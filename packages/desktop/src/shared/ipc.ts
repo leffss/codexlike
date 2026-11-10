@@ -17,7 +17,7 @@ import type { McpServerInput } from '../mcp/mcp-store';
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
 export type { SearchSettings };
-export type { McpServerView };
+export type { McpServerView, McpServerInput };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。

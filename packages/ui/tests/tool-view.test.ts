@@ -109,5 +109,11 @@ describe('summarizeToolCall（工具卡片参数摘要）', () => {
 
     expect(summarizeToolCall('mcp_tool', '{"a":1}')).toContain('a');
     expect(summarizeToolCall('read_file', '不是 json')).toBe('不是 json');
+
+    // MCP 工具摘要（工单 12）：text 类字段优先，否则压缩 JSON
+    expect(summarizeToolCall('mcp_fake_echo', '{"text":"你好"}')).toBe(
+      'MCP mcp_fake_echo：你好',
+    );
+    expect(summarizeToolCall('mcp_fake_x', '{"n":1}')).toBe('MCP mcp_fake_x {"n":1}');
   });
 });
