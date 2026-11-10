@@ -170,4 +170,30 @@ describe('run_terminal_command 工具（默认 Git Bash）', () => {
     },
     30_000,
   );
+
+  it(
+    'AbortSignal 中断：长命令执行中终止子进程，输出标记为用户中断（区别于超时）',
+    async () => {
+      const workspace = makeWorkspace();
+      const controller = new AbortController();
+      const startedAt = Date.now();
+      const pending = tool.execute(
+        { command: 'echo started; sleep 30', timeoutMs: 120_000 },
+        { workspacePath: workspace, signal: controller.signal },
+      );
+      // 等 'started' 真正产出后再中断（轮询工作区内产物不可行，改为等一小段固定时间）
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      controller.abort();
+      const result = await pending;
+      const elapsed = Date.now() - startedAt;
+
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain('started');
+      expect(result.output).toContain('已被用户中断');
+      expect(result.output).not.toContain('超时');
+      // 子进程被立即终止：不能等到 30 秒 sleep 自然结束
+      expect(elapsed).toBeLessThan(10_000);
+    },
+    30_000,
+  );
 });
