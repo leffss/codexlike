@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { APICallError } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -63,6 +64,21 @@ function textStream(deltas: string[]): ReadableStream<LanguageModelV4StreamPart>
       controller.close();
     },
   });
+}
+
+/**
+ * 提取 prompt 消息的纯文本：ai v7 传给 provider 层时 string content 会转为 parts 数组。
+ */
+function textOf(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part: { text?: string }) => part.text ?? '')
+      .join('');
+  }
+  return String(content);
 }
 
 /**
@@ -191,5 +207,285 @@ describe('AgentSession.compact（手动压缩）', () => {
     expect(result.compactedMessages).toBe(4);
     expect(result.keptMessages).toHaveLength(6);
     expect(result.summaryMessage.role).toBe('compact-summary');
+  });
+
+  it('压缩后继续对话：注入模型的消息序列 = 摘要（包装 user）+ 最近 3 轮 + 新消息', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    const model = compactableModel('压缩摘要：调通了安装流程。');
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    await talkRounds(session, 4);
+    const streamCallsBefore = model.doStreamCalls.length;
+    await session.compact({ profile });
+
+    for await (const event of session.sendMessage({ text: '继续', profile })) {
+      expect(event.type).not.toBe('error');
+    }
+
+    const lastCall = model.doStreamCalls.at(-1)!;
+    expect(model.doStreamCalls.length).toBe(streamCallsBefore + 1);
+    // 结构断言（避免 JSON.stringify 转义问题）：
+    // [摘要 user, 第2轮 u/a, 第3轮 u/a, 第4轮 u/a, 新消息 user]
+    expect(lastCall.prompt).toHaveLength(8);
+    expect(lastCall.prompt.map((m) => m.role)).toEqual([
+      'user',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(textOf(lastCall.prompt[0]!.content)).toContain('<compact-summary>');
+    expect(textOf(lastCall.prompt[0]!.content)).toContain('压缩摘要：调通了安装流程。');
+    expect(lastCall.prompt.slice(1, 7).map((m) => textOf(m.content))).toEqual([
+      '第2轮问题',
+      '第2轮回复',
+      '第3轮问题',
+      '第3轮回复',
+      '第4轮问题',
+      '第4轮回复',
+    ]);
+    expect(textOf(lastCall.prompt[7]!.content)).toBe('继续');
+  });
+
+  it('压缩请求失败：原历史与上下文不受损，可重试且成功', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    let failFirst = true;
+    let streamCall = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        streamCall += 1;
+        return { stream: textStream([`第${streamCall}轮回复`]) };
+      },
+      doGenerate: async () => {
+        if (failFirst) {
+          failFirst = false;
+          // 401（不可自动重试类）：SDK 对 5xx 会先自动重试，测试要观察「失败→可重试」
+          throw new APICallError({
+            message: 'boom',
+            url: 'https://example.com',
+            statusCode: 401,
+            responseBody: '',
+          });
+        }
+        return {
+          content: [{ type: 'text', text: '重试后的摘要' }],
+          finishReason: { unified: 'stop' as const, raw: 'stop' },
+          usage: {
+            inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 2, text: undefined, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    await talkRounds(session, 5);
+    const before = persistence.listMessages('session-1');
+
+    await expect(session.compact({ profile })).rejects.toThrow('模型请求失败（HTTP 401）');
+
+    // 原历史不受损：库与 compact 记录原样
+    expect(persistence.listMessages('session-1')).toEqual(before);
+    expect(persistence.listCompacts('session-1')).toEqual([]);
+
+    // 可重试：第二次成功，替换生效
+    await session.compact({ profile });
+    expect(persistence.listMessages('session-1')[0]).toMatchObject({
+      role: 'compact-summary',
+      content: '重试后的摘要',
+    });
+  });
+
+  it('互斥：压缩进行中不可发送/重复压缩；回复中不可压缩', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    let releaseGenerate: (() => void) | null = null;
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({ stream: textStream(['回复']) }),
+      doGenerate: async () => {
+        await new Promise<void>((resolve) => {
+          releaseGenerate = resolve;
+        });
+        return {
+          content: [{ type: 'text', text: '摘要' }],
+          finishReason: { unified: 'stop' as const, raw: 'stop' },
+          usage: {
+            inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 2, text: undefined, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    await talkRounds(session, 4);
+    const compacting = session.compact({ profile });
+    // 压缩挂起（doGenerate 未返回）时：发送与再次压缩都被拒绝
+    await expect(session.compact({ profile })).rejects.toThrow('正在回复或压缩中');
+    const sending = session.sendMessage({ text: '插队', profile });
+    const sendDone = (async () => {
+      for await (const event of sending) {
+        void event;
+      }
+    })();
+    // 等 sendMessage 启动抛错（busy 拒绝是同步 throw，出现于迭代启动时）
+    await expect(sendDone).rejects.toThrow('仍在回复中');
+    // 等压缩请求真正挂起在 doGenerate 上再放行
+    while (releaseGenerate === null) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    releaseGenerate();
+    await compacting;
+
+    // 压缩完成后可正常发送
+    for await (const event of session.sendMessage({ text: '继续', profile })) {
+      expect(event.type).not.toBe('error');
+    }
+  });
+
+  it('历史过短（≤3 轮）：中文提示且不动库', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    const model = compactableModel('摘要');
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    await talkRounds(session, 3);
+    await expect(session.compact({ profile })).rejects.toThrow('没有可压缩的内容');
+    expect(persistence.listMessages('session-1')).toHaveLength(6);
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it('重启等价：压缩后经持久层恢复的上下文与压缩后立即发送一致（含 @引用 保留轮次）', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    const summary = '修复了打包脚本';
+    let streamCall = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        streamCall += 1;
+        return { stream: textStream([`第${streamCall}轮回复`]) };
+      },
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: summary }],
+        finishReason: { unified: 'stop' as const, raw: 'stop' },
+        usage: {
+          inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 2, text: undefined, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    });
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    // 4 轮对话；第 4 轮带 @引用（将落入保留的最近 3 轮内）
+    for (let i = 1; i <= 3; i += 1) {
+      for await (const event of session.sendMessage({ text: `第${i}轮问题`, profile })) {
+        expect(event.type).not.toBe('error');
+      }
+    }
+    for await (const event of session.sendMessage({
+      text: '第4轮问题',
+      profile,
+      mentions: [{ path: 'docs/说明.md', content: '被引用的文件内容' }],
+    })) {
+      expect(event.type).not.toBe('error');
+    }
+
+    await session.compact({ profile });
+
+    // 压缩后立即发送：保留轮次的 @引用 附加内容仍在内存上下文中
+    for await (const event of session.sendMessage({ text: '压缩后立即', profile })) {
+      expect(event.type).not.toBe('error');
+    }
+    const immediateCall = model.doStreamCalls.at(-1)!;
+    expect(textOf(immediateCall.prompt[5]!.content)).toContain('被引用的文件内容');
+
+    // 等价重启：同一持久层重建会话（manager.get 的恢复路径）
+    const restored = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: persistence.listMessages('session-1'),
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 100;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    for await (const event of restored.sendMessage({ text: '重启后继续', profile })) {
+      expect(event.type).not.toBe('error');
+    }
+    const lastCall = model.doStreamCalls.at(-1)!;
+    // 恢复后的上下文 = 摘要 + 3 轮原文 + 新消息（@引用 附加内容与未压缩会话的
+    // 重启行为一致：落库保持用户原文，附加内容只存在于内存上下文）
+    expect(textOf(lastCall.prompt[0]!.content)).toContain('<compact-summary>');
+    expect(textOf(lastCall.prompt[0]!.content)).toContain(summary);
+    expect(lastCall.prompt.slice(1, 7).map((m) => textOf(m.content))).toEqual([
+      '第2轮问题',
+      '第2轮回复',
+      '第3轮问题',
+      '第3轮回复',
+      '第4轮问题',
+      '第4轮回复',
+    ]);
+    expect(textOf(lastCall.prompt[9]!.content)).toBe('重启后继续');
   });
 });
