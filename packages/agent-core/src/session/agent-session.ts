@@ -255,16 +255,21 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               };
               yield { type: 'tool-call', call: base };
 
+              // 中断可能发生在上一个事件产出与本工具执行之间（生成器在 yield 处暂停）：
+              // 已 abort 的 signal 不会再触发 listener，这里显式短路，不再启动执行
               const definition = toolsByName.get(call.toolName);
-              const executed = definition
-                ? await runTool(definition, call.input, {
-                    workspacePath: record.workspacePath,
-                    signal,
-                  })
-                : {
-                    output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
-                    isError: true,
-                  };
+              const executed =
+                signal?.aborted === true
+                  ? { output: '已被用户中断，未执行', isError: true }
+                  : definition
+                    ? await runTool(definition, call.input, {
+                        workspacePath: record.workspacePath,
+                        signal,
+                      })
+                    : {
+                        output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
+                        isError: true,
+                      };
 
               const completed = { ...base, ...executed };
               persistence.insertToolCall(completed);

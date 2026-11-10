@@ -182,6 +182,11 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
       const requestedTimeout = optionalNumber(args, 'timeoutMs');
       const timeoutMs = Math.min(requestedTimeout ?? defaultTimeoutMs, maxTimeoutMs);
 
+      // 中断先于 spawn 到达：已 abort 的 signal 不会触发 listener，显式短路
+      if (context.signal?.aborted === true) {
+        return { output: '已被用户中断，未执行', isError: true };
+      }
+
       const cwd = resolveInWorkspace(context.workspacePath, cwdArg ?? '.');
       const plan = buildSpawnPlan(shell, command, cwd, filterEnv(env));
 
