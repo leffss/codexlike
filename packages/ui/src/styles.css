@@ -1,0 +1,24 @@
+@import 'tailwindcss';
+
+/* CodexLike 深色工作台主题 */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'Segoe UI',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+}

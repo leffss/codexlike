@@ -1,0 +1,30 @@
+{
+  "name": "@codexlike/desktop",
+  "version": "0.1.0",
+  "description": "CodexLike 桌面宿主：Electron 主进程、类型化 IPC 桥与本地配置存储（safeStorage 加密）。",
+  "type": "module",
+  "private": true,
+  "main": "./dist/main.cjs",
+  "exports": {
+    "./ipc": {
+      "types": "./src/shared/ipc.ts"
+    }
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@codexlike/agent-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^45.2.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0",
+    "wait-on": "^9.5.1"
+  }
+}
