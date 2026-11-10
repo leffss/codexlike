@@ -108,6 +108,17 @@ describe('TavilySearchSource', () => {
     });
     await expect(source.search('x')).rejects.toThrow('搜索请求发送失败');
   });
+
+  it('baseUrl 可覆盖（E2E/自建代理场景）：请求打到指定端点', async () => {
+    const fake = fakeFetch(jsonResponse(200, tavilyResponse([])));
+    const source = createTavilySearchSource({
+      apiKey: 'tvly-test',
+      baseUrl: 'http://127.0.0.1:9999/search',
+      fetch: fake.fetchLike,
+    });
+    await source.search('local');
+    expect(fake.calls[0]?.url).toBe('http://127.0.0.1:9999/search');
+  });
 });
 
 describe('web_search 工具', () => {

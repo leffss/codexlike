@@ -30,13 +30,18 @@ export interface SearchOptions {
 export interface TavilySearchSourceOptions {
   /** Tavily API key（设置页配置） */
   apiKey: string;
+  /**
+   * 自定义端点 URL（默认 https://api.tavily.com/search）。
+   * 测试与自建代理场景使用；宿主可从环境变量注入。
+   */
+  baseUrl?: string;
   /** 自定义 fetch（测试注入用；默认全局 fetch） */
   fetch?: typeof globalThis.fetch;
   /** 请求超时毫秒数（默认 15000） */
   timeoutMs?: number;
 }
 
-const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
+const DEFAULT_TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_RESULTS_LIMIT = 10;
 
@@ -50,6 +55,7 @@ export function createTavilySearchSource(
 ): SearchSource {
   const fetchLike = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const endpoint = options.baseUrl ?? DEFAULT_TAVILY_ENDPOINT;
 
   return {
     async search(query, searchOptions) {
@@ -58,7 +64,7 @@ export function createTavilySearchSource(
 
       let response: Response;
       try {
-        response = await fetchLike(TAVILY_ENDPOINT, {
+        response = await fetchLike(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

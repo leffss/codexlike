@@ -174,7 +174,11 @@ void app.whenReady().then(async () => {
     searchSource =
       settings.apiKey === ''
         ? null
-        : createTavilySearchSource({ apiKey: settings.apiKey });
+        : createTavilySearchSource({
+            apiKey: settings.apiKey,
+            // E2E 隔离钩子（与 CODEXLIKE_TEST_WORKSPACE 同款模式）：指向本地 mock
+            baseUrl: process.env['CODEXLIKE_TAVILY_URL'],
+          });
   };
   await refreshSearchSource();
 
