@@ -124,6 +124,13 @@ void app.whenReady().then(() => {
   const manager = createSessionManager({ persistence });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
+  // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置
+  for (const record of manager.list()) {
+    if (record.status === 'streaming') {
+      manager.get(record.id);
+    }
+  }
+
   registerProviderProfileHandlers(store);
   registerSessionHandlers({
     manager,
