@@ -95,8 +95,18 @@ export function MessageComposer(props: {
         event.preventDefault();
         if (menu.kind === 'slash-commands') {
           const command = result.item as SlashCommandDef;
-          // 选中命令回填：无参命令直接补尾空格，Enter 即执行
-          commitText(`/${command.name} `, `/${command.name} `.length);
+          if (command.argumentHint === null) {
+            // 无参命令：选中即执行（免二次 Enter）
+            setValue('');
+            setMenu(null);
+            dismissedRef.current = null;
+            if (!props.disabled) {
+              props.onSend(`/${command.name}`);
+            }
+          } else {
+            // 带参命令：回填 `/命令 ` 继续输入参数
+            commitText(`/${command.name} `, `/${command.name} `.length);
+          }
         } else {
           const caret = event.currentTarget.selectionStart ?? value.length;
           const applied = applyMentionSelection({
