@@ -7,3 +7,6 @@ export type {
   ProviderProfileInput,
 } from './provider/provider-profile';
 export { validateProviderProfile } from './provider/provider-profile';
+
+export type { CreateLanguageModelOptions } from './provider/language-model';
+export { createLanguageModelFromProfile } from './provider/language-model';
