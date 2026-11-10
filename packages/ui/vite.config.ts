@@ -8,5 +8,13 @@ export default defineConfig({
   base: './',
   // 端口固定：desktop 包 dev 流程按 5173 等待/加载
   server: { port: 5173, strictPort: true },
-  build: { outDir: 'dist' },
+  build: {
+    outDir: 'dist',
+    rollupOptions: {
+      output: {
+        // Monaco 体积大（~2MB），独立成 chunk：改动面板首次打开 diff 时才加载
+        manualChunks: { monaco: ['monaco-editor'] },
+      },
+    },
+  },
 });

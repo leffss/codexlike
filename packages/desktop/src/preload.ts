@@ -26,6 +26,7 @@ const api: CodexLikeApi = {
         providerProfileId,
         mentionPaths,
       ),
+    interrupt: (sessionId) => ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>
@@ -63,6 +64,17 @@ const api: CodexLikeApi = {
     return () => {
       ipcRenderer.removeListener(IPC.sessionEvents, handler);
     };
+  },
+  git: {
+    status: (sessionId) => ipcRenderer.invoke(IPC.git.status, sessionId),
+    diff: (sessionId, path, oldPath) =>
+      ipcRenderer.invoke(IPC.git.diff, sessionId, path, oldPath),
+    createBranch: (sessionId) =>
+      ipcRenderer.invoke(IPC.git.createBranch, sessionId),
+    generateCommitMessage: (sessionId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.git.commitMessage, sessionId, providerProfileId),
+    commit: (sessionId, message) =>
+      ipcRenderer.invoke(IPC.git.commit, sessionId, message),
   },
 };
 

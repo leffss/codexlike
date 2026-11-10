@@ -8,6 +8,12 @@ import type {
   SessionRecord,
   TranscriptItem,
 } from '@codexlike/agent-core';
+import type {
+  GitBranchResult,
+  GitCommitResult,
+  GitFileDiff,
+  GitStatus,
+} from '@codexlike/agent-core';
 
 import type { SessionStatusInfo } from '../sessions/status';
 import type { SearchSettings } from '../search/search-settings-store';
@@ -42,6 +48,8 @@ export const IPC = {
     messages: 'sessions:messages',
     /** 发送消息；流式事件经 sessionEvents 推送 */
     send: 'sessions:send',
+    /** 停止按钮：打断指定会话运行中的本轮（流式输出或工具执行）；空闲返回 false */
+    interrupt: 'sessions:interrupt',
     /** /rename 与侧栏重命名共用（同一 IPC 通道） */
     rename: 'sessions:rename',
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
@@ -74,6 +82,19 @@ export const IPC = {
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
+  /** 改动面板 + git 集成（工单 05）：status/diff/分支/提交消息生成/提交 */
+  git: {
+    /** 工作区 git 状态（非 git 工作区返回 isGitRepo=false，不报错） */
+    status: 'git:status',
+    /** 单文件 diff（新旧两侧全文，Monaco 双栏渲染） */
+    diff: 'git:diff',
+    /** 一键创建 codexlike/<会话名> 分支（分支名由会话名生成） */
+    createBranch: 'git:create-branch',
+    /** 由模型按会话内容生成提交消息草稿（一次不发工具的请求） */
+    commitMessage: 'git:commit-message',
+    /** 提交当前全部变更（消息可编辑后传入） */
+    commit: 'git:commit',
+  },
 } as const;
 
 /** 事件流信封：按会话 ID 多路复用 */
@@ -116,6 +137,12 @@ export interface CodexLikeApi {
       providerProfileId: string,
       mentionPaths?: string[],
     ): Promise<void>;
+    /**
+     * 打断指定会话运行中的本轮（停止按钮）：
+     * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
+     * 会话空闲时幂等返回 false。
+     */
+    interrupt(sessionId: string): Promise<boolean>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
     rename(sessionId: string, title: string): Promise<SessionRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
@@ -171,4 +198,20 @@ export interface CodexLikeApi {
   onSessionEvent(
     listener: (envelope: SessionEventEnvelope) => void,
   ): () => void;
+  /** 改动面板 + git 集成（工单 05） */
+  git: {
+    /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */
+    status(sessionId: string): Promise<GitStatus>;
+    /** 单文件改动（新旧两侧全文）；oldPath 为重命名场景的原路径 */
+    diff(sessionId: string, path: string, oldPath?: string): Promise<GitFileDiff>;
+    /** 创建（或切换到已存在的）codexlike/<会话名> 分支 */
+    createBranch(sessionId: string): Promise<GitBranchResult>;
+    /** 模型按会话内容生成提交消息草稿（可编辑后提交）；失败抛中文异常 */
+    generateCommitMessage(
+      sessionId: string,
+      providerProfileId: string,
+    ): Promise<string>;
+    /** 提交当前全部变更；无变更时 committed=false */
+    commit(sessionId: string, message: string): Promise<GitCommitResult>;
+  };
 }

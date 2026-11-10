@@ -7,6 +7,7 @@ import {
   type SessionRecord,
 } from '@codexlike/agent-core';
 
+import { ChangesPanel } from '../components/ChangesPanel';
 import { MessageComposer } from '../components/MessageComposer';
 import { MessageStream } from '../components/MessageStream';
 import { SessionSidebar } from '../components/SessionSidebar';
@@ -39,6 +40,7 @@ export function WorkspacePage(props: {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const [changesOpen, setChangesOpen] = useState(false);
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
@@ -191,9 +193,21 @@ export function WorkspacePage(props: {
     }
   }
 
+  /** 停止按钮：打断当前会话运行中的本轮（流式输出中断 / 工具子进程终止）。
+   *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。 */
+  async function stop() {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      await window.codexlike.sessions.interrupt(currentId);
+    } catch (error) {
+      pushLocalStatus(`停止失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
   async function runCommand(name: string, argument: string) {
-    const current = sessions.find((session) => session.id === currentId) ?? null;
     const action = planSlashCommand(
       { name: name as never, argument },
       current !== null,
@@ -364,6 +378,9 @@ export function WorkspacePage(props: {
           ? '新建或选择一个会话后开始对话'
           : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
 
+  /** 当前打开的会话记录（改动面板与顶栏显示用） */
+  const current = sessions.find((session) => session.id === currentId) ?? null;
+
   return (
     <div className="flex h-full">
       <SessionSidebar
@@ -392,33 +409,62 @@ export function WorkspacePage(props: {
         }}
       />
       <section className="flex min-w-0 flex-1 flex-col">
-        <MessageStream
-          items={messages}
-          compacting={compacting}
-          emptyHint={
-            profiles.length === 0 ? (
-              <button
-                type="button"
-                className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-sky-600 hover:text-sky-400"
-                onClick={props.onOpenSettings}
-              >
-                前往设置配置 Provider Profile
-              </button>
-            ) : undefined
-          }
-          onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
-        />
-        <MessageComposer
-          profiles={profiles}
-          selectedProfileId={selectedProfileId}
-          onSelectProfile={setSelectedProfileId}
-          onSend={handleSubmit}
-          workspaceFiles={workspaceFiles}
-          disabled={currentId === null || profiles.length === 0 || streaming || compacting}
-          hint={composerHint}
-          approvalMode={currentSession?.approvalMode ?? null}
-          onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-        />
+        <header className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
+          <span className="min-w-0 flex-1 truncate text-sm text-slate-400">
+            {current?.title ?? '未选择会话'}
+          </span>
+          <button
+            type="button"
+            data-testid="changes-toggle"
+            onClick={() => setChangesOpen((prev) => !prev)}
+            disabled={currentId === null}
+            className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-sky-600 hover:text-sky-400 disabled:opacity-50"
+          >
+            {changesOpen ? '收起改动' : '改动'}
+          </button>
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <MessageStream
+              items={messages}
+              compacting={compacting}
+              emptyHint={
+                profiles.length === 0 ? (
+                  <button
+                    type="button"
+                    className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-sky-600 hover:text-sky-400"
+                    onClick={props.onOpenSettings}
+                  >
+                    前往设置配置 Provider Profile
+                  </button>
+                ) : undefined
+              }
+              onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
+            />
+            <MessageComposer
+              profiles={profiles}
+              selectedProfileId={selectedProfileId}
+              onSelectProfile={setSelectedProfileId}
+              onSend={handleSubmit}
+              workspaceFiles={workspaceFiles}
+              disabled={currentId === null || profiles.length === 0 || streaming || compacting}
+              streaming={streaming}
+              onStop={() => void stop()}
+              hint={composerHint}
+              approvalMode={currentSession?.approvalMode ?? null}
+              onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+            />
+          </div>
+          {changesOpen && current !== null && (
+            <ChangesPanel
+              key={current.id}
+              sessionId={current.id}
+              sessionTitle={current.title}
+              selectedProfileId={selectedProfileId}
+              onClose={() => setChangesOpen(false)}
+            />
+          )}
+        </div>
       </section>
     </div>
   );

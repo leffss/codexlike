@@ -254,4 +254,38 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     expect(persistence.listSessions().find((r) => r.id === created.id)?.status).toBe('idle');
     persistence.close();
   });
+
+  it('审批模式默认 suggest，切换后落库并跨重启恢复（工单 06 恢复语义，档位由工单 04 定义）', () => {
+    const dbPath = join(
+      (() => {
+        const dir = mkdtempSync(join(tmpdir(), 'codexlike-mgr-'));
+        tempDirs.push(dir);
+        return dir;
+      })(),
+      'codexlike.db',
+    );
+
+    const persistence1 = createSqliteSessionStore(dbPath);
+    const first = createSessionManager({
+      persistence: persistence1,
+      languageModelFor: () => okModel(),
+    });
+    const session = first.create({ workspacePath: 'C:\\work\\demo' });
+    expect(session.record.approvalMode).toBe('suggest');
+
+    expect(first.setApprovalMode(session.id, 'full')?.approvalMode).toBe('full');
+    expect(first.list()[0]?.approvalMode).toBe('full');
+    expect(first.setApprovalMode('nope', 'full')).toBeNull();
+    persistence1.close();
+
+    // 等价重启：审批模式随会话记录恢复
+    const persistence2 = createSqliteSessionStore(dbPath);
+    const second = createSessionManager({
+      persistence: persistence2,
+      languageModelFor: () => okModel(),
+    });
+    expect(second.list()[0]?.approvalMode).toBe('full');
+    expect(second.get(session.id)?.record.approvalMode).toBe('full');
+    persistence2.close();
+  });
 });

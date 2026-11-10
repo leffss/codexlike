@@ -42,7 +42,8 @@ export const APPROVAL_MODE_OPTIONS: {
  * - `/` 开头的单行草稿弹出命令菜单，`@` 触发工作区文件模糊搜索菜单（键盘可选）；
  * - 模型选择器（Provider Profile）对下一条发送的消息生效；
  * - 审批模式选择器随时可切，对下一次工具调用立即生效；
- * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发。
+ * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发；
+ * - 本轮回复进行中（流式输出或工具执行）时发送按钮切换为「停止」，打断当前轮。
  */
 export function MessageComposer(props: {
   profiles: ProviderProfile[];
@@ -53,6 +54,10 @@ export function MessageComposer(props: {
   workspaceFiles: string[];
   /** 无会话 / 未选模型 / 流式回复中时禁用发送 */
   disabled: boolean;
+  /** 本轮回复进行中（流式输出 / 工具执行）：按钮切换为「停止」 */
+  streaming?: boolean;
+  /** 停止按钮：打断运行中的本轮（立即中断流式输出、终止工具子进程） */
+  onStop?: () => void;
   hint: string;
   /** 当前会话审批模式；无会话时选择器禁用 */
   approvalMode: ApprovalMode | null;
@@ -252,14 +257,26 @@ export function MessageComposer(props: {
             className="min-h-11 w-full resize-none rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600"
           />
         </div>
-        <button
-          type="submit"
-          data-testid="composer-send"
-          disabled={props.disabled}
-          className="rounded-lg bg-sky-700 px-4 py-2 text-sm text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          发送
-        </button>
+        {props.streaming === true ? (
+          <button
+            type="button"
+            data-testid="composer-stop"
+            onClick={() => props.onStop?.()}
+            className="rounded-lg bg-red-700 px-4 py-2 text-sm text-white hover:bg-red-600"
+            title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+          >
+            停止
+          </button>
+        ) : (
+          <button
+            type="submit"
+            data-testid="composer-send"
+            disabled={props.disabled}
+            className="rounded-lg bg-sky-700 px-4 py-2 text-sm text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            发送
+          </button>
+        )}
       </form>
     </div>
   );

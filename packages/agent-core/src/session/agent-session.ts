@@ -128,7 +128,7 @@ function isAbortLike(error: unknown, signal: AbortSignal | undefined): boolean {
   );
 }
 
-/** 对话上下文只包含 user / assistant 消息；error 提示不进入模型 */
+/** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: message.content };
@@ -137,7 +137,8 @@ function toModelMessage(message: StoredMessage): ModelMessage {
     // 摘要以 user 角色注入；包装标签与 compact 成功后的内存上下文保持一致（重启等价）
     return { role: 'user', content: composeCompactSummaryContext(message.content) };
   }
-  return { role: 'user', content: message.content };
+  // @引用 内容随消息持久化，恢复时重组进上下文（快照等价性：与发送时一致）
+  return { role: 'user', content: composeUserContent(message.content, message.mentions) };
 }
 
 /** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
@@ -292,6 +293,9 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'user',
           content: text,
+          // @引用 随消息持久化：重启恢复后重组进模型上下文（快照等价性）
+          mentions:
+            mentions !== undefined && mentions.length > 0 ? mentions : undefined,
           createdAt: now(),
         };
         persistence.insertMessage(userMessage);
@@ -379,11 +383,19 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               };
               yield { type: 'tool-call', call: base };
 
+              // 中断可能发生在上一个事件产出与本工具执行之间（生成器在 yield 处暂停）：
+              // 已 abort 的 signal 不会再触发 listener，这里显式短路，不再启动执行
               const definition = toolsByName.get(call.toolName);
               let output: string;
               let isError: boolean;
 
-              if (definition === undefined) {
+              if (signal?.aborted === true) {
+                // 中断短路（工单 06）：中断发生在上一个事件产出与本工具执行之间，
+                // 不再启动执行，也不进入审批门（已 abort 的 signal 不会再触发
+                // listener，进审批等待会永久卡死）
+                output = '已被用户中断，未执行';
+                isError = true;
+              } else if (definition === undefined) {
                 output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`;
                 isError = true;
               } else {
@@ -505,6 +517,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'assistant',
           content: accumulated,
+          // 被用户中断的回复：持久化标记，重启恢复后 UI 仍显示中断点
+          aborted: aborted || undefined,
           createdAt: now(),
         };
         persistence.insertMessage(assistantMessage);

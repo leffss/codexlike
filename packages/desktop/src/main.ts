@@ -26,6 +26,7 @@ import {
   type ProfileStore,
   type SafeStorageLike,
 } from './profiles/profile-store';
+import { registerGitHandlers } from './git/git-ipc';
 import {
   createSearchSettingsStore,
   type SearchSettingsStore,
@@ -233,6 +234,8 @@ void app.whenReady().then(async () => {
     profiles: store,
     getWindow: () => mainWindow,
   });
+  // 改动面板 + git 集成（工单 05）
+  registerGitHandlers({ manager, profiles: store });
   mainWindow = createMainWindow();
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
