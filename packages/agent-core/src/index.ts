@@ -37,6 +37,9 @@ export type {
   ComposerSubmission,
 } from './composer/parse';
 export { fuzzyMatch } from './composer/fuzzy';
+
+// 上下文用量估算（/status 与 compact 共用的稳定接口）
+export { estimateTokens } from './context/tokens';
 export type {
   SlashCommandDef,
   SlashCommandName,
