@@ -17,6 +17,7 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     providerProfileId: null,
     model: null,
     status: 'idle',
+    workspaceMode: 'local',
     approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
@@ -137,6 +138,38 @@ describe('createSqliteSessionStore（SQLite 会话持久化）', () => {
 
     store.updateSession('session-1', { approvalMode: 'full', updatedAt: '2026-11-10T08:30:00.000Z' });
     expect(store.listSessions()[0]?.approvalMode).toBe('full');
+  });
+
+  it('运行模式（local/worktree）随会话落库：insert 读回一致，updateSession 补丁生效', () => {
+    const store = createSqliteSessionStore(':memory:');
+    store.insertSession(sessionRecord({ workspaceMode: 'worktree' }));
+    expect(store.listSessions()[0]?.workspaceMode).toBe('worktree');
+
+    store.updateSession('session-1', { workspaceMode: 'local', updatedAt: '2026-11-10T08:40:00.000Z' });
+    expect(store.listSessions()[0]?.workspaceMode).toBe('local');
+  });
+
+  it('旧库迁移：无 workspace_mode 列的旧会话恢复为 local（本目录直跑）', () => {
+    const dbPath = tempDbPath();
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT,
+        model TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sessions VALUES ('legacy-wt', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteSessionStore(dbPath);
+    expect(store.listSessions()[0]?.workspaceMode).toBe('local');
+    store.close();
   });
 
   it('「总是允许」记忆入库：幂等（同词不重复）、按会话隔离、重开库完整恢复', () => {

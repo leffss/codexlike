@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   createWorktreeService,
+  type WorktreeCleanupSession,
   type WorktreeService,
 } from '../../src/worktree/worktree-service';
 
@@ -154,8 +155,8 @@ describe('worktree LRU 清理', () => {
   /** 最小会话记录（cleanup 只读 id / status / archivedAt / updatedAt） */
   function sessionRecord(
     id: string,
-    overrides: Partial<{ status: string; archivedAt: string | null; updatedAt: string }> = {},
-  ) {
+    overrides: Partial<WorktreeCleanupSession> = {},
+  ): WorktreeCleanupSession {
     return {
       id,
       status: 'idle',

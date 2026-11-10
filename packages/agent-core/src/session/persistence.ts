@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   model TEXT,
   status TEXT NOT NULL,
   approval_mode TEXT NOT NULL DEFAULT 'suggest',
+  workspace_mode TEXT NOT NULL DEFAULT 'local',
   archived_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -110,6 +111,7 @@ interface SessionRow {
   model: string | null;
   status: string;
   approval_mode: string;
+  workspace_mode: string;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -163,6 +165,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   } catch {
     // 列已存在（新库或已迁移）
   }
+  // 旧库迁移：工单 08 时代的 sessions 表没有 workspace_mode（工单 09 托管 Worktree）
+  try {
+    db.exec("ALTER TABLE sessions ADD COLUMN workspace_mode TEXT NOT NULL DEFAULT 'local'");
+  } catch {
+    // 列已存在（新库或已迁移）
+  }
   // 旧库迁移：工单 03 时代的 messages 表没有 mentions / aborted（工单 06 恢复等价性需要）
   try {
     db.exec('ALTER TABLE messages ADD COLUMN mentions TEXT');
@@ -176,10 +184,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   const insertSession = db.prepare(
-    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   const updateSessionStmt = db.prepare(
-    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, archived_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, archived_at = ?, updated_at = ? WHERE id = ?',
   );
   const insertMessageStmt = db.prepare(
     'INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -228,6 +236,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         row.approval_mode === 'readonly' || row.approval_mode === 'full'
           ? row.approval_mode
           : 'suggest',
+      // 运行位置：非法/缺失值恢复为 local（本目录直跑）
+      workspaceMode: row.workspace_mode === 'worktree' ? 'worktree' : 'local',
       archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -259,6 +269,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.model,
         record.status,
         record.approvalMode,
+        record.workspaceMode,
         record.archivedAt,
         record.createdAt,
         record.updatedAt,
@@ -280,6 +291,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.model,
         next.status,
         next.approvalMode,
+        next.workspaceMode,
         next.archivedAt,
         next.updatedAt,
         id,
