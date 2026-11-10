@@ -25,10 +25,10 @@ const FORM_HTML = `<!doctype html>
 </body>
 </html>`;
 
-/** 长文页：正文远超截断上限（browser_read 用） */
+/** 长文页：正文远超截断上限（browser_read 用；1200 段约 5 万字符） */
 function articleHtml(): string {
   const paragraph = '这是一段用于验证正文提取与截断行为的填充文本，包含中英文 mix 内容 sample text。';
-  const body = Array.from({ length: 400 }, (_, index) => `<p>${index} ${paragraph}</p>`).join('\n');
+  const body = Array.from({ length: 1200 }, (_, index) => `<p>${index} ${paragraph}</p>`).join('\n');
   return `<!doctype html>
 <html lang="zh">
 <head><meta charset="utf-8"><title>长文测试页</title></head>

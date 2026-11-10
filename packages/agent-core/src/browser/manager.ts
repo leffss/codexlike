@@ -21,8 +21,15 @@ export interface BrowserSessionManagerOptions {
 }
 
 export interface BrowserSessionManager {
+  /** 确保 Chromium 就绪（必要时下载安装）；onProgress 接收下载进度，缺省走构造时 progress */
+  prepare(onProgress?: (line: string) => void): Promise<void>;
   /** 获取会话页面：首次调用确保 Chromium 就绪（必要时下载）并创建独立 context */
   pageFor(sessionId: string): Promise<Page>;
+  /**
+   * 丢弃会话当前页面、在同一 context 上开新页（Cookie 等状态保留）。
+   * 导航失败后页面可能停在 chrome-error:// 并打断后续导航——整页换新是最可靠复位。
+   */
+  resetPage(sessionId: string): Promise<Page>;
   /** 会话结束：关闭其 context（页面与 Cookie 随之释放）；未打开的会话安全返回 */
   closeSession(sessionId: string): Promise<void>;
   /** 应用退出：关闭 Chromium 与全部会话 context；可重复调用 */
@@ -45,13 +52,13 @@ export function createBrowserSessionManager(
   let launchTask: Promise<Browser> | null = null;
 
   /** 首次使用前确保 Chromium 可执行就绪（未就绪自动下载，失败中文提示可重试） */
-  async function launchBrowser(): Promise<Browser> {
-    await ensureChromiumReady(installer, progress);
-    progress('正在启动 Chromium…');
+  async function launchBrowser(onProgress: (line: string) => void): Promise<Browser> {
+    await ensureChromiumReady(installer, onProgress);
+    onProgress('正在启动 Chromium…');
     return await chromium.launch({ headless: true, ...options.launchOptions });
   }
 
-  function browserReady(): Promise<Browser> {
+  function browserReady(onProgress: (line: string) => void): Promise<Browser> {
     if (browser !== null && browser.isConnected()) {
       return Promise.resolve(browser);
     }
@@ -59,7 +66,7 @@ export function createBrowserSessionManager(
       // 并发调用共享同一次启动；启动失败清空任务句柄，下次调用重试
       browser = null;
       sessions.clear();
-      launchTask = launchBrowser()
+      launchTask = launchBrowser(onProgress)
         .then((launched) => {
           browser = launched;
           return launched;
@@ -72,8 +79,12 @@ export function createBrowserSessionManager(
   }
 
   return {
+    async prepare(onProgress) {
+      await browserReady(onProgress ?? progress);
+    },
+
     async pageFor(sessionId) {
-      const active = await browserReady();
+      const active = await browserReady(progress);
       const existing = sessions.get(sessionId);
       if (existing !== undefined && !existing.page.isClosed()) {
         return existing.page;
@@ -91,6 +102,16 @@ export function createBrowserSessionManager(
       }
       sessions.delete(sessionId);
       await entry.context.close().catch(() => {});
+    },
+
+    async resetPage(sessionId) {
+      const entry = sessions.get(sessionId);
+      if (entry === undefined) {
+        return await this.pageFor(sessionId);
+      }
+      await entry.page.close({ runBeforeUnload: false }).catch(() => {});
+      entry.page = await entry.context.newPage();
+      return entry.page;
     },
 
     async close() {
