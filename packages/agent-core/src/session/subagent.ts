@@ -267,6 +267,7 @@ export function createSubagentOrchestrator(
   ): Promise<void> {
     let output = '';
     let isError = false;
+    let aborted = false;
     try {
       // 模型解析：设置页的子代理 Profile；null = 同主模型（spawn 时暂存的会话 profile）
       const fallback = fallbackProfiles.get(entry.subagentId);
@@ -288,7 +289,6 @@ export function createSubagentOrchestrator(
         });
 
         const toolCalls: { toolCallId: string; toolName: string; input: unknown }[] = [];
-        let aborted = false;
         for await (const part of result.fullStream) {
           if (part.type === 'text-delta') {
             output += part.text;
@@ -361,11 +361,7 @@ export function createSubagentOrchestrator(
       }
     } catch (error) {
       if (isAbortLike(error, signal)) {
-        // 中断：已生成的部分文本保留为报告；完全没产出则记为失败
-        if (output.trim() === '') {
-          output = '子代理已随主会话中断，未产出报告';
-          isError = true;
-        }
+        aborted = true;
       } else {
         // 子代理失败不崩主会话：失败原因作为报告回流，isError 标记
         output = `子代理执行失败：${describeModelError(error)}`;
@@ -373,7 +369,13 @@ export function createSubagentOrchestrator(
       }
     }
 
-    if (output.trim() === '' && !isError) {
+    if (aborted) {
+      // 中断：已生成的部分文本保留为报告；完全没产出则记为失败（原因可读）
+      if (output.trim() === '') {
+        output = '子代理已随主会话中断，未产出报告';
+        isError = true;
+      }
+    } else if (output.trim() === '' && !isError) {
       output = '子代理已完成任务，但未产出文本报告';
     }
 

@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { mkdtempSync } from 'node:fs';
+import { APICallError } from 'ai';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -378,5 +379,247 @@ describe('子代理（spawn_subagent，GLOSSARY「子代理」）', () => {
       expect(secondPrompt).toContain(`子代理 ${i} 的调研报告`);
     }
     expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it('readonly 传导：子代理的写入同样被拦截，文件不落盘且拒绝原因回流', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const { session } = makeSubagentSession({
+      workspacePath: workspace,
+      approvalMode: 'readonly',
+      main: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'd1', toolName: 'spawn_subagent', input: { task: '写入一个文件' } }],
+        },
+        { kind: 'text', deltas: ['readonly 下子代理没能写入'] },
+      ],
+      // 子代理先尝试 write_file（应被拒），再返回报告
+      sub: [
+        {
+          kind: 'tool',
+          calls: [
+            { toolCallId: 'sub-w', toolName: 'write_file', input: { path: 'secret.txt', content: 'x' } },
+          ],
+        },
+        { kind: 'text', deltas: ['写入被审批策略拒绝，改用只读手段完成了调研'] },
+      ],
+    });
+
+    const events = await collect(session.sendMessage({ text: '让子代理写文件', profile }));
+
+    // 子代理的 write_file 被真实拦截：subagent-tool 结果为拒绝，文件不落盘
+    const writeResult = events.find(
+      (e): e is Extract<SessionEvent, { type: 'subagent-tool' }> =>
+        e.type === 'subagent-tool' &&
+        e.phase === 'result' &&
+        e.call.toolName === 'write_file',
+    );
+    expect(writeResult?.call.isError).toBe(true);
+    expect(writeResult?.call.output).toContain('readonly');
+    expect(existsSync(join(workspace, 'secret.txt'))).toBe(false);
+
+    // 委派本身放行（readonly 不禁调研），子代理报告正常回流
+    const delegation = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> =>
+        e.type === 'tool-result' && e.call.toolName === 'spawn_subagent',
+    );
+    expect(delegation?.call.isError).toBe(false);
+    expect(delegation?.call.output).toContain('写入被审批策略拒绝');
+    expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it('子代理模型失败：失败原因回流为 isError 结果，主会话不崩并继续到最终回复', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    // 子模型直接抛 401（不可重试类错误）
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({
+          message: 'Incorrect API key provided',
+          url: 'https://api.example.com/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 401,
+          responseBody: 'Unauthorized',
+        });
+      },
+    });
+    const { session, persistence } = makeSubagentSession({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'd1', toolName: 'spawn_subagent', input: { task: '查点资料' } }],
+        },
+        { kind: 'text', deltas: ['子代理失败了，我自己来'] },
+      ],
+      subModel,
+    });
+
+    const events = await collect(session.sendMessage({ text: '委派失败场景', profile }));
+
+    // 失败以 isError 工具结果回流（中文原因），subagent-report 标记失败
+    const delegation = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> =>
+        e.type === 'tool-result' && e.call.toolName === 'spawn_subagent',
+    );
+    expect(delegation?.call.isError).toBe(true);
+    expect(delegation?.call.output).toContain('子代理执行失败');
+    const report = events.find(
+      (e): e is Extract<SessionEvent, { type: 'subagent-report' }> => e.type === 'subagent-report',
+    );
+    expect(report?.ok).toBe(false);
+
+    // 主会话不崩：正常收尾、无 error 事件、会话状态回 idle
+    expect(events.at(-1)?.type).toBe('assistant-done');
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
+    const stored = persistence
+      .listToolCalls('session-1')
+      .find((c) => c.toolName === 'spawn_subagent');
+    expect(stored?.isError).toBe(true);
+  });
+
+  it('suggest 传导：子代理的终端命令弹审批卡片，批准后执行且 always 记忆随会话入库', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const { session, persistence } = makeSubagentSession({
+      workspacePath: workspace,
+      approvalMode: 'suggest',
+      main: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'd1', toolName: 'spawn_subagent', input: { task: '跑一条命令' } }],
+        },
+        { kind: 'text', deltas: ['子代理执行完了'] },
+      ],
+      sub: [
+        {
+          kind: 'tool',
+          calls: [
+            {
+              toolCallId: 'sub-t',
+              toolName: 'run_terminal_command',
+              input: { command: 'echo sub-agent-ran > ran.txt' },
+            },
+          ],
+        },
+        { kind: 'text', deltas: ['命令已执行，产物在 ran.txt'] },
+      ],
+    });
+
+    const events: SessionEvent[] = [];
+    const iterator = session.sendMessage({ text: '委派跑命令', profile })[
+      Symbol.asyncIterator
+    ]();
+
+    // 推进到子代理的审批请求（approval-request 带 subagentId）
+    let approvalRequest: Extract<SessionEvent, { type: 'approval-request' }> | null = null;
+    for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+      events.push(head.value);
+      if (head.value.type === 'approval-request') {
+        approvalRequest = head.value;
+        break;
+      }
+    }
+    expect(approvalRequest).not.toBeNull();
+    expect(approvalRequest!.request.subagentId).toBeDefined();
+    expect(approvalRequest!.request.command).toContain('echo sub-agent-ran');
+
+    // id 不匹配的响应返回 false；always 批准生效并记忆命令首词
+    expect(session.respondApproval('not-the-id', 'approve')).toBe(false);
+    expect(session.respondApproval(approvalRequest!.request.id, 'always')).toBe(true);
+
+    // 消费剩余事件：审批卡片转结果态、命令真实执行、报告回流、主会话收尾
+    for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+      events.push(head.value);
+    }
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'approval-resolved' && e.requestId === approvalRequest!.request.id,
+      ),
+    ).toBe(true);
+    expect(readFileSync(join(workspace, 'ran.txt'), 'utf8')).toBe('sub-agent-ran\n');
+
+    // always 记忆随会话入库（恢复后子代理/主会话同首词命令均免审批）
+    expect(persistence.listApprovals('session-1')).toContain('echo');
+    expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it('主会话中断：运行中的子代理随 AbortSignal 一并中止，主会话以中断态收尾', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    // 挂起子模型：中断前一直挂着；abort signal 到达时以 AbortError 终止流
+    // （模拟真实 provider 流对 abortSignal 的响应——MockLanguageModelV4 不会自动做）
+    let releaseGate: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const subModel = new MockLanguageModelV4({
+      doStream: async (options) => ({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            const onAbort = () =>
+              controller.error(new DOMException('Aborted', 'AbortError'));
+            const signal = options.abortSignal;
+            if (signal?.aborted) {
+              onAbort();
+              return;
+            }
+            signal?.addEventListener('abort', onAbort, { once: true });
+            await gate;
+            signal?.removeEventListener('abort', onAbort);
+            controller.enqueue({ type: 'text-start', id: 'text-1' });
+            controller.enqueue({ type: 'text-delta', id: 'text-1', delta: '不应到达' });
+            controller.enqueue({ type: 'text-end', id: 'text-1' });
+            controller.enqueue({ type: 'finish', ...finishPart() });
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const { session } = makeSubagentSession({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'd1', toolName: 'spawn_subagent', input: { task: '长调研' } }],
+        },
+        { kind: 'text', deltas: ['汇总'] },
+      ],
+      subModel,
+    });
+
+    const controller = new AbortController();
+    const events: SessionEvent[] = [];
+    const iterator = session.sendMessage({
+      text: '委派后中断',
+      profile,
+      signal: controller.signal,
+    })[Symbol.asyncIterator]();
+
+    // 推进到子代理开跑
+    for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+      events.push(head.value);
+      if (head.value.type === 'subagent-start') {
+        break;
+      }
+    }
+    expect(events.some((e) => e.type === 'subagent-start')).toBe(true);
+
+    // 中断主会话：子代理的模型流随 signal 以 AbortError 终止，事件流收尾不卡死
+    controller.abort();
+    for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+      events.push(head.value);
+    }
+
+    const report = events.find(
+      (e): e is Extract<SessionEvent, { type: 'subagent-report' }> => e.type === 'subagent-report',
+    );
+    expect(report?.ok).toBe(false);
+    const delegation = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> =>
+        e.type === 'tool-result' && e.call.toolName === 'spawn_subagent',
+    );
+    expect(delegation?.call.isError).toBe(true);
+    // 主会话以中断态收尾（02 的语义），无 error
+    expect(events.at(-1)?.type).toBe('assistant-aborted');
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0);
   });
 });
