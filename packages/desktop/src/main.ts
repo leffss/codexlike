@@ -13,7 +13,7 @@ import {
   createSessionManager,
   createSqliteSessionStore,
   validateProviderProfile,
-} from '@codexlike/agent-core';
+} from '@codexlike/agent-core/node';
 
 import {
   createProfileStore,

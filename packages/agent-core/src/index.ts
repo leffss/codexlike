@@ -1,6 +1,11 @@
 // CodexLike Agent Core 公共出口。
 // 本包是纯 TypeScript 的 agent 运行时，禁止 import 任何 Electron API（ADR-0002）。
-// 后续工单（对话循环、工具注册表、审批状态机等）都在此出口下扩展。
+//
+// 出口分两层：
+// - `.`（本文件）：浏览器可打包——只含类型与 provider/校验的值导出，
+//   不引入任何 Node 内置模块（渲染进程的 ui 包从这里值导入）；
+// - `./node`（node.ts）：Node 宿主（Electron 主进程）专用，
+//   含会话对象、会话管理器与 SQLite 持久化（依赖 node:sqlite 等 Node API）。
 export type {
   ProviderProfile,
   ProviderProfileErrors,
@@ -11,6 +16,7 @@ export { validateProviderProfile } from './provider/provider-profile';
 export type { CreateLanguageModelOptions } from './provider/language-model';
 export { createLanguageModelFromProfile } from './provider/language-model';
 
+// 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
 export type {
   MessageRole,
   SessionEvent,
@@ -18,16 +24,3 @@ export type {
   SessionStatus,
   StoredMessage,
 } from './session/types';
-export type { SessionPersistence } from './session/persistence';
-export { createSqliteSessionStore } from './session/persistence';
-export type {
-  AgentSession,
-  CreateAgentSessionOptions,
-  SendMessageOptions,
-} from './session/agent-session';
-export { createAgentSession } from './session/agent-session';
-export type {
-  CreateSessionManagerOptions,
-  SessionManager,
-} from './session/manager';
-export { createSessionManager } from './session/manager';

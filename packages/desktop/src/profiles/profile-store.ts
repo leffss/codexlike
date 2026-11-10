@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ProviderProfile, ProviderProfileInput } from '@codexlike/agent-core';
+import type { ProviderProfile, ProviderProfileInput } from '@codexlike/agent-core/node';
 
 /**
  * Electron safeStorage 的最小接口（async 形态，Electron 45 起同步 API 已弃用）。

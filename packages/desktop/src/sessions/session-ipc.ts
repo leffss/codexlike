@@ -10,7 +10,7 @@ import {
 import type {
   ProviderProfile,
   SessionManager,
-} from '@codexlike/agent-core';
+} from '@codexlike/agent-core/node';
 
 import type { ProfileStore } from '../profiles/profile-store';
 import { IPC, type SessionEventEnvelope } from '../shared/ipc';
