@@ -10,6 +10,7 @@ import { runTool } from '../../src/tools/registry';
 import {
   createMcpManager,
   type McpManager,
+  type McpManagerOptions,
   type McpServerConfig,
 } from '../../src/mcp/manager';
 
@@ -35,9 +36,13 @@ function fakeServer(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
 const managers: McpManager[] = [];
 
 function newManager(
-  options: Partial<Parameters<typeof createMcpManager>[0]> = {},
+  options: Omit<McpManagerOptions, 'servers'> &
+    Partial<Pick<McpManagerOptions, 'servers'>> = {},
 ): McpManager {
-  const manager = createMcpManager(options);
+  const manager = createMcpManager({
+    servers: () => [],
+    ...options,
+  });
   managers.push(manager);
   return manager;
 }

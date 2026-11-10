@@ -4,6 +4,7 @@ import {
   getDefaultEnvironment,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 
+
 import type { ToolDefinition, ToolResult } from '../tools/types';
 
 import type {
@@ -11,6 +12,8 @@ import type {
   McpServerConfig,
   McpServerState,
 } from './types';
+
+export type { McpServerConfig, McpServerState } from './types';
 
 /** 默认工具调用超时：30 秒（spec「工具执行带超时」） */
 export const MCP_DEFAULT_CALL_TIMEOUT_MS = 30_000;
@@ -72,15 +75,23 @@ interface Entry {
   error: string | null;
 }
 
-/** 把 CallToolResult 的 content 转为模型可读的纯文本输出 */
-function contentToOutput(result: {
-  content?: Array<{ type: string } & Record<string, unknown>>;
-  isError?: boolean;
-}): { output: string; isError: boolean } {
+/** 把 CallToolResult 的 content 转为模型可读的纯文本输出（参数 unknown：SDK 泛型形态随版本变，结构窄化在此收口） */
+function contentToOutput(raw: unknown): { output: string; isError: boolean } {
+  const result =
+    typeof raw === 'object' && raw !== null
+      ? (raw as { content?: unknown; isError?: unknown })
+      : {};
   const isError = result.isError === true;
-  const texts = (result.content ?? [])
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text as string);
+  const parts = Array.isArray(result.content) ? result.content : [];
+  const texts = parts
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        typeof part === 'object' &&
+        part !== null &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string',
+    )
+    .map((part) => part.text);
   if (texts.length > 0) {
     return { output: texts.join('\n'), isError };
   }
