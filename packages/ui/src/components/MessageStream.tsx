@@ -56,6 +56,18 @@ function MessageBubble(props: { message: UiMessage }) {
     );
   }
 
+  if (message.role === 'status') {
+    // 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文
+    return (
+      <li
+        data-testid="message-status"
+        className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2 text-xs whitespace-pre-wrap text-slate-400"
+      >
+        {message.content}
+      </li>
+    );
+  }
+
   return (
     <li data-testid="message-assistant" className="max-w-full">
       <div className="markdown rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm">

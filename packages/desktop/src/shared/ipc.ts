@@ -8,6 +8,9 @@ import type {
 
 import type { SessionStatusInfo } from '../sessions/status';
 
+// ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
+export type { SessionStatusInfo };
+
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
  * preload（contextBridge）暴露 `window.codexlike`，UI 通过 `@codexlike/desktop/ipc` 引用类型。
