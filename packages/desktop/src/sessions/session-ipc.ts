@@ -7,12 +7,17 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 
-import type {
-  ProviderProfile,
-  SessionManager,
+import {
+  discoverAgentsInstructions,
+  type ProviderProfile,
+  type SessionManager,
+  type SessionRecord,
 } from '@codexlike/agent-core/node';
 
 import type { ProfileStore } from '../profiles/profile-store';
+import { readMentionAttachments } from './mentions';
+import { buildSessionStatus } from './status';
+import { listWorkspaceFiles } from './workspace-files';
 import { IPC, type SessionEventEnvelope } from '../shared/ipc';
 
 /** 注册会话相关 IPC 指令；事件流经 IPC.sessionEvents 推送给主窗口 */
@@ -72,7 +77,13 @@ export function registerSessionHandlers(options: {
 
   ipcMain.handle(
     IPC.sessions.send,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown, text: unknown, profileId: unknown) => {
+    async (
+      _e: IpcMainInvokeEvent,
+      sessionId: unknown,
+      text: unknown,
+      profileId: unknown,
+      mentionPaths: unknown,
+    ) => {
       if (typeof sessionId !== 'string' || typeof text !== 'string') {
         throw new Error('send：参数不合法');
       }
@@ -81,6 +92,13 @@ export function registerSessionHandlers(options: {
       }
       if (typeof profileId !== 'string' || profileId === '') {
         throw new Error('请先选择模型（Provider Profile）');
+      }
+      if (
+        mentionPaths !== undefined &&
+        (!Array.isArray(mentionPaths) ||
+          mentionPaths.some((path) => typeof path !== 'string'))
+      ) {
+        throw new Error('send：@引用 路径列表不合法');
       }
       const session = manager.get(sessionId);
       if (session === null) {
@@ -93,9 +111,17 @@ export function registerSessionHandlers(options: {
         throw new Error('所选 Provider Profile 不存在，请重新选择模型');
       }
 
+      // @引用 内容在主进程读取（路径限制在工作区内），失败以中文异常抛回
+      const mentions = readMentionAttachments(
+        session.record.workspacePath,
+        (mentionPaths as string[] | undefined) ?? [],
+      );
+
       // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
       // 在这里以异常抛回渲染进程；之后的事件异步推送。
-      const iterator = session.sendMessage({ text, profile })[Symbol.asyncIterator]();
+      const iterator = session.sendMessage({ text, profile, mentions })[
+        Symbol.asyncIterator
+      ]();
       const first = await iterator.next();
       if (first.done !== true) {
         emit({ sessionId, event: first.value });
@@ -108,6 +134,69 @@ export function registerSessionHandlers(options: {
         // 防御：流中途的意外异常不应成为未处理 rejection
         console.error('[sessions] 事件流意外终止', error);
       });
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.rename,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, title: unknown) => {
+      if (typeof sessionId !== 'string' || typeof title !== 'string') {
+        throw new Error('rename：参数不合法');
+      }
+      return manager.rename(sessionId, title);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.archive,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, archived: unknown) => {
+      if (typeof sessionId !== 'string' || typeof archived !== 'boolean') {
+        throw new Error('archive：参数不合法');
+      }
+      return manager.setArchived(sessionId, archived);
+    },
+  );
+
+  ipcMain.handle(IPC.sessions.status, async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') {
+      throw new Error('status：sessionId 必须是字符串');
+    }
+    const record = manager
+      .list()
+      .find((candidate: SessionRecord) => candidate.id === sessionId);
+    if (record === undefined) {
+      return null;
+    }
+    const providerProfileName =
+      record.providerProfileId === null
+        ? null
+        : ((await profiles.list()).find(
+            (candidate: ProviderProfile) =>
+              candidate.id === record.providerProfileId,
+          )?.name ?? null);
+    return buildSessionStatus({
+      record,
+      messages: manager.messages(sessionId),
+      agentsMd: discoverAgentsInstructions({
+        workspacePath: record.workspacePath,
+      }),
+      providerProfileName,
+    });
+  });
+
+  ipcMain.handle(
+    IPC.sessions.workspaceFiles,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== 'string') {
+        throw new Error('workspaceFiles：sessionId 必须是字符串');
+      }
+      const record = manager
+        .list()
+        .find((candidate: SessionRecord) => candidate.id === sessionId);
+      if (record === undefined) {
+        throw new Error('会话不存在或已损坏');
+      }
+      return listWorkspaceFiles(record.workspacePath);
     },
   );
 }

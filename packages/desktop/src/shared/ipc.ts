@@ -6,6 +6,11 @@ import type {
   TranscriptItem,
 } from '@codexlike/agent-core';
 
+import type { SessionStatusInfo } from '../sessions/status';
+
+// ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
+export type { SessionStatusInfo };
+
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
  * preload（contextBridge）暴露 `window.codexlike`，UI 通过 `@codexlike/desktop/ipc` 引用类型。
@@ -19,7 +24,7 @@ export const IPC = {
     remove: 'provider-profiles:remove',
   },
   sessions: {
-    /** 全部会话（侧栏列表，updatedAt 倒序） */
+    /** 全部会话（含已归档，侧栏列表自行过滤；updatedAt 倒序） */
     list: 'sessions:list',
     /** 新建会话（绑定工作区目录） */
     create: 'sessions:create',
@@ -29,6 +34,14 @@ export const IPC = {
     messages: 'sessions:messages',
     /** 发送消息；流式事件经 sessionEvents 推送 */
     send: 'sessions:send',
+    /** /rename 与侧栏重命名共用（同一 IPC 通道） */
+    rename: 'sessions:rename',
+    /** /archive 与侧栏归档共用；archived=false 取消归档 */
+    archive: 'sessions:archive',
+    /** /status：上下文用量估算 + 模型 + 预留审批模式字段 */
+    status: 'sessions:status',
+    /** @引用 菜单候选：工作区文件相对路径列表 */
+    workspaceFiles: 'sessions:workspace-files',
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
@@ -55,7 +68,7 @@ export interface CodexLikeApi {
     remove(id: string): Promise<boolean>;
   };
   sessions: {
-    /** 全部会话（重启后从 SQLite 恢复） */
+    /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionRecord[]>;
     /** 在指定工作区目录新建会话 */
     create(workspacePath: string): Promise<SessionRecord>;
@@ -65,13 +78,23 @@ export interface CodexLikeApi {
     messages(sessionId: string): Promise<TranscriptItem[]>;
     /**
      * 发送消息：成功即启动流式回复（事件经 onSessionEvent 推送）。
-     * 会话正在回复中 / Profile 不存在等启动失败以异常抛回。
+     * mentionPaths 为消息中 @引用 的工作区相对路径，内容由主进程读取附加进模型上下文。
+     * 会话正在回复中 / Profile 不存在 / 引用文件不可读等启动失败以异常抛回。
      */
     send(
       sessionId: string,
       text: string,
       providerProfileId: string,
+      mentionPaths?: string[],
     ): Promise<void>;
+    /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
+    rename(sessionId: string, title: string): Promise<SessionRecord | null>;
+    /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
+    archive(sessionId: string, archived: boolean): Promise<SessionRecord | null>;
+    /** /status 数据；会话不存在返回 null */
+    status(sessionId: string): Promise<SessionStatusInfo | null>;
+    /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
+    workspaceFiles(sessionId: string): Promise<string[]>;
   };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(

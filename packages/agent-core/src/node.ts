@@ -30,3 +30,14 @@ export { createGrepTool } from './tools/grep';
 export { createTerminalTool } from './tools/terminal';
 export type { TerminalShell, TerminalToolOptions } from './tools/terminal';
 export { resolveInWorkspace } from './tools/workspace';
+// AGENTS.md 发现（依赖 node:fs / git 探测，Node 宿主专用）
+export {
+  AGENTS_MD_MAX_BYTES,
+  composeSystemPrompt,
+  discoverAgentsInstructions,
+} from './context/agents-md';
+export type {
+  AgentsMdDiscovery,
+  AgentsMdSection,
+  DiscoverAgentsInstructionsOptions,
+} from './context/agents-md';

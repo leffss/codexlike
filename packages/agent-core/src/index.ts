@@ -18,6 +18,7 @@ export { createLanguageModelFromProfile } from './provider/language-model';
 
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
 export type {
+  MentionAttachment,
   MessageRole,
   SessionEvent,
   SessionRecord,
@@ -35,3 +36,22 @@ export type {
   ToolPermission,
   ToolResult,
 } from './tools/types';
+// 输入框解析层（纯函数，浏览器安全；ui 的命令菜单与发送分发直接值导入）
+export {
+  extractMentionPaths,
+  parseComposerDraft,
+  resolveComposerSubmission,
+  SLASH_COMMANDS,
+} from './composer/parse';
+export type {
+  ComposerDraftMenu,
+  ComposerSubmission,
+} from './composer/parse';
+export { fuzzyMatch } from './composer/fuzzy';
+
+// 上下文用量估算（/status 与 compact 共用的稳定接口）
+export { estimateTokens } from './context/tokens';
+export type {
+  SlashCommandDef,
+  SlashCommandName,
+} from './composer/slash-command';

@@ -18,12 +18,19 @@ import { runTool } from '../tools/registry';
 import type { ToolCallRecord, ToolDefinition } from '../tools/types';
 
 import type { SessionPersistence } from './persistence';
-import type { SessionEvent, SessionRecord, StoredMessage } from './types';
+import type {
+  MentionAttachment,
+  SessionEvent,
+  SessionRecord,
+  StoredMessage,
+} from './types';
 
 /** 发送消息的输入：文本 + 本条消息使用的 Provider Profile（模型选择器「对下一条生效」） */
 export interface SendMessageOptions {
   text: string;
   profile: ProviderProfile;
+  /** @引用 的工作区文件；内容附加进本条消息的模型上下文（落库与回显保持原文） */
+  mentions?: MentionAttachment[];
   /** 中断信号：中断后已生成的部分文本保留为助手消息 */
   signal?: AbortSignal;
 }
@@ -34,6 +41,8 @@ export interface CreateAgentSessionOptions {
   persistence: SessionPersistence;
   /** 恢复会话时传入既有消息；新会话为空 */
   history?: StoredMessage[];
+  /** AGENTS.md 等组装的系统提示；空串/省略时不注入 system 角色 */
+  systemPrompt?: string;
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认走 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
@@ -101,12 +110,34 @@ function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
     }),
   ]);
   return Object.fromEntries(entries);
+/**
+ * 组装发给模型的用户消息内容：原文 + @引用 文件内容（XML 标签 + 路径标注，
+ * 内容含反引号等 markdown 语法也不会破坏结构）。
+ */
+function composeUserContent(
+  text: string,
+  mentions: MentionAttachment[] | undefined,
+): string {
+  if (mentions === undefined || mentions.length === 0) {
+    return text;
+  }
+  const blocks = mentions
+    .map(
+      (mention) =>
+        `<attached-file path="${mention.path}">\n${mention.content}\n</attached-file>`,
+    )
+    .join('\n');
+  return `${text}\n\n以下为该消息 @引用 的工作区文件内容：\n\n${blocks}`;
 }
 
 /** 创建会话对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
 export function createAgentSession(options: CreateAgentSessionOptions): AgentSession {
   const { record, persistence } = options;
-  const history = options.history ? [...options.history] : [];
+  // 模型上下文与持久化消息分离：user 消息进上下文时附加 @引用 内容，落库保持原文
+  const context: ModelMessage[] = options.history
+    ? options.history.filter((message) => message.role !== 'error').map(toModelMessage)
+    : [];
+  const systemPrompt = options.systemPrompt ?? '';
   const modelFor = options.languageModelFor ?? createLanguageModelFromProfile;
   const toolsByName = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
   const modelTools = toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
@@ -119,7 +150,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
     id: record.id,
     record,
 
-    async *sendMessage({ text, profile, signal }) {
+    async *sendMessage({ text, profile, mentions, signal }) {
       if (busy) {
         throw new Error('上一条消息仍在回复中，请等待完成后再发送');
       }
@@ -146,16 +177,24 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
         const assistantMessageId = generateId();
         yield { type: 'assistant-start', messageId: assistantMessageId };
 
+        // 本条消息进模型上下文：原文 + @引用 内容；落库与事件保持原文
+        const userContextMessage: ModelMessage = {
+          role: 'user',
+          content: composeUserContent(text, mentions),
+        };
+
         let accumulated = '';
         let aborted = false;
         try {
           // 工具循环：模型调工具 → 执行 → 结果回填 → 继续生成，直到最终文本（或中断/上限）
-          const pending: ModelMessage[] = [...history, userMessage].map(toModelMessage);
+          // 初始上下文 = 历史消息 + 本条用户消息（原文 + @引用 内容）；system 为 AGENTS.md 注入
+          const pending: ModelMessage[] = [...context, userContextMessage];
           let round = 0;
 
           while (true) {
             const result = streamText({
               model: modelFor(profile),
+              system: systemPrompt === '' ? undefined : systemPrompt,
               messages: pending,
               abortSignal: signal,
               tools: modelTools,
@@ -262,7 +301,10 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           createdAt: now(),
         };
         persistence.insertMessage(assistantMessage);
-        history.push(userMessage, assistantMessage);
+        context.push(userContextMessage, {
+          role: 'assistant',
+          content: accumulated,
+        });
         yield aborted
           ? { type: 'assistant-aborted', message: assistantMessage }
           : { type: 'assistant-done', message: assistantMessage };

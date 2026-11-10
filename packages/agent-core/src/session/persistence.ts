@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   provider_profile_id TEXT,
   model TEXT,
   status TEXT NOT NULL,
+  archived_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -70,6 +71,7 @@ interface SessionRow {
   provider_profile_id: string | null;
   model: string | null;
   status: string;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -100,12 +102,18 @@ interface ToolCallRow {
 export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
+  // 旧库迁移：工单 02 时代的 sessions 表没有 archived_at（工单 07 /archive 需要）
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN archived_at TEXT');
+  } catch {
+    // 列已存在（新库或已迁移）
+  }
 
   const insertSession = db.prepare(
-    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   const updateSessionStmt = db.prepare(
-    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, updated_at = ? WHERE id = ?',
+    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, archived_at = ?, updated_at = ? WHERE id = ?',
   );
   const insertMessageStmt = db.prepare(
     'INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -131,6 +139,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       providerProfileId: row.provider_profile_id,
       model: row.model,
       status: row.status as SessionRecord['status'],
+      archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -145,6 +154,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.providerProfileId,
         record.model,
         record.status,
+        record.archivedAt,
         record.createdAt,
         record.updatedAt,
       );
@@ -164,6 +174,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.providerProfileId,
         next.model,
         next.status,
+        next.archivedAt,
         next.updatedAt,
         id,
       );

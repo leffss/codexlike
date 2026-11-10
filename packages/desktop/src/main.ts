@@ -10,10 +10,13 @@ import {
 } from 'electron';
 
 import {
+  composeSystemPrompt,
   createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
+  discoverAgentsInstructions,
   validateProviderProfile,
+  type SessionRecord,
 } from '@codexlike/agent-core/node';
 
 import {
@@ -122,7 +125,7 @@ function assertValidInput(input: unknown) {
 void app.whenReady().then(() => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
-  // 六件内置工具：无状态实例，全部会话共享；工作区经执行上下文逐会话注入。
+  // 六件内置工具（工单 03）：无状态实例，全部会话共享；工作区经执行上下文逐会话注入。
   // shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
   const shellEnv = process.env['CODEXLIKE_SHELL'];
   const tools = createBuiltinTools({
@@ -132,7 +135,13 @@ void app.whenReady().then(() => {
         ? shellEnv
         : undefined,
   });
-  const manager = createSessionManager({ persistence, tools });
+  // AGENTS.md 自动注入（工单 07）：全局 + 项目根 → cwd 逐层发现，
+  // 会话创建与恢复时各计算一次系统提示（agent-core 不依赖 fs，发现逻辑注入宿主）
+  const systemPromptFor = (record: SessionRecord) =>
+    composeSystemPrompt(
+      discoverAgentsInstructions({ workspacePath: record.workspacePath }),
+    );
+  const manager = createSessionManager({ persistence, tools, systemPromptFor });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
   // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置
