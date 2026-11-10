@@ -36,6 +36,7 @@ export type {
   ComposerDraftMenu,
   ComposerSubmission,
 } from './composer/parse';
+export { fuzzyMatch } from './composer/fuzzy';
 export type {
   SlashCommandDef,
   SlashCommandName,
