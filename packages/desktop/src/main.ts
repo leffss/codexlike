@@ -144,9 +144,10 @@ void app.whenReady().then(() => {
   const manager = createSessionManager({ persistence, tools, systemPromptFor });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
-  // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置
+  // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
+  // 进程刚启动不可能有真实运行中的流，统一重置（manager.get 的恢复路径会落库 idle）
   for (const record of manager.list()) {
-    if (record.status === 'streaming') {
+    if (record.status === 'streaming' || record.status === 'waiting-approval') {
       manager.get(record.id);
     }
   }

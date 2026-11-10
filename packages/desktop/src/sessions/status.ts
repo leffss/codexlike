@@ -1,11 +1,12 @@
 import {
   estimateTokens,
   type AgentsMdDiscovery,
+  type ApprovalMode,
   type SessionRecord,
   type StoredMessage,
 } from '@codexlike/agent-core/node';
 
-/** /status 展示的会话状态（工单 07；审批模式字段在工单 04 接入） */
+/** /status 展示的会话状态（工单 07；审批模式自工单 04 起显示真实档位） */
 export interface SessionStatusInfo {
   /** 最近一次发送消息所用模型 */
   model: string | null;
@@ -19,8 +20,8 @@ export interface SessionStatusInfo {
   messageCount: number;
   /** AGENTS.md 来源摘要；未发现任何文件为 null */
   agentsMd: { sources: string[]; truncated: boolean } | null;
-  /** 预留：审批模式（readonly / suggest / full），工单 04 起有值 */
-  approvalMode: null;
+  /** 审批模式（工单 04）：readonly / suggest / full */
+  approvalMode: ApprovalMode;
 }
 
 /**
@@ -52,6 +53,6 @@ export function buildSessionStatus(input: {
             sources: agentsMd.sections.map((section) => section.path),
             truncated: agentsMd.truncated,
           },
-    approvalMode: null,
+    approvalMode: record.approvalMode,
   };
 }

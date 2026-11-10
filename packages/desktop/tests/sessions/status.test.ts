@@ -16,6 +16,7 @@ function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
     providerProfileId: 'profile-1',
     model: 'glm-4.7',
     status: 'idle',
+    approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
     updatedAt: '2026-11-10T08:00:00.000Z',
@@ -63,8 +64,20 @@ describe('buildSessionStatus（/status 数据组装）', () => {
       sources: ['C:\\Users\\u\\.codexlike\\AGENTS.md'],
       truncated: false,
     });
-    // 审批模式在工单 04 接入，先预留字段
-    expect(status.approvalMode).toBeNull();
+    // 审批模式（工单 04）：/status 显示会话真实档位
+    expect(status.approvalMode).toBe('suggest');
+  });
+
+  it('审批模式随会话记录透传（readonly / full）', () => {
+    for (const mode of ['readonly', 'full'] as const) {
+      const status = buildSessionStatus({
+        record: record({ approvalMode: mode }),
+        messages: [],
+        agentsMd: emptyDiscovery,
+        providerProfileName: null,
+      });
+      expect(status.approvalMode).toBe(mode);
+    }
   });
 
   it('无 AGENTS.md、未发过消息的最小会话', () => {
