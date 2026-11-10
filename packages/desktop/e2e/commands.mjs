@@ -93,7 +93,11 @@ async function main() {
     await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
     await window.getByLabel('API Key').fill('sk-e2e');
     await window.getByLabel('模型').fill('mock-model');
-    await window.getByRole('button', { name: /保存|创建/ }).click();
+    // 设置页现在有两个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
+    await window
+      .locator('form')
+      .getByRole('button', { name: /保存|创建/ })
+      .click();
     await window.getByText('Mock').first().waitFor();
 
     // 2) 建会话（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）

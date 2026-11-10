@@ -7,9 +7,11 @@ import type {
 } from '@codexlike/agent-core';
 
 import type { SessionStatusInfo } from '../sessions/status';
+import type { SearchSettings } from '../search/search-settings-store';
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
+export type { SearchSettings };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -42,6 +44,11 @@ export const IPC = {
     status: 'sessions:status',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
+  },
+  /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
+  searchSettings: {
+    get: 'search-settings:get',
+    set: 'search-settings:set',
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
@@ -95,6 +102,12 @@ export interface CodexLikeApi {
     status(sessionId: string): Promise<SessionStatusInfo | null>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
+  };
+  searchSettings: {
+    /** 当前搜索源设置（apiKey 已解密，仅存在于渲染进程内存；'' 表示未配置） */
+    get(): Promise<SearchSettings>;
+    /** 保存搜索源 API key（空字符串清除）；safeStorage 不可用时以异常抛回 */
+    set(input: { apiKey: string }): Promise<SearchSettings>;
   };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(

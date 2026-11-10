@@ -34,6 +34,10 @@ const api: CodexLikeApi = {
     workspaceFiles: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
   },
+  searchSettings: {
+    get: () => ipcRenderer.invoke(IPC.searchSettings.get),
+    set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
+  },
   onSessionEvent: (listener) => {
     const handler: (
       _event: Electron.IpcRendererEvent,
