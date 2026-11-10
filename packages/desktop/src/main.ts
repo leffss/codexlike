@@ -32,6 +32,9 @@ import {
 } from './search/search-settings-store';
 import { registerSessionHandlers } from './sessions/session-ipc';
 import { IPC } from './shared/ipc';
+import { createMcpStore } from './mcp/mcp-store';
+import { createMcpService } from './mcp/mcp-service';
+import { registerMcpHandlers } from './mcp/mcp-ipc';
 
 /**
  * 把 Electron safeStorage（async API，Electron 45 起同步版已弃用）
@@ -185,7 +188,7 @@ void app.whenReady().then(async () => {
   // 内置工具（工单 03 六件 + 工单 10 web_search）：无状态实例，全部会话共享；
   // 工作区经执行上下文逐会话注入。shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
   const shellEnv = process.env['CODEXLIKE_SHELL'];
-  const tools = createBuiltinTools({
+  const builtinTools = createBuiltinTools({
     env: process.env,
     shell:
       shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
@@ -193,13 +196,25 @@ void app.whenReady().then(async () => {
         : undefined,
     webSearch: { searchSource: () => searchSource },
   });
+
+  // MCP（工单 12）：stdio server 的配置存储 + 连接管理；启动时连接全部已配置
+  // server（失败不拖垮应用，状态在设置页可见）。会话工具 = 内置 + 启用的 MCP 工具，
+  // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
+  const mcpService = createMcpService({
+    store: createMcpStore({ dir: dataDir(), safeStorage: asSafeStorageLike() }),
+  });
+  await mcpService.startup();
   // AGENTS.md 自动注入（工单 07）：全局 + 项目根 → cwd 逐层发现，
   // 会话创建与恢复时各计算一次系统提示（agent-core 不依赖 fs，发现逻辑注入宿主）
   const systemPromptFor = (record: SessionRecord) =>
     composeSystemPrompt(
       discoverAgentsInstructions({ workspacePath: record.workspacePath }),
     );
-  const manager = createSessionManager({ persistence, tools, systemPromptFor });
+  const manager = createSessionManager({
+    persistence,
+    tools: () => mcpService.sessionTools(builtinTools),
+    systemPromptFor,
+  });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
   // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
@@ -212,6 +227,7 @@ void app.whenReady().then(async () => {
 
   registerProviderProfileHandlers(store);
   registerSearchSettingsHandlers(searchSettings, refreshSearchSource);
+  registerMcpHandlers(mcpService);
   registerSessionHandlers({
     manager,
     profiles: store,
@@ -225,8 +241,9 @@ void app.whenReady().then(async () => {
     app.quit();
   });
 
-  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）
+  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）并断开 MCP 子进程
   app.on('will-quit', () => {
     persistence.close();
+    void mcpService.shutdown();
   });
 });
