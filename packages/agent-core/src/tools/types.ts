@@ -12,18 +12,32 @@
  */
 export type ToolPermission = 'readonly' | 'write' | 'command';
 
-/** 工具执行上下文：会话循环在每次调用时提供（工作区边界随之逐会话生效） */
+/** 工具执行上下文：会话循环在每次调用时提供（工作区边界与会话级资源随之逐会话生效） */
 export interface ToolExecutionContext {
   /** 会话绑定的工作区目录（绝对路径） */
   workspacePath: string;
+  /** 调用所属会话：会话级资源（如浏览器 context/Cookie）按它隔离复用 */
+  sessionId: string;
+  /** 本次调用的 tool call id（如截图文件命名）；测试注入固定值 */
+  toolCallId?: string;
   /** 会话中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
   signal?: AbortSignal;
+}
+
+/** 工具结果附带的图片（截图）：多模态端点作为 image 内容块附给模型，端点不支持时忽略 */
+export interface ToolResultImage {
+  /** IANA media type（如 image/png） */
+  mediaType: string;
+  /** 图片二进制的 base64（不含 data: 前缀） */
+  data: string;
 }
 
 /** 工具执行结果：output 已截断，直接回填模型；isError 标记失败（失败原因也在 output） */
 export interface ToolResult {
   output: string;
   isError: boolean;
+  /** 图片附件（截图）：output 文本同时包含路径说明，降级端点仍可工作 */
+  images?: ToolResultImage[];
 }
 
 /** JSON Schema（draft-07 的 object 子集；声明为交叉类型以允许额外关键字如 additionalProperties） */

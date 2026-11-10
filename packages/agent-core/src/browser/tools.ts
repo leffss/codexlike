@@ -265,8 +265,9 @@ export function createBrowserTools(options: BrowserToolsOptions): ToolDefinition
       void args;
       try {
         const page = await requireOpenedPage(context);
-        const body = await page.evaluate(
-          () => document.body?.innerText ?? '',
+        // 字符串表达式形式：不依赖 tsconfig 的 DOM lib
+        const body = await page.evaluate<string>(
+          'document.body ? document.body.innerText : ""',
         );
         const title = await page.title();
         const header = `标题：${title}\n地址：${page.url()}\n\n`;

@@ -32,7 +32,7 @@ function fakeInstaller(script: {
   };
   return Object.defineProperty(installer, 'installCalls', {
     get: () => installCalls,
-  });
+  }) as ChromiumInstaller & { readonly installCalls: number };
 }
 
 describe('ensureChromiumReady（首次使用前确保 Chromium 就绪）', () => {
@@ -74,16 +74,16 @@ describe('ensureChromiumReady（首次使用前确保 Chromium 就绪）', () =>
 
 /** 仿 node:child_process.spawn 返回的子进程（stdout/stderr 流 + exit 事件） */
 function fakeSpawn(
-  script: (args: string[], env: NodeJS.ProcessEnv) => {
+  script: (args: readonly string[], env: NodeJS.ProcessEnv) => {
     code: number;
     stdout: string[];
     stderr: string[];
   },
 ) {
-  const calls: { args: string[]; env: NodeJS.ProcessEnv }[] = [];
+  const calls: { args: readonly string[]; env: NodeJS.ProcessEnv }[] = [];
   const spawn = (
     _command: string,
-    args: string[],
+    args: readonly string[],
     options: { env: NodeJS.ProcessEnv },
   ) => {
     calls.push({ args, env: options.env });

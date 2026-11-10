@@ -39,10 +39,10 @@ describe('BrowserSessionManager（会话级浏览器实例）', () => {
     const pageA = await manager.pageFor('session-cookie-a');
     const pageB = await manager.pageFor('session-cookie-b');
     await pageA.goto(`${fixture.origin}/set-cookie`);
-    const cookieA = await pageA.evaluate(() => document.cookie);
+    const cookieA = await pageA.evaluate<string>('document.cookie');
     expect(cookieA).toContain('fixture_sid=abc123');
     await pageB.goto(`${fixture.origin}/form`);
-    const cookieB = await pageB.evaluate(() => document.cookie);
+    const cookieB = await pageB.evaluate<string>('document.cookie');
     expect(cookieB).not.toContain('fixture_sid');
   }, 60_000);
 
@@ -55,7 +55,7 @@ describe('BrowserSessionManager（会话级浏览器实例）', () => {
     const fresh = await manager.pageFor('session-recycled');
     expect(fresh).not.toBe(page);
     await fresh.goto(`${fixture.origin}/form`);
-    const cookie = await fresh.evaluate(() => document.cookie);
+    const cookie = await fresh.evaluate<string>('document.cookie');
     expect(cookie).not.toContain('fixture_sid');
   }, 60_000);
 

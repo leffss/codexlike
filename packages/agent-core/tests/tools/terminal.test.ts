@@ -12,7 +12,7 @@ function makeWorkspace(): string {
 }
 
 function context(workspacePath: string): ToolExecutionContext {
-  return { workspacePath };
+  return { workspacePath, sessionId: 'unit-test-session' };
 }
 
 /** 与生产宿主同构：传完整 process.env，工具层做白名单过滤 */

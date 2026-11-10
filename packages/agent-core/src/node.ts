@@ -41,3 +41,20 @@ export type {
   AgentsMdSection,
   DiscoverAgentsInstructionsOptions,
 } from './context/agents-md';
+// 浏览器工具组（工单 11）：Playwright headless Chromium，会话级复用（依赖 playwright-core，仅 Node 宿主）
+export { createBrowserSessionManager } from './browser/manager';
+export type {
+  BrowserSessionManager,
+  BrowserSessionManagerOptions,
+} from './browser/manager';
+export { createBrowserTools, BROWSER_READ_MAX_CHARS } from './browser/tools';
+export type { BrowserToolsOptions } from './browser/tools';
+export {
+  createCliChromiumInstaller,
+  DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+  ensureChromiumReady,
+} from './browser/chromium';
+export type {
+  ChromiumInstaller,
+  CliChromiumInstallerOptions,
+} from './browser/chromium';

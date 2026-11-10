@@ -10,12 +10,13 @@ import {
   type ModelMessage,
   type Tool,
   type ToolModelMessage,
+  type ToolResultPart,
 } from 'ai';
 
 import { createLanguageModelFromProfile } from '../provider/language-model';
 import type { ProviderProfile } from '../provider/provider-profile';
 import { runTool } from '../tools/registry';
-import type { ToolCallRecord, ToolDefinition } from '../tools/types';
+import type { ToolCallRecord, ToolDefinition, ToolResult } from '../tools/types';
 
 import type { SessionPersistence } from './persistence';
 import type {
@@ -50,6 +51,11 @@ export interface CreateAgentSessionOptions {
    * 本工单内工具默认放行；审批三档在工单 04 于 tool-call 与 tool-result 之间接入。
    */
   tools?: ToolDefinition[];
+  /**
+   * 工具结果的图片附件（截图）是否回填模型：true（默认）作为 image 内容块附给
+   * 多模态端点；false 纯文本降级（output 内已含文件路径说明，模型仍可工作）。
+   */
+  attachToolImages?: boolean;
   /** 时间与 id 生成注入（测试用固定值） */
   now?: () => string;
   generateId?: () => string;
@@ -100,6 +106,33 @@ function toModelMessage(message: StoredMessage): ModelMessage {
   return { role: 'user', content: message.content };
 }
 
+/**
+ * 工具结果 → 回填模型的 output：默认带图片附件（content 块 = 文本 + file 图片，
+ * OpenAI 兼容端点转 image_url）；attachToolImages=false 或无图时纯文本（降级路径
+ * 依然可工作：output 文本含截图文件路径与说明）。
+ */
+function toolResultOutput(
+  result: ToolResult,
+  attachImages: boolean,
+): Pick<ToolResultPart, 'output'> {
+  if (attachImages && result.images !== undefined && result.images.length > 0) {
+    return {
+      output: {
+        type: 'content',
+        value: [
+          { type: 'text', text: result.output },
+          ...result.images.map((image) => ({
+            type: 'file' as const,
+            data: { type: 'data' as const, data: image.data },
+            mediaType: image.mediaType,
+          })),
+        ],
+      },
+    };
+  }
+  return { output: { type: 'text', value: result.output } };
+}
+
 /** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
 function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
   const entries = tools.map((definition) => [
@@ -145,6 +178,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
   const modelTools = toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
+  const attachToolImages = options.attachToolImages ?? true;
 
   let busy = false;
 
@@ -254,22 +288,24 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               const definition = toolsByName.get(call.toolName);
               const executed = definition
                 ? await runTool(definition, call.input, {
-                    workspacePath: record.workspacePath,
-                    signal,
-                  })
+                        workspacePath: record.workspacePath,
+                        sessionId: record.id,
+                        toolCallId: call.toolCallId,
+                        signal,
+                      })
                 : {
                     output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
                     isError: true,
                   };
 
-              const completed = { ...base, ...executed };
+              const completed = { ...base, output: executed.output, isError: executed.isError };
               persistence.insertToolCall(completed);
               yield { type: 'tool-result', call: completed };
               resultParts.push({
                 type: 'tool-result',
                 toolCallId: call.toolCallId,
                 toolName: call.toolName,
-                output: { type: 'text', value: executed.output },
+                ...toolResultOutput(executed, attachToolImages),
                 // 失败语义已在 output 文本（「工具 X 执行失败：…」前缀），模型可读
               });
             }

@@ -66,7 +66,7 @@ export type InstallerSpawn = (
   command: string,
   args: readonly string[],
   options: { env: NodeJS.ProcessEnv },
-) => InstallerChildProcess | ChildProcess;
+) => InstallerChildProcess;
 
 export interface CliChromiumInstallerOptions {
   /** 宿主环境变量（默认 process.env；PLAYWRIGHT_* 全透传，其余按白名单） */
@@ -108,7 +108,16 @@ export function createCliChromiumInstaller(
   options: CliChromiumInstallerOptions = {},
 ): ChromiumInstaller {
   const env = options.env ?? process.env;
-  const spawnFn = options.spawnOverride ?? nodeSpawn;
+  const spawnFn: InstallerSpawn =
+    options.spawnOverride ??
+    ((command, args, spawnOptions) => {
+      const child = nodeSpawn(command, args, {
+        ...spawnOptions,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      // stdio pipe 下 stdout/stderr 必非空
+      return { stdout: child.stdout!, stderr: child.stderr!, on: child.on.bind(child) };
+    });
   const executable = options.executablePathOverride ?? chromium.executablePath();
 
   /** 解析 playwright-core 的 cli.js（exports 白名单不含它，经 package.json 定位） */
