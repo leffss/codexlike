@@ -229,7 +229,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
                 toolCallId: call.toolCallId,
                 toolName: call.toolName,
                 output: { type: 'text', value: executed.output },
-                isError: executed.isError || undefined,
+                // 失败语义已在 output 文本（「工具 X 执行失败：…」前缀），模型可读
               });
             }
 
