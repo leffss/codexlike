@@ -130,9 +130,6 @@ async function talkRounds(
     })) {
       events.push(event);
     }
-    if (events.at(-1)?.type !== 'assistant-done') {
-      console.log('DEBUG 最后事件', JSON.stringify(events.at(-1)));
-    }
     expect(events.at(-1)?.type).toBe('assistant-done');
   }
 }
