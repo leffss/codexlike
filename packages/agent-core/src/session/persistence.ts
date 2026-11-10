@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS messages (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  mentions TEXT,
+  aborted INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_created
   ON messages(session_id, created_at);
@@ -82,6 +84,8 @@ interface MessageRow {
   role: string;
   content: string;
   created_at: string;
+  mentions: string | null;
+  aborted: number | null;
 }
 
 interface ToolCallRow {
@@ -108,6 +112,17 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   } catch {
     // 列已存在（新库或已迁移）
   }
+  // 旧库迁移：工单 03 时代的 messages 表没有 mentions / aborted（工单 06 恢复等价性需要）
+  try {
+    db.exec('ALTER TABLE messages ADD COLUMN mentions TEXT');
+  } catch {
+    // 列已存在
+  }
+  try {
+    db.exec('ALTER TABLE messages ADD COLUMN aborted INTEGER');
+  } catch {
+    // 列已存在
+  }
 
   const insertSession = db.prepare(
     'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -116,7 +131,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, archived_at = ?, updated_at = ? WHERE id = ?',
   );
   const insertMessageStmt = db.prepare(
-    'INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   const listSessionsStmt = db.prepare(
     'SELECT * FROM sessions ORDER BY updated_at DESC, rowid DESC',
@@ -187,6 +202,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         message.role,
         message.content,
         message.createdAt,
+        message.mentions === undefined || message.mentions.length === 0
+          ? null
+          : JSON.stringify(message.mentions),
+        message.aborted === true ? 1 : 0,
       );
     },
 
@@ -196,13 +215,30 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
 
     listMessages(sessionId) {
       return (listMessagesStmt.all(sessionId) as unknown as MessageRow[]).map(
-        (row) => ({
-          id: row.id,
-          sessionId: row.session_id,
-          role: row.role as StoredMessage['role'],
-          content: row.content,
-          createdAt: row.created_at,
-        }),
+        (row) => {
+          const message: StoredMessage = {
+            id: row.id,
+            sessionId: row.session_id,
+            role: row.role as StoredMessage['role'],
+            content: row.content,
+            createdAt: row.created_at,
+          };
+          // mentions JSON 反序列化：损坏数据视作无引用（不阻塞恢复）
+          if (row.mentions !== null && row.mentions !== '') {
+            try {
+              const parsed = JSON.parse(row.mentions) as unknown;
+              if (Array.isArray(parsed)) {
+                message.mentions = parsed as StoredMessage['mentions'];
+              }
+            } catch {
+              // 忽略损坏的 mentions 列
+            }
+          }
+          if (row.aborted === 1) {
+            message.aborted = true;
+          }
+          return message;
+        },
       );
     },
 

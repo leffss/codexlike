@@ -97,7 +97,8 @@ function toModelMessage(message: StoredMessage): ModelMessage {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: message.content };
   }
-  return { role: 'user', content: message.content };
+  // @引用 内容随消息持久化，恢复时重组进上下文（快照等价性：与发送时一致）
+  return { role: 'user', content: composeUserContent(message.content, message.mentions) };
 }
 
 /** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
@@ -171,6 +172,9 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'user',
           content: text,
+          // @引用 随消息持久化：重启恢复后重组进模型上下文（快照等价性）
+          mentions:
+            mentions !== undefined && mentions.length > 0 ? mentions : undefined,
           createdAt: now(),
         };
         persistence.insertMessage(userMessage);
@@ -300,6 +304,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'assistant',
           content: accumulated,
+          // 被用户中断的回复：持久化标记，重启恢复后 UI 仍显示中断点
+          aborted: aborted || undefined,
           createdAt: now(),
         };
         persistence.insertMessage(assistantMessage);

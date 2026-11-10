@@ -36,7 +36,16 @@ export interface StoredMessage {
   id: string;
   sessionId: string;
   role: MessageRole;
+  /** 用户原文 / 助手回复全文 / 错误提示；@引用 内容不混入（单独存 mentions） */
   content: string;
+  /**
+   * 该条 user 消息携带的 @引用（GLOSSARY「@ Mention」）。
+   * 持久化它，重启恢复时才能把附件内容重组进模型上下文（快照等价性，工单 06）；
+   * 非 user 消息与无引用的 user 消息为 undefined。
+   */
+  mentions?: MentionAttachment[];
+  /** 助手回复被用户中断：content 为已生成的部分文本（UI 中断点标记恢复用） */
+  aborted?: boolean;
   /** ISO 8601 */
   createdAt: string;
 }
