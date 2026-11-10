@@ -52,5 +52,16 @@
 
 ### 测试与验证
 
-- `pnpm typecheck` 三包 0 错误；`pnpm test`：agent-core 164 + desktop 18 + ui 31 = 213 用例全绿。
+- `pnpm typecheck` 三包 0 错误；`pnpm test`：agent-core 164 + desktop 18 + ui 31 = 213 用例全绿（合并 08/10 前）。
 - E2E：`smoke.mjs`（02/03 冒烟）回归通过；`commands.mjs`（07）回归通过；新增 `approvals.mjs`（`pnpm --filter @codexlike/desktop run test:e2e:approvals`）通过——覆盖 suggest 审批卡三键、always 记忆、/status 真实值、真实重启记忆恢复、readonly 拦截全链路。
+
+### 并行合并（merge integration/codexlike-v1，含工单 08 compact + 10 web_search）
+
+集成分支在实现期间两次前进，均已合并并确认全绿：
+
+- **agent-session 冲突**：两侧在同一位置插入不同辅助函数。以集成分支为底本回打审批门——`commandOfToolInput` 与 compact 辅助函数并存，工具循环审批插点与 compact 的上下文压缩正交共存；审批等待（await respondApproval）不影响 compact 的 busy 互斥语义（compact 在 sendMessage 之外的独立方法）。
+- **persistence/manager**：approvals 表与 compact_records/replaceHistory 并存；`SessionManager` 同时暴露 `setApprovalMode` 与 `latestCompact`。
+- **status.ts**：`compacted`（08）与 `approvalMode` 真实值（04）并存于 /status 文案。
+- **08/10 的测试工厂补 `approvalMode` 必填字段**、`approvalMode: null` 预留用例改真实档位（并行工单基于无 04 的基线开发，合并时按新 schema 补齐）。
+- **顺手修复 10 的遗漏回归**：设置页两个「保存」按钮（Profile 表单 + 搜索源区）后 `compact.mjs` 未按 `smoke.mjs` 的 form 限定模式修正（integration 上即坏；后续集成分支同款修复合入，内容一致取集成侧）。
+- 合并后全量验证：`pnpm typecheck` 0 错误；`pnpm test` 250 用例全绿（agent-core 190 + desktop 25 + ui 35，含 08/10 全部用例）；E2E 四条全过（smoke / commands / approvals / compact）。
