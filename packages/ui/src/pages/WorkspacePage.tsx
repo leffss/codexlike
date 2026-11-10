@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   resolveComposerSubmission,
+  type ApprovalMode,
   type ProviderProfile,
   type SessionRecord,
 } from '@codexlike/agent-core';
@@ -32,6 +33,8 @@ export function WorkspacePage(props: {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** /compact 压缩进行中（不可重复触发、禁用输入） */
+  const [compacting, setCompacting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
@@ -39,6 +42,8 @@ export function WorkspacePage(props: {
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
+  /** 当前会话记录（审批模式选择器的数据来源；sessions 列表随事件刷新） */
+  const currentSession = sessions.find((session) => session.id === currentId) ?? null;
 
   const refreshSessions = useCallback(async () => {
     const list = await window.codexlike.sessions.list();
@@ -58,8 +63,19 @@ export function WorkspacePage(props: {
     setCurrentId(id);
     currentIdRef.current = id;
     const history = await window.codexlike.sessions.messages(id);
-    setMessages(initialTranscript(history));
+    let items = initialTranscript(history);
     setStreaming(false);
+    // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
+    try {
+      const pending = await window.codexlike.sessions.pendingApproval(id);
+      if (pending !== null) {
+        items = applySessionEvent(items, { type: 'approval-request', request: pending });
+        setStreaming(true);
+      }
+    } catch {
+      // 查询失败不阻塞会话打开
+    }
+    setMessages(items);
     // @引用 菜单候选：随会话（工作区）切换重新枚举
     try {
       setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(id));
@@ -115,8 +131,11 @@ export function WorkspacePage(props: {
         event.type === 'user-message' ||
         event.type === 'assistant-done' ||
         event.type === 'assistant-aborted' ||
-        event.type === 'error'
+        event.type === 'error' ||
+        event.type === 'approval-request' ||
+        event.type === 'approval-resolved'
       ) {
+        // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
         void refreshSessions();
       }
     });
@@ -147,7 +166,7 @@ export function WorkspacePage(props: {
   }
 
   async function send(text: string, mentionPaths: string[]) {
-    if (currentId === null || selectedProfileId === '' || streaming) {
+    if (currentId === null || selectedProfileId === '' || streaming || compacting) {
       return;
     }
     setStreaming(true);
@@ -186,6 +205,38 @@ export function WorkspacePage(props: {
       case 'new-session': {
         // /new：同工作区新会话（不走目录选择器）
         await createSession(current!.workspacePath);
+        return;
+      }
+      case 'compact': {
+        // /compact：压缩进行中不可重复触发；模型在主进程解析（apiKey 不入渲染层）
+        if (compacting) {
+          pushLocalStatus('正在压缩历史，请等待完成…');
+          return;
+        }
+        if (selectedProfileId === '') {
+          pushLocalStatus('压缩需要先选择模型（Provider Profile）');
+          return;
+        }
+        setCompacting(true);
+        try {
+          const result = await window.codexlike.sessions.compact(
+            current!.id,
+            selectedProfileId,
+          );
+          await refreshSessions();
+          // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
+          const history = await window.codexlike.sessions.messages(current!.id);
+          setMessages(initialTranscript(history));
+          pushLocalStatus(
+            `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`,
+          );
+        } catch (error) {
+          pushLocalStatus(
+            `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`,
+          );
+        } finally {
+          setCompacting(false);
+        }
         return;
       }
       case 'rename': {
@@ -272,12 +323,46 @@ export function WorkspacePage(props: {
     void send(submission.text, submission.mentionPaths);
   }
 
+  /** 审批响应（审批卡片三键）：经 IPC 唤醒等待中的工具循环 */
+  async function respondApproval(id: string, decision: 'approve' | 'reject' | 'always') {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const accepted = await window.codexlike.sessions.respondApproval(
+        currentId,
+        id,
+        decision,
+      );
+      if (!accepted) {
+        pushLocalStatus('该审批请求已失效（可能已被响应）');
+      }
+    } catch (error) {
+      pushLocalStatus(`审批响应失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 审批模式切换：随时可切，对下一次工具调用立即生效 */
+  async function selectApprovalMode(mode: ApprovalMode) {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      await window.codexlike.sessions.setApprovalMode(currentId, mode);
+      await refreshSessions();
+    } catch (error) {
+      pushLocalStatus(`切换审批模式失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   const composerHint =
     profiles.length === 0
       ? '尚未配置模型，请先前往设置页添加 Provider Profile'
-      : currentId === null
-        ? '新建或选择一个会话后开始对话'
-        : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
+      : compacting
+        ? '正在压缩历史，请稍候…'
+        : currentId === null
+          ? '新建或选择一个会话后开始对话'
+          : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
 
   return (
     <div className="flex h-full">
@@ -309,6 +394,7 @@ export function WorkspacePage(props: {
       <section className="flex min-w-0 flex-1 flex-col">
         <MessageStream
           items={messages}
+          compacting={compacting}
           emptyHint={
             profiles.length === 0 ? (
               <button
@@ -320,6 +406,7 @@ export function WorkspacePage(props: {
               </button>
             ) : undefined
           }
+          onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
         />
         <MessageComposer
           profiles={profiles}
@@ -327,8 +414,10 @@ export function WorkspacePage(props: {
           onSelectProfile={setSelectedProfileId}
           onSend={handleSubmit}
           workspaceFiles={workspaceFiles}
-          disabled={currentId === null || profiles.length === 0 || streaming}
+          disabled={currentId === null || profiles.length === 0 || streaming || compacting}
           hint={composerHint}
+          approvalMode={currentSession?.approvalMode ?? null}
+          onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
         />
       </section>
     </div>

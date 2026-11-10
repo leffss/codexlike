@@ -101,6 +101,10 @@ export function SessionSidebar(props: {
                     <span className="shrink-0 rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] text-emerald-300">
                       运行中
                     </span>
+                  ) : session.status === 'waiting-approval' ? (
+                    <span className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      等待审批
+                    </span>
                   ) : null}
                 </button>
               )}

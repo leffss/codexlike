@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 
 import {
   parseComposerDraft,
+  type ApprovalMode,
   type ProviderProfile,
   type SlashCommandDef,
 } from '@codexlike/agent-core';
@@ -13,10 +14,34 @@ import {
   type ComposerMenuState,
 } from '../lib/composer-menu';
 
+/** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档中文名） */
+export const APPROVAL_MODE_OPTIONS: {
+  value: ApprovalMode;
+  label: string;
+  title: string;
+}[] = [
+  {
+    value: 'readonly',
+    label: '只读',
+    title: 'readonly：禁止一切写入与终端命令（纯调研）',
+  },
+  {
+    value: 'suggest',
+    label: '协作',
+    title: 'suggest：文件编辑自动应用，终端命令逐条审批',
+  },
+  {
+    value: 'full',
+    label: '自主',
+    title: 'full：全自动执行（不询问）',
+  },
+];
+
 /**
  * 中栏底部：消息输入区。
  * - `/` 开头的单行草稿弹出命令菜单，`@` 触发工作区文件模糊搜索菜单（键盘可选）；
  * - 模型选择器（Provider Profile）对下一条发送的消息生效；
+ * - 审批模式选择器随时可切，对下一次工具调用立即生效；
  * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发。
  */
 export function MessageComposer(props: {
@@ -24,11 +49,14 @@ export function MessageComposer(props: {
   selectedProfileId: string;
   onSelectProfile: (id: string) => void;
   onSend: (text: string) => void;
-  /** @引用 菜单候选（工作区文件相对路径） */
+  /** @引用 菜单候选（工作区文件） */
   workspaceFiles: string[];
   /** 无会话 / 未选模型 / 流式回复中时禁用发送 */
   disabled: boolean;
   hint: string;
+  /** 当前会话审批模式；无会话时选择器禁用 */
+  approvalMode: ApprovalMode | null;
+  onSelectApprovalMode: (mode: ApprovalMode) => void;
 }) {
   const [value, setValue] = useState('');
   const [menu, setMenu] = useState<ComposerMenuState | null>(null);
@@ -148,6 +176,20 @@ export function MessageComposer(props: {
           {props.profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.name} · {profile.model}
+            </option>
+          ))}
+        </select>
+        <select
+          data-testid="approval-mode-select"
+          value={props.approvalMode ?? 'suggest'}
+          disabled={props.approvalMode === null}
+          onChange={(event) => props.onSelectApprovalMode(event.target.value as ApprovalMode)}
+          className="h-11 shrink-0 rounded-lg border border-slate-700 bg-slate-950/70 px-2 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+          title="审批模式：随时切换，对下一次工具调用立即生效"
+        >
+          {APPROVAL_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>

@@ -3,8 +3,14 @@
  * 输入框以 `/` 开头的一行输入构成命令，与等效 UI 操作走同一 IPC 通道（工单 07）。
  */
 
-/** 内置命令名（spec：/new /rename /archive /model /status；/compact 由工单 08 增加） */
-export type SlashCommandName = 'new' | 'rename' | 'archive' | 'model' | 'status';
+/** 内置命令名（spec：/new /compact /rename /archive /model /status） */
+export type SlashCommandName =
+  | 'new'
+  | 'compact'
+  | 'rename'
+  | 'archive'
+  | 'model'
+  | 'status';
 
 export interface SlashCommandDef {
   readonly name: SlashCommandName;
@@ -18,6 +24,11 @@ export const SLASH_COMMANDS: readonly SlashCommandDef[] = [
   {
     name: 'new',
     description: '在当前工作区新建会话',
+    argumentHint: null,
+  },
+  {
+    name: 'compact',
+    description: '压缩历史为摘要（保留最近 3 轮）',
     argumentHint: null,
   },
   {

@@ -67,6 +67,8 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
       return '整页截图';
     case 'browser_read':
       return '提取页面正文';
+    case 'web_search':
+      return `搜「${asString(args['query']) ?? '?'}」`;
     default:
       return JSON.stringify(args);
   }

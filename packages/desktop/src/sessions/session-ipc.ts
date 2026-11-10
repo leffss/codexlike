@@ -205,8 +205,38 @@ export function registerSessionHandlers(options: {
         workspacePath: record.workspacePath,
       }),
       providerProfileName,
+      latestCompact: manager.latestCompact(sessionId),
     });
   });
+
+  ipcMain.handle(
+    IPC.sessions.compact,
+    async (
+      _e: IpcMainInvokeEvent,
+      sessionId: unknown,
+      profileId: unknown,
+    ) => {
+      if (typeof sessionId !== 'string' || typeof profileId !== 'string') {
+        throw new Error('compact：参数不合法');
+      }
+      if (profileId === '') {
+        throw new Error('请先选择模型（Provider Profile）');
+      }
+      const session = manager.get(sessionId);
+      if (session === null) {
+        throw new Error('会话不存在或已损坏');
+      }
+      const profile = (await profiles.list()).find(
+        (candidate: ProviderProfile) => candidate.id === profileId,
+      );
+      if (profile === undefined) {
+        throw new Error('所选 Provider Profile 不存在，请重新选择模型');
+      }
+      // 失败（模型错误/历史过短/会话正忙）以中文异常抛回渲染层；原历史不受损，可重试
+      const result = await session.compact({ profile });
+      return { compactedMessages: result.compactedMessages };
+    },
+  );
 
   ipcMain.handle(
     IPC.sessions.workspaceFiles,
@@ -221,6 +251,54 @@ export function registerSessionHandlers(options: {
         throw new Error('会话不存在或已损坏');
       }
       return listWorkspaceFiles(record.workspacePath);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.setApprovalMode,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, mode: unknown) => {
+      if (typeof sessionId !== 'string') {
+        throw new Error('setApprovalMode：sessionId 必须是字符串');
+      }
+      // IPC 边界不信任渲染进程：只接受三档枚举
+      if (mode !== 'readonly' && mode !== 'suggest' && mode !== 'full') {
+        throw new Error('setApprovalMode：mode 必须是 readonly / suggest / full');
+      }
+      return manager.setApprovalMode(sessionId, mode);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.respondApproval,
+    (
+      _e: IpcMainInvokeEvent,
+      sessionId: unknown,
+      requestId: unknown,
+      decision: unknown,
+    ) => {
+      if (typeof sessionId !== 'string' || typeof requestId !== 'string') {
+        throw new Error('respondApproval：参数不合法');
+      }
+      if (decision !== 'approve' && decision !== 'reject' && decision !== 'always') {
+        throw new Error('respondApproval：decision 必须是 approve / reject / always');
+      }
+      const session = manager.get(sessionId);
+      if (session === null) {
+        throw new Error('会话不存在或已损坏');
+      }
+      return session.respondApproval(requestId, decision);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.pendingApproval,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== 'string') {
+        throw new Error('pendingApproval：sessionId 必须是字符串');
+      }
+      const session = manager.get(sessionId);
+      // 会话不存在与无等待统一返回 null（切回会话时 UI 不渲染审批卡片）
+      return session?.pendingApproval ?? null;
     },
   );
 }

@@ -16,8 +16,10 @@ import {
   createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
+  createTavilySearchSource,
   discoverAgentsInstructions,
   validateProviderProfile,
+  type SearchSource,
   type SessionRecord,
 } from '@codexlike/agent-core/node';
 
@@ -26,6 +28,10 @@ import {
   type ProfileStore,
   type SafeStorageLike,
 } from './profiles/profile-store';
+import {
+  createSearchSettingsStore,
+  type SearchSettingsStore,
+} from './search/search-settings-store';
 import { registerSessionHandlers } from './sessions/session-ipc';
 import { sessionScreenshotDir } from './sessions/screenshots';
 import { IPC } from './shared/ipc';
@@ -125,11 +131,62 @@ function assertValidInput(input: unknown) {
   return parsed;
 }
 
-void app.whenReady().then(() => {
+/**
+ * 注册搜索源设置的 IPC 指令（工单 10）。
+ * web_search 工具的 searchSource 每次调用时解析内存缓存，
+ * 因此设置页保存/清除 key 后无需重启即可对进行中的会话生效。
+ */
+function registerSearchSettingsHandlers(
+  store: SearchSettingsStore,
+  onSaved: () => Promise<void>,
+): void {
+  ipcMain.handle(IPC.searchSettings.get, () => store.get());
+  ipcMain.handle(IPC.searchSettings.set, (_e: IpcMainInvokeEvent, input: unknown) => {
+    if (typeof input !== 'object' || input === null) {
+      throw new Error('搜索源设置输入不合法');
+    }
+    const apiKey = (input as Record<string, unknown>)['apiKey'];
+    if (typeof apiKey !== 'string') {
+      throw new Error('apiKey 必须是字符串（空字符串表示清除配置）');
+    }
+    return store
+      .set({ apiKey })
+      .then(async (settings) => {
+        await onSaved();
+        return settings;
+      })
+      .catch((error: unknown) => {
+        throw error instanceof Error ? error : new Error(String(error));
+      });
+  });
+}
+
+void app.whenReady().then(async () => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
-  // 六件内置工具（工单 03）：无状态实例，全部会话共享；工作区经执行上下文逐会话注入。
-  // shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
+
+  // 搜索源（工单 10）：key 存设置页（safeStorage 加密），内存缓存供 web_search 逐次解析；
+  // 未配置时 searchSource 为 null → 工具返回「未配置搜索源」中文指引，会话不崩。
+  const searchSettings = createSearchSettingsStore({
+    dir: dataDir(),
+    safeStorage: asSafeStorageLike(),
+  });
+  let searchSource: SearchSource | null = null;
+  const refreshSearchSource = async () => {
+    const settings = await searchSettings.get();
+    searchSource =
+      settings.apiKey === ''
+        ? null
+        : createTavilySearchSource({
+            apiKey: settings.apiKey,
+            // E2E 隔离钩子（与 CODEXLIKE_TEST_WORKSPACE 同款模式）：指向本地 mock
+            baseUrl: process.env['CODEXLIKE_TAVILY_URL'],
+          });
+  };
+  await refreshSearchSource();
+
+  // 内置工具（工单 03 六件 + 工单 10 web_search）：无状态实例，全部会话共享；
+  // 工作区经执行上下文逐会话注入。shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
   const shellEnv = process.env['CODEXLIKE_SHELL'];
   // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
   // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
@@ -148,6 +205,7 @@ void app.whenReady().then(() => {
         shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
           ? shellEnv
           : undefined,
+      webSearch: { searchSource: () => searchSource },
     }),
     ...browserTools,
   ];
@@ -170,14 +228,16 @@ void app.whenReady().then(() => {
   });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
-  // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置
+  // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
+  // 进程刚启动不可能有真实运行中的流，统一重置（manager.get 的恢复路径会落库 idle）
   for (const record of manager.list()) {
-    if (record.status === 'streaming') {
+    if (record.status === 'streaming' || record.status === 'waiting-approval') {
       manager.get(record.id);
     }
   }
 
   registerProviderProfileHandlers(store);
+  registerSearchSettingsHandlers(searchSettings, refreshSearchSource);
   registerSessionHandlers({
     manager,
     profiles: store,
@@ -194,20 +254,10 @@ void app.whenReady().then(() => {
   });
 
   // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）；
-  // 浏览器先优雅关闭（Chromium 子进程退出），完成后再真正退出
-  let cleanupDone = false;
-  app.on('will-quit', (event) => {
-    if (cleanupDone) {
-      return;
-    }
-    event.preventDefault();
-    cleanupDone = true;
-    void browserManager
-      .close()
-      .catch(() => {})
-      .finally(() => {
-        persistence.close();
-        app.quit();
-      });
+  // 浏览器收尾尽力而为（不阻塞退出流程：preventDefault + 二次 quit 在
+  // Electron 45 上会让进程挂起不退）
+  app.on('will-quit', () => {
+    persistence.close();
+    void browserManager.close().catch(() => {});
   });
 });

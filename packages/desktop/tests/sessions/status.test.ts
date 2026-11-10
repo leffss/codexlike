@@ -16,6 +16,7 @@ function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
     providerProfileId: 'profile-1',
     model: 'glm-4.7',
     status: 'idle',
+    approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
     updatedAt: '2026-11-10T08:00:00.000Z',
@@ -50,6 +51,7 @@ describe('buildSessionStatus（/status 数据组装）', () => {
       messages,
       agentsMd: discovery,
       providerProfileName: 'GLM',
+      latestCompact: null,
     });
 
     expect(status.model).toBe('glm-4.7');
@@ -63,8 +65,21 @@ describe('buildSessionStatus（/status 数据组装）', () => {
       sources: ['C:\\Users\\u\\.codexlike\\AGENTS.md'],
       truncated: false,
     });
-    // 审批模式在工单 04 接入，先预留字段
-    expect(status.approvalMode).toBeNull();
+    // 审批模式（工单 04）：/status 显示会话真实档位
+    expect(status.approvalMode).toBe('suggest');
+  });
+
+  it('审批模式随会话记录透传（readonly / full）', () => {
+    for (const mode of ['readonly', 'full'] as const) {
+      const status = buildSessionStatus({
+        record: record({ approvalMode: mode }),
+        messages: [],
+        agentsMd: emptyDiscovery,
+        providerProfileName: null,
+        latestCompact: null,
+      });
+      expect(status.approvalMode).toBe(mode);
+    }
   });
 
   it('无 AGENTS.md、未发过消息的最小会话', () => {
@@ -73,6 +88,7 @@ describe('buildSessionStatus（/status 数据组装）', () => {
       messages: [],
       agentsMd: emptyDiscovery,
       providerProfileName: null,
+      latestCompact: null,
     });
     expect(status.model).toBeNull();
     expect(status.estimatedContextTokens).toBe(0);
@@ -91,7 +107,49 @@ describe('buildSessionStatus（/status 数据组装）', () => {
       messages: [],
       agentsMd: discovery,
       providerProfileName: null,
+      latestCompact: null,
     });
     expect(status.agentsMd).toEqual({ sources: ['g'], truncated: true });
+  });
+});
+
+describe('buildSessionStatus 已压缩标记（工单 08）', () => {
+  it('compact-summary 消息计入压缩后用量；latestCompact 透传摘要信息', () => {
+    const compactedMessages: StoredMessage[] = [
+      { id: 's1', sessionId: 's1', role: 'compact-summary', content: '摘要内容', createdAt: 't' },
+      { id: 'm4', sessionId: 's1', role: 'user', content: '继续', createdAt: 't' },
+    ];
+    const status = buildSessionStatus({
+      record: record(),
+      messages: compactedMessages,
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: {
+        id: 'c1',
+        sessionId: 's1',
+        summary: '摘要内容',
+        messagesCompacted: 8,
+        createdAt: '2026-11-11T09:00:00.000Z',
+      },
+    });
+
+    // 压缩后用量：摘要（4 CJK → 3）+ '继续'（2 CJK → 2）= 5；摘要按上下文消息计入
+    expect(status.estimatedContextTokens).toBe(5);
+    expect(status.messageCount).toBe(2);
+    expect(status.compacted).toEqual({
+      at: '2026-11-11T09:00:00.000Z',
+      messagesCompacted: 8,
+    });
+  });
+
+  it('从未压缩的会话 compacted 为 null', () => {
+    const status = buildSessionStatus({
+      record: record(),
+      messages,
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    });
+    expect(status.compacted).toBeNull();
   });
 });

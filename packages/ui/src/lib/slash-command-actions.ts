@@ -14,6 +14,7 @@ import type { SessionStatusInfo } from '@codexlike/desktop/ipc';
 
 export type SlashCommandAction =
   | { type: 'new-session' }
+  | { type: 'compact' }
   | { type: 'rename'; title: string }
   | { type: 'rename-missing-argument' }
   | { type: 'archive' }
@@ -32,6 +33,8 @@ export function planSlashCommand(
   switch (command.name) {
     case 'new':
       return { type: 'new-session' };
+    case 'compact':
+      return { type: 'compact' };
     case 'rename':
       return command.argument === ''
         ? { type: 'rename-missing-argument' }
@@ -67,7 +70,14 @@ export function matchProfilesForModelSwitch(
   };
 }
 
-/** /status 展示文案（中文；审批模式为预留字段，工单 04 接入） */
+/** 审批模式 → /status 中文文案（GLOSSARY「审批模式」） */
+const APPROVAL_MODE_LABELS: Record<SessionStatusInfo['approvalMode'], string> = {
+  readonly: '只读（readonly）：禁止一切写入与终端命令',
+  suggest: '协作（suggest）：文件编辑自动应用，终端命令逐条审批',
+  full: '自主（full）：全自动执行',
+};
+
+/** /status 展示文案（中文） */
 export function formatSessionStatus(status: SessionStatusInfo): string {
   const model =
     status.model === null
@@ -79,11 +89,16 @@ export function formatSessionStatus(status: SessionStatusInfo): string {
       : `${status.agentsMd.sources.length} 个来源${
           status.agentsMd.truncated ? '（总量超 32 KiB 已截断）' : ''
         }`;
+  const compacted =
+    status.compacted === null
+      ? '未压缩'
+      : `已压缩（${status.compacted.at.replace('T', ' ').slice(0, 19)}，压缩了 ${status.compacted.messagesCompacted} 条历史消息）`;
   return [
     '会话状态（/status）',
     `模型：${model}`,
     `上下文用量（估算）：约 ${status.estimatedContextTokens} tokens（${status.messageCount} 条消息 + 系统提示）`,
+    `压缩状态：${compacted}`,
     `AGENTS.md：${agentsMd}`,
-    '审批模式：待工单 04 接入',
+    `审批模式：${APPROVAL_MODE_LABELS[status.approvalMode]}`,
   ].join('\n');
 }

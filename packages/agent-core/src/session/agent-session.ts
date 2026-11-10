@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   APICallError,
   RetryError,
+  generateText,
   jsonSchema,
   streamText,
   tool as aiTool,
@@ -18,8 +19,16 @@ import type { ProviderProfile } from '../provider/provider-profile';
 import { runTool } from '../tools/registry';
 import type { ToolCallRecord, ToolDefinition, ToolResult } from '../tools/types';
 
+import {
+  decideApproval,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type ApprovalRequest,
+} from './approval';
 import type { SessionPersistence } from './persistence';
 import type {
+  CompactRecord,
+  CompactResult,
   MentionAttachment,
   SessionEvent,
   SessionRecord,
@@ -48,7 +57,7 @@ export interface CreateAgentSessionOptions {
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
    * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
-   * 本工单内工具默认放行；审批三档在工单 04 于 tool-call 与 tool-result 之间接入。
+   * 工具执行前经审批门（工单 04）：readonly 拒绝、suggest 命令审批、full 全放行。
    */
   tools?: ToolDefinition[];
   /**
@@ -56,6 +65,10 @@ export interface CreateAgentSessionOptions {
    * 多模态端点；false 纯文本降级（output 内已含文件路径说明，模型仍可工作）。
    */
   attachToolImages?: boolean;
+  /** 初始审批模式（缺省用 record.approvalMode） */
+  approvalMode?: ApprovalMode;
+  /** 恢复会话时传入的历史「总是允许」记忆（命令首词，随会话入库） */
+  approvalMemory?: string[];
   /** 时间与 id 生成注入（测试用固定值） */
   now?: () => string;
   generateId?: () => string;
@@ -65,14 +78,35 @@ export interface AgentSession {
   readonly id: string;
   /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
   readonly record: SessionRecord;
+  /** 当前等待用户审批的请求；无等待时为 null（UI 切回会话时恢复审批卡片） */
+  readonly pendingApproval: ApprovalRequest | null;
+  /**
+   * 切换审批模式（三档，随时可调）：对下一次工具调用立即生效。
+   * 持久化由调用方（SessionManager）负责。
+   */
+  setApprovalMode(mode: ApprovalMode): void;
+  /**
+   * 响应等待中的审批请求（审批卡片三键）：
+   * - approve：本次执行；reject：拒绝并回填模型；always：记忆命令首词（随会话入库）后执行。
+   * 没有等待中的请求或 id 不匹配时返回 false。
+   */
+  respondApproval(requestId: string, decision: ApprovalDecision): boolean;
   /**
    * 发送一条用户消息并流式聚合模型回复为会话事件流。
-   * 模型可多轮调用工具：每轮 tool-call → 执行（tool-call/tool-result 事件）→
-   * 结果回填继续生成，直到最终文本回复。
+   * 模型可多轮调用工具：每轮 tool-call → 审批门（可能发 approval-request 并暂停等待
+   * respondApproval 唤醒）→ 执行（tool-result 事件）→ 结果回填继续生成，直到最终文本回复。
    * 单会话同一时刻只允许一个流（并发发送直接抛错）；
    * 出错时发 error 事件（中文提示，落库为 error 消息），会话保持可用。
    */
   sendMessage(options: SendMessageOptions): AsyncIterable<SessionEvent>;
+  /**
+   * /compact 手动压缩（工单 08，GLOSSARY「Compact」）：
+   * 用当前模型把既有历史压成摘要 → 摘要替换旧历史、保留最近 3 轮原始对话 →
+   * 单事务落库（摘要消息 + 保留轮次 + compact 记录）。
+   * 摘要生成成功前不动任何状态（失败可原样重试）；
+   * 与 sendMessage 共享互斥（回复中不可压缩、压缩中不可发送）。
+   */
+  compact(options: { profile: ProviderProfile }): Promise<CompactResult>;
 }
 
 /** 单次回复允许的工具轮次上限（防模型失控循环） */
@@ -102,6 +136,10 @@ function isAbortLike(error: unknown, signal: AbortSignal | undefined): boolean {
 function toModelMessage(message: StoredMessage): ModelMessage {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: message.content };
+  }
+  if (message.role === 'compact-summary') {
+    // 摘要以 user 角色注入；包装标签与 compact 成功后的内存上下文保持一致（重启等价）
+    return { role: 'user', content: composeCompactSummaryContext(message.content) };
   }
   return { role: 'user', content: message.content };
 }
@@ -165,6 +203,60 @@ function composeUserContent(
   return `${text}\n\n以下为该消息 @引用 的工作区文件内容：\n\n${blocks}`;
 }
 
+/** /compact 保留的最近原始对话轮数（工单 08） */
+export const COMPACT_KEEP_ROUNDS = 3;
+
+/** 从工具参数中安全读取 command 字段（run_terminal_command 的命令原文） */
+function commandOfToolInput(input: unknown): string | undefined {
+  if (typeof input === 'object' && input !== null && 'command' in input) {
+    const value = (input as Record<string, unknown>).command;
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/** 摘要进入模型上下文的包装（XML 标签防注入；恢复与压缩后共用，保证重启等价） */
+function composeCompactSummaryContext(summary: string): string {
+  return `<compact-summary>\n以下是本会话此前对话历史的压缩摘要：\n${summary}\n</compact-summary>`;
+}
+
+/** 压缩请求的系统指令（一次性总结任务，不注入 AGENTS.md 的 coding 系统提示） */
+const COMPACT_SYSTEM_PROMPT = [
+  '你是对话历史压缩器。请把提供的会话历史压缩为一份摘要，',
+  '供后续对话作为上下文继续任务。要求：',
+  '- 保留任务目标、关键决策与结论、涉及的文件路径与命令、尚未完成的事项；',
+  '- 丢弃寒暄、重复与无关内容；',
+  '- 直接输出摘要正文，不要任何前后缀说明。',
+].join('\n');
+
+/** 把被压缩的上下文消息序列化为送模型的对话文本 */
+function serializeContextForCompaction(messages: ModelMessage[]): string {
+  const lines = messages.map((message) => {
+    const role = message.role === 'assistant' ? 'assistant' : 'user';
+    return `[${role}] ${message.content}`;
+  });
+  return `以下是一次 coding agent 会话的既有对话历史（按时间顺序）：\n\n${lines.join('\n\n')}`;
+}
+
+/**
+ * 计算保留边界：上下文尾部 KEEP_ROUNDS 轮（一轮 = user 开头的一段）之前的部分可压缩。
+ * 返回保留部分在 context 中的起始下标；整个上下文不足 KEEP_ROUNDS 轮时返回 0。
+ */
+function keptRoundsStart(context: ModelMessage[]): number {
+  let rounds = 0;
+  for (let i = context.length - 1; i >= 0; i -= 1) {
+    if (context[i]!.role === 'user') {
+      rounds += 1;
+      if (rounds === COMPACT_KEEP_ROUNDS) {
+        return i;
+      }
+    }
+  }
+  return 0;
+}
+
 /** 创建会话对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
 export function createAgentSession(options: CreateAgentSessionOptions): AgentSession {
   const { record, persistence } = options;
@@ -180,11 +272,40 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
   const generateId = options.generateId ?? randomUUID;
   const attachToolImages = options.attachToolImages ?? true;
 
+  // 审批状态（工单 04）：模式随时可切（对下一次工具调用立即生效）；
+  // 「总是允许」记忆 = 命令首词集合（恢复会话时从库读回）
+  let approvalMode = options.approvalMode ?? record.approvalMode ?? 'suggest';
+  const approvalMemory = new Set(options.approvalMemory ?? []);
+  let pendingApproval: ApprovalRequest | null = null;
+  let approvalWaiter: {
+    requestId: string;
+    resolve: (decision: ApprovalDecision) => void;
+  } | null = null;
+
   let busy = false;
 
   return {
     id: record.id,
     record,
+    get pendingApproval() {
+      return pendingApproval;
+    },
+
+    setApprovalMode(mode) {
+      approvalMode = mode;
+      record.approvalMode = mode;
+    },
+
+    respondApproval(requestId, decision) {
+      const waiter = approvalWaiter;
+      if (waiter === null || waiter.requestId !== requestId) {
+        return false;
+      }
+      approvalWaiter = null;
+      pendingApproval = null;
+      waiter.resolve(decision);
+      return true;
+    },
 
     async *sendMessage({ text, profile, mentions, signal }) {
       if (busy) {
@@ -270,8 +391,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
             // 本轮 assistant 消息（含 tool-call parts）进入对话上下文
             pending.push(...(await result.response).messages);
 
-            // 逐个执行工具：tool-call 事件 → 执行 → tool-result 事件 + 落库
-            // 审批拦截（工单 04）将插入在事件与执行之间
+            // 逐个执行工具：tool-call 事件 → 审批门（工单 04）→ 执行 → tool-result 事件 + 落库
             const resultParts: ToolModelMessage['content'] = [];
             for (const call of toolCalls) {
               const base: ToolCallRecord = {
@@ -286,27 +406,111 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               yield { type: 'tool-call', call: base };
 
               const definition = toolsByName.get(call.toolName);
-              const executed = definition
-                ? await runTool(definition, call.input, {
-                        workspacePath: record.workspacePath,
-                        sessionId: record.id,
-                        toolCallId: call.toolCallId,
-                        signal,
-                      })
-                : {
-                    output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
-                    isError: true,
-                  };
+              let output: string;
+              let isError: boolean;
+              /** 实际执行的完整结果（截图等图片附件）；被拒绝/未注册时为 null */
+              let executed: ToolResult | null = null;
 
-              const completed = { ...base, output: executed.output, isError: executed.isError };
+              if (definition === undefined) {
+                output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`;
+                isError = true;
+              } else {
+                // 审批门（插在 tool-call 事件与执行之间）：
+                // readonly 拒绝 / suggest 命令审批 / full 放行（见 decideApproval）
+                const command = commandOfToolInput(call.input);
+                const gate = decideApproval({
+                  mode: approvalMode,
+                  permission: definition.permission,
+                  toolName: definition.name,
+                  command,
+                  memory: approvalMemory,
+                });
+
+                if (gate.kind === 'blocked') {
+                  output = `工具调用被审批策略拒绝：${gate.reason}`;
+                  isError = true;
+                } else if (gate.kind === 'ask') {
+                  // 暂停等待审批：落库 waiting-approval → 事件流出卡片 →
+                  // await 外部 respondApproval 唤醒（desktop 经 IPC 桥接 UI 三键）
+                  const request: ApprovalRequest = {
+                    id: call.toolCallId,
+                    sessionId: record.id,
+                    toolName: call.toolName,
+                    command: command ?? call.toolName,
+                    commandWord: gate.commandWord,
+                    createdAt: now(),
+                  };
+                  persistence.updateSession(record.id, {
+                    status: 'waiting-approval',
+                    updatedAt: now(),
+                  });
+                  pendingApproval = request;
+                  let resolveDecision!: (decision: ApprovalDecision) => void;
+                  const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
+                    resolveDecision = resolve;
+                  });
+                  approvalWaiter = { requestId: request.id, resolve: resolveDecision };
+                  // 中断防御：等待审批时被中断（06 打断）视为拒绝，避免生成器永久卡死
+                  const onAbort = () => resolveDecision('reject');
+                  signal?.addEventListener('abort', onAbort, { once: true });
+                  let decision: ApprovalDecision;
+                  try {
+                    yield { type: 'approval-request', request };
+                    decision = await decisionPromise;
+                  } finally {
+                    signal?.removeEventListener('abort', onAbort);
+                    approvalWaiter = null;
+                    pendingApproval = null;
+                    persistence.updateSession(record.id, {
+                      status: 'streaming',
+                      updatedAt: now(),
+                    });
+                  }
+                  yield { type: 'approval-resolved', requestId: request.id, decision };
+
+                  if (decision === 'reject') {
+                    output =
+                      '工具调用被用户拒绝：用户未批准在当前会话执行该命令。可以改用只读工具继续，或向用户说明计划并询问如何调整。';
+                    isError = true;
+                  } else {
+                    if (decision === 'always') {
+                      // 本会话总是允许：记忆命令首词（随会话入库，恢复后仍生效）
+                      approvalMemory.add(gate.commandWord);
+                      persistence.insertApproval(record.id, gate.commandWord);
+                    }
+                    executed = await runToolWithSessionContext();
+                    output = executed.output;
+                    isError = executed.isError;
+                  }
+                } else {
+                  executed = await runToolWithSessionContext();
+                  output = executed.output;
+                  isError = executed.isError;
+                }
+              }
+
+              /** 工具执行（工单 11：上下文带会话/调用标识，浏览器工具按会话隔离复用） */
+              async function runToolWithSessionContext(): Promise<ToolResult> {
+                return await runTool(definition!, call.input, {
+                  workspacePath: record.workspacePath,
+                  sessionId: record.id,
+                  toolCallId: call.toolCallId,
+                  signal,
+                });
+              }
+
+              const completed = { ...base, output, isError };
               persistence.insertToolCall(completed);
               yield { type: 'tool-result', call: completed };
               resultParts.push({
                 type: 'tool-result',
                 toolCallId: call.toolCallId,
                 toolName: call.toolName,
-                ...toolResultOutput(executed, attachToolImages),
-                // 失败语义已在 output 文本（「工具 X 执行失败：…」前缀），模型可读
+                ...toolResultOutput(
+                  { output, isError, images: executed?.images },
+                  attachToolImages,
+                ),
+                // 失败语义已在 output 文本（拒绝 /「工具 X 执行失败：…」前缀），模型可读
               });
             }
 
@@ -348,6 +552,93 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           : { type: 'assistant-done', message: assistantMessage };
       } finally {
         persistence.updateSession(record.id, { status: 'idle', updatedAt: now() });
+        busy = false;
+      }
+    },
+
+    async compact({ profile }) {
+      if (busy) {
+        throw new Error('会话正在回复或压缩中，请等待完成后再操作');
+      }
+      const keptStart = keptRoundsStart(context);
+      if (keptStart === 0) {
+        throw new Error(
+          `当前历史不超过最近 ${COMPACT_KEEP_ROUNDS} 轮，没有可压缩的内容`,
+        );
+      }
+      busy = true;
+      try {
+        // 第一步（副本上生成）：请求当前模型压缩被替换的旧历史；失败直接抛出，
+        // 库与内存上下文都未动，可原样重试
+        const compactable = context.slice(0, keptStart);
+        let summary = '';
+        try {
+          const result = await generateText({
+            model: modelFor(profile),
+            system: COMPACT_SYSTEM_PROMPT,
+            prompt: [{ role: 'user', content: serializeContextForCompaction(compactable) }],
+          });
+          summary = result.text.trim();
+        } catch (error) {
+          throw new Error(describeModelError(error));
+        }
+        if (summary === '') {
+          throw new Error('压缩失败：模型返回了空摘要，请重试');
+        }
+
+        // 第二步（成功才替换）：新历史 = 摘要 + 最近 3 轮原文（重新落库，
+        // 新 id 与递增时间戳保证摘要卡片排在最前）；内存上下文同步替换为
+        // 包装摘要 + 保留轮次的模型消息（@引用 附加内容随内存上下文保真）
+        const keptContext = context.slice(keptStart);
+        const storedContext = persistence
+          .listMessages(record.id)
+          .filter((message) => message.role === 'user' || message.role === 'assistant')
+          .slice(-keptContext.length);
+        // 被压缩轮次的工具调用记录随历史一起清理：边界 = 保留轮次最老一条消息的旧时间戳
+        // （保留轮次自身的工具调用晚于其 user 消息，不受影响）
+        const pruneToolCallsBefore = storedContext[0]?.createdAt;
+        const summaryMessage: StoredMessage = {
+          id: generateId(),
+          sessionId: record.id,
+          role: 'compact-summary',
+          content: summary,
+          createdAt: now(),
+        };
+        const keptMessages: StoredMessage[] = storedContext.map((message) => ({
+          ...message,
+          id: generateId(),
+          createdAt: now(),
+        }));
+        const compactRecord: CompactRecord = {
+          id: generateId(),
+          sessionId: record.id,
+          summary,
+          messagesCompacted: compactable.length,
+          createdAt: now(),
+        };
+        persistence.replaceHistory(
+          record.id,
+          [summaryMessage, ...keptMessages],
+          compactRecord,
+          pruneToolCallsBefore,
+        );
+        context.splice(
+          0,
+          context.length,
+          { role: 'user', content: composeCompactSummaryContext(summary) },
+          ...keptContext,
+        );
+        persistence.updateSession(record.id, {
+          providerProfileId: profile.id,
+          model: profile.model,
+          updatedAt: now(),
+        });
+        return {
+          summaryMessage,
+          keptMessages,
+          compactedMessages: compactable.length,
+        };
+      } finally {
         busy = false;
       }
     },

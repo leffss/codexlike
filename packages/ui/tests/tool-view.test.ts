@@ -97,6 +97,9 @@ describe('summarizeToolCall（工具卡片参数摘要）', () => {
     expect(summarizeToolCall('glob', '{"pattern":"**/*.ts"}')).toBe('**/*.ts');
     expect(summarizeToolCall('grep', '{"pattern":"TODO","path":"src"}')).toBe('src 中搜 TODO');
     expect(summarizeToolCall('run_terminal_command', '{"command":"pnpm test"}')).toBe('$ pnpm test');
+    expect(summarizeToolCall('web_search', '{"query":"tavily api 定价"}')).toBe(
+      '搜「tavily api 定价」',
+    );
   });
 
   it('超长命令截断；未知工具回退 JSON 摘要；坏 JSON 不抛错', () => {

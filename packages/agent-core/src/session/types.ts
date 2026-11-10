@@ -3,22 +3,28 @@
  * 全部可 JSON 序列化：SessionEvent 经 Electron IPC 转发到渲染进程，
  * StoredMessage / SessionRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
  */
+import type { ApprovalDecision, ApprovalMode, ApprovalRequest } from './approval';
 import type { ToolCallRecord } from '../tools/types';
 
-/** 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中 */
-export type SessionStatus = 'idle' | 'streaming';
+/**
+ * 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
+ * `waiting-approval` 工具执行暂停、等待用户审批（spec 用户故事 10，侧栏可见）
+ */
+export type SessionStatus = 'idle' | 'streaming' | 'waiting-approval';
 
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
   id: string;
   /** 侧栏显示名，默认取工作区目录名 */
   title: string;
-  /** 绑定的工作区目录，agent 的文件与终端操作都被限制在其中 */
+  /** 绑定的工作区目录，agent 的所有文件与终端操作都被限制在其中 */
   workspacePath: string;
   /** 最近一次发送消息所用的 Provider Profile（模型选择器「对下一条生效」的落点） */
   providerProfileId: string | null;
   /** 最近一次发送消息所用的模型标识 */
   model: string | null;
+  /** 审批模式（三档，随时切换、对下一次工具调用立即生效；新建会话默认 suggest） */
+  approvalMode: ApprovalMode;
   status: SessionStatus;
   /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
   archivedAt: string | null;
@@ -28,8 +34,9 @@ export interface SessionRecord {
   updatedAt: string;
 }
 
-/** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文） */
-export type MessageRole = 'user' | 'assistant' | 'error';
+/** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
+ * 压缩摘要（/compact 生成，进入对话上下文时按 user 角色注入；消息流渲染为可展开的摘要卡片） */
+export type MessageRole = 'user' | 'assistant' | 'error' | 'compact-summary';
 
 /** 消息记录（messages 表一行） */
 export interface StoredMessage {
@@ -56,6 +63,28 @@ export interface MentionAttachment {
   content: string;
 }
 
+/** compact 记录（compact_records 表一行；/compact 的审计与 /status「已压缩」标记数据源） */
+export interface CompactRecord {
+  id: string;
+  sessionId: string;
+  /** 压缩生成的摘要全文（与 compact-summary 消息内容一致） */
+  summary: string;
+  /** 被压缩替换的历史消息条数（user + assistant） */
+  messagesCompacted: number;
+  /** ISO 8601 */
+  createdAt: string;
+}
+
+/** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
+export interface CompactResult {
+  /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */
+  summaryMessage: StoredMessage;
+  /** 保留的最近 3 轮原始消息（重新落库后的行） */
+  keptMessages: StoredMessage[];
+  /** 被压缩替换的历史消息条数 */
+  compactedMessages: number;
+}
+
 /**
  * 会话事件流：agent-core 聚合的流式事件，desktop 主进程按会话 ID 多路复用转发给渲染进程。
  * 一次 sendMessage 的事件序列（正常路径）：
@@ -76,4 +105,11 @@ export type SessionEvent =
    */
   | { type: 'tool-call'; call: ToolCallRecord }
   /** 工具执行完成：call.output 已填（截断后）、isError 标记失败；记录同时落库 */
-  | { type: 'tool-result'; call: ToolCallRecord };
+  | { type: 'tool-result'; call: ToolCallRecord }
+  /**
+   * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
+   * 发出后会话进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
+   */
+  | { type: 'approval-request'; request: ApprovalRequest }
+  /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本会话总是允许） */
+  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision };

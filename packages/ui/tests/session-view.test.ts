@@ -121,4 +121,66 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
       },
     ]);
   });
+
+  it('审批：approval-request 追加等待中的审批卡片，approval-resolved 更新为结果态', () => {
+    let state: UiItem[] = [
+      { kind: 'tool-call', id: 'c1', sessionId: 's1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
+    ];
+    state = applySessionEvent(state, {
+      type: 'approval-request',
+      request: {
+        id: 'c1',
+        sessionId: 's1',
+        toolName: 'run_terminal_command',
+        command: 'git status',
+        commandWord: 'git',
+        createdAt: '2026-11-11T08:00:01.000Z',
+      },
+    });
+    expect(state).toEqual([
+      { kind: 'tool-call', id: 'c1', sessionId: 's1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
+      { kind: 'approval', id: 'c1', toolName: 'run_terminal_command', command: 'git status', commandWord: 'git', decision: null },
+    ]);
+
+    // 批准后卡片转为结果态（不再等待）
+    state = applySessionEvent(state, {
+      type: 'approval-resolved',
+      requestId: 'c1',
+      decision: 'always',
+    });
+    expect(state[1]).toEqual({
+      kind: 'approval',
+      id: 'c1',
+      toolName: 'run_terminal_command',
+      command: 'git status',
+      commandWord: 'git',
+      decision: 'always',
+    });
+  });
+
+  it('审批：迟到的 approval-resolved（会话切换后/未知 id）被忽略', () => {
+    const state: UiItem[] = [];
+    const next = applySessionEvent(state, {
+      type: 'approval-resolved',
+      requestId: 'ghost',
+      decision: 'approve',
+    });
+    expect(next).toEqual(state);
+  });
+});
+
+/** 工单 08：重启恢复后的 compact-summary 行映射为消息流条目（渲染摘要卡片） */
+describe('initialMessages（压缩摘要恢复）', () => {
+  it('持久化历史中的 compact-summary 行原样映射（id/role/content 透传）', () => {
+    const state = initialMessages([
+      stored({ id: 's1', role: 'compact-summary', content: '此前对话的压缩摘要' }),
+      stored({ id: 'k1', role: 'user', content: '第4轮问题' }),
+      stored({ id: 'k2', role: 'assistant', content: '第4轮回复' }),
+    ]);
+    expect(state).toEqual([
+      { id: 's1', role: 'compact-summary', content: '此前对话的压缩摘要' },
+      { id: 'k1', role: 'user', content: '第4轮问题' },
+      { id: 'k2', role: 'assistant', content: '第4轮回复' },
+    ]);
+  });
 });

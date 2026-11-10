@@ -29,6 +29,15 @@ export { createGlobTool } from './tools/glob';
 export { createGrepTool } from './tools/grep';
 export { createTerminalTool } from './tools/terminal';
 export type { TerminalShell, TerminalToolOptions } from './tools/terminal';
+// web_search（工单 10）：搜索源接口 + Tavily 默认实现 + 工具定义
+export { createTavilySearchSource, createWebSearchTool } from './tools/web-search';
+export type {
+  SearchOptions,
+  SearchSource,
+  SearchResult,
+  TavilySearchSourceOptions,
+  WebSearchToolOptions,
+} from './tools/web-search';
 export { resolveInWorkspace } from './tools/workspace';
 // AGENTS.md 发现（依赖 node:fs / git 探测，Node 宿主专用）
 export {

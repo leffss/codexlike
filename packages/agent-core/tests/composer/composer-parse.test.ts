@@ -5,11 +5,12 @@ import {
   SLASH_COMMANDS,
 } from '../../src/composer/parse';
 
-/** 斜杠命令词汇表：五个内置命令，全部有中文描述（工单 07） */
+/** 斜杠命令词汇表：六个内置命令，全部有中文描述（工单 07 + 08 /compact） */
 describe('SLASH_COMMANDS 命令表', () => {
-  it('包含 /new /rename /archive /model /status 五个命令', () => {
+  it('包含 /new /compact /rename /archive /model /status 六个命令', () => {
     expect(SLASH_COMMANDS.map((command) => command.name)).toEqual([
       'new',
+      'compact',
       'rename',
       'archive',
       'model',

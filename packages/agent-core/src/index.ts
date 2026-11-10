@@ -18,6 +18,8 @@ export { createLanguageModelFromProfile } from './provider/language-model';
 
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
 export type {
+  CompactRecord,
+  CompactResult,
   MentionAttachment,
   MessageRole,
   SessionEvent,
@@ -26,6 +28,15 @@ export type {
   StoredMessage,
   TranscriptItem,
 } from './session/types';
+
+// 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
+export type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalMode,
+  ApprovalRequest,
+} from './session/approval';
+export { commandFirstWord, decideApproval } from './session/approval';
 
 // 工具域类型（GLOSSARY「工具注册表」）：type-only，工具实现（Node 专属）在 ./node 出口
 export type {

@@ -7,7 +7,7 @@ import { ProviderProfileForm } from '../components/ProviderProfileForm';
 /** 编辑中态：'new' 新建；其余为正在编辑的 Profile id */
 type Editing = 'new' | string | null;
 
-/** 设置页：Provider Profile 的增删改查（其余设置项随后续工单扩展） */
+/** 设置页：Provider Profile 的增删改查 + 搜索源配置（其余设置项随后续工单扩展） */
 export function SettingsPage() {
   const [profiles, setProfiles] = useState<ProviderProfile[] | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
@@ -143,6 +143,111 @@ export function SettingsPage() {
           </p>
         )}
       </section>
+
+      <SearchSettingsSection />
     </div>
+  );
+}
+
+/** 搜索源配置区（工单 10）：默认 Tavily；key 经 safeStorage 加密存储，改完对进行中的会话即时生效 */
+function SearchSettingsSection() {
+  const [apiKey, setApiKey] = useState('');
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
+
+  async function refresh() {
+    try {
+      const settings = await window.codexlike.searchSettings.get();
+      setApiKey(settings.apiKey);
+      setConfigured(settings.apiKey !== '');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function save(nextKey: string) {
+    setSaving(true);
+    setMessage('');
+    try {
+      const settings = await window.codexlike.searchSettings.set({ apiKey: nextKey });
+      setApiKey(settings.apiKey);
+      setConfigured(settings.apiKey !== '');
+      setMessage(nextKey === '' ? '已清除搜索源配置' : '搜索源已保存，web_search 可用');
+      setMessageError(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-medium text-slate-200">搜索源</h2>
+        <p className="text-xs text-slate-500">
+          web_search 工具使用的搜索服务（默认 Tavily，https://tavily.com 注册，免费 1000
+          次/月）；API key 经系统加密存储。配置后无需重启会话即可生效。
+        </p>
+      </div>
+
+      {configured !== null && (
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-xs text-sky-300">
+              Tavily
+            </span>
+            <span className={configured ? 'text-emerald-400' : 'text-amber-400'}>
+              {configured ? '已配置' : '未配置（web_search 将提示先在设置页填写 key）'}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              data-testid="search-api-key-input"
+              className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950/70 px-2 py-1.5 font-mono text-sm text-slate-200 outline-none focus:border-sky-600"
+              placeholder="Tavily API key（tvly-…）"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <button
+              type="button"
+              data-testid="search-api-key-save"
+              disabled={saving || apiKey.trim() === ''}
+              className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
+              onClick={() => void save(apiKey.trim())}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+            {configured && (
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded px-3 py-1.5 text-sm text-slate-400 hover:bg-red-950 hover:text-red-400 disabled:opacity-50"
+                onClick={() => void save('')}
+              >
+                清除
+              </button>
+            )}
+          </div>
+          {message !== '' && (
+            <p
+              data-testid="search-settings-message"
+              className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+            >
+              {message}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
