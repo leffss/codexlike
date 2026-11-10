@@ -219,4 +219,49 @@ describe('子代理（spawn_subagent，GLOSSARY「子代理」）', () => {
       .find((c) => c.toolName === 'spawn_subagent');
     expect(stored?.output).toContain('调研报告：本项目使用 vitest');
   });
+
+  it('防递归：子代理工具集不含 spawn_subagent，子代理尝试再委派返回可读错误', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const { session, subModel } = makeSubagentSession({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'd1', toolName: 'spawn_subagent', input: { task: '再委派一次试试' } }],
+        },
+        { kind: 'text', deltas: ['收到'] },
+      ],
+      // 子代理模型第一轮尝试调 spawn_subagent（应被当作未注册工具回填），第二轮出报告
+      sub: [
+        {
+          kind: 'tool',
+          calls: [{ toolCallId: 'sub-c1', toolName: 'spawn_subagent', input: { task: '套娃' } }],
+        },
+        { kind: 'text', deltas: ['子代理无法再委派，直接报告'] },
+      ],
+    });
+
+    const events = await collect(session.sendMessage({ text: '去调研', profile }));
+
+    // 子代理模型的工具表不含 spawn_subagent（doStream 调用参数的 tools 里没有该名）
+    const subCall = subModel.doStreamCalls[0] as { tools?: { name?: string }[] };
+    const toolNames = (subCall.tools ?? []).map((t) => t.name);
+    expect(toolNames).not.toContain('spawn_subagent');
+    expect(toolNames).toContain('read_file');
+
+    // 行为断言：子代理尝试调用 → 「未注册」错误回填子代理 → 子代理继续到最终报告
+    const subToolEvents = events.filter(
+      (e): e is Extract<SessionEvent, { type: 'subagent-tool' }> => e.type === 'subagent-tool',
+    );
+    const rejected = subToolEvents.find((e) => e.phase === 'result' && e.call.toolName === 'spawn_subagent');
+    expect(rejected?.call.isError).toBe(true);
+    expect(rejected?.call.output).toContain('未注册');
+
+    // 子代理最终报告回流（未被套娃调用破坏），主会话正常收尾
+    const reportEvent = events.find(
+      (e): e is Extract<SessionEvent, { type: 'subagent-report' }> => e.type === 'subagent-report',
+    );
+    expect(reportEvent?.report).toContain('子代理无法再委派');
+    expect(events.at(-1)?.type).toBe('assistant-done');
+  });
 });
