@@ -16,6 +16,7 @@ function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
     providerProfileId: 'profile-1',
     model: 'glm-4.7',
     status: 'idle',
+    approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
     updatedAt: '2026-11-10T08:00:00.000Z',
