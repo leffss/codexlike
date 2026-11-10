@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   resolveComposerSubmission,
+  type ApprovalMode,
   type ProviderProfile,
   type SessionRecord,
 } from '@codexlike/agent-core';
@@ -39,6 +40,8 @@ export function WorkspacePage(props: {
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
+  /** 当前会话记录（审批模式选择器的数据来源；sessions 列表随事件刷新） */
+  const currentSession = sessions.find((session) => session.id === currentId) ?? null;
 
   const refreshSessions = useCallback(async () => {
     const list = await window.codexlike.sessions.list();
@@ -58,8 +61,19 @@ export function WorkspacePage(props: {
     setCurrentId(id);
     currentIdRef.current = id;
     const history = await window.codexlike.sessions.messages(id);
-    setMessages(initialTranscript(history));
+    let items = initialTranscript(history);
     setStreaming(false);
+    // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
+    try {
+      const pending = await window.codexlike.sessions.pendingApproval(id);
+      if (pending !== null) {
+        items = applySessionEvent(items, { type: 'approval-request', request: pending });
+        setStreaming(true);
+      }
+    } catch {
+      // 查询失败不阻塞会话打开
+    }
+    setMessages(items);
     // @引用 菜单候选：随会话（工作区）切换重新枚举
     try {
       setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(id));
@@ -115,8 +129,11 @@ export function WorkspacePage(props: {
         event.type === 'user-message' ||
         event.type === 'assistant-done' ||
         event.type === 'assistant-aborted' ||
-        event.type === 'error'
+        event.type === 'error' ||
+        event.type === 'approval-request' ||
+        event.type === 'approval-resolved'
       ) {
+        // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
         void refreshSessions();
       }
     });
@@ -272,6 +289,38 @@ export function WorkspacePage(props: {
     void send(submission.text, submission.mentionPaths);
   }
 
+  /** 审批响应（审批卡片三键）：经 IPC 唤醒等待中的工具循环 */
+  async function respondApproval(id: string, decision: 'approve' | 'reject' | 'always') {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const accepted = await window.codexlike.sessions.respondApproval(
+        currentId,
+        id,
+        decision,
+      );
+      if (!accepted) {
+        pushLocalStatus('该审批请求已失效（可能已被响应）');
+      }
+    } catch (error) {
+      pushLocalStatus(`审批响应失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 审批模式切换：随时可切，对下一次工具调用立即生效 */
+  async function selectApprovalMode(mode: ApprovalMode) {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      await window.codexlike.sessions.setApprovalMode(currentId, mode);
+      await refreshSessions();
+    } catch (error) {
+      pushLocalStatus(`切换审批模式失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   const composerHint =
     profiles.length === 0
       ? '尚未配置模型，请先前往设置页添加 Provider Profile'
@@ -320,6 +369,7 @@ export function WorkspacePage(props: {
               </button>
             ) : undefined
           }
+          onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
         />
         <MessageComposer
           profiles={profiles}
@@ -329,6 +379,8 @@ export function WorkspacePage(props: {
           workspaceFiles={workspaceFiles}
           disabled={currentId === null || profiles.length === 0 || streaming}
           hint={composerHint}
+          approvalMode={currentSession?.approvalMode ?? null}
+          onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
         />
       </section>
     </div>
