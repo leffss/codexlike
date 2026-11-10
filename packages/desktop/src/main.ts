@@ -15,6 +15,7 @@ import {
   createSessionManager,
   createSqliteSessionStore,
   createTavilySearchSource,
+  createWorktreeService,
   discoverAgentsInstructions,
   validateProviderProfile,
   type SearchSource,
@@ -288,6 +289,12 @@ void app.whenReady().then(async () => {
   });
   const store = profileStore;
 
+  // 托管 Worktree（工单 09）：worktree 模式会话的隔离副本根目录
+  // （~/.codexlike/worktrees，CODEXLIKE_HOME 隔离由 dataDir 统一解析）
+  const worktreeService = createWorktreeService({
+    worktreesDir: join(dataDir(), 'worktrees'),
+  });
+
   // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
   // 进程刚启动不可能有真实运行中的流，统一重置（manager.get 的恢复路径会落库 idle）
   for (const record of manager.list()) {
@@ -295,6 +302,19 @@ void app.whenReady().then(async () => {
       manager.get(record.id);
     }
   }
+
+  // 启动时跑一次 LRU 清理：会话已删除/已归档的托管 Worktree 超量部分回收
+  // （运行中的永不清理；此刻无运行中会话，主要是孤儿目录与超量归档副本）
+  void worktreeService
+    .cleanup({ sessions: manager.list() })
+    .then((result) => {
+      if (result.removed.length > 0) {
+        console.log(`[main] 已清理 ${result.removed.length} 个过期托管 Worktree`);
+      }
+    })
+    .catch((error: unknown) => {
+      console.error('[main] worktree 启动清理失败', error);
+    });
 
   registerProviderProfileHandlers(store);
   registerSearchSettingsHandlers(searchSettings, refreshSearchSource);
@@ -308,6 +328,7 @@ void app.whenReady().then(async () => {
     manager,
     profiles: store,
     getWindow: () => mainWindow,
+    worktreeService,
   });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });

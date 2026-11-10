@@ -36,6 +36,7 @@ function sessionRecord(workspacePath: string): SessionRecord {
     workspacePath,
     providerProfileId: null,
     model: null,
+    workspaceMode: 'local',
     status: 'idle',
     approvalMode: 'suggest',
     archivedAt: null,

@@ -5,11 +5,13 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type SessionRecord,
+  type WorkspaceMode,
 } from '@codexlike/agent-core';
 
 import { ChangesPanel } from '../components/ChangesPanel';
 import { MessageComposer } from '../components/MessageComposer';
 import { MessageStream } from '../components/MessageStream';
+import { NewSessionDialog } from '../components/NewSessionDialog';
 import { SessionSidebar } from '../components/SessionSidebar';
 import {
   applySessionEvent,
@@ -41,11 +43,13 @@ export function WorkspacePage(props: {
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
+  /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
+  const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null);
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
-  /** 当前会话记录（审批模式选择器的数据来源；sessions 列表随事件刷新） */
-  const currentSession = sessions.find((session) => session.id === currentId) ?? null;
+  /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；sessions 列表随事件刷新） */
+  const current = sessions.find((session) => session.id === currentId) ?? null;
 
   const refreshSessions = useCallback(async () => {
     const list = await window.codexlike.sessions.list();
@@ -146,14 +150,45 @@ export function WorkspacePage(props: {
     });
   }, [refreshSessions]);
 
-  async function createSession(workspacePath?: string) {
+  /** 侧栏「+ 新建会话」：选目录 → 模式对话框（本目录直跑 / worktree 模式）→ 创建 */
+  async function startCreateSession() {
+    const dir = await window.codexlike.sessions.selectWorkspace();
+    if (dir === null) {
+      return; // 用户取消目录选择
+    }
+    setPendingWorkspace(dir);
+  }
+
+  /** 模式对话框确认：创建会话（worktree 失败的中文错误显示在消息流，可改选重试） */
+  async function createSession(mode: WorkspaceMode) {
+    if (pendingWorkspace === null) {
+      return;
+    }
     setCreating(true);
     try {
-      const dir = workspacePath ?? (await window.codexlike.sessions.selectWorkspace());
-      if (dir === null) {
-        return;
-      }
-      const record = await window.codexlike.sessions.create(dir);
+      const record = await window.codexlike.sessions.create(pendingWorkspace, mode);
+      setPendingWorkspace(null);
+      await refreshSessions();
+      await openSession(record.id);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${Date.now()}`,
+          role: 'error',
+          content: `新建会话失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      ]);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  /** /new：同工作区新会话（不经目录选择器与模式对话框，本目录直跑当前工作区） */
+  async function createSessionInWorkspace(workspacePath: string) {
+    setCreating(true);
+    try {
+      const record = await window.codexlike.sessions.create(workspacePath);
       await refreshSessions();
       await openSession(record.id);
     } catch (error) {
@@ -220,8 +255,8 @@ export function WorkspacePage(props: {
         pushLocalStatus('该命令需要先选择一个会话');
         return;
       case 'new-session': {
-        // /new：同工作区新会话（不走目录选择器）
-        await createSession(current!.workspacePath);
+        // /new：同工作区新会话（不走目录选择器与模式对话框，本目录直跑）
+        await createSessionInWorkspace(current!.workspacePath);
         return;
       }
       case 'compact': {
@@ -381,16 +416,21 @@ export function WorkspacePage(props: {
           ? '新建或选择一个会话后开始对话'
           : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
 
-  /** 当前打开的会话记录（改动面板与顶栏显示用） */
-  const current = sessions.find((session) => session.id === currentId) ?? null;
-
   return (
     <div className="flex h-full">
+      {pendingWorkspace !== null && (
+        <NewSessionDialog
+          workspacePath={pendingWorkspace}
+          creating={creating}
+          onCreate={(mode) => void createSession(mode)}
+          onCancel={() => setPendingWorkspace(null)}
+        />
+      )}
       <SessionSidebar
         sessions={sessions}
         currentId={currentId}
         onSelect={(id) => void openSession(id)}
-        onCreate={() => void createSession()}
+        onCreate={() => void startCreateSession()}
         creating={creating}
         onRename={(id, title) => {
           void window.codexlike.sessions
@@ -454,7 +494,7 @@ export function WorkspacePage(props: {
               streaming={streaming}
               onStop={() => void stop()}
               hint={composerHint}
-              approvalMode={currentSession?.approvalMode ?? null}
+              approvalMode={current?.approvalMode ?? null}
               onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
             />
           </div>

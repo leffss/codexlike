@@ -72,5 +72,17 @@ export type {
 } from './context/agents-md';
 // git 服务（simple-git，改动面板的数据源；工单 05）
 export { createGitService } from './git/git-service';
+// 托管 Worktree 管理（worktree 模式会话的隔离副本；工单 09）
+export {
+  WORKTREE_INCLUDE_FILE,
+  WORKTREE_KEEP_DEFAULT,
+  createWorktreeService,
+} from './worktree/worktree-service';
+export type {
+  ManagedWorktree,
+  WorktreeCleanupResult,
+  WorktreeCleanupSession,
+  WorktreeService,
+} from './worktree/worktree-service';
 // commit 消息生成（一次不发工具的 LLM 请求；mock 依赖注入，可脱离 Electron 测试）
 export { generateCommitMessage } from './git/commit-message';

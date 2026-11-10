@@ -18,6 +18,13 @@ export type SessionStatus = 'idle' | 'streaming' | 'waiting-approval';
  * 定义在 ./approval（工单 04 审批状态机），本文件经 import 引用。
  */
 
+/**
+ * 会话运行位置（GLOSSARY「托管 Worktree」）：`local` 本目录直跑（默认）；
+ * `worktree` 托管 Worktree 隔离副本——workspacePath 指向 `~/.codexlike/worktrees/<会话id>`，
+ * 由宿主在会话创建前先检出（agent-core 的 worktree 模块），落库后恢复天然指向原副本。
+ */
+export type WorkspaceMode = 'local' | 'worktree';
+
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
   id: string;
@@ -25,6 +32,8 @@ export interface SessionRecord {
   title: string;
   /** 绑定的工作区目录，agent 的所有文件、终端操作都被限制在其中 */
   workspacePath: string;
+  /** 运行位置（本目录直跑 / 托管 Worktree）；旧库无此列恢复为 local */
+  workspaceMode: WorkspaceMode;
   /** 最近一次发送消息所用的 Provider Profile（模型选择器「对下一条生效」的落点） */
   providerProfileId: string | null;
   /** 最近一次发送消息所用的模型标识 */

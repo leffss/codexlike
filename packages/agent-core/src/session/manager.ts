@@ -49,7 +49,14 @@ export interface CreateSessionManagerOptions {
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
 export interface SessionManager {
-  create(options: { workspacePath: string; title?: string }): AgentSession;
+  create(options: {
+    workspacePath: string;
+    title?: string;
+    /** 运行位置（默认 local 本目录直跑；worktree 由宿主先检出副本再传入其路径） */
+    workspaceMode?: 'local' | 'worktree';
+    /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
+    id?: string;
+  }): AgentSession;
   /** 全部会话记录（含已归档），按 updatedAt 倒序 */
   list(): SessionRecord[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
@@ -139,12 +146,14 @@ export function createSessionManager(
   }
 
   return {
-    create({ workspacePath, title }) {
+    create({ workspacePath, title, workspaceMode = 'local', id }) {
       const timestamp = now();
       const record: SessionRecord = {
-        id: generateId(),
+        // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
+        id: id ?? generateId(),
         title: title ?? (basename(workspacePath) || workspacePath),
         workspacePath,
+        workspaceMode,
         providerProfileId: null,
         model: null,
         status: 'idle',

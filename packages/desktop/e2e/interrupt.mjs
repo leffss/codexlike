@@ -175,6 +175,8 @@ async function main() {
 
     // ① 流式输出中点停止：本轮立即中断，UI 标记中断点
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
     await window.getByTestId('composer-input').fill('慢慢写一篇长文');
     await window.getByTestId('composer-send').click();

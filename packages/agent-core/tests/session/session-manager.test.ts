@@ -80,6 +80,30 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     persistence.close();
   });
 
+  it('create 支持 worktree 模式与外部生成的会话 id（宿主先建 worktree 再落库）', () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+
+    // 宿主（desktop 主进程）先创建托管 worktree、再以同一 id 落库：workspacePath 指向副本
+    const session = manager.create({
+      id: 'wt-session-1',
+      workspacePath: 'C:\\home\\.codexlike\\worktrees\\wt-session-1',
+      workspaceMode: 'worktree',
+      title: 'demo',
+    });
+
+    expect(session.id).toBe('wt-session-1');
+    expect(session.record.workspaceMode).toBe('worktree');
+    expect(manager.list()[0]?.workspaceMode).toBe('worktree');
+    // 默认（不传模式）仍是本目录直跑
+    const local = manager.create({ workspacePath: 'C:\\work\\demo' });
+    expect(local.record.workspaceMode).toBe('local');
+    persistence.close();
+  });
+
   it('get 惰性恢复既有会话：历史完整接续（等价应用重启后继续对话）', async () => {
     const dbPath = join(
       (() => {

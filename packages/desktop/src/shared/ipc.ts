@@ -7,6 +7,7 @@ import type {
   SessionEvent,
   SessionRecord,
   TranscriptItem,
+  WorkspaceMode,
 } from '@codexlike/agent-core';
 import type {
   GitBranchResult,
@@ -42,7 +43,7 @@ export const IPC = {
   sessions: {
     /** 全部会话（含已归档，侧栏列表自行过滤；updatedAt 倒序） */
     list: 'sessions:list',
-    /** 新建会话（绑定工作区目录） */
+    /** 新建会话（绑定工作区目录；可选运行位置 local/worktree） */
     create: 'sessions:create',
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: 'sessions:select-workspace',
@@ -129,8 +130,12 @@ export interface CodexLikeApi {
   sessions: {
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionRecord[]>;
-    /** 在指定工作区目录新建会话 */
-    create(workspacePath: string): Promise<SessionRecord>;
+    /**
+     * 在指定工作区目录新建会话。workspaceMode 缺省 local（本目录直跑）；
+     * `worktree` 在 ~/.codexlike/worktrees/<会话id> 检出托管 Worktree（独立分支），
+     * 非 git 目录以中文异常抛回且会话不创建。
+     */
+    create(workspacePath: string, workspaceMode?: WorkspaceMode): Promise<SessionRecord>;
     /** 原生目录选择器；取消返回 null */
     selectWorkspace(): Promise<string | null>;
     /** 指定会话的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */
