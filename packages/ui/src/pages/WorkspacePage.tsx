@@ -72,10 +72,13 @@ export function WorkspacePage(props: {
     let items = initialTranscript(history);
     setStreaming(false);
     // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
+    // （主会话与子代理可能并行等待——工单 13，全部恢复）
     try {
-      const pending = await window.codexlike.sessions.pendingApproval(id);
-      if (pending !== null) {
-        items = applySessionEvent(items, { type: 'approval-request', request: pending });
+      const pendingList = await window.codexlike.sessions.pendingApprovals(id);
+      if (pendingList.length > 0) {
+        for (const request of pendingList) {
+          items = applySessionEvent(items, { type: 'approval-request', request });
+        }
         setStreaming(true);
       }
     } catch {

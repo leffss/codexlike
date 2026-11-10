@@ -332,4 +332,16 @@ export function registerSessionHandlers(options: {
       return session?.pendingApproval ?? null;
     },
   );
+
+  ipcMain.handle(
+    IPC.sessions.pendingApprovals,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== 'string') {
+        throw new Error('pendingApprovals：sessionId 必须是字符串');
+      }
+      const session = manager.get(sessionId);
+      // 主会话与子代理可能并行等待审批（工单 13），全部返回供 UI 恢复多张审批卡片
+      return session?.pendingApprovals ?? [];
+    },
+  );
 }

@@ -3,6 +3,7 @@
  * 全部可 JSON 序列化：ToolCallRecord 与会话事件、IPC、UI 卡片共用。
  * 本文件浏览器安全（无 Node 内置模块），实现（fs/child_process）在 ./node 出口。
  */
+import type { ProviderProfile } from '../provider/provider-profile';
 
 /**
  * 权限类别（spec「审批模式」三档在工单 04 接入前的预留字段）：
@@ -18,6 +19,13 @@ export interface ToolExecutionContext {
   workspacePath: string;
   /** 会话中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
   signal?: AbortSignal;
+  /**
+   * 本次 sendMessage 的 Provider Profile（工单 13）：
+   * spawn_subagent 在「子代理模型 = 同主模型」时以此回退；其余工具可忽略。
+   */
+  profile?: ProviderProfile;
+  /** 模型给定的 tool call id（工单 13：spawn_subagent 委派与报告回流的绑定键） */
+  toolCallId?: string;
 }
 
 /** 工具执行结果：output 已截断，直接回填模型；isError 标记失败（失败原因也在 output） */
