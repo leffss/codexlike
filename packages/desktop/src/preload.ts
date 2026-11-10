@@ -31,6 +31,8 @@ const api: CodexLikeApi = {
     archive: (sessionId, archived) =>
       ipcRenderer.invoke(IPC.sessions.archive, sessionId, archived),
     status: (sessionId) => ipcRenderer.invoke(IPC.sessions.status, sessionId),
+    compact: (sessionId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.sessions.compact, sessionId, providerProfileId),
     workspaceFiles: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
   },

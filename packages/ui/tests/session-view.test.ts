@@ -122,3 +122,19 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
     ]);
   });
 });
+
+/** 工单 08：重启恢复后的 compact-summary 行映射为消息流条目（渲染摘要卡片） */
+describe('initialMessages（压缩摘要恢复）', () => {
+  it('持久化历史中的 compact-summary 行原样映射（id/role/content 透传）', () => {
+    const state = initialMessages([
+      stored({ id: 's1', role: 'compact-summary', content: '此前对话的压缩摘要' }),
+      stored({ id: 'k1', role: 'user', content: '第4轮问题' }),
+      stored({ id: 'k2', role: 'assistant', content: '第4轮回复' }),
+    ]);
+    expect(state).toEqual([
+      { id: 's1', role: 'compact-summary', content: '此前对话的压缩摘要' },
+      { id: 'k1', role: 'user', content: '第4轮问题' },
+      { id: 'k2', role: 'assistant', content: '第4轮回复' },
+    ]);
+  });
+});

@@ -28,8 +28,9 @@ export interface SessionRecord {
   updatedAt: string;
 }
 
-/** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文） */
-export type MessageRole = 'user' | 'assistant' | 'error';
+/** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
+ * 压缩摘要（/compact 生成，进入对话上下文时按 user 角色注入；消息流渲染为可展开的摘要卡片） */
+export type MessageRole = 'user' | 'assistant' | 'error' | 'compact-summary';
 
 /** 消息记录（messages 表一行） */
 export interface StoredMessage {
@@ -54,6 +55,28 @@ export interface MentionAttachment {
   /** 相对工作区的路径（输入框中 @token 的原样文本） */
   path: string;
   content: string;
+}
+
+/** compact 记录（compact_records 表一行；/compact 的审计与 /status「已压缩」标记数据源） */
+export interface CompactRecord {
+  id: string;
+  sessionId: string;
+  /** 压缩生成的摘要全文（与 compact-summary 消息内容一致） */
+  summary: string;
+  /** 被压缩替换的历史消息条数（user + assistant） */
+  messagesCompacted: number;
+  /** ISO 8601 */
+  createdAt: string;
+}
+
+/** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
+export interface CompactResult {
+  /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */
+  summaryMessage: StoredMessage;
+  /** 保留的最近 3 轮原始消息（重新落库后的行） */
+  keptMessages: StoredMessage[];
+  /** 被压缩替换的历史消息条数 */
+  compactedMessages: number;
 }
 
 /**
