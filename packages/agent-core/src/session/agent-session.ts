@@ -17,6 +17,13 @@ import type { ProviderProfile } from '../provider/provider-profile';
 import { runTool } from '../tools/registry';
 import type { ToolCallRecord, ToolDefinition } from '../tools/types';
 
+import {
+  commandFirstWord,
+  decideApproval,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type ApprovalRequest,
+} from './approval';
 import type { SessionPersistence } from './persistence';
 import type {
   MentionAttachment,
@@ -47,9 +54,13 @@ export interface CreateAgentSessionOptions {
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
    * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
-   * 本工单内工具默认放行；审批三档在工单 04 于 tool-call 与 tool-result 之间接入。
+   * 工具执行前经审批门（工单 04）：readonly 拒绝、suggest 命令审批、full 全放行。
    */
   tools?: ToolDefinition[];
+  /** 初始审批模式（缺省用 record.approvalMode） */
+  approvalMode?: ApprovalMode;
+  /** 恢复会话时传入的历史「总是允许」记忆（命令首词，随会话入库） */
+  approvalMemory?: string[];
   /** 时间与 id 生成注入（测试用固定值） */
   now?: () => string;
   generateId?: () => string;
@@ -59,10 +70,23 @@ export interface AgentSession {
   readonly id: string;
   /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
   readonly record: SessionRecord;
+  /** 当前等待用户审批的请求；无等待时为 null（UI 切回会话时恢复审批卡片） */
+  readonly pendingApproval: ApprovalRequest | null;
+  /**
+   * 切换审批模式（三档，随时可调）：对下一次工具调用立即生效。
+   * 持久化由调用方（SessionManager）负责。
+   */
+  setApprovalMode(mode: ApprovalMode): void;
+  /**
+   * 响应等待中的审批请求（审批卡片三键）：
+   * - approve：本次执行；reject：拒绝并回填模型；always：记忆命令首词（随会话入库）后执行。
+   * 没有等待中的请求或 id 不匹配时返回 false。
+   */
+  respondApproval(requestId: string, decision: ApprovalDecision): boolean;
   /**
    * 发送一条用户消息并流式聚合模型回复为会话事件流。
-   * 模型可多轮调用工具：每轮 tool-call → 执行（tool-call/tool-result 事件）→
-   * 结果回填继续生成，直到最终文本回复。
+   * 模型可多轮调用工具：每轮 tool-call → 审批门（可能发 approval-request 并暂停等待
+   * respondApproval 唤醒）→ 执行（tool-result 事件）→ 结果回填继续生成，直到最终文本回复。
    * 单会话同一时刻只允许一个流（并发发送直接抛错）；
    * 出错时发 error 事件（中文提示，落库为 error 消息），会话保持可用。
    */
@@ -132,6 +156,17 @@ function composeUserContent(
   return `${text}\n\n以下为该消息 @引用 的工作区文件内容：\n\n${blocks}`;
 }
 
+/** 从工具参数中安全读取 command 字段（run_terminal_command 的命令原文） */
+function commandOfToolInput(input: unknown): string | undefined {
+  if (typeof input === 'object' && input !== null && 'command' in input) {
+    const value = (input as Record<string, unknown>).command;
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 /** 创建会话对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
 export function createAgentSession(options: CreateAgentSessionOptions): AgentSession {
   const { record, persistence } = options;
@@ -146,11 +181,40 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
 
+  // 审批状态（工单 04）：模式随时可切（对下一次工具调用立即生效）；
+  // 「总是允许」记忆 = 命令首词集合（恢复会话时从库读回）
+  let approvalMode = options.approvalMode ?? record.approvalMode ?? 'suggest';
+  const approvalMemory = new Set(options.approvalMemory ?? []);
+  let pendingApproval: ApprovalRequest | null = null;
+  let approvalWaiter: {
+    requestId: string;
+    resolve: (decision: ApprovalDecision) => void;
+  } | null = null;
+
   let busy = false;
 
   return {
     id: record.id,
     record,
+    get pendingApproval() {
+      return pendingApproval;
+    },
+
+    setApprovalMode(mode) {
+      approvalMode = mode;
+      record.approvalMode = mode;
+    },
+
+    respondApproval(requestId, decision) {
+      const waiter = approvalWaiter;
+      if (waiter === null || waiter.requestId !== requestId) {
+        return false;
+      }
+      approvalWaiter = null;
+      pendingApproval = null;
+      waiter.resolve(decision);
+      return true;
+    },
 
     async *sendMessage({ text, profile, mentions, signal }) {
       if (busy) {
@@ -236,8 +300,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
             // 本轮 assistant 消息（含 tool-call parts）进入对话上下文
             pending.push(...(await result.response).messages);
 
-            // 逐个执行工具：tool-call 事件 → 执行 → tool-result 事件 + 落库
-            // 审批拦截（工单 04）将插入在事件与执行之间
+            // 逐个执行工具：tool-call 事件 → 审批门（工单 04）→ 执行 → tool-result 事件 + 落库
             const resultParts: ToolModelMessage['content'] = [];
             for (const call of toolCalls) {
               const base: ToolCallRecord = {
@@ -252,25 +315,102 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               yield { type: 'tool-call', call: base };
 
               const definition = toolsByName.get(call.toolName);
-              const executed = definition
-                ? await runTool(definition, call.input, {
+              let output: string;
+              let isError: boolean;
+
+              if (definition === undefined) {
+                output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`;
+                isError = true;
+              } else {
+                // 审批门（插在 tool-call 事件与执行之间）：
+                // readonly 拒绝 / suggest 命令审批 / full 放行（见 decideApproval）
+                const command = commandOfToolInput(call.input);
+                const gate = decideApproval({
+                  mode: approvalMode,
+                  permission: definition.permission,
+                  toolName: definition.name,
+                  command,
+                  memory: approvalMemory,
+                });
+
+                if (gate.kind === 'blocked') {
+                  output = `工具调用被审批策略拒绝：${gate.reason}`;
+                  isError = true;
+                } else if (gate.kind === 'ask') {
+                  // 暂停等待审批：落库 waiting-approval → 事件流出卡片 →
+                  // await 外部 respondApproval 唤醒（desktop 经 IPC 桥接 UI 三键）
+                  const request: ApprovalRequest = {
+                    id: call.toolCallId,
+                    sessionId: record.id,
+                    toolName: call.toolName,
+                    command: command ?? call.toolName,
+                    commandWord: gate.commandWord,
+                    createdAt: now(),
+                  };
+                  persistence.updateSession(record.id, {
+                    status: 'waiting-approval',
+                    updatedAt: now(),
+                  });
+                  pendingApproval = request;
+                  let resolveDecision!: (decision: ApprovalDecision) => void;
+                  const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
+                    resolveDecision = resolve;
+                  });
+                  approvalWaiter = { requestId: request.id, resolve: resolveDecision };
+                  // 中断防御：等待审批时被中断（06 打断）视为拒绝，避免生成器永久卡死
+                  const onAbort = () => resolveDecision('reject');
+                  signal?.addEventListener('abort', onAbort, { once: true });
+                  let decision: ApprovalDecision;
+                  try {
+                    yield { type: 'approval-request', request };
+                    decision = await decisionPromise;
+                  } finally {
+                    signal?.removeEventListener('abort', onAbort);
+                    approvalWaiter = null;
+                    pendingApproval = null;
+                    persistence.updateSession(record.id, {
+                      status: 'streaming',
+                      updatedAt: now(),
+                    });
+                  }
+                  yield { type: 'approval-resolved', requestId: request.id, decision };
+
+                  if (decision === 'reject') {
+                    output =
+                      '工具调用被用户拒绝：用户未批准在当前会话执行该命令。可以改用只读工具继续，或向用户说明计划并询问如何调整。';
+                    isError = true;
+                  } else {
+                    if (decision === 'always') {
+                      // 本会话总是允许：记忆命令首词（随会话入库，恢复后仍生效）
+                      approvalMemory.add(gate.commandWord);
+                      persistence.insertApproval(record.id, gate.commandWord);
+                    }
+                    const executed = await runTool(definition, call.input, {
+                      workspacePath: record.workspacePath,
+                      signal,
+                    });
+                    output = executed.output;
+                    isError = executed.isError;
+                  }
+                } else {
+                  const executed = await runTool(definition, call.input, {
                     workspacePath: record.workspacePath,
                     signal,
-                  })
-                : {
-                    output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
-                    isError: true,
-                  };
+                  });
+                  output = executed.output;
+                  isError = executed.isError;
+                }
+              }
 
-              const completed = { ...base, ...executed };
+              const completed = { ...base, output, isError };
               persistence.insertToolCall(completed);
               yield { type: 'tool-result', call: completed };
               resultParts.push({
                 type: 'tool-result',
                 toolCallId: call.toolCallId,
                 toolName: call.toolName,
-                output: { type: 'text', value: executed.output },
-                // 失败语义已在 output 文本（「工具 X 执行失败：…」前缀），模型可读
+                output: { type: 'text', value: output },
+                // 失败语义已在 output 文本（拒绝 /「工具 X 执行失败：…」前缀），模型可读
               });
             }
 

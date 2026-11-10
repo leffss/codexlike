@@ -25,6 +25,7 @@ function sessionRecord(): SessionRecord {
     providerProfileId: null,
     model: null,
     status: 'idle',
+    approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
     updatedAt: '2026-11-10T08:00:00.000Z',
