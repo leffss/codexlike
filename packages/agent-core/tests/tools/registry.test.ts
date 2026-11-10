@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  createToolRegistry,
-  type ToolDefinition,
-} from '../../src/tools/registry';
-import type { ToolResult } from '../../src/tools/types';
+import { createToolRegistry } from '../../src/tools/registry';
+import type { ToolDefinition, ToolResult } from '../../src/tools/types';
 
 /** 最小工具桩：只关心注册表行为，不关心执行 */
 function stubTool(name: string, permission: ToolDefinition['permission'] = 'readonly'): ToolDefinition {
