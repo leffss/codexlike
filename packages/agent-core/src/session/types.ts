@@ -39,6 +39,16 @@ export interface StoredMessage {
 }
 
 /**
+ * @文件引用（GLOSSARY「@ Mention」）：随消息附加的工作区文件。
+ * 内容由宿主读取注入（主进程校验路径在工作区内）；消息流与持久化保持用户原文。
+ */
+export interface MentionAttachment {
+  /** 相对工作区的路径（输入框中 @token 的原样文本） */
+  path: string;
+  content: string;
+}
+
+/**
  * 会话事件流：agent-core 聚合的流式事件，desktop 主进程按会话 ID 多路复用转发给渲染进程。
  * 一次 sendMessage 的事件序列（正常路径）：
  * `user-message → assistant-start → assistant-delta* → assistant-done`
