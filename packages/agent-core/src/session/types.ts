@@ -19,6 +19,8 @@ export interface SessionRecord {
   /** 最近一次发送消息所用的模型标识 */
   model: string | null;
   status: SessionStatus;
+  /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
+  archivedAt: string | null;
   /** ISO 8601 */
   createdAt: string;
   /** ISO 8601；listSessions 按此倒序 */
