@@ -50,6 +50,10 @@ function makeDir(prefix: string): string {
 }
 
 afterAll(() => {
+  // Windows：先释放 SQLite 句柄再删临时目录，否则 rmSync EPERM
+  for (const store of openStores) {
+    store.close();
+  }
   for (const dir of dirs) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -124,9 +128,14 @@ function writeThenTextModel(path: string, content: string): MockLanguageModelV4 
 /** 每个 profile id 对应的模型工厂（会话创建前注册，避免并行时序竞态） */
 const modelFactories = new Map<string, () => MockLanguageModelV4>();
 
+/** 打开的 SQLite 库句柄（Windows 上不 close 会锁住临时目录，afterAll 统一释放） */
+const openStores: ReturnType<typeof createSqliteSessionStore>[] = [];
+
 function makeManager(dbPath: string) {
+  const persistence = createSqliteSessionStore(dbPath);
+  openStores.push(persistence);
   return createSessionManager({
-    persistence: createSqliteSessionStore(dbPath),
+    persistence,
     tools: createBuiltinTools(),
     languageModelFor: (used) => {
       const factory = modelFactories.get(used.id);
