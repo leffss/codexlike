@@ -278,6 +278,7 @@ describe('AgentSession.compact（手动压缩）', () => {
           throw new APICallError({
             message: 'boom',
             url: 'https://example.com',
+            requestBodyValues: {},
             statusCode: 401,
             responseBody: '',
           });
@@ -367,11 +368,12 @@ describe('AgentSession.compact（手动压缩）', () => {
     })();
     // 等 sendMessage 启动抛错（busy 拒绝是同步 throw，出现于迭代启动时）
     await expect(sendDone).rejects.toThrow('仍在回复中');
-    // 等压缩请求真正挂起在 doGenerate 上再放行
+    // 等压缩请求真正挂起在 doGenerate 上再放行（闭包内赋值，as 绕过 TS 收窄）
     while (releaseGenerate === null) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    releaseGenerate();
+    const release = releaseGenerate as () => void;
+    release();
     await compacting;
 
     // 压缩完成后可正常发送
