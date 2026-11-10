@@ -1,7 +1,60 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { UiToolCall } from '../lib/session-view';
 import { summarizeToolCall } from '../lib/tool-summary';
+
+/** 截图卡片的图片展示：展开时经主进程按 会话+调用 id 读取文件（dataURL） */
+function ScreenshotView(props: { call: UiToolCall }) {
+  const { call } = props;
+  const [image, setImage] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setImage(null);
+    setFailed(false);
+    if (!call.isError) {
+      window.codexlike.sessions
+        .toolImage(call.sessionId, call.id)
+        .then((dataUrl) => {
+          if (alive) {
+            if (dataUrl === null) {
+              setFailed(true);
+            } else {
+              setImage(dataUrl);
+            }
+          }
+        })
+        .catch(() => {
+          if (alive) {
+            setFailed(true);
+          }
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [call.id, call.sessionId, call.isError]);
+
+  if (call.isError) {
+    return null;
+  }
+  if (image !== null) {
+    return (
+      <img
+        data-testid="tool-call-screenshot"
+        src={image}
+        alt={`截图 ${call.id}`}
+        className="mt-2 max-h-96 w-full rounded border border-slate-800 object-contain"
+      />
+    );
+  }
+  return failed ? (
+    <p className="mt-1 text-xs text-slate-500">截图文件已不存在（可能在其它数据目录）</p>
+  ) : (
+    <p className="mt-1 text-xs text-slate-500">截图加载中…</p>
+  );
+}
 
 /** 工具卡片：折叠态显示工具名 + 参数摘要，展开显示完整参数与输出（spec 用户故事 7） */
 export function ToolCallCard(props: { call: UiToolCall }) {
@@ -57,6 +110,9 @@ export function ToolCallCard(props: { call: UiToolCall }) {
           >
             {call.output === '' && call.running ? '（执行中…）' : call.output}
           </pre>
+          {call.toolName === 'browser_screenshot' && !call.running && (
+            <ScreenshotView call={call} />
+          )}
         </div>
       )}
     </li>

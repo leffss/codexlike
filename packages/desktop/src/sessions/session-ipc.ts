@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import {
   dialog,
@@ -9,6 +9,7 @@ import {
 
 import {
   discoverAgentsInstructions,
+  type BrowserSessionManager,
   type ProviderProfile,
   type SessionManager,
   type SessionRecord,
@@ -18,6 +19,7 @@ import {
 import type { ProfileStore } from '../profiles/profile-store';
 import { createInterruptRegistry } from './interrupt-registry';
 import { readMentionAttachments } from './mentions';
+import { screenshotPathFor } from './screenshots';
 import { buildSessionStatus } from './status';
 import { listWorkspaceFiles } from './workspace-files';
 import { createSessionWithMode } from './worktree-flow';
@@ -28,10 +30,14 @@ export function registerSessionHandlers(options: {
   manager: SessionManager;
   profiles: ProfileStore;
   getWindow: () => BrowserWindow | null;
+  /** 应用数据目录（截图读回的路径约定；工单 11） */
+  dataDir: string;
+  /** 浏览器会话管理器（会话归档时释放其浏览器 context；工单 11） */
+  browserManager?: BrowserSessionManager;
   /** 托管 Worktree 服务（工单 09）：worktree 模式会话创建与 LRU 清理 */
   worktreeService: WorktreeService;
 }): void {
-  const { manager, profiles, getWindow, worktreeService } = options;
+  const { manager, profiles, getWindow, dataDir, browserManager, worktreeService } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
@@ -201,6 +207,10 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== 'string' || typeof archived !== 'boolean') {
         throw new Error('archive：参数不合法');
       }
+      // 会话结束（归档）：释放其浏览器 context（Cookie 等随之清理；工单 11）
+      if (archived) {
+        void browserManager?.closeSession(sessionId).catch(() => {});
+      }
       const result = manager.setArchived(sessionId, archived);
       // 归档后其托管 Worktree 进入 LRU 清理候选（运行中的永不清理；后台执行不阻塞归档反馈）
       void worktreeService
@@ -209,6 +219,20 @@ export function registerSessionHandlers(options: {
           console.error('[sessions] worktree 清理失败', error);
         });
       return result;
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.toolImage,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, toolCallId: unknown) => {
+      if (typeof sessionId !== 'string' || typeof toolCallId !== 'string') {
+        throw new Error('toolImage：参数不合法');
+      }
+      const path = screenshotPathFor(dataDir, sessionId, toolCallId);
+      if (!existsSync(path)) {
+        return null;
+      }
+      return `data:image/png;base64,${readFileSync(path).toString('base64')}`;
     },
   );
 

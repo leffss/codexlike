@@ -12,7 +12,7 @@ function makeWorkspace(): string {
 }
 
 function context(workspacePath: string): ToolExecutionContext {
-  return { workspacePath };
+  return { workspacePath, sessionId: 'unit-test-session' };
 }
 
 const tool = createApplyPatchTool();

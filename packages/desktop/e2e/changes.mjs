@@ -25,6 +25,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
 }
@@ -253,7 +268,7 @@ async function main() {
     console.log('[e2e] 一键提交：模型生成 → 可编辑 → 提交 → 面板刷新，git 侧验证通过');
 
     // 6) 非 git 工作区：降级提示、不报错
-    await app.close();
+    await closeApp(app);
     const homeSecond = homeDir; // 复用同一数据目录：Profile 已配置
     const second = await launchAppPlain(homeSecond, plain);
     app = second.app;
@@ -270,13 +285,13 @@ async function main() {
     );
     console.log('[e2e] 非 git 工作区：面板降级提示，不报错');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 改动面板 + git 集成 E2E 通过 ✅');
   } catch (error) {
     console.error('[e2e] 改动面板 E2E 失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

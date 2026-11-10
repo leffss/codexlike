@@ -11,6 +11,8 @@ import {
 
 import {
   composeSystemPrompt,
+  createBrowserSessionManager,
+  createBrowserTools,
   createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
@@ -33,6 +35,7 @@ import {
   type SearchSettingsStore,
 } from './search/search-settings-store';
 import { registerSessionHandlers } from './sessions/session-ipc';
+import { sessionScreenshotDir } from './sessions/screenshots';
 import {
   createSubagentSettingsStore,
   type SubagentSettings,
@@ -235,6 +238,17 @@ void app.whenReady().then(async () => {
   // 内置工具（工单 03 六件 + 工单 10 web_search）：无状态实例，全部会话共享；
   // 工作区经执行上下文逐会话注入。shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
   const shellEnv = process.env['CODEXLIKE_SHELL'];
+  // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
+  // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
+  const browserManager = createBrowserSessionManager({
+    progress: (line) => console.log(`[browser] ${line}`),
+  });
+  const browserTools = createBrowserTools({
+    manager: browserManager,
+    // 截图保存到会话数据目录（约定路径，重启后 UI 仍可读回）
+    screenshotDirFor: (sessionId) => sessionScreenshotDir(dataDir(), sessionId),
+  });
+
   const builtinTools = createBuiltinTools({
     env: process.env,
     shell:
@@ -261,20 +275,29 @@ void app.whenReady().then(async () => {
   });
   await mcpService.startup();
 
+
+  // 会话工具工厂（主会话与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
+  const sessionTools = () => [...mcpService.sessionTools(builtinTools), ...browserTools];
   // AGENTS.md 自动注入（工单 07）：全局 + 项目根 → cwd 逐层发现，
   // 会话创建与恢复时各计算一次系统提示（agent-core 不依赖 fs，发现逻辑注入宿主）
   const systemPromptFor = (record: SessionRecord) =>
     composeSystemPrompt(
       discoverAgentsInstructions({ workspacePath: record.workspacePath }),
     );
+  // 截图附图开关（工单 11）：端点支持图片输入时设 CODEXLIKE_ATTACH_TOOL_IMAGES=1，
+  // 截图以 image_url 附给模型；默认关闭走降级路径（输出文本含文件路径）。
+  const attachToolImages = ['1', 'true'].includes(
+    (process.env['CODEXLIKE_ATTACH_TOOL_IMAGES'] ?? '').toLowerCase(),
+  );
   const manager = createSessionManager({
     persistence,
-    tools: () => mcpService.sessionTools(builtinTools),
+    tools: sessionTools,
     systemPromptFor,
+    attachToolImages,
     subagents: {
-      // 子代理工具集 = 完整会话工具（内置 + 启用的 MCP 工具，与主会话同一工厂逐次解析；
+      // 子代理工具集 = 完整会话工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
-      tools: () => mcpService.sessionTools(builtinTools),
+      tools: sessionTools,
       settings: () => subagentSettings,
       // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前会话所选）
       resolveProfile: async () => {
@@ -328,6 +351,8 @@ void app.whenReady().then(async () => {
     manager,
     profiles: store,
     getWindow: () => mainWindow,
+    dataDir: dataDir(),
+    browserManager,
     worktreeService,
   });
   // 改动面板 + git 集成（工单 05）
@@ -340,9 +365,12 @@ void app.whenReady().then(async () => {
     app.quit();
   });
 
-  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）并断开 MCP 子进程
+  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）、
+  // 断开 MCP 子进程与浏览器收尾（尽力而为，不阻塞退出流程：
+  // preventDefault + 二次 quit 在 Electron 45 上会让进程挂起不退）
   app.on('will-quit', () => {
     persistence.close();
     void mcpService.shutdown();
+    void browserManager.close().catch(() => {});
   });
 });

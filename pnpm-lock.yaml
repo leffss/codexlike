@@ -26,6 +26,9 @@ importers:
       ai:
         specifier: ^7.0.0
         version: 7.0.166(zod@4.6.7)
+      playwright-core:
+        specifier: ^1.65.0
+        version: 1.65.0
       simple-git:
         specifier: ^4.0.2
         version: 4.0.2(supports-color@10.2.2)

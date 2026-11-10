@@ -28,6 +28,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -216,7 +231,7 @@ async function main() {
     console.log('[e2e] 报告回流主会话上下文（第二轮请求体验证）');
 
     // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）
-    await app.close();
+    await closeApp(app);
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp(homeDir);
     app = relaunchedApp;
     await relaunchedWindow
@@ -226,13 +241,13 @@ async function main() {
     assert(restoredReport?.includes(REPORT_MARKER) === true, `重启后嵌套卡片报告缺失：${restoredReport}`);
     console.log('[e2e] 重启后嵌套卡片恢复（持久化验证）');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 工单 13 子代理冒烟通过 ✅');
   } catch (error) {
     console.error('[e2e] 子代理冒烟失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

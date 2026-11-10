@@ -37,6 +37,8 @@ export interface CreateSessionManagerOptions {
    * create 与 get 恢复时各调用一次。
    */
   systemPromptFor?: (record: SessionRecord) => string;
+  /** 工具截图是否作为图片附给模型（默认 true；纯文本端点在装配层关掉走降级路径） */
+  attachToolImages?: boolean;
   now?: () => string;
   generateId?: () => string;
 }
@@ -115,6 +117,7 @@ export function createSessionManager(
       tools: options.tools,
       subagents: options.subagents,
       systemPrompt: systemPromptFor?.(record) ?? '',
+      attachToolImages: options.attachToolImages,
       languageModelFor,
       approvalMode: record.approvalMode,
       approvalMemory: persistence.listApprovals(record.id),

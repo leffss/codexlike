@@ -259,6 +259,8 @@ export function createSubagentOrchestrator(
     }
     return runTool(definition, input, {
       workspacePath: port.workspacePath,
+      // 工单 11：子代理与主会话共享同一会话级浏览器 context/Cookie
+      sessionId: port.sessionId,
       signal,
     });
   }

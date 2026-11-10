@@ -23,6 +23,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 /** 本地 OpenAI 兼容 mock：记录请求体（断言 AGENTS.md / @引用 内容真实进入模型请求） */
 function startMockProvider() {
   const seenBodies = [];
@@ -216,13 +231,13 @@ async function main() {
     );
     console.log('[e2e] /archive 与恢复：归档不在侧栏显示，可展开恢复');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 工单 07 命令冒烟通过 ✅');
   } catch (error) {
     console.error('[e2e] 冒烟失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

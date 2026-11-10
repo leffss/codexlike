@@ -33,6 +33,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
 }
@@ -197,7 +212,7 @@ async function main() {
     console.log('[e2e] 会话改动发生在副本内，主仓库不受影响');
 
     // 4) 重启恢复：会话仍指向原副本，续跑改动仍在副本内
-    await app.close();
+    await closeApp(app);
     const second = await launchApp(homeDir, repo);
     app = second.app;
     window = second.window;
@@ -215,7 +230,7 @@ async function main() {
     console.log('[e2e] 重启恢复后仍指向原 worktree，续跑改动仍在副本内');
 
     // 5) 非 git 目录选 worktree：中文报错、会话不创建；改选本目录直跑可成功
-    await app.close();
+    await closeApp(app);
     const third = await launchApp(homeDir, plain);
     app = third.app;
     window = third.window;
@@ -243,13 +258,13 @@ async function main() {
     );
     console.log('[e2e] 报错后改选本目录直跑创建成功（对话框可恢复）');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 托管 Worktree E2E 通过 ✅');
   } catch (error) {
     console.error('[e2e] 托管 Worktree E2E 失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

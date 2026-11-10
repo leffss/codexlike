@@ -30,6 +30,8 @@ export interface UiMessage {
 export interface UiToolCall {
   kind: 'tool-call';
   id: string;
+  /** 所属会话（截图卡片按会话+调用 id 向主进程请求图片数据） */
+  sessionId: string;
   toolName: string;
   /** 参数 JSON 字符串（展示时解析） */
   arguments: string;
@@ -104,6 +106,7 @@ export function initialTranscript(items: TranscriptItem[]): UiItem[] {
         : {
             kind: 'tool-call',
             id: item.call.id,
+            sessionId: item.call.sessionId,
             toolName: item.call.toolName,
             arguments: item.call.arguments,
             output: item.call.output,
@@ -206,6 +209,7 @@ export function applySessionEvent(
         {
           kind: 'tool-call',
           id: event.call.id,
+          sessionId: event.call.sessionId,
           toolName: event.call.toolName,
           arguments: event.call.arguments,
           output: '',
@@ -275,6 +279,7 @@ export function applySessionEvent(
               {
                 kind: 'tool-call' as const,
                 id: event.call.id,
+                sessionId: event.call.sessionId,
                 toolName: event.call.toolName,
                 arguments: event.call.arguments,
                 output: '',

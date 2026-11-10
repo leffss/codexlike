@@ -12,7 +12,7 @@ function makeWorkspace(): string {
 }
 
 function context(workspacePath: string): ToolExecutionContext {
-  return { workspacePath };
+  return { workspacePath, sessionId: 'unit-test-session' };
 }
 
 /** 与生产宿主同构：传完整 process.env，工具层做白名单过滤 */
@@ -179,7 +179,7 @@ describe('run_terminal_command 工具（默认 Git Bash）', () => {
       const startedAt = Date.now();
       const pending = tool.execute(
         { command: 'echo started; sleep 30', timeoutMs: 120_000 },
-        { workspacePath: workspace, signal: controller.signal },
+        { workspacePath: workspace, sessionId: 'terminal-test', signal: controller.signal },
       );
       // 等 'started' 真正产出后再中断（轮询工作区内产物不可行，改为等一小段固定时间）
       await new Promise((resolve) => setTimeout(resolve, 700));

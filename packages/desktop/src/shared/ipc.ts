@@ -63,6 +63,8 @@ export const IPC = {
     compact: 'sessions:compact',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
+    /** 工具截图数据（dataURL）；文件不存在（如已清理）返回 null */
+    toolImage: 'sessions:tool-image',
     /** 审批模式切换（三档）：落库并对下一次工具调用立即生效 */
     setApprovalMode: 'sessions:set-approval-mode',
     /** 审批响应（审批卡片三键）：唤醒等待中的工具循环 */
@@ -173,6 +175,11 @@ export interface CodexLikeApi {
     ): Promise<{ compactedMessages: number }>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
+    /**
+     * 工具调用截图（browser_screenshot）的图片数据：`data:image/png;base64,…`。
+     * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
+     */
+    toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
     /** 切换审批模式（readonly / suggest / full），对下一次工具调用立即生效；会话不存在返回 null */
     setApprovalMode(
       sessionId: string,

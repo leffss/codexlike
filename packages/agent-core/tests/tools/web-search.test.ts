@@ -122,7 +122,7 @@ describe('TavilySearchSource', () => {
 });
 
 describe('web_search 工具', () => {
-  const context = { workspacePath: 'C:/ws' };
+  const context = { workspacePath: 'C:/ws', sessionId: 'web-search-test' };
 
   /** 固定结果的假搜索源（记录收到的 query/maxResults） */
   function fakeSource(results: SearchResult[] | Error) {

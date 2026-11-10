@@ -90,6 +90,7 @@ describe('McpManager 工具发现（连接 stdio server → listTools）', () =>
     const workspace = mkdtempSync(join(tmpdir(), 'codexlike-mcp-'));
     const result = await runTool(echo!, { text: '你好 MCP' }, {
       workspacePath: workspace,
+      sessionId: 'mcp-test',
     });
     expect(result).toEqual({ output: 'echo: 你好 MCP', isError: false });
   });
@@ -148,7 +149,7 @@ describe('McpManager 韧性：崩溃/超时/启动失败不拖垮调用方', () 
     await manager.connect('srv-1');
 
     const crash = manager.tools().find((tool) => tool.name === 'mcp_fake_crash')!;
-    const crashed = await runTool(crash, {}, { workspacePath: tmpdir() });
+    const crashed = await runTool(crash, {}, { workspacePath: tmpdir(), sessionId: 'mcp-test' });
     expect(crashed.isError).toBe(true);
     expect(crashed.output).toContain('mcp_fake_crash');
     expect(crashed.output).toMatch(/失败|退出|断开/);
@@ -163,6 +164,7 @@ describe('McpManager 韧性：崩溃/超时/启动失败不拖垮调用方', () 
     expect(echo).toBeDefined();
     const recovered = await runTool(echo!, { text: '重连成功' }, {
       workspacePath: tmpdir(),
+      sessionId: 'mcp-test',
     });
     expect(recovered).toEqual({ output: 'echo: 重连成功', isError: false });
   });
@@ -180,7 +182,7 @@ describe('McpManager 韧性：崩溃/超时/启动失败不拖垮调用方', () 
     const result = await runTool(
       slow,
       { text: '慢', delayMs: 10_000 },
-      { workspacePath: tmpdir() },
+      { workspacePath: tmpdir(), sessionId: 'mcp-test' },
     );
     expect(result.isError).toBe(true);
     expect(result.output).toContain('超时');

@@ -70,6 +70,23 @@ export type {
   AgentsMdSection,
   DiscoverAgentsInstructionsOptions,
 } from './context/agents-md';
+// 浏览器工具组（工单 11）：Playwright headless Chromium，会话级复用（依赖 playwright-core，仅 Node 宿主）
+export { createBrowserSessionManager } from './browser/manager';
+export type {
+  BrowserSessionManager,
+  BrowserSessionManagerOptions,
+} from './browser/manager';
+export { createBrowserTools, BROWSER_READ_MAX_CHARS } from './browser/tools';
+export type { BrowserToolsOptions } from './browser/tools';
+export {
+  createCliChromiumInstaller,
+  DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+  ensureChromiumReady,
+} from './browser/chromium';
+export type {
+  ChromiumInstaller,
+  CliChromiumInstallerOptions,
+} from './browser/chromium';
 // git 服务（simple-git，改动面板的数据源；工单 05）
 export { createGitService } from './git/git-service';
 // 托管 Worktree 管理（worktree 模式会话的隔离副本；工单 09）

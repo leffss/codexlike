@@ -124,7 +124,7 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
 
   it('审批：approval-request 追加等待中的审批卡片，approval-resolved 更新为结果态', () => {
     let state: UiItem[] = [
-      { kind: 'tool-call', id: 'c1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
+      { kind: 'tool-call', id: 'c1', sessionId: 's1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
     ];
     state = applySessionEvent(state, {
       type: 'approval-request',
@@ -138,7 +138,7 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
       },
     });
     expect(state).toEqual([
-      { kind: 'tool-call', id: 'c1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
+      { kind: 'tool-call', id: 'c1', sessionId: 's1', toolName: 'run_terminal_command', arguments: '{"command":"git status"}', output: '', isError: false, running: true },
       { kind: 'approval', id: 'c1', toolName: 'run_terminal_command', command: 'git status', commandWord: 'git', decision: null },
     ]);
 
