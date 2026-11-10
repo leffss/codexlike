@@ -10,3 +10,13 @@ export { validateProviderProfile } from './provider/provider-profile';
 
 export type { CreateLanguageModelOptions } from './provider/language-model';
 export { createLanguageModelFromProfile } from './provider/language-model';
+
+export type {
+  MessageRole,
+  SessionEvent,
+  SessionRecord,
+  SessionStatus,
+  StoredMessage,
+} from './session/types';
+export type { SessionPersistence } from './session/persistence';
+export { createSqliteSessionStore } from './session/persistence';
