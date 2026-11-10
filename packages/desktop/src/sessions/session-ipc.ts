@@ -12,6 +12,7 @@ import {
   type ProviderProfile,
   type SessionManager,
   type SessionRecord,
+  type WorktreeService,
 } from '@codexlike/agent-core/node';
 
 import type { ProfileStore } from '../profiles/profile-store';
@@ -19,6 +20,7 @@ import { createInterruptRegistry } from './interrupt-registry';
 import { readMentionAttachments } from './mentions';
 import { buildSessionStatus } from './status';
 import { listWorkspaceFiles } from './workspace-files';
+import { createSessionWithMode } from './worktree-flow';
 import { IPC, type SessionEventEnvelope } from '../shared/ipc';
 
 /** 注册会话相关 IPC 指令；事件流经 IPC.sessionEvents 推送给主窗口 */
@@ -26,8 +28,10 @@ export function registerSessionHandlers(options: {
   manager: SessionManager;
   profiles: ProfileStore;
   getWindow: () => BrowserWindow | null;
+  /** 托管 Worktree 服务（工单 09）：worktree 模式会话创建与 LRU 清理 */
+  worktreeService: WorktreeService;
 }): void {
-  const { manager, profiles, getWindow } = options;
+  const { manager, profiles, getWindow, worktreeService } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
@@ -41,23 +45,39 @@ export function registerSessionHandlers(options: {
 
   ipcMain.handle(IPC.sessions.list, () => manager.list());
 
-  ipcMain.handle(IPC.sessions.create, (_e: IpcMainInvokeEvent, workspacePath: unknown) => {
-    if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
-      throw new Error('新建会话需要选择一个工作区目录');
-    }
-    // IPC 边界不信任渲染进程：目录必须真实存在
-    let isDirectory = false;
-    try {
-      isDirectory = statSync(workspacePath).isDirectory();
-    } catch {
-      isDirectory = false;
-    }
-    if (!isDirectory) {
-      throw new Error(`工作区目录不存在：${workspacePath}`);
-    }
-    // 返回可结构化克隆的记录快照（AgentSession 含闭包，不可跨 IPC）
-    return manager.create({ workspacePath }).record;
-  });
+  ipcMain.handle(
+    IPC.sessions.create,
+    (_e: IpcMainInvokeEvent, workspacePath: unknown, workspaceMode: unknown) => {
+      if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
+        throw new Error('新建会话需要选择一个工作区目录');
+      }
+      // IPC 边界不信任渲染进程：目录必须真实存在
+      let isDirectory = false;
+      try {
+        isDirectory = statSync(workspacePath).isDirectory();
+      } catch {
+        isDirectory = false;
+      }
+      if (!isDirectory) {
+        throw new Error(`工作区目录不存在：${workspacePath}`);
+      }
+      // 运行位置枚举校验（默认本目录直跑）；worktree 失败以中文异常抛回且会话不落库
+      if (
+        workspaceMode !== undefined &&
+        workspaceMode !== 'local' &&
+        workspaceMode !== 'worktree'
+      ) {
+        throw new Error('新建会话：运行位置必须是 local / worktree');
+      }
+      // 返回可结构化克隆的记录快照（AgentSession 含闭包，不可跨 IPC）
+      return createSessionWithMode({
+        manager,
+        worktreeService,
+        workspacePath,
+        workspaceMode: workspaceMode ?? 'local',
+      });
+    },
+  );
 
   ipcMain.handle(IPC.sessions.selectWorkspace, async () => {
     // E2E 钩子：Playwright 无法操作原生目录对话框，自动化环境固定返回该目录
@@ -181,7 +201,14 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== 'string' || typeof archived !== 'boolean') {
         throw new Error('archive：参数不合法');
       }
-      return manager.setArchived(sessionId, archived);
+      const result = manager.setArchived(sessionId, archived);
+      // 归档后其托管 Worktree 进入 LRU 清理候选（运行中的永不清理；后台执行不阻塞归档反馈）
+      void worktreeService
+        .cleanup({ sessions: manager.list() })
+        .catch((error: unknown) => {
+          console.error('[sessions] worktree 清理失败', error);
+        });
+      return result;
     },
   );
 
