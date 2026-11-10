@@ -90,3 +90,63 @@ export function resolveComposerSubmission(
   }
   return { kind: 'message', text: raw, mentionPaths: extractMentionPaths(raw) };
 }
+
+/** 输入中（光标）解析结果：驱动 `/` 命令菜单与 `@引用` 文件菜单的弹出 */
+export type ComposerDraftMenu =
+  | { menu: 'slash-commands'; query: string }
+  /** mentionStart = @ 字符在原文中的位置（菜单选中后据此替换 token） */
+  | { menu: 'mentions'; query: string; mentionStart: number }
+  | { menu: null };
+
+/**
+ * 光标处的草稿解析（输入中）：
+ * - 首个非空白字符是 `/` 且无换行 → 命令菜单（query 为命令 token）；
+ *   已知命令已完整并跟空白（正在输参数）时不再弹出；
+ * - 光标位于 @token 内（@ 与光标间无空白/终止标点，@ 前是行首或空白）
+ *   → 引用菜单（query 为 @ 到光标的文本）。
+ */
+export function parseComposerDraft(
+  text: string,
+  options?: { caretIndex?: number },
+): ComposerDraftMenu {
+  const caret = options?.caretIndex ?? text.length;
+
+  // 命令草稿：单行、行首 /
+  if (!text.includes('\n')) {
+    const slashIndex = text.indexOf('/');
+    const head = text.slice(0, slashIndex);
+    if (slashIndex !== -1 && head.trim() === '') {
+      let tokenEnd = slashIndex + 1;
+      while (tokenEnd < text.length && !/\s/.test(text[tokenEnd]!)) {
+        tokenEnd += 1;
+      }
+      const token = text.slice(slashIndex + 1, tokenEnd);
+      const known = SLASH_COMMANDS.find(
+        (command) => command.name === token.toLowerCase(),
+      );
+      // 命令名仍在输入中（或未知 token 交给菜单层过滤），且光标在 token 内
+      const typingToken = tokenEnd >= text.length || known === undefined;
+      if (
+        typingToken &&
+        caret >= slashIndex + 1 &&
+        caret <= tokenEnd
+      ) {
+        return {
+          menu: 'slash-commands',
+          query: token.slice(0, caret - (slashIndex + 1)),
+        };
+      }
+      return { menu: null };
+    }
+  }
+
+  // 引用草稿：光标向前扫描到最近的 @（不得隔着空白/终止标点）
+  let scan = caret - 1;
+  while (scan >= 0 && text[scan] !== '@' && !MENTION_TERMINATORS.has(text[scan]!)) {
+    scan -= 1;
+  }
+  if (scan >= 0 && text[scan] === '@' && isMentionStart(text, scan)) {
+    return { menu: 'mentions', query: text.slice(scan + 1, caret), mentionStart: scan };
+  }
+  return { menu: null };
+}

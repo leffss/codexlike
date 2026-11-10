@@ -28,10 +28,14 @@ export type {
 // 输入框解析层（纯函数，浏览器安全；ui 的命令菜单与发送分发直接值导入）
 export {
   extractMentionPaths,
+  parseComposerDraft,
   resolveComposerSubmission,
   SLASH_COMMANDS,
 } from './composer/parse';
-export type { ComposerSubmission } from './composer/parse';
+export type {
+  ComposerDraftMenu,
+  ComposerSubmission,
+} from './composer/parse';
 export type {
   SlashCommandDef,
   SlashCommandName,
