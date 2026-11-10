@@ -44,6 +44,17 @@ const api: CodexLikeApi = {
       ipcRenderer.removeListener(IPC.sessionEvents, handler);
     };
   },
+  git: {
+    status: (sessionId) => ipcRenderer.invoke(IPC.git.status, sessionId),
+    diff: (sessionId, path, oldPath) =>
+      ipcRenderer.invoke(IPC.git.diff, sessionId, path, oldPath),
+    createBranch: (sessionId) =>
+      ipcRenderer.invoke(IPC.git.createBranch, sessionId),
+    generateCommitMessage: (sessionId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.git.commitMessage, sessionId, providerProfileId),
+    commit: (sessionId, message) =>
+      ipcRenderer.invoke(IPC.git.commit, sessionId, message),
+  },
 };
 
 contextBridge.exposeInMainWorld('codexlike', api);
