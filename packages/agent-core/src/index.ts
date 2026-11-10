@@ -24,3 +24,13 @@ export type {
   SessionStatus,
   StoredMessage,
 } from './session/types';
+
+// 工具域类型（GLOSSARY「工具注册表」）：type-only，工具实现（Node 专属）在 ./node 出口
+export type {
+  ToolCallRecord,
+  ToolDefinition,
+  ToolExecutionContext,
+  ToolParametersSchema,
+  ToolPermission,
+  ToolResult,
+} from './tools/types';

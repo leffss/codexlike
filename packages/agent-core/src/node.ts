@@ -16,3 +16,17 @@ export type {
   SessionManager,
 } from './session/manager';
 export { createSessionManager } from './session/manager';
+
+// 工具域：注册表与六件内置工具（依赖 node:fs / node:child_process，仅 Node 宿主可用）
+export { createToolRegistry, runTool } from './tools/registry';
+export type { ToolRegistry } from './tools/registry';
+export { createBuiltinTools } from './tools/builtin';
+export type { BuiltinToolsOptions } from './tools/builtin';
+export { createReadFileTool } from './tools/read-file';
+export { createWriteFileTool } from './tools/write-file';
+export { createApplyPatchTool } from './tools/apply-patch';
+export { createGlobTool } from './tools/glob';
+export { createGrepTool } from './tools/grep';
+export { createTerminalTool } from './tools/terminal';
+export type { TerminalShell, TerminalToolOptions } from './tools/terminal';
+export { resolveInWorkspace } from './tools/workspace';
