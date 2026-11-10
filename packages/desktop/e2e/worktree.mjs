@@ -155,7 +155,8 @@ async function main() {
     await window.getByLabel('名称').fill('Mock');
     await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
     await window.getByLabel('API Key').fill('sk-e2e');
-    await window.getByLabel('模型').fill('mock-model');
+    // 设置页有子代理模型选择器（工单 13）也带「模型」label，限定在 Profile 表单内
+    await window.locator('form').getByLabel('模型').fill('mock-model');
     await window
       .locator('form')
       .getByRole('button', { name: /保存|创建/ })

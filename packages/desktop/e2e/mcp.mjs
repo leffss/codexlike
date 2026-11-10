@@ -177,6 +177,8 @@ async function main() {
     // 2) 建会话（默认 suggest）→ 模型调用 mcp_fake_echo → 审批卡片
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框（工单 09）：确认默认本目录直跑
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
 
     await window.getByTestId('composer-input').fill('调用 MCP echo 工具');

@@ -168,6 +168,8 @@ async function main() {
     // 3) 建会话 + 委派调研
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框（工单 09）：确认默认本目录直跑
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
     const composer = window.getByTestId('composer-input');
     await composer.fill('委派调研一下测试入口');
