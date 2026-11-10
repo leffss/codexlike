@@ -39,6 +39,11 @@ export interface StoredMessage {
   createdAt: string;
 }
 
+/** 会话时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
+export type TranscriptItem =
+  | { kind: 'message'; message: StoredMessage }
+  | { kind: 'tool-call'; call: ToolCallRecord };
+
 /**
  * 会话事件流：agent-core 聚合的流式事件，desktop 主进程按会话 ID 多路复用转发给渲染进程。
  * 一次 sendMessage 的事件序列（正常路径）：
