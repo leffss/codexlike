@@ -42,6 +42,8 @@ export const IPC = {
     archive: 'sessions:archive',
     /** /status：上下文用量估算 + 模型 + 预留审批模式字段 */
     status: 'sessions:status',
+    /** /compact：手动压缩历史为摘要（保留最近 3 轮）；成功返回压缩概要 */
+    compact: 'sessions:compact',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
   },
@@ -100,6 +102,14 @@ export interface CodexLikeApi {
     archive(sessionId: string, archived: boolean): Promise<SessionRecord | null>;
     /** /status 数据；会话不存在返回 null */
     status(sessionId: string): Promise<SessionStatusInfo | null>;
+    /**
+     * /compact：用所选 Provider Profile 的模型压缩历史为摘要（保留最近 3 轮）。
+     * 压缩失败（模型错误 / 历史过短 / 会话正忙）以异常抛回，原历史不受损，可重试。
+     */
+    compact(
+      sessionId: string,
+      providerProfileId: string,
+    ): Promise<{ compactedMessages: number }>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
   };
