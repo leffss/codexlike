@@ -145,7 +145,136 @@ export function SettingsPage() {
       </section>
 
       <SearchSettingsSection />
+      <SubagentSettingsSection />
     </div>
+  );
+}
+
+/**
+ * 子代理全局配置区（工单 13，GLOSSARY「子代理」）：
+ * 子代理模型（Provider Profile 引用；默认同主模型）+ 并发上限（默认 3，1-8）。
+ * 保存后对后续会话/下一次委派即时生效（主进程逐次解析内存缓存）。
+ */
+function SubagentSettingsSection() {
+  const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const [providerProfileId, setProviderProfileId] = useState<string>('');
+  const [maxConcurrent, setMaxConcurrent] = useState('3');
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
+
+  async function refresh() {
+    try {
+      const [profileList, settings] = await Promise.all([
+        window.codexlike.providerProfiles.list(),
+        window.codexlike.subagentSettings.get(),
+      ]);
+      setProfiles(profileList);
+      // 空串 = 同主模型（默认）；引用的 Profile 已删除时回落为同主模型
+      const valid =
+        settings.providerProfileId !== null &&
+        profileList.some((p) => p.id === settings.providerProfileId);
+      setProviderProfileId(valid ? settings.providerProfileId! : '');
+      setMaxConcurrent(String(settings.maxConcurrent));
+      setLoaded(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setMessage('');
+    try {
+      const settings = await window.codexlike.subagentSettings.set({
+        providerProfileId: providerProfileId === '' ? null : providerProfileId,
+        maxConcurrent: Number(maxConcurrent),
+      });
+      setMaxConcurrent(String(settings.maxConcurrent));
+      setMessage('子代理设置已保存（对后续会话与下一次委派生效）');
+      setMessageError(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-medium text-slate-200">子代理</h2>
+        <p className="text-xs text-slate-500">
+          spawn_subagent 委派的子代理使用的模型与并发上限。子代理拥有独立上下文与完整工具集
+          （不可再委派子代理）；并发上限外的委派将排队等待。
+        </p>
+      </div>
+
+      {loaded && (
+        <div
+          data-testid="subagent-settings"
+          className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+        >
+          <label className="flex flex-col gap-1 text-sm text-slate-300">
+            子代理模型
+            <select
+              data-testid="subagent-profile-select"
+              className="rounded border border-slate-700 bg-slate-950/70 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-sky-600"
+              value={providerProfileId}
+              onChange={(e) => setProviderProfileId(e.target.value)}
+            >
+              <option value="">同主模型（每次委派沿用当前会话所选模型）</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} · {profile.model}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-slate-300">
+            并发上限（1-8）
+            <input
+              type="number"
+              min={1}
+              max={8}
+              step={1}
+              data-testid="subagent-concurrency-input"
+              className="w-32 rounded border border-slate-700 bg-slate-950/70 px-2 py-1.5 font-mono text-sm text-slate-200 outline-none focus:border-sky-600"
+              value={maxConcurrent}
+              onChange={(e) => setMaxConcurrent(e.target.value)}
+            />
+          </label>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              data-testid="subagent-settings-save"
+              disabled={saving}
+              className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
+              onClick={() => void save()}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+            {message !== '' && (
+              <p
+                data-testid="subagent-settings-message"
+                className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+              >
+                {message}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

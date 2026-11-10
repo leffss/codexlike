@@ -41,10 +41,16 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.respondApproval, sessionId, requestId, decision),
     pendingApproval: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.pendingApproval, sessionId),
+    pendingApprovals: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.pendingApprovals, sessionId),
   },
   searchSettings: {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
+  },
+  subagentSettings: {
+    get: () => ipcRenderer.invoke(IPC.subagentSettings.get),
+    set: (input) => ipcRenderer.invoke(IPC.subagentSettings.set, input),
   },
   onSessionEvent: (listener) => {
     const handler: (

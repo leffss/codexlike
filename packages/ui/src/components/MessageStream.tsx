@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 
 import type { UiItem } from '../lib/session-view';
 import { ApprovalCard } from './ApprovalCard';
+import { SubagentCard } from './SubagentCard';
 import { ToolCallCard } from './ToolCallCard';
 
 /** 中栏上部：消息流。用户消息、助手 markdown 流式回复、工具卡片、审批卡片、错误提示、压缩摘要卡片。 */
@@ -37,6 +38,8 @@ export function MessageStream(props: {
                 approval={item}
                 onRespond={props.onApprovalRespond ?? (() => {})}
               />
+            ) : item.kind === 'subagent' ? (
+              <SubagentCard key={`subagent-${item.id}`} subagent={item} />
             ) : (
               <MessageBubble key={item.id} message={item} />
             ),
@@ -57,7 +60,7 @@ export function MessageStream(props: {
 }
 
 function MessageBubble(props: {
-  message: Exclude<UiItem, { kind: 'tool-call' } | { kind: 'approval' }>;
+  message: Exclude<UiItem, { kind: 'tool-call' } | { kind: 'approval' } | { kind: 'subagent' }>;
 }) {
   const { message } = props;
 

@@ -54,6 +54,9 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
       return `$ ${asString(args['command']) ?? '?'}`;
     case 'web_search':
       return `搜「${asString(args['query']) ?? '?'}」`;
+    case 'spawn_subagent':
+      // 工单 13：嵌套卡片自身展示任务全文，此处给普通工具卡片复用时的简短摘要
+      return `委派：${asString(args['task']) ?? '?'}`;
     default:
       return JSON.stringify(args);
   }
