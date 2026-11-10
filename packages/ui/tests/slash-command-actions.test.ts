@@ -83,7 +83,7 @@ describe('matchProfilesForModelSwitch（/model 关键词匹配）', () => {
 });
 
 describe('formatSessionStatus（/status 展示文案）', () => {
-  it('包含模型、用量估算、消息数、AGENTS.md 来源与预留审批模式字段', () => {
+  it('包含模型、用量估算、消息数、AGENTS.md 来源与审批模式（中文档位说明）', () => {
     const text = formatSessionStatus({
       model: 'glm-4.7',
       providerProfileName: 'GLM',
@@ -93,7 +93,7 @@ describe('formatSessionStatus（/status 展示文案）', () => {
         sources: ['C:\\Users\\u\\.codexlike\\AGENTS.md', 'C:\\work\\demo\\AGENTS.md'],
         truncated: false,
       },
-      approvalMode: null,
+      approvalMode: 'suggest',
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).toContain('模型：GLM · glm-4.7');
@@ -101,7 +101,25 @@ describe('formatSessionStatus（/status 展示文案）', () => {
     expect(text).toContain('12');
     expect(text).toContain('AGENTS.md');
     expect(text).toContain('2 个来源');
-    expect(text).toContain('审批模式');
+    expect(text).toContain('审批模式：协作（suggest）：文件编辑自动应用，终端命令逐条审批');
+  });
+
+  it('readonly / full 档位的中文说明', () => {
+    for (const [mode, expected] of [
+      ['readonly', '只读（readonly）：禁止一切写入与终端命令'],
+      ['full', '自主（full）：全自动执行'],
+    ] as const) {
+      const text = formatSessionStatus({
+        model: null,
+        providerProfileName: null,
+        estimatedContextTokens: 0,
+        messageCount: 0,
+        agentsMd: null,
+        approvalMode: mode,
+        compacted: null,
+      } satisfies SessionStatusInfo);
+      expect(text).toContain(expected);
+    }
   });
 
   it('未发现 AGENTS.md、未选模型时的降级文案', () => {
@@ -111,7 +129,7 @@ describe('formatSessionStatus（/status 展示文案）', () => {
       estimatedContextTokens: 0,
       messageCount: 0,
       agentsMd: null,
-      approvalMode: null,
+      approvalMode: 'suggest',
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).toContain('未选择');
@@ -137,7 +155,7 @@ describe('/compact（手动压缩）ui 分发', () => {
       estimatedContextTokens: 210,
       messageCount: 7,
       agentsMd: null,
-      approvalMode: null,
+      approvalMode: 'suggest',
       compacted: { at: '2026-11-11T09:00:00.000Z', messagesCompacted: 8 },
     } satisfies SessionStatusInfo);
     expect(text).toContain('已压缩');
@@ -152,7 +170,7 @@ describe('/compact（手动压缩）ui 分发', () => {
       estimatedContextTokens: 0,
       messageCount: 0,
       agentsMd: null,
-      approvalMode: null,
+      approvalMode: 'suggest',
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).not.toContain('已压缩');

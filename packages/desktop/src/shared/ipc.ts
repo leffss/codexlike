@@ -1,4 +1,7 @@
 import type {
+  ApprovalDecision,
+  ApprovalMode,
+  ApprovalRequest,
   ProviderProfile,
   ProviderProfileInput,
   SessionEvent,
@@ -40,12 +43,18 @@ export const IPC = {
     rename: 'sessions:rename',
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
     archive: 'sessions:archive',
-    /** /status：上下文用量估算 + 模型 + 预留审批模式字段 */
+    /** /status：上下文用量估算 + 模型 + 审批模式 */
     status: 'sessions:status',
     /** /compact：手动压缩历史为摘要（保留最近 3 轮）；成功返回压缩概要 */
     compact: 'sessions:compact',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
+    /** 审批模式切换（三档）：落库并对下一次工具调用立即生效 */
+    setApprovalMode: 'sessions:set-approval-mode',
+    /** 审批响应（审批卡片三键）：唤醒等待中的工具循环 */
+    respondApproval: 'sessions:respond-approval',
+    /** 当前等待审批的请求（切回会话时恢复审批卡片）；无等待返回 null */
+    pendingApproval: 'sessions:pending-approval',
   },
   /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
   searchSettings: {
@@ -112,6 +121,22 @@ export interface CodexLikeApi {
     ): Promise<{ compactedMessages: number }>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
+    /** 切换审批模式（readonly / suggest / full），对下一次工具调用立即生效；会话不存在返回 null */
+    setApprovalMode(
+      sessionId: string,
+      mode: ApprovalMode,
+    ): Promise<SessionRecord | null>;
+    /**
+     * 响应等待中的审批（批准 / 拒绝 / 本会话总是允许）；
+     * 没有等待中的请求或 id 不匹配时返回 false。
+     */
+    respondApproval(
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): Promise<boolean>;
+    /** 当前等待审批的请求（UI 切回会话时恢复审批卡片）；无等待或会话不存在返回 null */
+    pendingApproval(sessionId: string): Promise<ApprovalRequest | null>;
   };
   searchSettings: {
     /** 当前搜索源设置（apiKey 已解密，仅存在于渲染进程内存；'' 表示未配置） */

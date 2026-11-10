@@ -35,6 +35,12 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.compact, sessionId, providerProfileId),
     workspaceFiles: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
+    setApprovalMode: (sessionId, mode) =>
+      ipcRenderer.invoke(IPC.sessions.setApprovalMode, sessionId, mode),
+    respondApproval: (sessionId, requestId, decision) =>
+      ipcRenderer.invoke(IPC.sessions.respondApproval, sessionId, requestId, decision),
+    pendingApproval: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.pendingApproval, sessionId),
   },
   searchSettings: {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),

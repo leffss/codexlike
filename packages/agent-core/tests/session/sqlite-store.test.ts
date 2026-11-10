@@ -17,6 +17,7 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     providerProfileId: null,
     model: null,
     status: 'idle',
+    approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
     updatedAt: '2026-11-10T08:00:00.000Z',
@@ -127,6 +128,68 @@ describe('createSqliteSessionStore（SQLite 会话持久化）', () => {
   it('未写入过的会话消息查询返回空数组', () => {
     const store = createSqliteSessionStore(':memory:');
     expect(store.listMessages('nope')).toEqual([]);
+  });
+
+  it('审批模式随会话落库：insert 读回一致，updateSession 补丁生效', () => {
+    const store = createSqliteSessionStore(':memory:');
+    store.insertSession(sessionRecord({ approvalMode: 'readonly' }));
+    expect(store.listSessions()[0]?.approvalMode).toBe('readonly');
+
+    store.updateSession('session-1', { approvalMode: 'full', updatedAt: '2026-11-10T08:30:00.000Z' });
+    expect(store.listSessions()[0]?.approvalMode).toBe('full');
+  });
+
+  it('「总是允许」记忆入库：幂等（同词不重复）、按会话隔离、重开库完整恢复', () => {
+    const dbPath = tempDbPath();
+    const first = createSqliteSessionStore(dbPath);
+    first.insertSession(sessionRecord({ id: 'session-a' }));
+    first.insertSession(sessionRecord({ id: 'session-b', createdAt: '2026-11-10T09:00:00.000Z', updatedAt: '2026-11-10T09:00:00.000Z' }));
+
+    first.insertApproval('session-a', 'git');
+    first.insertApproval('session-a', 'git'); // 幂等：同词重复写入不重复
+    first.insertApproval('session-a', 'pnpm');
+    first.insertApproval('session-b', 'npm');
+
+    expect(first.listApprovals('session-a')).toEqual(['git', 'pnpm']);
+    expect(first.listApprovals('session-b')).toEqual(['npm']);
+    expect(first.listApprovals('nope')).toEqual([]);
+    first.close();
+
+    // 等价应用重启：记忆完整恢复（审批恢复后仍生效的数据来源）
+    const reopened = createSqliteSessionStore(dbPath);
+    expect(reopened.listApprovals('session-a')).toEqual(['git', 'pnpm']);
+    reopened.close();
+  });
+
+  it('旧库迁移：工单 03 时代 schema（无 approval_mode / approvals 表）打开后自动补齐', () => {
+    const dbPath = tempDbPath();
+    // 手工建 03 时代的旧 schema 并写入一行旧会话
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT,
+        model TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sessions VALUES ('legacy-1', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    // 打开旧库：迁移幂等补列（approval_mode 默认 suggest）+ approvals 表可用
+    const store = createSqliteSessionStore(dbPath);
+    const record = store.listSessions()[0]!;
+    expect(record.id).toBe('legacy-1');
+    expect(record.approvalMode).toBe('suggest');
+    store.insertApproval('legacy-1', 'git');
+    expect(store.listApprovals('legacy-1')).toEqual(['git']);
+    store.updateSession('legacy-1', { approvalMode: 'full', updatedAt: '2026-11-02T00:00:00.000Z' });
+    expect(store.listSessions()[0]?.approvalMode).toBe('full');
+    store.close();
   });
 });
 

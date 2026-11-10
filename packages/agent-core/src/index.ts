@@ -29,6 +29,15 @@ export type {
   TranscriptItem,
 } from './session/types';
 
+// 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
+export type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalMode,
+  ApprovalRequest,
+} from './session/approval';
+export { commandFirstWord, decideApproval } from './session/approval';
+
 // 工具域类型（GLOSSARY「工具注册表」）：type-only，工具实现（Node 专属）在 ./node 出口
 export type {
   ToolCallRecord,

@@ -8,6 +8,7 @@ import type { ProviderProfile } from '../provider/provider-profile';
 import type { ToolDefinition } from '../tools/types';
 
 import { createAgentSession, type AgentSession } from './agent-session';
+import type { ApprovalMode } from './approval';
 import type { SessionPersistence } from './persistence';
 import type {
   CompactRecord,
@@ -52,6 +53,8 @@ export interface SessionManager {
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
+  /** 审批模式切换（三档）：落库并对已实例化会话立即生效；不存在返回 null */
+  setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
 }
@@ -73,8 +76,8 @@ export function createSessionManager(
 
   function restore(record: SessionRecord): AgentSession {
     const history = persistence.listMessages(record.id);
-    // 上次退出时若流式中途被杀，库里会残留 streaming；恢复即视为空闲
-    if (record.status === 'streaming') {
+    // 上次退出时若流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；恢复即视为空闲
+    if (record.status === 'streaming' || record.status === 'waiting-approval') {
       const patched: SessionRecord = { ...record, status: 'idle' };
       persistence.updateSession(record.id, { status: 'idle' });
       return createCachedSession(patched, history);
@@ -93,6 +96,8 @@ export function createSessionManager(
       tools: options.tools,
       systemPrompt: systemPromptFor?.(record) ?? '',
       languageModelFor,
+      approvalMode: record.approvalMode,
+      approvalMemory: persistence.listApprovals(record.id),
       now,
       generateId,
     });
@@ -130,6 +135,8 @@ export function createSessionManager(
         providerProfileId: null,
         model: null,
         status: 'idle',
+        // 新建会话默认协作模式（suggest：文件编辑自动应用、命令逐条审批）
+        approvalMode: 'suggest',
         archivedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -189,6 +196,15 @@ export function createSessionManager(
         archivedAt: archived ? now() : null,
         updatedAt: now(),
       });
+    },
+
+    /** 审批模式切换（输入区选择器）：落库 + 对缓存实例立即生效（下一次工具调用） */
+    setApprovalMode(sessionId, mode) {
+      const next = patchRecord(sessionId, { approvalMode: mode, updatedAt: now() });
+      if (next !== null) {
+        cache.get(sessionId)?.setApprovalMode(mode);
+      }
+      return next;
     },
 
     latestCompact(sessionId) {

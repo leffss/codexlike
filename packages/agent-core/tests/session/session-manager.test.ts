@@ -192,4 +192,66 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     expect(manager.get(session.id)).toBe(session);
     persistence.close();
   });
+
+  it('create 默认 suggest 审批模式；setApprovalMode 落库并即时生效于缓存实例', () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+
+    const session = manager.create({ workspacePath: 'C:\work\demo' });
+    expect(session.record.approvalMode).toBe('suggest');
+    expect(manager.list()[0]?.approvalMode).toBe('suggest');
+
+    // 切换：落库 + 缓存实例立即拿到新档位（下一次工具调用生效）
+    const updated = manager.setApprovalMode(session.id, 'readonly');
+    expect(updated?.approvalMode).toBe('readonly');
+    expect(session.record.approvalMode).toBe('readonly');
+    expect(manager.list()[0]?.approvalMode).toBe('readonly');
+
+    // 不存在的会话返回 null
+    expect(manager.setApprovalMode('nope', 'full')).toBeNull();
+    persistence.close();
+  });
+
+  it('setApprovalMode 对未实例化会话只落库：get 恢复时读到新档位与审批记忆', () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+
+    const created = manager.create({ workspacePath: 'C:\work\demo' });
+    // 「总是允许」记忆直接入库（等价上次会话中审批过 echo）
+    persistence.insertApproval(created.id, 'echo');
+
+    // 未 get 实例化前切换模式（IPC 可先于会话打开发生）
+    manager.setApprovalMode(created.id, 'full');
+    const restored = manager.get(created.id)!;
+    expect(restored.record.approvalMode).toBe('full');
+    persistence.close();
+  });
+
+  it('恢复时把异常残留的 waiting-approval 状态重置为 idle（上次退出时等待审批中途被杀）', () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+
+    const created = manager.create({ workspacePath: 'C:\work\demo' });
+    // 模拟应用在等待审批时被杀：库里残留 waiting-approval
+    persistence.updateSession(created.id, { status: 'waiting-approval', updatedAt: '2026-11-11T09:00:00.000Z' });
+
+    // 等价应用重启：全新 manager 读残留记录并重置为 idle 落库
+    const manager2 = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const restored = manager2.get(created.id)!;
+    expect(restored.record.status).toBe('idle');
+    expect(persistence.listSessions().find((r) => r.id === created.id)?.status).toBe('idle');
+    persistence.close();
+  });
 });

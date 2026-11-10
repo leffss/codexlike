@@ -1,4 +1,5 @@
 import type {
+  ApprovalDecision,
   MessageRole,
   SessionEvent,
   StoredMessage,
@@ -38,8 +39,22 @@ export interface UiToolCall {
   running?: boolean;
 }
 
-/** 消息流条目：消息或工具卡片 */
-export type UiItem = UiMessage | UiToolCall;
+/** 消息流里一张审批卡片的 UI 状态（工单 04：批准 / 拒绝 / 本会话总是允许） */
+export interface UiApproval {
+  kind: 'approval';
+  /** 审批 id（即对应 tool call id） */
+  id: string;
+  toolName: string;
+  /** 命令原文 */
+  command: string;
+  /** 命令首词（「本会话总是允许」的记忆键） */
+  commandWord: string;
+  /** null = 等待用户决定；响应后变为对应决定（卡片转结果态） */
+  decision: ApprovalDecision | null;
+}
+
+/** 消息流条目：消息、工具卡片或审批卡片 */
+export type UiItem = UiMessage | UiToolCall | UiApproval;
 
 /** 会话切换 / 应用启动时，把持久化历史映射为消息流初始状态 */
 export function initialMessages(history: StoredMessage[]): UiMessage[] {
@@ -150,6 +165,26 @@ export function applySessionEvent(
               isError: event.call.isError,
               running: false,
             }
+          : item,
+      );
+
+    case 'approval-request':
+      return [
+        ...messages,
+        {
+          kind: 'approval',
+          id: event.request.id,
+          toolName: event.request.toolName,
+          command: event.request.command,
+          commandWord: event.request.commandWord,
+          decision: null,
+        },
+      ];
+
+    case 'approval-resolved':
+      return messages.map((item) =>
+        item.kind === 'approval' && item.id === event.requestId
+          ? { ...item, decision: event.decision }
           : item,
       );
 
