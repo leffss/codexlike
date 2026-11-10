@@ -22,3 +22,117 @@ body {
   background-color: #0f172a;
   color: #e2e8f0;
 }
+
+/* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版） */
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0.5em 0;
+  white-space: pre-wrap;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li {
+  margin: 0.15em 0;
+}
+
+.markdown a {
+  color: #7dd3fc;
+  text-decoration: underline;
+}
+
+.markdown blockquote {
+  margin: 0.5em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid #475569;
+  color: #94a3b8;
+}
+
+.markdown code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.875em;
+}
+
+.markdown :not(pre) > code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background-color: #1e293b;
+  color: #fda4af;
+}
+
+.markdown pre {
+  margin: 0.6em 0;
+  padding: 0.75em 1em;
+  border-radius: 8px;
+  background-color: #0d1117;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  background-color: transparent;
+}
+
+.markdown table {
+  margin: 0.6em 0;
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.3em 0.7em;
+  border: 1px solid #334155;
+}
+
+.markdown th {
+  background-color: #1e293b;
+}
+
+.markdown hr {
+  margin: 0.8em 0;
+  border-color: #334155;
+}
+
+/* 流式回复进行中的光标 */
+.markdown-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background-color: #7dd3fc;
+  animation: markdown-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes markdown-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}

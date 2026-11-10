@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
     }
   },
   "files": [
@@ -24,6 +28,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/provider": "^4.0.37",
     "ai": "^7.0.0"
   },
   "devDependencies": {
