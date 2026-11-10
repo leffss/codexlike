@@ -110,6 +110,8 @@ function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
     }),
   ]);
   return Object.fromEntries(entries);
+}
+
 /**
  * 组装发给模型的用户消息内容：原文 + @引用 文件内容（XML 标签 + 路径标注，
  * 内容含反引号等 markdown 语法也不会破坏结构）。
