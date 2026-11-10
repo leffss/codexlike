@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import type { ToolCallRecord } from '../tools/types';
 import type { SessionRecord, StoredMessage } from './types';
 
 /**
@@ -7,8 +8,7 @@ import type { SessionRecord, StoredMessage } from './types';
  * 以接口注入：生产环境用 SQLite 文件库（`~/.codexlike/`），
  * 测试可换内存库或内存实现（ADR-0002：agent-core 可用 Node 内置 API，不依赖 Electron）。
  *
- * 前瞻：工具调用记录、审批决定、compact 记录在后续工单各自建表，
- * 届时在此接口上扩展方法；sessions / messages 两表的列已按 spec 持久化节预留。
+ * 前瞻：审批决定、compact 记录在后续工单各自建表，届时在此接口上扩展方法。
  */
 export interface SessionPersistence {
   insertSession(record: SessionRecord): void;
@@ -22,6 +22,10 @@ export interface SessionPersistence {
   listSessions(): SessionRecord[];
   /** 指定会话的全部消息，按写入顺序；未知会话返回空数组 */
   listMessages(sessionId: string): StoredMessage[];
+  /** 工具调用记录（一次调用完成时写入一条完整记录） */
+  insertToolCall(call: ToolCallRecord): void;
+  /** 指定会话的工具调用记录，按写入顺序 */
+  listToolCalls(sessionId: string): ToolCallRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -46,6 +50,17 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_created
   ON messages(session_id, created_at);
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  arguments TEXT NOT NULL,
+  output TEXT NOT NULL,
+  is_error INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session_created
+  ON tool_calls(session_id, created_at);
 `;
 
 interface SessionRow {
@@ -64,6 +79,16 @@ interface MessageRow {
   session_id: string;
   role: string;
   content: string;
+  created_at: string;
+}
+
+interface ToolCallRow {
+  id: string;
+  session_id: string;
+  tool_name: string;
+  arguments: string;
+  output: string;
+  is_error: number;
   created_at: string;
 }
 
@@ -90,6 +115,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   );
   const listMessagesStmt = db.prepare(
     'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at, rowid',
+  );
+  const insertToolCallStmt = db.prepare(
+    'INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  const listToolCallsStmt = db.prepare(
+    'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at, rowid',
   );
 
   function toRecord(row: SessionRow): SessionRecord {
@@ -159,6 +190,32 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           sessionId: row.session_id,
           role: row.role as StoredMessage['role'],
           content: row.content,
+          createdAt: row.created_at,
+        }),
+      );
+    },
+
+    insertToolCall(call) {
+      insertToolCallStmt.run(
+        call.id,
+        call.sessionId,
+        call.toolName,
+        call.arguments,
+        call.output,
+        call.isError ? 1 : 0,
+        call.createdAt,
+      );
+    },
+
+    listToolCalls(sessionId) {
+      return (listToolCallsStmt.all(sessionId) as unknown as ToolCallRow[]).map(
+        (row) => ({
+          id: row.id,
+          sessionId: row.session_id,
+          toolName: row.tool_name,
+          arguments: row.arguments,
+          output: row.output,
+          isError: row.is_error === 1,
           createdAt: row.created_at,
         }),
       );

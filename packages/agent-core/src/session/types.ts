@@ -1,8 +1,9 @@
 /**
- * 会话域类型（见 GLOSSARY.md「会话」「工作区」）。
+ * 会话域类型（见 GLOSSARY.md「会话」「工作区」「工具注册表」）。
  * 全部可 JSON 序列化：SessionEvent 经 Electron IPC 转发到渲染进程，
- * StoredMessage / SessionRecord 是持久化与 IPC 共用的形状。
+ * StoredMessage / SessionRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
  */
+import type { ToolCallRecord } from '../tools/types';
 
 /** 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中 */
 export type SessionStatus = 'idle' | 'streaming';
@@ -51,4 +52,11 @@ export type SessionEvent =
   /** 用户中断：已生成的部分文本保留为助手消息 */
   | { type: 'assistant-aborted'; message: StoredMessage }
   /** 模型 API 出错：中文提示落为 error 消息，会话可继续使用 */
-  | { type: 'error'; message: StoredMessage };
+  | { type: 'error'; message: StoredMessage }
+  /**
+   * 模型发起了工具调用（执行开始前；output 为空串，UI 卡片显示运行中）。
+   * 审批拦截（工单 04）将发生在本事件与 tool-result 之间。
+   */
+  | { type: 'tool-call'; call: ToolCallRecord }
+  /** 工具执行完成：call.output 已填（截断后）、isError 标记失败；记录同时落库 */
+  | { type: 'tool-result'; call: ToolCallRecord };
