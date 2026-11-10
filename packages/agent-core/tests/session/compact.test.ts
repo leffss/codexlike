@@ -477,8 +477,8 @@ describe('AgentSession.compact（手动压缩）', () => {
       expect(event.type).not.toBe('error');
     }
     const lastCall = model.doStreamCalls.at(-1)!;
-    // 恢复后的上下文 = 摘要 + 3 轮原文 + 新消息（@引用 附加内容与未压缩会话的
-    // 重启行为一致：落库保持用户原文，附加内容只存在于内存上下文）
+    // 恢复后的上下文 = 摘要 + 3 轮原文 + 新消息。工单 06 起 @引用 随消息持久化：
+    // 保留轮次里的第 4 轮恢复后重组附加内容（与压缩后立即发送的内存上下文一致，快照等价）
     expect(textOf(lastCall.prompt[0]!.content)).toContain('<compact-summary>');
     expect(textOf(lastCall.prompt[0]!.content)).toContain(summary);
     expect(lastCall.prompt.slice(1, 7).map((m) => textOf(m.content))).toEqual([
@@ -486,7 +486,7 @@ describe('AgentSession.compact（手动压缩）', () => {
       '第2轮回复',
       '第3轮问题',
       '第3轮回复',
-      '第4轮问题',
+      '第4轮问题\n\n以下为该消息 @引用 的工作区文件内容：\n\n<attached-file path="docs/说明.md">\n被引用的文件内容\n</attached-file>',
       '第4轮回复',
     ]);
     expect(textOf(lastCall.prompt[9]!.content)).toBe('重启后继续');

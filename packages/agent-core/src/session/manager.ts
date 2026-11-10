@@ -20,8 +20,11 @@ import type {
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
-  /** 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin） */
-  tools?: ToolDefinition[];
+  /**
+   * 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
+   * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
+   */
+  tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /**
    * 子代理编排配置（工单 13）：传入即向会话工具表追加 spawn_subagent。
    * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
@@ -59,7 +62,10 @@ export interface SessionManager {
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
-  /** 审批模式切换（三档）：落库并对已实例化会话立即生效；不存在返回 null */
+  /**
+   * 审批模式切换（三档）：落库（随会话记录跨重启恢复）并对已实例化会话立即
+   * 生效（下一次工具调用）；拦截语义由工单 04 的审批状态机实现。不存在返回 null。
+   */
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;

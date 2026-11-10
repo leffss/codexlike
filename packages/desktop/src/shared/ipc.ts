@@ -8,15 +8,24 @@ import type {
   SessionRecord,
   TranscriptItem,
 } from '@codexlike/agent-core';
+import type {
+  GitBranchResult,
+  GitCommitResult,
+  GitFileDiff,
+  GitStatus,
+} from '@codexlike/agent-core';
 
 import type { SessionStatusInfo } from '../sessions/status';
 import type { SearchSettings } from '../search/search-settings-store';
 import type { SubagentSettings } from '../subagents/subagent-settings-store';
+import type { McpServerView } from '../mcp/mcp-service';
+import type { McpServerInput } from '../mcp/mcp-store';
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
+export type { McpServerView, McpServerInput };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -41,6 +50,8 @@ export const IPC = {
     messages: 'sessions:messages',
     /** 发送消息；流式事件经 sessionEvents 推送 */
     send: 'sessions:send',
+    /** 停止按钮：打断指定会话运行中的本轮（流式输出或工具执行）；空闲返回 false */
+    interrupt: 'sessions:interrupt',
     /** /rename 与侧栏重命名共用（同一 IPC 通道） */
     rename: 'sessions:rename',
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
@@ -70,8 +81,29 @@ export const IPC = {
     get: 'subagent-settings:get',
     set: 'subagent-settings:set',
   },
+  /** MCP servers（工单 12）：配置 + 连接状态 + 工具启停 */
+  mcp: {
+    overview: 'mcp:overview',
+    addServer: 'mcp:add-server',
+    removeServer: 'mcp:remove-server',
+    reconnect: 'mcp:reconnect',
+    setToolEnabled: 'mcp:set-tool-enabled',
+  },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
+  /** 改动面板 + git 集成（工单 05）：status/diff/分支/提交消息生成/提交 */
+  git: {
+    /** 工作区 git 状态（非 git 工作区返回 isGitRepo=false，不报错） */
+    status: 'git:status',
+    /** 单文件 diff（新旧两侧全文，Monaco 双栏渲染） */
+    diff: 'git:diff',
+    /** 一键创建 codexlike/<会话名> 分支（分支名由会话名生成） */
+    createBranch: 'git:create-branch',
+    /** 由模型按会话内容生成提交消息草稿（一次不发工具的请求） */
+    commitMessage: 'git:commit-message',
+    /** 提交当前全部变更（消息可编辑后传入） */
+    commit: 'git:commit',
+  },
 } as const;
 
 /** 事件流信封：按会话 ID 多路复用 */
@@ -114,6 +146,12 @@ export interface CodexLikeApi {
       providerProfileId: string,
       mentionPaths?: string[],
     ): Promise<void>;
+    /**
+     * 打断指定会话运行中的本轮（停止按钮）：
+     * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
+     * 会话空闲时幂等返回 false。
+     */
+    interrupt(sessionId: string): Promise<boolean>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
     rename(sessionId: string, title: string): Promise<SessionRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
@@ -164,8 +202,36 @@ export interface CodexLikeApi {
      */
     set(input: SubagentSettings): Promise<SubagentSettings>;
   };
+  mcp: {
+    /** 全部 MCP server：配置 + 连接状态 + 发现到的工具（含启停） */
+    overview(): Promise<{ servers: McpServerView[] }>;
+    /** 添加 server（保存配置并立即连接）；输入不合法以中文异常抛回 */
+    addServer(input: McpServerInput): Promise<McpServerView>;
+    /** 删除 server（断开连接）；不存在返回 false */
+    removeServer(id: string): Promise<boolean>;
+    /** 手动重连（崩溃/启动失败后的显式重连入口） */
+    reconnect(id: string): Promise<McpServerView>;
+    /** 工具启停：对后续会话消息即时生效 */
+    setToolEnabled(toolName: string, enabled: boolean): Promise<void>;
+  };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(
     listener: (envelope: SessionEventEnvelope) => void,
   ): () => void;
+  /** 改动面板 + git 集成（工单 05） */
+  git: {
+    /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */
+    status(sessionId: string): Promise<GitStatus>;
+    /** 单文件改动（新旧两侧全文）；oldPath 为重命名场景的原路径 */
+    diff(sessionId: string, path: string, oldPath?: string): Promise<GitFileDiff>;
+    /** 创建（或切换到已存在的）codexlike/<会话名> 分支 */
+    createBranch(sessionId: string): Promise<GitBranchResult>;
+    /** 模型按会话内容生成提交消息草稿（可编辑后提交）；失败抛中文异常 */
+    generateCommitMessage(
+      sessionId: string,
+      providerProfileId: string,
+    ): Promise<string>;
+    /** 提交当前全部变更；无变更时 committed=false */
+    commit(sessionId: string, message: string): Promise<GitCommitResult>;
+  };
 }

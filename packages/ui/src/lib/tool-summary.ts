@@ -57,8 +57,15 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
     case 'spawn_subagent':
       // 工单 13：嵌套卡片自身展示任务全文，此处给普通工具卡片复用时的简短摘要
       return `委派：${asString(args['task']) ?? '?'}`;
-    default:
+    default: {
+      // MCP 工具（mcp_<server>_<tool>，工单 12）：参数是任意 JSON Schema，
+      // 有 text/query/command 类字段时优先取值，否则压缩 JSON
+      if (toolName.startsWith('mcp_')) {
+        const notable = asString(args['text']) ?? asString(args['query']) ?? asString(args['command']) ?? asString(args['path']);
+        return notable !== undefined ? `MCP ${toolName}：${notable}` : `MCP ${toolName} ${JSON.stringify(args)}`;
+      }
       return JSON.stringify(args);
+    }
   }
 }
 

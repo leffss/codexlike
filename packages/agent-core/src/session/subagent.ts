@@ -47,10 +47,12 @@ export interface SubagentRuntimeSettings {
 /**
  * 宿主注入的子代理配置（desktop 主进程装配；测试注入 mock 模型）。
  * tools 为子代理可用的工具集——编排器还会再剔除 spawn_subagent 一次（防递归双保险）。
+ * 工厂函数形式与主会话 tools 一致（工单 12）：每次委派时逐次解析，
+ * MCP 工具启停、server 断线/重连对下一个子代理即时生效。
  */
 export interface SubagentsConfig {
-  /** 子代理可用工具（完整工具集，剔除 spawn_subagent 由编排器保证） */
-  tools: ToolDefinition[];
+  /** 子代理可用工具（完整工具集，剔除 spawn_subagent 由编排器保证；支持工厂逐次解析） */
+  tools: ToolDefinition[] | (() => ToolDefinition[]);
   /** Provider Profile → 语言模型 工厂；缺省 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /** 逐次解析的运行时设置（并发上限）；改动对下一次委派生效 */
@@ -153,14 +155,15 @@ export function createSubagentOrchestrator(
   config: SubagentsConfig,
   port: SubagentHostPort,
 ): SubagentOrchestrator {
-  // 子代理工具集：完整工具集但剔除 spawn_subagent（防递归；编排器侧的双保险）
-  const subagentTools = config.tools.filter(
-    (tool) => tool.name !== SUBAGENT_TOOL_NAME,
-  );
-  const toolsByName = new Map(subagentTools.map((tool) => [tool.name, tool]));
+  // 子代理工具集：完整工具集但剔除 spawn_subagent（防递归；编排器侧的双保险）。
+  // 逐次解析（工单 12 的工厂语义）：每次委派时重新取用，MCP 启停即时生效
+  function resolveSubagentTools(): ToolDefinition[] {
+    const resolved =
+      typeof config.tools === 'function' ? config.tools() : config.tools;
+    return resolved.filter((tool) => tool.name !== SUBAGENT_TOOL_NAME);
+  }
+
   const modelFor = config.languageModelFor ?? createLanguageModelFromProfile;
-  const modelTools =
-    subagentTools.length > 0 ? toModelTools(subagentTools) : undefined;
 
   // 事件缓冲 + 唤醒（pump 的实时转发机制）
   const buffer: SessionEvent[] = [];
@@ -276,6 +279,10 @@ export function createSubagentOrchestrator(
         throw new Error('未解析到子代理模型（Provider Profile）');
       }
       const messages: ModelMessage[] = [{ role: 'user', content: entry.task }];
+      const subagentTools = resolveSubagentTools();
+      const toolsByName = new Map(subagentTools.map((tool) => [tool.name, tool]));
+      const modelTools =
+        subagentTools.length > 0 ? toModelTools(subagentTools) : undefined;
       let round = 0;
 
       let settled = false;

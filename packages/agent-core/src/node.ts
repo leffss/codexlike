@@ -52,6 +52,13 @@ export type {
   WebSearchToolOptions,
 } from './tools/web-search';
 export { resolveInWorkspace } from './tools/workspace';
+// MCP 客户端（工单 12，stdio）：连接管理 + 工具发现 + ToolDefinition 适配
+export {
+  createMcpManager,
+  MCP_DEFAULT_CALL_TIMEOUT_MS,
+  MCP_DEFAULT_CONNECT_TIMEOUT_MS,
+} from './mcp/manager';
+export type { McpManager, McpManagerOptions } from './mcp/manager';
 // AGENTS.md 发现（依赖 node:fs / git 探测，Node 宿主专用）
 export {
   AGENTS_MD_MAX_BYTES,
@@ -63,3 +70,7 @@ export type {
   AgentsMdSection,
   DiscoverAgentsInstructionsOptions,
 } from './context/agents-md';
+// git 服务（simple-git，改动面板的数据源；工单 05）
+export { createGitService } from './git/git-service';
+// commit 消息生成（一次不发工具的 LLM 请求；mock 依赖注入，可脱离 Electron 测试）
+export { generateCommitMessage } from './git/commit-message';

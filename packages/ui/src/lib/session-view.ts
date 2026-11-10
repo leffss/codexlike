@@ -96,6 +96,8 @@ export function initialTranscript(items: TranscriptItem[]): UiItem[] {
           id: item.message.id,
           role: item.message.role,
           content: item.message.content,
+          // 重启恢复：被中断的助手消息仍显示中断点标记
+          interrupted: item.message.aborted === true || undefined,
         }
       : item.call.toolName === 'spawn_subagent'
         ? subagentFromToolRecord(item.call)

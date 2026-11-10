@@ -182,6 +182,11 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
       const requestedTimeout = optionalNumber(args, 'timeoutMs');
       const timeoutMs = Math.min(requestedTimeout ?? defaultTimeoutMs, maxTimeoutMs);
 
+      // 中断先于 spawn 到达：已 abort 的 signal 不会触发 listener，显式短路
+      if (context.signal?.aborted === true) {
+        return { output: '已被用户中断，未执行', isError: true };
+      }
+
       const cwd = resolveInWorkspace(context.workspacePath, cwdArg ?? '.');
       const plan = buildSpawnPlan(shell, command, cwd, filterEnv(env));
 
@@ -211,7 +216,9 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
         child.stdout?.on('data', (chunk: Buffer) => collect('out', chunk));
         child.stderr?.on('data', (chunk: Buffer) => collect('err', chunk));
 
-        const finish = (outcome: { code: number } | { timedOut: true }) => {
+        const finish = (
+          outcome: { code: number } | { timedOut: true } | { aborted: true },
+        ) => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
@@ -228,6 +235,12 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
           }
           if (truncated) {
             output += `\n[输出已截断：原始输出超过 ${maxOutputLength} 字符，仅显示前面部分]\n`;
+          }
+          if ('aborted' in outcome) {
+            // 用户打断（停止按钮）：子进程树已被终止，标记区别于超时
+            output += `\n[已被用户中断，进程已终止]\n`;
+            resolve({ output, isError: true });
+            return;
           }
           if ('timedOut' in outcome) {
             output += `\n[命令超时（${timeoutMs / 1000} 秒），已强制终止]\n`;
@@ -249,7 +262,7 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
 
         function onAbort() {
           killTree(child);
-          finish({ timedOut: true });
+          finish({ aborted: true });
         }
         context.signal?.addEventListener('abort', onAbort);
 

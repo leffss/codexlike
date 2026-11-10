@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { ProviderProfile } from '@codexlike/agent-core';
 
 import { ProviderProfileForm } from '../components/ProviderProfileForm';
+import { McpSettingsSection } from '../components/McpSettingsSection';
 
 /** 编辑中态：'new' 新建；其余为正在编辑的 Profile id */
 type Editing = 'new' | string | null;
@@ -146,6 +147,8 @@ export function SettingsPage() {
 
       <SearchSettingsSection />
       <SubagentSettingsSection />
+
+      <McpSettingsSection />
     </div>
   );
 }

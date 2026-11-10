@@ -58,9 +58,11 @@ export interface CreateAgentSessionOptions {
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
    * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
+   * 支持工厂函数：每条消息发送时逐次解析——设置页对 MCP 工具的启停、
+   * server 连接状态变化对后续消息即时生效（工单 12），无需重建会话。
    * 工具执行前经审批门（工单 04）：readonly 拒绝、suggest 命令审批、full 全放行。
    */
-  tools?: ToolDefinition[];
+  tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /**
    * 子代理编排配置（工单 13，GLOSSARY「子代理」）：传入即向工具表追加 spawn_subagent。
    * 子代理：独立上下文、完整工具集（剔除 spawn_subagent 防递归）、并发上限（超出的
@@ -119,7 +121,7 @@ export interface AgentSession {
 /** 单次回复允许的工具轮次上限（防模型失控循环） */
 const MAX_TOOL_ROUNDS = 16;
 
-/** 对话上下文只包含 user / assistant 消息；error 提示不进入模型 */
+/** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: message.content };
@@ -128,7 +130,8 @@ function toModelMessage(message: StoredMessage): ModelMessage {
     // 摘要以 user 角色注入；包装标签与 compact 成功后的内存上下文保持一致（重启等价）
     return { role: 'user', content: composeCompactSummaryContext(message.content) };
   }
-  return { role: 'user', content: message.content };
+  // @引用 内容随消息持久化，恢复时重组进上下文（快照等价性：与发送时一致）
+  return { role: 'user', content: composeUserContent(message.content, message.mentions) };
 }
 
 /**
@@ -297,13 +300,12 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
     });
   }
 
-  // 工具表：宿主工具 + spawn_subagent（配置了 subagents 时）
-  const sessionTools: ToolDefinition[] = [...(options.tools ?? [])];
-  if (orchestrator !== null) {
-    sessionTools.push(orchestrator.tool);
+  // 工具表：宿主工具（工单 12 逐条消息解析）+ spawn_subagent（工单 13，见 sendMessage）
+  function resolveSessionTools(): ToolDefinition[] {
+    const resolved =
+      typeof options.tools === 'function' ? options.tools() : (options.tools ?? []);
+    return orchestrator === null ? resolved : [...resolved, orchestrator.tool];
   }
-  const toolsByName = new Map(sessionTools.map((tool) => [tool.name, tool]));
-  const modelTools = toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
 
   let busy = false;
 
@@ -354,10 +356,22 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'user',
           content: text,
+          // @引用 随消息持久化：重启恢复后重组进模型上下文（快照等价性）
+          mentions:
+            mentions !== undefined && mentions.length > 0 ? mentions : undefined,
           createdAt: now(),
         };
         persistence.insertMessage(userMessage);
         yield { type: 'user-message', message: userMessage };
+
+        // 工具逐条消息解析（工单 12）：工厂函数让设置页的 MCP 工具启停、
+        // server 断线/重连对后续消息即时生效；数组形式行为不变。
+        // spawn_subagent（工单 13）随解析一并加入工具表
+        const toolsByName = new Map(
+          resolveSessionTools().map((tool) => [tool.name, tool]),
+        );
+        const modelTools =
+          toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
 
         const assistantMessageId = generateId();
         yield { type: 'assistant-start', messageId: assistantMessageId };
@@ -436,11 +450,19 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               };
               yield { type: 'tool-call', call: base };
 
+              // 中断可能发生在上一个事件产出与本工具执行之间（生成器在 yield 处暂停）：
+              // 已 abort 的 signal 不会再触发 listener，这里显式短路，不再启动执行
               const definition = toolsByName.get(call.toolName);
               let output: string;
               let isError: boolean;
 
-              if (definition === undefined) {
+              if (signal?.aborted === true) {
+                // 中断短路（工单 06）：中断发生在上一个事件产出与本工具执行之间，
+                // 不再启动执行，也不进入审批门（已 abort 的 signal 不会再触发
+                // listener，进审批等待会永久卡死）
+                output = '已被用户中断，未执行';
+                isError = true;
+              } else if (definition === undefined) {
                 output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`;
                 isError = true;
               } else {
@@ -584,6 +606,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
           sessionId: record.id,
           role: 'assistant',
           content: accumulated,
+          // 被用户中断的回复：持久化标记，重启恢复后 UI 仍显示中断点
+          aborted: aborted || undefined,
           createdAt: now(),
         };
         persistence.insertMessage(assistantMessage);
