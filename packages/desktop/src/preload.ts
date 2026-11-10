@@ -18,8 +18,21 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.create, workspacePath),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) => ipcRenderer.invoke(IPC.sessions.messages, sessionId),
-    send: (sessionId, text, providerProfileId) =>
-      ipcRenderer.invoke(IPC.sessions.send, sessionId, text, providerProfileId),
+    send: (sessionId, text, providerProfileId, mentionPaths) =>
+      ipcRenderer.invoke(
+        IPC.sessions.send,
+        sessionId,
+        text,
+        providerProfileId,
+        mentionPaths,
+      ),
+    rename: (sessionId, title) =>
+      ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
+    archive: (sessionId, archived) =>
+      ipcRenderer.invoke(IPC.sessions.archive, sessionId, archived),
+    status: (sessionId) => ipcRenderer.invoke(IPC.sessions.status, sessionId),
+    workspaceFiles: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
   },
   onSessionEvent: (listener) => {
     const handler: (

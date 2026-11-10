@@ -1,9 +1,15 @@
 import type { MessageRole, SessionEvent, StoredMessage } from '@codexlike/agent-core';
 
+/**
+ * 本地状态消息角色（工单 07）：命令反馈与 /status 展示。
+ * 只存在于渲染层（不落库、不进模型上下文、不来自 SessionEvent）。
+ */
+export type LocalMessageRole = 'status';
+
 /** 消息流里一条消息的 UI 状态（含流式/中断标记） */
 export interface UiMessage {
   id: string;
-  role: MessageRole;
+  role: MessageRole | LocalMessageRole;
   content: string;
   /** 助手消息流式进行中 */
   streaming?: boolean;
