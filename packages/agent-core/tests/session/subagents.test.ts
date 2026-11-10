@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV4 } from 'ai/test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ProviderProfile } from '../../src/provider/provider-profile';
 import { createSqliteSessionStore } from '../../src/session/persistence';
@@ -127,6 +127,8 @@ interface SubagentHarnessOptions {
   main: ScriptedStep[];
   /** 子代理模型脚本（每个子代理共用同一 mock 实例，按调用次序消费） */
   sub?: ScriptedStep[];
+  /** 直接注入子代理模型（与 sub 脚本二选一；用于受控挂起等复杂场景） */
+  subModel?: MockLanguageModelV4;
   /** 子代理 Profile 解析（缺省固定返回 sub-profile） */
   resolveProfile?: () => Promise<ProviderProfile | null>;
   /** 并发上限（缺省 3） */
@@ -141,7 +143,9 @@ interface SubagentHarnessOptions {
  */
 function makeSubagentSession(options: SubagentHarnessOptions) {
   const mainModel = scriptedModel(options.main);
-  const subModel = scriptedModel(options.sub ?? [{ kind: 'text', deltas: ['子代理默认报告'] }]);
+  const subModel =
+    options.subModel ??
+    scriptedModel(options.sub ?? [{ kind: 'text', deltas: ['子代理默认报告'] }]);
   const persistence = createSqliteSessionStore(':memory:');
   const record = sessionRecord(options.workspacePath);
   record.approvalMode = options.approvalMode ?? 'suggest';
@@ -262,6 +266,117 @@ describe('子代理（spawn_subagent，GLOSSARY「子代理」）', () => {
       (e): e is Extract<SessionEvent, { type: 'subagent-report' }> => e.type === 'subagent-report',
     );
     expect(reportEvent?.report).toContain('子代理无法再委派');
+    expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it('并发上限 3：第 4 个委派排队（FIFO），有空位后开跑；全部完成后报告各自回流', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+
+    // 受控子模型：每个子代理的 doStream 挂起直至测试放行（gate），
+    // 释放后返回带编号的报告——并发数 = 模型调用数，可精确观察
+    const releases: (() => void)[] = [];
+    let callSeq = 0;
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        const index = callSeq++;
+        const stream = new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            await new Promise<void>((resolve) => {
+              releases[index] = resolve;
+            });
+            controller.enqueue({ type: 'text-start', id: 'text-1' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'text-1',
+              delta: `子代理 ${index} 的调研报告`,
+            });
+            controller.enqueue({ type: 'text-end', id: 'text-1' });
+            controller.enqueue({ type: 'finish', ...finishPart() });
+            controller.close();
+          },
+        });
+        return { stream };
+      },
+    });
+
+    const { session, mainModel } = makeSubagentSession({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: 'tool',
+          calls: [1, 2, 3, 4].map((n) => ({
+            toolCallId: `delegate-${n}`,
+            toolName: 'spawn_subagent',
+            input: { task: `任务 ${n}` },
+          })),
+        },
+        { kind: 'text', deltas: ['四份报告都收到'] },
+      ],
+      subModel,
+    });
+
+    const events: SessionEvent[] = [];
+    const iterator = session.sendMessage({
+      text: '并行调研四件事',
+      profile,
+    })[Symbol.asyncIterator]();
+
+    // 推进到 4 个委派全部派发（第 4 个 queued 事件即证据：前 3 个已 start）
+    async function drainUntil(predicate: (event: SessionEvent) => boolean): Promise<void> {
+      for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+        events.push(head.value);
+        if (predicate(head.value)) {
+          return;
+        }
+      }
+    }
+
+    await drainUntil(
+      (event) =>
+        event.type === 'subagent-queued' &&
+        events.filter((e) => e.type === 'subagent-queued').length === 4,
+    );
+
+    // 前 3 个并发运行（模型调用 = 3），第 4 个排队（无第 4 次模型调用）。
+    // 模型调用发生在 resolveProfile 微任务后，用 waitFor 等其稳定。
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(3));
+    expect(events.filter((e) => e.type === 'subagent-start')).toHaveLength(3);
+    expect(events.filter((e) => e.type === 'subagent-report')).toHaveLength(0);
+
+    // 释放第 0 个子代理：队列中的第 4 个立即占位开跑
+    releases[0]!();
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(4));
+    await drainUntil(
+      (event) =>
+        event.type === 'subagent-start' &&
+        events.filter((e) => e.type === 'subagent-start').length === 4,
+    );
+
+    // 释放剩余全部：4 份报告各自回流为 tool-result，主会话收尾
+    for (let i = 1; i < 4; i += 1) {
+      releases[i]?.();
+    }
+    for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+      events.push(head.value);
+    }
+
+    expect(events.filter((e) => e.type === 'subagent-report')).toHaveLength(4);
+    const delegationResults = events.filter(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> =>
+        e.type === 'tool-result' && e.call.toolName === 'spawn_subagent',
+    );
+    expect(delegationResults).toHaveLength(4);
+    // 各委派的报告与 toolCallId 一一对应（delegate-1..4 按编号回流）
+    for (const result of delegationResults) {
+      const index = Number(result.call.id.slice(-1));
+      expect(result.call.output).toContain(`子代理 ${index - 1} 的调研报告`);
+      expect(result.call.isError).toBe(false);
+    }
+    // 主模型第二轮收到全部 4 份报告
+    const secondPrompt = JSON.stringify(mainModel.doStreamCalls[1]?.prompt);
+    for (let i = 0; i < 4; i += 1) {
+      expect(secondPrompt).toContain(`子代理 ${i} 的调研报告`);
+    }
     expect(events.at(-1)?.type).toBe('assistant-done');
   });
 });
