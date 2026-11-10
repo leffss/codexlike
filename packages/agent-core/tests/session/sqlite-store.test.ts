@@ -191,6 +191,82 @@ describe('createSqliteSessionStore（SQLite 会话持久化）', () => {
     expect(store.listSessions()[0]?.approvalMode).toBe('full');
     store.close();
   });
+
+  it('消息的 @引用 与中断标记原样往返（快照恢复的数据来源）', () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteSessionStore(dbPath);
+    store.insertSession(sessionRecord());
+    store.insertMessage(
+      message({
+        mentions: [{ path: 'material.txt', content: '被引用的文件内容' }],
+      }),
+    );
+    store.insertMessage(
+      message({
+        id: 'message-2',
+        role: 'assistant',
+        content: '部分回复',
+        aborted: true,
+        createdAt: '2026-11-10T08:00:02.000Z',
+      }),
+    );
+    store.close();
+
+    const reopened = createSqliteSessionStore(dbPath);
+    const restored = reopened.listMessages('session-1');
+    expect(restored[0]?.mentions).toEqual([
+      { path: 'material.txt', content: '被引用的文件内容' },
+    ]);
+    expect(restored[0]?.aborted).toBeUndefined();
+    expect(restored[1]?.aborted).toBe(true);
+    expect(restored[1]?.mentions).toBeUndefined();
+    reopened.close();
+  });
+
+  it('工单 03 时代的旧库（messages 无 mentions/aborted 列）打开时幂等迁移，旧数据可读', async () => {
+    const dbPath = tempDbPath();
+    // 手工建工单 03 时代的旧 schema（messages 无 mentions / aborted 列，07 踩坑样例）
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec(`CREATE TABLE sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+      provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`);
+    db.exec(`CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+    db.prepare(
+      'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('session-1', 'demo', 'C:\\work\\demo', null, null, 'idle', null,
+      '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+    db.prepare(
+      'INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('legacy-1', 'session-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
+    db.close();
+
+    const migrated = createSqliteSessionStore(dbPath);
+    const messages = migrated.listMessages('session-1');
+    expect(messages).toEqual([
+      {
+        id: 'legacy-1',
+        sessionId: 'session-1',
+        role: 'user',
+        content: '旧消息',
+        createdAt: '2026-11-10T08:00:01.000Z',
+      },
+    ]);
+    // 迁移后可继续按新 schema 写入
+    migrated.insertMessage(
+      message({ id: 'new-1', createdAt: '2026-11-10T08:00:02.000Z' }),
+    );
+    expect(migrated.listMessages('session-1')).toHaveLength(2);
+    migrated.close();
+  });
 });
 
 describe('SessionPersistence compact 落库（工单 08）', () => {

@@ -191,6 +191,19 @@ export function WorkspacePage(props: {
     }
   }
 
+  /** 停止按钮：打断当前会话运行中的本轮（流式输出中断 / 工具子进程终止）。
+   *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。 */
+  async function stop() {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      await window.codexlike.sessions.interrupt(currentId);
+    } catch (error) {
+      pushLocalStatus(`停止失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
   async function runCommand(name: string, argument: string) {
     const current = sessions.find((session) => session.id === currentId) ?? null;
@@ -415,6 +428,8 @@ export function WorkspacePage(props: {
           onSend={handleSubmit}
           workspaceFiles={workspaceFiles}
           disabled={currentId === null || profiles.length === 0 || streaming || compacting}
+          streaming={streaming}
+          onStop={() => void stop()}
           hint={composerHint}
           approvalMode={currentSession?.approvalMode ?? null}
           onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}

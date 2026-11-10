@@ -15,6 +15,7 @@ import {
 } from '@codexlike/agent-core/node';
 
 import type { ProfileStore } from '../profiles/profile-store';
+import { createInterruptRegistry } from './interrupt-registry';
 import { readMentionAttachments } from './mentions';
 import { buildSessionStatus } from './status';
 import { listWorkspaceFiles } from './workspace-files';
@@ -27,6 +28,9 @@ export function registerSessionHandlers(options: {
   getWindow: () => BrowserWindow | null;
 }): void {
   const { manager, profiles, getWindow } = options;
+  // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
+  // abort 贯穿流式输出与工具执行（长命令子进程树终止）
+  const interrupts = createInterruptRegistry();
 
   function emit(envelope: SessionEventEnvelope): void {
     const win = getWindow();
@@ -117,25 +121,49 @@ export function registerSessionHandlers(options: {
         (mentionPaths as string[] | undefined) ?? [],
       );
 
-      // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
-      // 在这里以异常抛回渲染进程；之后的事件异步推送。
-      const iterator = session.sendMessage({ text, profile, mentions })[
-        Symbol.asyncIterator
-      ]();
-      const first = await iterator.next();
-      if (first.done !== true) {
-        emit({ sessionId, event: first.value });
-      }
-      void (async () => {
-        for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
-          emit({ sessionId, event: head.value });
+      // 本条消息流的中断通道：停止按钮经 sessions:interrupt 打断
+      const controller = interrupts.begin(sessionId);
+      try {
+        // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
+        // 在这里以异常抛回渲染进程；之后的事件异步推送。
+        const iterator = session.sendMessage({
+          text,
+          profile,
+          mentions,
+          signal: controller.signal,
+        })[Symbol.asyncIterator]();
+        const first = await iterator.next();
+        if (first.done !== true) {
+          emit({ sessionId, event: first.value });
         }
-      })().catch((error: unknown) => {
-        // 防御：流中途的意外异常不应成为未处理 rejection
-        console.error('[sessions] 事件流意外终止', error);
-      });
+        void (async () => {
+          for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+            emit({ sessionId, event: head.value });
+          }
+        })()
+          .catch((error: unknown) => {
+            // 防御：流中途的意外异常不应成为未处理 rejection
+            console.error('[sessions] 事件流意外终止', error);
+          })
+          .finally(() => {
+            // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
+            interrupts.end(sessionId, controller);
+          });
+      } catch (error) {
+        // 启动失败：注销中断登记后再抛回渲染进程
+        interrupts.end(sessionId, controller);
+        throw error;
+      }
     },
   );
+
+  ipcMain.handle(IPC.sessions.interrupt, (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') {
+      throw new Error('interrupt：sessionId 必须是字符串');
+    }
+    // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲会话幂等返回 false
+    return interrupts.interrupt(sessionId);
+  });
 
   ipcMain.handle(
     IPC.sessions.rename,

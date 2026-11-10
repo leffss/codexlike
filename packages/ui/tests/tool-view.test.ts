@@ -51,6 +51,25 @@ describe('initialTranscript（时间线 → 消息流初始状态）', () => {
       running: false,
     });
   });
+
+  it('重启恢复：被中断的助手消息保留中断点标记（aborted → interrupted）', () => {
+    const items: TranscriptItem[] = [
+      { kind: 'message', message: stored({ id: 'm1', role: 'user', content: '慢慢说' }) },
+      {
+        kind: 'message',
+        message: stored({
+          id: 'm2',
+          role: 'assistant',
+          content: '被打断的部分',
+          aborted: true,
+          createdAt: '2026-11-10T08:00:02.000Z',
+        }),
+      },
+    ];
+
+    const view = initialTranscript(items);
+    expect(view[1]).toMatchObject({ id: 'm2', interrupted: true });
+  });
 });
 
 describe('applySessionEvent（工具事件归并）', () => {

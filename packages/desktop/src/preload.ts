@@ -26,6 +26,7 @@ const api: CodexLikeApi = {
         providerProfileId,
         mentionPaths,
       ),
+    interrupt: (sessionId) => ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>

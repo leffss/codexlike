@@ -39,6 +39,8 @@ export const IPC = {
     messages: 'sessions:messages',
     /** 发送消息；流式事件经 sessionEvents 推送 */
     send: 'sessions:send',
+    /** 停止按钮：打断指定会话运行中的本轮（流式输出或工具执行）；空闲返回 false */
+    interrupt: 'sessions:interrupt',
     /** /rename 与侧栏重命名共用（同一 IPC 通道） */
     rename: 'sessions:rename',
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
@@ -105,6 +107,12 @@ export interface CodexLikeApi {
       providerProfileId: string,
       mentionPaths?: string[],
     ): Promise<void>;
+    /**
+     * 打断指定会话运行中的本轮（停止按钮）：
+     * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
+     * 会话空闲时幂等返回 false。
+     */
+    interrupt(sessionId: string): Promise<boolean>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
     rename(sessionId: string, title: string): Promise<SessionRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
