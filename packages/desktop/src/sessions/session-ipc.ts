@@ -1,0 +1,112 @@
+import { statSync } from 'node:fs';
+
+import {
+  dialog,
+  ipcMain,
+  type BrowserWindow,
+  type IpcMainInvokeEvent,
+} from 'electron';
+
+import type {
+  ProviderProfile,
+  SessionManager,
+} from '@codexlike/agent-core';
+
+import type { ProfileStore } from '../profiles/profile-store';
+import { IPC, type SessionEventEnvelope } from '../shared/ipc';
+
+/** 注册会话相关 IPC 指令；事件流经 IPC.sessionEvents 推送给主窗口 */
+export function registerSessionHandlers(options: {
+  manager: SessionManager;
+  profiles: ProfileStore;
+  getWindow: () => BrowserWindow | null;
+}): void {
+  const { manager, profiles, getWindow } = options;
+
+  function emit(envelope: SessionEventEnvelope): void {
+    const win = getWindow();
+    if (win !== null && !win.isDestroyed()) {
+      win.webContents.send(IPC.sessionEvents, envelope);
+    }
+  }
+
+  ipcMain.handle(IPC.sessions.list, () => manager.list());
+
+  ipcMain.handle(IPC.sessions.create, (_e: IpcMainInvokeEvent, workspacePath: unknown) => {
+    if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
+      throw new Error('新建会话需要选择一个工作区目录');
+    }
+    // IPC 边界不信任渲染进程：目录必须真实存在
+    let isDirectory = false;
+    try {
+      isDirectory = statSync(workspacePath).isDirectory();
+    } catch {
+      isDirectory = false;
+    }
+    if (!isDirectory) {
+      throw new Error(`工作区目录不存在：${workspacePath}`);
+    }
+    return manager.create({ workspacePath });
+  });
+
+  ipcMain.handle(IPC.sessions.selectWorkspace, async () => {
+    // E2E 钩子：Playwright 无法操作原生目录对话框，自动化环境固定返回该目录
+    const pinned = process.env.CODEXLIKE_TEST_WORKSPACE;
+    if (pinned !== undefined && pinned !== '') {
+      return pinned;
+    }
+    const win = getWindow();
+    const result = win
+      ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.sessions.messages, (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') {
+      throw new Error('messages：sessionId 必须是字符串');
+    }
+    return manager.messages(sessionId);
+  });
+
+  ipcMain.handle(
+    IPC.sessions.send,
+    async (_e: IpcMainInvokeEvent, sessionId: unknown, text: unknown, profileId: unknown) => {
+      if (typeof sessionId !== 'string' || typeof text !== 'string') {
+        throw new Error('send：参数不合法');
+      }
+      if (text.trim() === '') {
+        throw new Error('消息内容不能为空');
+      }
+      if (typeof profileId !== 'string' || profileId === '') {
+        throw new Error('请先选择模型（Provider Profile）');
+      }
+      const session = manager.get(sessionId);
+      if (session === null) {
+        throw new Error('会话不存在或已损坏');
+      }
+      const profile = (await profiles.list()).find(
+        (candidate: ProviderProfile) => candidate.id === profileId,
+      );
+      if (profile === undefined) {
+        throw new Error('所选 Provider Profile 不存在，请重新选择模型');
+      }
+
+      // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
+      // 在这里以异常抛回渲染进程；之后的事件异步推送。
+      const iterator = session.sendMessage({ text, profile })[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      if (first.done !== true) {
+        emit({ sessionId, event: first.value });
+      }
+      void (async () => {
+        for (let head = await iterator.next(); !head.done; head = await iterator.next()) {
+          emit({ sessionId, event: head.value });
+        }
+      })().catch((error: unknown) => {
+        // 防御：流中途的意外异常不应成为未处理 rejection
+        console.error('[sessions] 事件流意外终止', error);
+      });
+    },
+  );
+}

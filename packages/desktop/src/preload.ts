@@ -12,6 +12,25 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.providerProfiles.update, id, input),
     remove: (id) => ipcRenderer.invoke(IPC.providerProfiles.remove, id),
   },
+  sessions: {
+    list: () => ipcRenderer.invoke(IPC.sessions.list),
+    create: (workspacePath) =>
+      ipcRenderer.invoke(IPC.sessions.create, workspacePath),
+    selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
+    messages: (sessionId) => ipcRenderer.invoke(IPC.sessions.messages, sessionId),
+    send: (sessionId, text, providerProfileId) =>
+      ipcRenderer.invoke(IPC.sessions.send, sessionId, text, providerProfileId),
+  },
+  onSessionEvent: (listener) => {
+    const handler: (
+      _event: Electron.IpcRendererEvent,
+      envelope: Parameters<typeof listener>[0],
+    ) => void = (_event, envelope) => listener(envelope);
+    ipcRenderer.on(IPC.sessionEvents, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.sessionEvents, handler);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('codexlike', api);

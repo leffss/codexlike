@@ -9,13 +9,18 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 
-import { validateProviderProfile } from '@codexlike/agent-core';
+import {
+  createSessionManager,
+  createSqliteSessionStore,
+  validateProviderProfile,
+} from '@codexlike/agent-core';
 
 import {
   createProfileStore,
   type ProfileStore,
   type SafeStorageLike,
 } from './profiles/profile-store';
+import { registerSessionHandlers } from './sessions/session-ipc';
 import { IPC } from './shared/ipc';
 
 /**
@@ -33,10 +38,12 @@ function asSafeStorageLike(): SafeStorageLike {
   };
 }
 
-/** 应用数据目录（spec 约定：`~/.codexlike/`） */
+/** 应用数据目录（spec 约定：`~/.codexlike/`；CODEXLIKE_HOME 供 E2E 隔离） */
 function dataDir(): string {
-  return join(homedir(), '.codexlike');
+  return process.env.CODEXLIKE_HOME ?? join(homedir(), '.codexlike');
 }
+
+let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -112,13 +119,27 @@ function assertValidInput(input: unknown) {
 }
 
 void app.whenReady().then(() => {
+  // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
+  const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
+  const manager = createSessionManager({ persistence });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
+
   registerProviderProfileHandlers(store);
-  createMainWindow();
+  registerSessionHandlers({
+    manager,
+    profiles: store,
+    getWindow: () => mainWindow,
+  });
+  mainWindow = createMainWindow();
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
   // Windows 优先：全部窗口关闭即退出（无 macOS dock 常驻）
   app.on('window-all-closed', () => {
     app.quit();
+  });
+
+  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）
+  app.on('will-quit', () => {
+    persistence.close();
   });
 });
