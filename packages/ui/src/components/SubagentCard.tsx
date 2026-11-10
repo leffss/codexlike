@@ -24,6 +24,13 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
     return () => window.clearInterval(timer);
   }, [subagent.state]);
 
+  // 报告到达自动展开（流式路径卡片以排队态挂载，完成时用户最关心报告）
+  useEffect(() => {
+    if (subagent.state === 'done') {
+      setExpanded(true);
+    }
+  }, [subagent.state]);
+
   const statusLabel =
     subagent.state === 'queued'
       ? '排队中（并发上限已满）'

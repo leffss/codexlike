@@ -18,7 +18,8 @@
     "test:e2e": "node e2e/smoke.mjs",
     "test:e2e:commands": "node e2e/commands.mjs",
     "test:e2e:approvals": "node e2e/approvals.mjs",
-    "test:e2e:compact": "node e2e/compact.mjs"
+    "test:e2e:compact": "node e2e/compact.mjs",
+    "test:e2e:subagents": "node e2e/subagents.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"
