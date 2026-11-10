@@ -1,9 +1,10 @@
-// E2E 冒烟（工单 02）：启动真实 Electron 应用走最小路径——
+// E2E 冒烟（工单 02 + 03 扩展）：启动真实 Electron 应用走最小路径——
 // 预置 Provider Profile（指向本地 OpenAI 兼容 mock SSE server）→ 新建会话（固定工作区）
-// → 消息往返（流式 markdown + 代码块高亮）→ 重启应用断言会话列表与历史恢复。
+// → 消息往返（第一轮返回 tool_call：真实执行 write_file → 结果回填 → 第二轮流式 markdown）
+// → 工具卡片出现并可展开 → 重启应用断言会话列表、消息历史与工具卡片恢复。
 // 运行：pnpm test:e2e（先全仓 build，再用生产产物启动）。
 import http from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -24,47 +25,71 @@ function assert(condition, message) {
   }
 }
 
-/** 本地 OpenAI 兼容 mock：/v1/chat/completions 返回流式 markdown（含代码块） */
+/**
+ * 本地 OpenAI 兼容 mock：第 1 次 /chat/completions 返回 tool_call（write_file），
+ * 之后返回流式 markdown（含代码块）——覆盖「工具调用 → 执行 → 回填 → 最终回复」全链路。
+ */
 function startMockProvider() {
-  const chunks = [
+  const textChunks = [
     '你好！这是一个示例：\n\n',
     '```ts\n',
     'const answer = 42;\n',
     '```\n',
   ];
+  let requestCount = 0;
   const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
+      requestCount += 1;
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
       });
-      let index = 0;
-      const timer = setInterval(() => {
-        if (index < chunks.length) {
-          const delta = chunks[index++];
-          res.write(
-            `data: ${JSON.stringify({
-              id: 'chatcmpl-e2e',
-              object: 'chat.completion.chunk',
-              created: 0,
-              model: 'mock-model',
-              choices: [{ index: 0, delta: { content: delta }, finish_reason: null }],
-            })}\n\n`,
-          );
-          return;
-        }
-        clearInterval(timer);
+      const send = (payload) =>
         res.write(
           `data: ${JSON.stringify({
             id: 'chatcmpl-e2e',
             object: 'chat.completion.chunk',
             created: 0,
             model: 'mock-model',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            choices: [{ index: 0, ...payload }],
           })}\n\n`,
         );
+      const finishWith = (reason) => {
+        send({ delta: {}, finish_reason: reason });
         res.write('data: [DONE]\n\n');
         res.end();
+      };
+
+      if (requestCount === 1) {
+        // 第一轮：发起 write_file 工具调用（agent 会真实写文件并把结果回填）
+        send({
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call-e2e',
+                type: 'function',
+                function: {
+                  name: 'write_file',
+                  arguments: JSON.stringify({ path: 'e2e.txt', content: '工具链路 OK' }),
+                },
+              },
+            ],
+          },
+          finish_reason: null,
+        });
+        setTimeout(() => finishWith('tool_calls'), 30);
+        return;
+      }
+
+      let index = 0;
+      const timer = setInterval(() => {
+        if (index < textChunks.length) {
+          send({ delta: { content: textChunks[index++] }, finish_reason: null });
+          return;
+        }
+        clearInterval(timer);
+        finishWith('stop');
       }, 30);
       return;
     }
@@ -136,9 +161,24 @@ async function main() {
     }
     console.log('[e2e] 会话已创建并选中');
 
-    // 3) 发送消息 → 流式渲染 markdown，代码块高亮
-    await window.getByTestId('composer-input').fill('打个招呼，并给出一个 TypeScript 代码块');
+    // 3) 发送消息 → 模型先调 write_file（真实执行）→ 结果回填 → 最终流式 markdown
+    await window.getByTestId('composer-input').fill('创建 e2e.txt，并给出一个 TypeScript 代码块');
     await window.getByTestId('composer-send').click();
+
+    // 工具卡片出现（折叠态：工具名 + 参数摘要），点击展开可见完整输出
+    const card = window.getByTestId('tool-call-card').first();
+    await card.waitFor({ timeout: 20_000 });
+    assert((await card.getAttribute('data-tool-name')) === 'write_file', '工具卡片未显示 write_file');
+    await card.getByTestId('tool-call-toggle').click();
+    await card.getByText('已写入 e2e.txt').waitFor({ timeout: 10_000 });
+    console.log('[e2e] 工具卡片渲染：write_file 摘要 + 可展开完整输出');
+
+    // 工具真实执行：工作区内文件已写入
+    const writtenPath = join(homeDir, 'workspace', 'e2e.txt');
+    await new Promise((r) => setTimeout(r, 500));
+    assert(existsSync(writtenPath), `工具未真实写入 ${writtenPath}`);
+    assert(readFileSync(writtenPath, 'utf8') === '工具链路 OK', '工具写入内容不正确');
+
     await window
       .getByTestId('message-assistant')
       .getByText('const answer = 42;')
@@ -149,12 +189,12 @@ async function main() {
     assert(highlighted >= 1, '代码块未渲染 highlight.js 高亮');
     const userText = await window.getByTestId('message-user').first().textContent();
     assert(
-      userText !== null && userText.includes('打个招呼'),
+      userText !== null && userText.includes('创建 e2e.txt'),
       '用户消息未出现在消息流',
     );
-    console.log('[e2e] 消息往返完成：流式 markdown + 代码块高亮可见');
+    console.log('[e2e] 消息往返完成：工具调用 + 流式 markdown + 代码块高亮可见');
 
-    // 4) 关闭 → 重启（等价应用重启）：侧栏会话列表与消息历史完整恢复
+    // 4) 关闭 → 重启（等价应用重启）：侧栏会话列表、消息历史与工具卡片完整恢复
     await app.close();
     const second = await launchApp(homeDir);
     app = second.app;
@@ -164,7 +204,9 @@ async function main() {
     await window.getByTestId('message-user').first().waitFor({ timeout: 10_000 });
     const restored = await window.getByTestId('message-assistant').count();
     assert(restored >= 1, '重启后助手消息历史未恢复');
-    console.log('[e2e] 重启后侧栏会话列表与消息历史完整恢复');
+    const restoredCards = await window.getByTestId('tool-call-card').count();
+    assert(restoredCards >= 1, '重启后工具卡片未恢复');
+    console.log('[e2e] 重启后侧栏会话列表、消息历史与工具卡片完整恢复');
 
     await app.close();
     console.log('[e2e] 冒烟通过 ✅');

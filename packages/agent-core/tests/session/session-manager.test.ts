@@ -147,6 +147,38 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     persistence.close();
   });
 
+  it('transcript：消息与工具调用按时间顺序合并（重启恢复时间线用）', async () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const session = manager.create({ workspacePath: 'C:\work\demo' });
+
+    // 手工落库一份交错的记录（真实路径由会话循环产生；此处验证合并语义）
+    persistence.insertMessage({
+      id: 'm1', sessionId: session.id, role: 'user', content: '读一下', createdAt: '2026-11-11T08:00:01.000Z',
+    });
+    persistence.insertToolCall({
+      id: 't1', sessionId: session.id, toolName: 'read_file',
+      arguments: JSON.stringify({ path: 'a.txt' }), output: '已读', isError: false,
+      createdAt: '2026-11-11T08:00:02.000Z',
+    });
+    persistence.insertMessage({
+      id: 'm2', sessionId: session.id, role: 'assistant', content: '读完了', createdAt: '2026-11-11T08:00:03.000Z',
+    });
+
+    const transcript = manager.transcript(session.id);
+    expect(transcript.map((item) => item.kind)).toEqual(['message', 'tool-call', 'message']);
+    const toolItem = transcript[1];
+    if (toolItem?.kind === 'tool-call') {
+      expect(toolItem.call.toolName).toBe('read_file');
+      expect(toolItem.call.isError).toBe(false);
+    }
+    expect(manager.transcript('nope')).toEqual([]);
+    persistence.close();
+  });
+
   it('get 不存在的会话返回 null；create 后 get 返回同一实例（缓存）', () => {
     const persistence = createSqliteSessionStore(':memory:');
     const manager = createSessionManager({

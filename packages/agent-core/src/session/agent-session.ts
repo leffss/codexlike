@@ -1,9 +1,21 @@
 import { randomUUID } from 'node:crypto';
 
-import { APICallError, RetryError, streamText, type LanguageModel, type ModelMessage } from 'ai';
+import {
+  APICallError,
+  RetryError,
+  jsonSchema,
+  streamText,
+  tool as aiTool,
+  type LanguageModel,
+  type ModelMessage,
+  type Tool,
+  type ToolModelMessage,
+} from 'ai';
 
 import { createLanguageModelFromProfile } from '../provider/language-model';
 import type { ProviderProfile } from '../provider/provider-profile';
+import { runTool } from '../tools/registry';
+import type { ToolCallRecord, ToolDefinition } from '../tools/types';
 
 import type { SessionPersistence } from './persistence';
 import type {
@@ -33,6 +45,11 @@ export interface CreateAgentSessionOptions {
   systemPrompt?: string;
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认走 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
+  /**
+   * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
+   * 本工单内工具默认放行；审批三档在工单 04 于 tool-call 与 tool-result 之间接入。
+   */
+  tools?: ToolDefinition[];
   /** 时间与 id 生成注入（测试用固定值） */
   now?: () => string;
   generateId?: () => string;
@@ -44,11 +61,16 @@ export interface AgentSession {
   readonly record: SessionRecord;
   /**
    * 发送一条用户消息并流式聚合模型回复为会话事件流。
+   * 模型可多轮调用工具：每轮 tool-call → 执行（tool-call/tool-result 事件）→
+   * 结果回填继续生成，直到最终文本回复。
    * 单会话同一时刻只允许一个流（并发发送直接抛错）；
    * 出错时发 error 事件（中文提示，落库为 error 消息），会话保持可用。
    */
   sendMessage(options: SendMessageOptions): AsyncIterable<SessionEvent>;
 }
+
+/** 单次回复允许的工具轮次上限（防模型失控循环） */
+const MAX_TOOL_ROUNDS = 16;
 
 /** 把 error 消息转成用户可读的中文提示（保留原始报错原文） */
 function describeModelError(error: unknown): string {
@@ -76,6 +98,18 @@ function toModelMessage(message: StoredMessage): ModelMessage {
     return { role: 'assistant', content: message.content };
   }
   return { role: 'user', content: message.content };
+}
+
+/** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
+function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
+  const entries = tools.map((definition) => [
+    definition.name,
+    aiTool({
+      description: definition.description,
+      inputSchema: jsonSchema(definition.parameters),
+    }),
+  ]);
+  return Object.fromEntries(entries);
 }
 
 /**
@@ -107,6 +141,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
     : [];
   const systemPrompt = options.systemPrompt ?? '';
   const modelFor = options.languageModelFor ?? createLanguageModelFromProfile;
+  const toolsByName = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
+  const modelTools = toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
 
@@ -152,25 +188,94 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
         let accumulated = '';
         let aborted = false;
         try {
-          const result = streamText({
-            model: modelFor(profile),
-            system: systemPrompt === '' ? undefined : systemPrompt,
-            messages: [...context, userContextMessage],
-            abortSignal: signal,
-          });
-          for await (const part of result.fullStream) {
-            if (part.type === 'text-delta') {
-              accumulated += part.text;
-              yield {
-                type: 'assistant-delta',
-                messageId: assistantMessageId,
-                delta: part.text,
-              };
-            } else if (part.type === 'error') {
-              throw part.error;
-            } else if (part.type === 'abort') {
-              aborted = true;
+          // 工具循环：模型调工具 → 执行 → 结果回填 → 继续生成，直到最终文本（或中断/上限）
+          // 初始上下文 = 历史消息 + 本条用户消息（原文 + @引用 内容）；system 为 AGENTS.md 注入
+          const pending: ModelMessage[] = [...context, userContextMessage];
+          let round = 0;
+
+          while (true) {
+            const result = streamText({
+              model: modelFor(profile),
+              system: systemPrompt === '' ? undefined : systemPrompt,
+              messages: pending,
+              abortSignal: signal,
+              tools: modelTools,
+            });
+
+            const toolCalls: { toolCallId: string; toolName: string; input: unknown }[] = [];
+            for await (const part of result.fullStream) {
+              if (part.type === 'text-delta') {
+                accumulated += part.text;
+                yield {
+                  type: 'assistant-delta',
+                  messageId: assistantMessageId,
+                  delta: part.text,
+                };
+              } else if (part.type === 'tool-call') {
+                toolCalls.push({
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  input: part.input,
+                });
+              } else if (part.type === 'error') {
+                throw part.error;
+              } else if (part.type === 'abort') {
+                aborted = true;
+              }
             }
+
+            if (aborted || toolCalls.length === 0) {
+              break;
+            }
+            round += 1;
+            if (round > MAX_TOOL_ROUNDS) {
+              // 达到轮次上限：停止工具循环，已生成文本照常作为助手回复落库
+              break;
+            }
+
+            // 本轮 assistant 消息（含 tool-call parts）进入对话上下文
+            pending.push(...(await result.response).messages);
+
+            // 逐个执行工具：tool-call 事件 → 执行 → tool-result 事件 + 落库
+            // 审批拦截（工单 04）将插入在事件与执行之间
+            const resultParts: ToolModelMessage['content'] = [];
+            for (const call of toolCalls) {
+              const base: ToolCallRecord = {
+                id: call.toolCallId,
+                sessionId: record.id,
+                toolName: call.toolName,
+                arguments: safeJsonStringify(call.input),
+                output: '',
+                isError: false,
+                createdAt: now(),
+              };
+              yield { type: 'tool-call', call: base };
+
+              const definition = toolsByName.get(call.toolName);
+              const executed = definition
+                ? await runTool(definition, call.input, {
+                    workspacePath: record.workspacePath,
+                    signal,
+                  })
+                : {
+                    output: `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join('、')}`,
+                    isError: true,
+                  };
+
+              const completed = { ...base, ...executed };
+              persistence.insertToolCall(completed);
+              yield { type: 'tool-result', call: completed };
+              resultParts.push({
+                type: 'tool-result',
+                toolCallId: call.toolCallId,
+                toolName: call.toolName,
+                output: { type: 'text', value: executed.output },
+                // 失败语义已在 output 文本（「工具 X 执行失败：…」前缀），模型可读
+              });
+            }
+
+            // 工具结果作为 tool 消息回填，进入下一轮生成
+            pending.push({ role: 'tool', content: resultParts });
           }
         } catch (error) {
           if (isAbortLike(error, signal)) {
@@ -211,4 +316,12 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
       }
     },
   };
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {});
+  } catch {
+    return '"<无法序列化的参数>"';
+  }
 }
