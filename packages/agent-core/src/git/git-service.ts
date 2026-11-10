@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+
 import { simpleGit } from 'simple-git';
+
+import { resolveInWorkspace } from '../tools/workspace';
 
 /**
  * git 服务（spec「git 集成」）：改动面板的数据源。
@@ -26,8 +31,23 @@ export interface GitStatus {
   files: GitFileChange[];
 }
 
+/** 单文件 diff（Monaco 双栏视图的数据形状）：HEAD 侧 vs 工作区侧 */
+export interface GitFileDiff {
+  path: string;
+  /** HEAD 版本内容；新文件为空串 */
+  original: string;
+  /** 工作区当前内容；已删除为空串 */
+  modified: string;
+}
+
 export interface GitService {
   status(): Promise<GitStatus>;
+  /**
+   * 查看单文件改动（新旧两侧全文，供 Monaco DiffEditor 渲染）。
+   * @param path 相对工作区的路径（POSIX 分隔符，来自 status 的 files）
+   * @param oldPath 重命名场景 HEAD 中的原路径（可选）
+   */
+  diffFile(path: string, oldPath?: string): Promise<GitFileDiff>;
 }
 
 /** git status 的 index/workdir 两列 code 合成面板显示的单一变更类型 */
@@ -82,20 +102,74 @@ function parseStatusPorcelainZ(raw: string): GitFileChange[] {
 export function createGitService(workspacePath: string): GitService {
   const git = simpleGit({ baseDir: workspacePath });
 
+  /** 工作区相对 repo 根的 POSIX 前缀（'' = 工作区即 repo 根） */
+  async function workspacePrefixInRepo(): Promise<string> {
+    const toplevel = (await git.revparse('--show-toplevel')).trim();
+    const rel = relative(toplevel, workspacePath).replace(/\\/g, '/');
+    return rel === '' ? '' : `${rel}/`;
+  }
+
   return {
     async status(): Promise<GitStatus> {
       const isGitRepo = await git.checkIsRepo();
       if (!isGitRepo) {
         return { isGitRepo: false, branch: null, files: [] };
       }
-      const porcelain = await git.raw(['status', '--porcelain=v1', '-z']);
+      // -u 展开被折叠的 untracked 目录到文件级（agent 新写文件的面板语义）
+      const porcelain = await git.raw([
+        'status',
+        '--porcelain=v1',
+        '-z',
+        '--untracked-files=all',
+      ]);
       const branchOutput = await git.raw(['branch', '--show-current']);
       const branch = branchOutput.trim();
+      const prefix = await workspacePrefixInRepo();
+      // porcelain 路径相对 repo 根：工作区为子目录时过滤到范围内并改写为工作区相对路径
+      const lowered = prefix.toLowerCase();
+      const files = parseStatusPorcelainZ(porcelain)
+        .filter((file) => file.path.toLowerCase().startsWith(lowered))
+        .map((file) => ({
+          ...file,
+          path: file.path.slice(prefix.length),
+          ...(file.oldPath !== undefined
+            ? { oldPath: file.oldPath.slice(prefix.length) }
+            : {}),
+        }));
       return {
         isGitRepo: true,
         branch: branch === '' ? null : branch,
-        files: parseStatusPorcelainZ(porcelain),
+        files,
       };
+    },
+
+    async diffFile(path: string, oldPath?: string): Promise<GitFileDiff> {
+      if (!(await git.checkIsRepo())) {
+        throw new Error('当前工作区不是 git 仓库，无法查看改动');
+      }
+      // 路径限制在工作区内（与工具层同一套边界校验，防 .. 与链接逃逸）
+      const absolute = resolveInWorkspace(workspacePath, path);
+      const prefix = await workspacePrefixInRepo();
+      const repoRelative = `${prefix}${path}`;
+      const originalRelative =
+        oldPath !== undefined ? `${prefix}${oldPath}` : repoRelative;
+      let original = '';
+      try {
+        // HEAD 版本（LF 存储）；新文件不在 HEAD 中 → 空串
+        original = (await git.raw(['show', `HEAD:${originalRelative}`])).replace(
+          /\r\n/g,
+          '\n',
+        );
+      } catch {
+        original = '';
+      }
+      let modified = '';
+      try {
+        modified = readFileSync(absolute, 'utf8').replace(/\r\n/g, '\n');
+      } catch {
+        modified = ''; // 已删除
+      }
+      return { path, original, modified };
     },
   };
 }

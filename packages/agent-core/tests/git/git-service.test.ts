@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -83,5 +83,76 @@ describe('git 服务：status', () => {
     const renamed = status.files.find((f) => f.path === 'renamed.txt');
     expect(renamed?.kind).toBe('renamed');
     expect(renamed?.oldPath).toBe('to-rename.txt');
+  });
+
+  it('工作区是 repo 子目录：只列子目录内的变更，路径相对工作区', async () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, 'sub'));
+    writeFileSync(join(repo, 'sub', 'inner.txt'), '初始');
+    git(repo, 'add', 'sub');
+    git(repo, 'commit', '-m', '加 sub');
+    writeFileSync(join(repo, 'sub', 'inner.txt'), '内部变更');
+    writeFileSync(join(repo, 'outside.txt'), '工作区外变更');
+
+    const status = await createGitService(join(repo, 'sub')).status();
+    expect(status.branch).toBe('main');
+    const paths = status.files.map((f) => f.path);
+    expect(paths).toContain('inner.txt'); // 相对工作区（而非 repo 根的 sub/inner.txt）
+    expect(paths.some((p) => p.includes('outside.txt'))).toBe(false);
+  });
+});
+
+describe('git 服务：diffFile（单文件新旧两侧内容）', () => {
+  it('修改文件：original 为 HEAD 版本、modified 为工作区版本', async () => {
+    const repo = makeRepo();
+    writeFileSync(join(repo, 'app.ts'), 'const a = 1;\n');
+    git(repo, 'add', 'app.ts');
+    git(repo, 'commit', '-m', '加 app.ts');
+    writeFileSync(join(repo, 'app.ts'), 'const a = 2;\n');
+
+    const diff = await createGitService(repo).diffFile('app.ts');
+    expect(diff.path).toBe('app.ts');
+    expect(diff.original).toBe('const a = 1;\n');
+    expect(diff.modified).toBe('const a = 2;\n');
+  });
+
+  it('新文件（未跟踪）：original 为空串；删除文件：modified 为空串', async () => {
+    const repo = makeRepo();
+    writeFileSync(join(repo, 'new.txt'), '全新文件');
+    writeFileSync(join(repo, 'bye.txt'), '将删除');
+    git(repo, 'add', 'bye.txt');
+    git(repo, 'commit', '-m', '加 bye.txt');
+    git(repo, 'rm', '-f', 'bye.txt');
+
+    const service = createGitService(repo);
+    expect((await service.diffFile('new.txt')).original).toBe('');
+    expect((await service.diffFile('new.txt')).modified).toBe('全新文件');
+    expect((await service.diffFile('bye.txt')).modified).toBe('');
+    expect((await service.diffFile('bye.txt')).original).toBe('将删除');
+  });
+
+  it('重命名：oldPath 命中 HEAD 中的原文件内容', async () => {
+    const repo = makeRepo();
+    writeFileSync(join(repo, 'origin.ts'), 'export const x = 1;\n');
+    git(repo, 'add', 'origin.ts');
+    git(repo, 'commit', '-m', '加 origin');
+    git(repo, 'mv', 'origin.ts', 'moved.ts');
+    writeFileSync(join(repo, 'moved.ts'), 'export const x = 2;\n');
+
+    const diff = await createGitService(repo).diffFile('moved.ts', 'origin.ts');
+    expect(diff.original).toBe('export const x = 1;\n');
+    expect(diff.modified).toBe('export const x = 2;\n');
+  });
+
+  it('路径越界拒绝；非 git 目录调用抛中文错误', async () => {
+    const repo = makeRepo();
+    const service = createGitService(repo);
+    await expect(service.diffFile('../outside.txt')).rejects.toThrow('路径越界');
+
+    const plain = mkdtempSync(join(tmpdir(), 'codexlike-nogit2-'));
+    repos.push(plain);
+    await expect(createGitService(plain).diffFile('a.txt')).rejects.toThrow(
+      '当前工作区不是 git 仓库',
+    );
   });
 });
