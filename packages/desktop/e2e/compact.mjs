@@ -26,6 +26,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 /**
  * 本地 OpenAI 兼容 mock：
  * - 对话（stream:true）→ SSE 回复「收到。」；
@@ -195,7 +210,7 @@ async function main() {
     console.log('[e2e] 压缩后继续对话：请求体 = 摘要 + 最近 3 轮 + 新消息');
 
     // 6) 重启应用：摘要卡片仍可见（持久化恢复）
-    await app.close();
+    await closeApp(app);
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp(homeDir);
     app = relaunchedApp;
     await relaunchedWindow.getByTestId('message-compact-summary').waitFor({ timeout: 15_000 });
@@ -203,13 +218,13 @@ async function main() {
     assert((await relaunchedWindow.getByTestId('message-user').count()) === 4, '重启后用户消息应为压缩后的 4 条');
     console.log('[e2e] 重启后摘要卡片仍可见（持久化验证）');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 工单 08 compact 冒烟通过 ✅');
   } catch (error) {
     console.error('[e2e] compact 冒烟失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

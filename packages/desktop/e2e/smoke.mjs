@@ -25,6 +25,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 /**
  * 本地 OpenAI 兼容 mock：第 1 次 /chat/completions 返回 tool_call（write_file），
  * 第 2 次返回 tool_call（web_search），之后返回流式 markdown（含代码块）——
@@ -281,7 +296,7 @@ async function main() {
     console.log('[e2e] web_search 全链路：key 配置 → 工具调用 → mock 搜索 → 卡片可展开');
 
     // 4) 关闭 → 重启（等价应用重启）：侧栏会话列表、消息历史与工具卡片完整恢复
-    await app.close();
+    await closeApp(app);
     const second = await launchApp(homeDir, tavilyUrl);
     app = second.app;
     window = second.window;
@@ -294,13 +309,13 @@ async function main() {
     assert(restoredCards >= 1, '重启后工具卡片未恢复');
     console.log('[e2e] 重启后侧栏会话列表、消息历史与工具卡片完整恢复');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 冒烟通过 ✅');
   } catch (error) {
     console.error('[e2e] 冒烟失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }

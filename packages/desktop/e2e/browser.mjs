@@ -23,6 +23,21 @@ function assert(condition, message) {
   }
 }
 
+/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
+async function closeApp(app) {
+  const forceKill = setTimeout(() => {
+    try {
+      app.process().kill();
+    } catch {}
+  }, 10_000);
+  try {
+    await app.close();
+  } catch {
+    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+  } finally {
+    clearTimeout(forceKill);
+  }
+}
 /** 浏览器工具要抓取的 fixture 页（标题与正文唯一，便于断言） */
 const FIXTURE_HTML = `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>E2E 浏览器页</title></head>
@@ -139,18 +154,20 @@ async function main() {
     const window = launched.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
     await window.getByRole('button', { name: '+ 新建 Profile' }).click();
-    await window.getByLabel('名称').fill('Mock');
-    await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
-    await window.getByLabel('API Key').fill('sk-e2e');
-    await window.getByLabel('模型').fill('mock-model');
-    // 设置页有两个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
-    await window
-      .locator('form')
+    const profileForm = window.locator('form');
+    await profileForm.getByLabel('名称').fill('Mock');
+    await profileForm.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
+    await profileForm.getByLabel('API Key').fill('sk-e2e');
+    await profileForm.getByLabel('模型').fill('mock-model');
+    // 设置页有多个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
+    await profileForm
       .getByRole('button', { name: /保存|创建/ })
       .click();
     await window.getByText('Mock').first().waitFor();
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框（工单 09）：默认本目录直跑，点确认
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
     console.log('[e2e] 应用启动、Profile 与会话就绪');
 
@@ -198,13 +215,13 @@ async function main() {
     assert(third.includes('image_url') === false, '默认（未开附图开关）不应包含 image_url');
     console.log('[e2e] 工具结果以文本回填模型（降级路径）；最终回复可见');
 
-    await app.close();
+    await closeApp(app);
     console.log('[e2e] 浏览器工具 E2E 通过 ✅');
   } catch (error) {
     console.error('[e2e] 浏览器工具 E2E 失败 ❌', error);
     process.exitCode = 1;
     try {
-      await app?.close();
+      await closeApp(app);
     } catch {
       // 已关闭
     }
