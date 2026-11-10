@@ -52,6 +52,8 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
     }
     case 'run_terminal_command':
       return `$ ${asString(args['command']) ?? '?'}`;
+    case 'web_search':
+      return `搜「${asString(args['query']) ?? '?'}」`;
     default:
       return JSON.stringify(args);
   }

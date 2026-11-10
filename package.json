@@ -10,7 +10,9 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:e2e": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e",
-    "test:e2e:commands": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:commands"
+    "test:e2e:commands": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:commands",
+    "test:e2e:compact": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:compact",
+    "test:e2e:interrupt": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interrupt"
   },
   "devDependencies": {
     "concurrently": "^10.0.7"

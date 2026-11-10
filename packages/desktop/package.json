@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:e2e": "node e2e/smoke.mjs",
     "test:e2e:commands": "node e2e/commands.mjs",
-    "test:e2e:interrupt": "node e2e/interrupt.mjs"
+    "test:e2e:interrupt": "node e2e/interrupt.mjs",
+    "test:e2e:compact": "node e2e/compact.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"

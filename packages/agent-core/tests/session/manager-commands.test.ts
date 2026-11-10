@@ -171,3 +171,98 @@ describe('SessionManager 系统提示注入（systemPromptFor）', () => {
     persistence2.close();
   });
 });
+
+describe('SessionManager compact 支持（工单 08）', () => {
+  /** 双通道模型：doStream 对话 + doGenerate 压缩摘要 */
+  function dualModel() {
+    let streamCall = 0;
+    return new MockLanguageModelV4({
+      doStream: async () => {
+        streamCall += 1;
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: 'text-start', id: 'text-1' });
+              controller.enqueue({ type: 'text-delta', id: 'text-1', delta: `回复${streamCall}` });
+              controller.enqueue({ type: 'text-end', id: 'text-1' });
+              controller.enqueue({
+                type: 'finish',
+                usage: {
+                  inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+                  outputTokens: { total: 1, text: undefined, reasoning: undefined },
+                },
+                finishReason: { unified: 'stop' as const, raw: 'stop' },
+              });
+              controller.close();
+            },
+          }),
+        };
+      },
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: '压缩摘要' }],
+        finishReason: { unified: 'stop' as const, raw: 'stop' },
+        usage: {
+          inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 1, text: undefined, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    });
+  }
+
+  it('latestCompact：未压缩 null；压缩后返回最近记录；重启后仍可读', async () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => dualModel(),
+      now: () => '2026-11-11T08:00:00.000Z',
+    });
+    const session = manager.create({ workspacePath: 'C:\work\demo' });
+
+    expect(manager.latestCompact(session.id)).toBeNull();
+
+    for (let i = 1; i <= 4; i += 1) {
+      for await (const _event of session.sendMessage({ text: `问${i}`, profile })) {
+        // 消费完整流
+      }
+    }
+    await session.compact({ profile });
+
+    const latest = manager.latestCompact(session.id);
+    expect(latest).toMatchObject({
+      sessionId: session.id,
+      summary: '压缩摘要',
+      messagesCompacted: 2,
+    });
+    persistence.close();
+  });
+
+  it('压缩后 manager.get 恢复的会话继续对话，上下文含摘要', async () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const model = dualModel();
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => model,
+    });
+    const session = manager.create({ workspacePath: 'C:\work\demo' });
+    for (let i = 1; i <= 4; i += 1) {
+      for await (const _event of session.sendMessage({ text: `问${i}`, profile })) {
+        // 消费完整流
+      }
+    }
+    await session.compact({ profile });
+    const callsBefore = model.doStreamCalls.length;
+
+    // 抛弃缓存实例（模拟重启后 get）：从库恢复，摘要仍在上下文中
+    const restored = manager.get(session.id)!;
+    expect(restored.id).toBe(session.id);
+    for await (const _event of restored.sendMessage({ text: '继续', profile })) {
+      // 消费完整流
+    }
+    const lastPrompt = JSON.stringify(model.doStreamCalls.at(-1)?.prompt);
+    expect(lastPrompt).toContain('compact-summary');
+    expect(lastPrompt).toContain('压缩摘要');
+    expect(model.doStreamCalls.length).toBe(callsBefore + 1);
+    persistence.close();
+  });
+});

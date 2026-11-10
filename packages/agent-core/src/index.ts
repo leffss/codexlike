@@ -20,6 +20,8 @@ export { createLanguageModelFromProfile } from './provider/language-model';
 export type {
   ApprovalDecisionRecord,
   ApprovalMode,
+  CompactRecord,
+  CompactResult,
   MentionAttachment,
   MessageRole,
   SessionEvent,

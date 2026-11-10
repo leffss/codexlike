@@ -32,6 +32,8 @@ export function WorkspacePage(props: {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** /compact 压缩进行中（不可重复触发、禁用输入） */
+  const [compacting, setCompacting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
@@ -147,7 +149,7 @@ export function WorkspacePage(props: {
   }
 
   async function send(text: string, mentionPaths: string[]) {
-    if (currentId === null || selectedProfileId === '' || streaming) {
+    if (currentId === null || selectedProfileId === '' || streaming || compacting) {
       return;
     }
     setStreaming(true);
@@ -199,6 +201,38 @@ export function WorkspacePage(props: {
       case 'new-session': {
         // /new：同工作区新会话（不走目录选择器）
         await createSession(current!.workspacePath);
+        return;
+      }
+      case 'compact': {
+        // /compact：压缩进行中不可重复触发；模型在主进程解析（apiKey 不入渲染层）
+        if (compacting) {
+          pushLocalStatus('正在压缩历史，请等待完成…');
+          return;
+        }
+        if (selectedProfileId === '') {
+          pushLocalStatus('压缩需要先选择模型（Provider Profile）');
+          return;
+        }
+        setCompacting(true);
+        try {
+          const result = await window.codexlike.sessions.compact(
+            current!.id,
+            selectedProfileId,
+          );
+          await refreshSessions();
+          // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
+          const history = await window.codexlike.sessions.messages(current!.id);
+          setMessages(initialTranscript(history));
+          pushLocalStatus(
+            `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`,
+          );
+        } catch (error) {
+          pushLocalStatus(
+            `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`,
+          );
+        } finally {
+          setCompacting(false);
+        }
         return;
       }
       case 'rename': {
@@ -288,9 +322,11 @@ export function WorkspacePage(props: {
   const composerHint =
     profiles.length === 0
       ? '尚未配置模型，请先前往设置页添加 Provider Profile'
-      : currentId === null
-        ? '新建或选择一个会话后开始对话'
-        : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
+      : compacting
+        ? '正在压缩历史，请稍候…'
+        : currentId === null
+          ? '新建或选择一个会话后开始对话'
+          : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
 
   return (
     <div className="flex h-full">
@@ -322,6 +358,7 @@ export function WorkspacePage(props: {
       <section className="flex min-w-0 flex-1 flex-col">
         <MessageStream
           items={messages}
+          compacting={compacting}
           emptyHint={
             profiles.length === 0 ? (
               <button
@@ -340,7 +377,7 @@ export function WorkspacePage(props: {
           onSelectProfile={setSelectedProfileId}
           onSend={handleSubmit}
           workspaceFiles={workspaceFiles}
-          disabled={currentId === null || profiles.length === 0 || streaming}
+          disabled={currentId === null || profiles.length === 0 || streaming || compacting}
           streaming={streaming}
           onStop={() => void stop()}
           hint={composerHint}

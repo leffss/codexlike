@@ -12,6 +12,7 @@ import type { SessionPersistence } from './persistence';
 import type {
   ApprovalDecisionRecord,
   ApprovalMode,
+  CompactRecord,
   SessionRecord,
   StoredMessage,
   TranscriptItem,
@@ -62,6 +63,8 @@ export interface SessionManager {
   recordApprovalDecision(decision: ApprovalDecisionRecord): void;
   /** 指定会话的审批决定（重启恢复后「总是允许」清单仍生效的数据源） */
   approvalDecisions(sessionId: string): ApprovalDecisionRecord[];
+  /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
+  latestCompact(sessionId: string): CompactRecord | null;
 }
 
 export function createSessionManager(
@@ -210,6 +213,11 @@ export function createSessionManager(
 
     approvalDecisions(sessionId) {
       return persistence.listApprovalDecisions(sessionId);
+    },
+
+    latestCompact(sessionId) {
+      const compacts = persistence.listCompacts(sessionId);
+      return compacts.length === 0 ? null : compacts[compacts.length - 1]!;
     },
   };
 }

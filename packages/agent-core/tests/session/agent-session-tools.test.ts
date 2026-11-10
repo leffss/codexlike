@@ -10,6 +10,7 @@ import { createSqliteSessionStore } from '../../src/session/persistence';
 import { createAgentSession } from '../../src/session/agent-session';
 import type { SessionEvent, SessionRecord } from '../../src/session/types';
 import { createBuiltinTools } from '../../src/tools/builtin';
+import type { SearchSource } from '../../src/tools/web-search';
 
 const profile: ProviderProfile = {
   id: 'profile-1',
@@ -288,6 +289,83 @@ describe('AgentSession 工具循环（六件工具默认放行）', () => {
       'assistant-delta',
       'assistant-done',
     ]);
+  });
+
+  it('web_search 注册与调用链路（工单 10）：模型搜索 → 结果回填下一轮 prompt', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const queries: string[] = [];
+    const source: SearchSource = {
+      async search(query) {
+        queries.push(query);
+        return [
+          {
+            title: 'Tavily 文档',
+            url: 'https://docs.tavily.com',
+            snippet: 'Search API for AI agents.',
+          },
+        ];
+      },
+    };
+    const model = scriptedModel([
+      { kind: 'tool', calls: [{ toolCallId: 'w1', toolName: 'web_search', input: { query: 'tavily api' } }] },
+      { kind: 'text', deltas: ['查到了，Tavily 是给 agent 用的搜索 API'] },
+    ]);
+    const persistence = createSqliteSessionStore(':memory:');
+    const record = sessionRecord(workspace);
+    persistence.insertSession(record);
+    const session = createAgentSession({
+      record,
+      persistence,
+      history: persistence.listMessages(record.id),
+      languageModelFor: () => model,
+      tools: createBuiltinTools({ webSearch: { searchSource: () => source } }),
+      now: fakeClock(),
+    });
+
+    const events = await collect(session.sendMessage({ text: '查一下 tavily', profile }));
+
+    // 搜索源被真实调用，结果以标题/URL/摘要回填模型上下文
+    expect(queries).toEqual(['tavily api']);
+    const secondPrompt = JSON.stringify(model.doStreamCalls[1]?.prompt);
+    expect(secondPrompt).toContain('Tavily 文档');
+    expect(secondPrompt).toContain('https://docs.tavily.com');
+    expect(secondPrompt).toContain('Search API for AI agents.');
+
+    const resultEvent = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> => e.type === 'tool-result',
+    );
+    expect(resultEvent?.call.toolName).toBe('web_search');
+    expect(resultEvent?.call.isError).toBe(false);
+    expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it('web_search 未配置搜索源：工具返回中文错误回填模型，会话继续不崩（工单 10）', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const model = scriptedModel([
+      { kind: 'tool', calls: [{ toolCallId: 'w1', toolName: 'web_search', input: { query: 'x' } }] },
+      { kind: 'text', deltas: ['没配搜索 key，我换个思路'] },
+    ]);
+    const persistence = createSqliteSessionStore(':memory:');
+    const record = sessionRecord(workspace);
+    persistence.insertSession(record);
+    const session = createAgentSession({
+      record,
+      persistence,
+      history: persistence.listMessages(record.id),
+      languageModelFor: () => model,
+      tools: createBuiltinTools({ webSearch: { searchSource: () => null } }),
+      now: fakeClock(),
+    });
+
+    const events = await collect(session.sendMessage({ text: '搜个东西', profile }));
+
+    const resultEvent = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> => e.type === 'tool-result',
+    );
+    expect(resultEvent?.call.isError).toBe(true);
+    expect(resultEvent?.call.output).toContain('未配置搜索源');
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('未配置搜索源');
+    expect(events.at(-1)?.type).toBe('assistant-done');
   });
 
   it(
