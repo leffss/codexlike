@@ -1,21 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  APICallError,
-  RetryError,
   generateText,
-  jsonSchema,
   streamText,
-  tool as aiTool,
   type LanguageModel,
   type ModelMessage,
-  type Tool,
   type ToolModelMessage,
 } from 'ai';
 
 import { createLanguageModelFromProfile } from '../provider/language-model';
 import type { ProviderProfile } from '../provider/provider-profile';
-import { runTool } from '../tools/registry';
+import { runTool, toModelTools } from '../tools/registry';
 import type { ToolCallRecord, ToolDefinition } from '../tools/types';
 
 import {
@@ -24,7 +19,14 @@ import {
   type ApprovalMode,
   type ApprovalRequest,
 } from './approval';
+import { describeModelError, isAbortLike } from './errors';
 import type { SessionPersistence } from './persistence';
+import {
+  createSubagentOrchestrator,
+  SUBAGENT_TOOL_NAME,
+  type SubagentOrchestrator,
+  type SubagentsConfig,
+} from './subagent';
 import type {
   CompactRecord,
   CompactResult,
@@ -61,6 +63,12 @@ export interface CreateAgentSessionOptions {
    * 工具执行前经审批门（工单 04）：readonly 拒绝、suggest 命令审批、full 全放行。
    */
   tools?: ToolDefinition[] | (() => ToolDefinition[]);
+  /**
+   * 子代理编排配置（工单 13，GLOSSARY「子代理」）：传入即向工具表追加 spawn_subagent。
+   * 子代理：独立上下文、完整工具集（剔除 spawn_subagent 防递归）、并发上限（超出的
+   * 委派 FIFO 排队）；子代理工具调用同样过当前审批模式；报告以工具结果回流主会话。
+   */
+  subagents?: SubagentsConfig;
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 恢复会话时传入的历史「总是允许」记忆（命令首词，随会话入库） */
@@ -74,7 +82,12 @@ export interface AgentSession {
   readonly id: string;
   /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
   readonly record: SessionRecord;
-  /** 当前等待用户审批的请求；无等待时为 null（UI 切回会话时恢复审批卡片） */
+  /**
+   * 全部等待用户审批的请求（主会话与子代理并行等待时可能多个）。
+   * UI 切回会话时据此恢复审批卡片。
+   */
+  readonly pendingApprovals: ApprovalRequest[];
+  /** 第一个等待中的审批请求；无等待时为 null（向后兼容的单值视图） */
   readonly pendingApproval: ApprovalRequest | null;
   /**
    * 切换审批模式（三档，随时可调）：对下一次工具调用立即生效。
@@ -108,26 +121,6 @@ export interface AgentSession {
 /** 单次回复允许的工具轮次上限（防模型失控循环） */
 const MAX_TOOL_ROUNDS = 16;
 
-/** 把 error 消息转成用户可读的中文提示（保留原始报错原文） */
-function describeModelError(error: unknown): string {
-  if (error instanceof APICallError) {
-    const where = error.statusCode === undefined ? '网络错误' : `HTTP ${error.statusCode}`;
-    return `模型请求失败（${where}）：${error.message}`;
-  }
-  if (error instanceof RetryError) {
-    return `模型请求失败（已重试 ${error.errors.length} 次）：${describeModelError(error.lastError)}`;
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return `模型请求失败：${message}`;
-}
-
-function isAbortLike(error: unknown, signal: AbortSignal | undefined): boolean {
-  return (
-    signal?.aborted === true ||
-    (error instanceof Error && error.name === 'AbortError')
-  );
-}
-
 /** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
   if (message.role === 'assistant') {
@@ -139,18 +132,6 @@ function toModelMessage(message: StoredMessage): ModelMessage {
   }
   // @引用 内容随消息持久化，恢复时重组进上下文（快照等价性：与发送时一致）
   return { role: 'user', content: composeUserContent(message.content, message.mentions) };
-}
-
-/** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
-function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
-  const entries = tools.map((definition) => [
-    definition.name,
-    aiTool({
-      description: definition.description,
-      inputSchema: jsonSchema(definition.parameters),
-    }),
-  ]);
-  return Object.fromEntries(entries);
 }
 
 /**
@@ -240,22 +221,102 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
   const generateId = options.generateId ?? randomUUID;
 
   // 审批状态（工单 04）：模式随时可切（对下一次工具调用立即生效）；
-  // 「总是允许」记忆 = 命令首词集合（恢复会话时从库读回）
+  // 「总是允许」记忆 = 命令首词集合（恢复会话时从库读回）。
+  // waiter 表（工单 13）：主会话与多个子代理可能并行等待审批，按 requestId 路由。
   let approvalMode = options.approvalMode ?? record.approvalMode ?? 'suggest';
   const approvalMemory = new Set(options.approvalMemory ?? []);
-  let pendingApproval: ApprovalRequest | null = null;
-  let approvalWaiter: {
-    requestId: string;
-    resolve: (decision: ApprovalDecision) => void;
-  } | null = null;
+  // 主会话流的中断信号（子代理审批等待与之贯通；每次 sendMessage 更新）
+  let activeSignal: AbortSignal | undefined;
+  const approvalWaiters = new Map<
+    string,
+    { request: ApprovalRequest; resolve: (decision: ApprovalDecision) => void }
+  >();
+
+  function pendingApprovalList(): ApprovalRequest[] {
+    return [...approvalWaiters.values()].map((waiter) => waiter.request);
+  }
+
+  // 子代理编排器（工单 13）：审批端口接主会话审批链路（模式/记忆/waiter 表共享）
+  let orchestrator: SubagentOrchestrator | null = null;
+  if (options.subagents !== undefined) {
+    orchestrator = createSubagentOrchestrator(options.subagents, {
+      sessionId: record.id,
+      workspacePath: record.workspacePath,
+      approvalMode: () => approvalMode,
+      approvalMemory,
+      rememberAlways(commandWord) {
+        approvalMemory.add(commandWord);
+        persistence.insertApproval(record.id, commandWord);
+      },
+      requestApproval(request) {
+        return requestSessionApproval(request);
+      },
+      now,
+      generateId,
+    });
+  }
+
+  /**
+   * 子代理审批入口（编排器端口）：注册等待，事件经编排器缓冲以 approval-request 流出。
+   * approval-resolved 同样进缓冲，UI 审批卡片与子代理进度保持同一时间线。
+   */
+  async function requestSessionApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
+    const orch = orchestrator;
+    orch?.pushEvent({ type: 'approval-request', request });
+    const decision = await registerApprovalWait(request, activeSignal);
+    orch?.pushEvent({ type: 'approval-resolved', requestId: request.id, decision });
+    return decision;
+  }
+
+  /**
+   * 注册一次审批等待并挂起直至 respondApproval：
+   * 主会话审批在生成器内 yield 事件（见工具循环），子代理审批经编排器事件缓冲转发；
+   * 等待中 signal abort 视为拒绝（防永久卡死）。
+   */
+  function registerApprovalWait(
+    request: ApprovalRequest,
+    signal: AbortSignal | undefined,
+  ): Promise<ApprovalDecision> {
+    persistence.updateSession(record.id, {
+      status: 'waiting-approval',
+      updatedAt: now(),
+    });
+    let resolveDecision!: (decision: ApprovalDecision) => void;
+    const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
+      resolveDecision = resolve;
+    });
+    approvalWaiters.set(request.id, { request, resolve: resolveDecision });
+    const onAbort = () => resolveDecision('reject');
+    signal?.addEventListener('abort', onAbort, { once: true });
+    return decisionPromise.finally(() => {
+      signal?.removeEventListener('abort', onAbort);
+      approvalWaiters.delete(request.id);
+      if (approvalWaiters.size === 0) {
+        persistence.updateSession(record.id, {
+          status: 'streaming',
+          updatedAt: now(),
+        });
+      }
+    });
+  }
+
+  // 工具表：宿主工具（工单 12 逐条消息解析）+ spawn_subagent（工单 13，见 sendMessage）
+  function resolveSessionTools(): ToolDefinition[] {
+    const resolved =
+      typeof options.tools === 'function' ? options.tools() : (options.tools ?? []);
+    return orchestrator === null ? resolved : [...resolved, orchestrator.tool];
+  }
 
   let busy = false;
 
   return {
     id: record.id,
     record,
+    get pendingApprovals() {
+      return pendingApprovalList();
+    },
     get pendingApproval() {
-      return pendingApproval;
+      return pendingApprovalList()[0] ?? null;
     },
 
     setApprovalMode(mode) {
@@ -264,12 +325,12 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
     },
 
     respondApproval(requestId, decision) {
-      const waiter = approvalWaiter;
-      if (waiter === null || waiter.requestId !== requestId) {
+      const waiter = approvalWaiters.get(requestId);
+      if (waiter === undefined) {
         return false;
       }
-      approvalWaiter = null;
-      pendingApproval = null;
+      // 先移除再 resolve：同一请求的重复响应直接返回 false（幂等防护，04 的语义）
+      approvalWaiters.delete(requestId);
       waiter.resolve(decision);
       return true;
     },
@@ -279,6 +340,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
         throw new Error('上一条消息仍在回复中，请等待完成后再发送');
       }
       busy = true;
+      // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
+      activeSignal = signal;
       try {
         // 模型选择对本次及后续消息生效，落库
         persistence.updateSession(record.id, {
@@ -302,10 +365,11 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
         yield { type: 'user-message', message: userMessage };
 
         // 工具逐条消息解析（工单 12）：工厂函数让设置页的 MCP 工具启停、
-        // server 断线/重连对后续消息即时生效；数组形式行为不变
-        const resolvedTools =
-          typeof options.tools === 'function' ? options.tools() : (options.tools ?? []);
-        const toolsByName = new Map(resolvedTools.map((tool) => [tool.name, tool]));
+        // server 断线/重连对后续消息即时生效；数组形式行为不变。
+        // spawn_subagent（工单 13）随解析一并加入工具表
+        const toolsByName = new Map(
+          resolveSessionTools().map((tool) => [tool.name, tool]),
+        );
         const modelTools =
           toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
 
@@ -369,8 +433,11 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
             // 本轮 assistant 消息（含 tool-call parts）进入对话上下文
             pending.push(...(await result.response).messages);
 
-            // 逐个执行工具：tool-call 事件 → 审批门（工单 04）→ 执行 → tool-result 事件 + 落库
+            // 逐个执行工具：tool-call 事件 → 审批门（工单 04）→ 执行 → tool-result 事件 + 落库。
+            // spawn_subagent 委派（工单 13）例外：execute 立即返回（子代理后台运行），
+            // tool-result 延迟到本轮全部委派派发完、子代理结束后以真实报告回填。
             const resultParts: ToolModelMessage['content'] = [];
+            const deferredDelegations: { base: ToolCallRecord }[] = [];
             for (const call of toolCalls) {
               const base: ToolCallRecord = {
                 id: call.toolCallId,
@@ -414,8 +481,9 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
                   output = `工具调用被审批策略拒绝：${gate.reason}`;
                   isError = true;
                 } else if (gate.kind === 'ask') {
-                  // 暂停等待审批：落库 waiting-approval → 事件流出卡片 →
-                  // await 外部 respondApproval 唤醒（desktop 经 IPC 桥接 UI 三键）
+                  // 暂停等待审批：事件流出卡片 → 注册等待（落库 waiting-approval）→
+                  // await 外部 respondApproval 唤醒（desktop 经 IPC 桥接 UI 三键）；
+                  // 等待中 signal abort 视为拒绝（registerApprovalWait 内防御）
                   const request: ApprovalRequest = {
                     id: call.toolCallId,
                     sessionId: record.id,
@@ -424,32 +492,11 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
                     commandWord: gate.commandWord,
                     createdAt: now(),
                   };
-                  persistence.updateSession(record.id, {
-                    status: 'waiting-approval',
-                    updatedAt: now(),
-                  });
-                  pendingApproval = request;
-                  let resolveDecision!: (decision: ApprovalDecision) => void;
-                  const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
-                    resolveDecision = resolve;
-                  });
-                  approvalWaiter = { requestId: request.id, resolve: resolveDecision };
-                  // 中断防御：等待审批时被中断（06 打断）视为拒绝，避免生成器永久卡死
-                  const onAbort = () => resolveDecision('reject');
-                  signal?.addEventListener('abort', onAbort, { once: true });
-                  let decision: ApprovalDecision;
-                  try {
-                    yield { type: 'approval-request', request };
-                    decision = await decisionPromise;
-                  } finally {
-                    signal?.removeEventListener('abort', onAbort);
-                    approvalWaiter = null;
-                    pendingApproval = null;
-                    persistence.updateSession(record.id, {
-                      status: 'streaming',
-                      updatedAt: now(),
-                    });
-                  }
+                  // 先注册等待再 yield 事件（04 踩坑：生成器挂起在 yield 时，
+                  // 外部 respondApproval 必须已能找到 waiter）
+                  const decisionPromise = registerApprovalWait(request, signal);
+                  yield { type: 'approval-request', request };
+                  const decision = await decisionPromise;
                   yield { type: 'approval-resolved', requestId: request.id, decision };
 
                   if (decision === 'reject') {
@@ -465,6 +512,8 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
                     const executed = await runTool(definition, call.input, {
                       workspacePath: record.workspacePath,
                       signal,
+                      profile,
+                      toolCallId: call.toolCallId,
                     });
                     output = executed.output;
                     isError = executed.isError;
@@ -473,10 +522,18 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
                   const executed = await runTool(definition, call.input, {
                     workspacePath: record.workspacePath,
                     signal,
+                    profile,
+                    toolCallId: call.toolCallId,
                   });
                   output = executed.output;
                   isError = executed.isError;
                 }
+              }
+
+              if (orchestrator !== null && call.toolName === SUBAGENT_TOOL_NAME) {
+                // 委派：占位结果先不落库不回填，本轮末以真实报告回填（见下）
+                deferredDelegations.push({ base });
+                continue;
               }
 
               const completed = { ...base, output, isError };
@@ -491,8 +548,40 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
               });
             }
 
+            // 子代理轮末等待（工单 13）：本轮全部委派已派发（并行运行），
+            // 等待其结束并实时转发进度事件（排队 → 运行 → 工具进度 → 报告）；
+            // 中断时子代理随 signal 一并中止（pump 在全部收尾后返回）。
+            if (orchestrator !== null && deferredDelegations.length > 0) {
+              for await (const event of orchestrator.pump()) {
+                yield event;
+              }
+              // 真实报告作为延迟 tool-result：落库、事件流出、回填下一轮生成
+              for (const { base } of deferredDelegations) {
+                const reported = orchestrator.resultFor(base.id) ?? {
+                  output: '子代理未返回报告（委派未被接受）',
+                  isError: true,
+                };
+                const completed = { ...base, ...reported };
+                persistence.insertToolCall(completed);
+                yield { type: 'tool-result', call: completed };
+                resultParts.push({
+                  type: 'tool-result',
+                  toolCallId: base.id,
+                  toolName: base.toolName,
+                  output: { type: 'text', value: reported.output },
+                });
+              }
+            }
+
             // 工具结果作为 tool 消息回填，进入下一轮生成
             pending.push({ role: 'tool', content: resultParts });
+          }
+
+          // 循环结束（最终文本 / 中断 / 上限）：转发子代理事件缓冲中的残留（正常应为空）
+          if (orchestrator !== null) {
+            for (const event of orchestrator.drain()) {
+              yield event;
+            }
           }
         } catch (error) {
           if (isAbortLike(error, signal)) {

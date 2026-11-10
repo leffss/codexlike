@@ -10,6 +10,7 @@ import type { ToolDefinition } from '../tools/types';
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { ApprovalMode } from './approval';
 import type { SessionPersistence } from './persistence';
+import type { SubagentsConfig } from './subagent';
 import type {
   CompactRecord,
   SessionRecord,
@@ -24,6 +25,11 @@ export interface CreateSessionManagerOptions {
    * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
    */
   tools?: ToolDefinition[] | (() => ToolDefinition[]);
+  /**
+   * 子代理编排配置（工单 13）：传入即向会话工具表追加 spawn_subagent。
+   * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
+   */
+  subagents?: SubagentsConfig;
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
@@ -100,6 +106,7 @@ export function createSessionManager(
       persistence,
       history,
       tools: options.tools,
+      subagents: options.subagents,
       systemPrompt: systemPromptFor?.(record) ?? '',
       languageModelFor,
       approvalMode: record.approvalMode,

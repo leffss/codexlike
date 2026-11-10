@@ -1,4 +1,18 @@
+import { jsonSchema, tool as aiTool, type Tool } from 'ai';
+
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from './types';
+
+/** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
+export function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
+  const entries = tools.map((definition) => [
+    definition.name,
+    aiTool({
+      description: definition.description,
+      inputSchema: jsonSchema(definition.parameters),
+    }),
+  ]);
+  return Object.fromEntries(entries);
+}
 
 /**
  * 工具注册表（GLOSSARY）：内置工具与 MCP 工具统一注册、统一调度的接口。

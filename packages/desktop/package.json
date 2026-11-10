@@ -21,7 +21,8 @@
     "test:e2e:changes": "node e2e/changes.mjs",
     "test:e2e:interrupt": "node e2e/interrupt.mjs",
     "test:e2e:compact": "node e2e/compact.mjs",
-    "test:e2e:mcp": "node e2e/mcp.mjs"
+    "test:e2e:mcp": "node e2e/mcp.mjs",
+    "test:e2e:subagents": "node e2e/subagents.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"

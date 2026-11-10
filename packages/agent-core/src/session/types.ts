@@ -140,7 +140,25 @@ export type SessionEvent =
   /**
    * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
    * 发出后会话进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
+   * 子代理的命令审批（工单 13）同样走本事件（request.subagentId 标注来源）。
    */
   | { type: 'approval-request'; request: ApprovalRequest }
   /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本会话总是允许） */
-  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision };
+  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision }
+  /**
+   * 子代理委派进入排队（工单 13，GLOSSARY「子代理」）：并发上限满，
+   * FIFO 等待；有空位即转 subagent-start。UI 嵌套卡片显示排队状态。
+   */
+  | { type: 'subagent-queued'; subagentId: string; task: string }
+  /** 子代理开始运行（排队结束或直接有空位） */
+  | { type: 'subagent-start'; subagentId: string; task: string; toolCallId: string }
+  /**
+   * 子代理内部工具调用进度（嵌套卡片显示「当前活动工具」）：
+   * phase=call 开始执行（运行中），phase=result 完成（含截断输出与失败标记）。
+   */
+  | { type: 'subagent-tool'; subagentId: string; phase: 'call' | 'result'; call: ToolCallRecord }
+  /**
+   * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
+   * ok=false 表示失败或被中断（report 为中文原因）。
+   */
+  | { type: 'subagent-report'; subagentId: string; task: string; report: string; ok: boolean };

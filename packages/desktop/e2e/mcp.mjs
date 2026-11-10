@@ -128,10 +128,11 @@ async function setupSettings(window, port) {
 
   // Provider Profile（限定表单内点击，工单 10 踩坑：设置页多区多「保存」按钮）
   await window.getByRole('button', { name: '+ 新建 Profile' }).click();
-  await window.getByLabel('名称').fill('Mock');
-  await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
-  await window.getByLabel('API Key').fill('sk-e2e');
-  await window.getByLabel('模型').fill('mock-model');
+  const profileForm = window.locator('form');
+  await profileForm.getByLabel('名称').fill('Mock');
+  await profileForm.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
+  await profileForm.getByLabel('API Key').fill('sk-e2e');
+  await profileForm.getByLabel('模型').fill('mock-model');
   await window
     .locator('form')
     .getByRole('button', { name: /保存|创建/ })

@@ -16,7 +16,7 @@ export type ApprovalDecision = 'approve' | 'reject' | 'always';
 
 /** 审批请求（等待用户决定时经事件流推给 UI；一次审批对应一次工具调用） */
 export interface ApprovalRequest {
-  /** 审批 id（即对应的 tool call id） */
+  /** 审批 id（即对应的 tool call id；子代理的审批为独立生成的 id） */
   id: string;
   sessionId: string;
   toolName: string;
@@ -26,6 +26,8 @@ export interface ApprovalRequest {
   commandWord: string;
   /** ISO 8601 */
   createdAt: string;
+  /** 由子代理发起的审批（工单 13）：审批卡片据此标注来源；主会话审批缺省 */
+  subagentId?: string;
 }
 
 /** 审批门决定：放行执行 / 拒绝 / 暂停等待审批 */
