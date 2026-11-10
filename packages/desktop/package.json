@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "node e2e/smoke.mjs",
-    "test:e2e:commands": "node e2e/commands.mjs"
+    "test:e2e:commands": "node e2e/commands.mjs",
+    "test:e2e:changes": "node e2e/changes.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"
