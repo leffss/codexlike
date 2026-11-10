@@ -290,11 +290,16 @@ function describeMismatch(
   hunkNumber: number,
 ): string {
   const head = expected.slice(0, 3).map((line) => `  | ${line}`).join('\n');
-  // 对期望序列的每个非空行取探测片段，在文件中找相近行（帮助模型定位差异）
-  const probes = expected
-    .filter((line) => line.trim() !== '')
-    .slice(0, 5)
-    .map((line) => line.trim().slice(0, 20));
+  // 对期望序列的每个非空行取探测片段，在文件中找相近行（帮助模型定位差异）。
+  // 片段取两级长度：完整前缀失配时短前缀仍能定位「开头相同、行尾不同」的行。
+  const probes: string[] = [];
+  for (const line of expected.filter((l) => l.trim() !== '').slice(0, 5)) {
+    const trimmed = line.trim();
+    probes.push(trimmed.slice(0, 20));
+    if (trimmed.length > 10) {
+      probes.push(trimmed.slice(0, 10));
+    }
+  }
   const hits: string[] = [];
   for (let index = 0; index < fileLines.length && hits.length < 3; index += 1) {
     const line = fileLines[index]!;
