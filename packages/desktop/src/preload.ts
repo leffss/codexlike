@@ -33,6 +33,8 @@ const api: CodexLikeApi = {
     status: (sessionId) => ipcRenderer.invoke(IPC.sessions.status, sessionId),
     workspaceFiles: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
+    toolImage: (sessionId, toolCallId) =>
+      ipcRenderer.invoke(IPC.sessions.toolImage, sessionId, toolCallId),
   },
   onSessionEvent: (listener) => {
     const handler: (

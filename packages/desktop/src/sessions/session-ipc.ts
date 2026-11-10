@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import {
   dialog,
@@ -9,6 +9,7 @@ import {
 
 import {
   discoverAgentsInstructions,
+  type BrowserSessionManager,
   type ProviderProfile,
   type SessionManager,
   type SessionRecord,
@@ -16,6 +17,7 @@ import {
 
 import type { ProfileStore } from '../profiles/profile-store';
 import { readMentionAttachments } from './mentions';
+import { screenshotPathFor } from './screenshots';
 import { buildSessionStatus } from './status';
 import { listWorkspaceFiles } from './workspace-files';
 import { IPC, type SessionEventEnvelope } from '../shared/ipc';
@@ -25,8 +27,12 @@ export function registerSessionHandlers(options: {
   manager: SessionManager;
   profiles: ProfileStore;
   getWindow: () => BrowserWindow | null;
+  /** 应用数据目录（截图读回的路径约定） */
+  dataDir: string;
+  /** 浏览器会话管理器（会话归档时释放其浏览器 context） */
+  browserManager?: BrowserSessionManager;
 }): void {
-  const { manager, profiles, getWindow } = options;
+  const { manager, profiles, getWindow, dataDir, browserManager } = options;
 
   function emit(envelope: SessionEventEnvelope): void {
     const win = getWindow();
@@ -153,7 +159,25 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== 'string' || typeof archived !== 'boolean') {
         throw new Error('archive：参数不合法');
       }
+      // 会话结束（归档）：释放其浏览器 context（Cookie 等随之清理）
+      if (archived) {
+        void browserManager?.closeSession(sessionId).catch(() => {});
+      }
       return manager.setArchived(sessionId, archived);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.sessions.toolImage,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, toolCallId: unknown) => {
+      if (typeof sessionId !== 'string' || typeof toolCallId !== 'string') {
+        throw new Error('toolImage：参数不合法');
+      }
+      const path = screenshotPathFor(dataDir, sessionId, toolCallId);
+      if (!existsSync(path)) {
+        return null;
+      }
+      return `data:image/png;base64,${readFileSync(path).toString('base64')}`;
     },
   );
 

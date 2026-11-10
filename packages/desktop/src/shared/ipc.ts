@@ -42,6 +42,8 @@ export const IPC = {
     status: 'sessions:status',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
+    /** 工具截图数据（dataURL）；文件不存在（如已清理）返回 null */
+    toolImage: 'sessions:tool-image',
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
@@ -95,6 +97,11 @@ export interface CodexLikeApi {
     status(sessionId: string): Promise<SessionStatusInfo | null>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
+    /**
+     * 工具调用截图（browser_screenshot）的图片数据：`data:image/png;base64,…`。
+     * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
+     */
+    toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
   };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(

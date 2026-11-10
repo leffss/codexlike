@@ -52,6 +52,21 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
     }
     case 'run_terminal_command':
       return `$ ${asString(args['command']) ?? '?'}`;
+    case 'browser_navigate':
+      return asString(args['url']) ?? '?';
+    case 'browser_click': {
+      const selector = asString(args['selector']) ?? '?';
+      return `点击 ${selector}`;
+    }
+    case 'browser_type': {
+      const selector = asString(args['selector']) ?? '?';
+      const text = asString(args['text']) ?? '';
+      return `在 ${selector} 输入 ${text}`;
+    }
+    case 'browser_screenshot':
+      return '整页截图';
+    case 'browser_read':
+      return '提取页面正文';
     default:
       return JSON.stringify(args);
   }

@@ -11,6 +11,8 @@ import {
 
 import {
   composeSystemPrompt,
+  createBrowserSessionManager,
+  createBrowserTools,
   createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
@@ -25,6 +27,7 @@ import {
   type SafeStorageLike,
 } from './profiles/profile-store';
 import { registerSessionHandlers } from './sessions/session-ipc';
+import { sessionScreenshotDir } from './sessions/screenshots';
 import { IPC } from './shared/ipc';
 
 /**
@@ -128,20 +131,43 @@ void app.whenReady().then(() => {
   // 六件内置工具（工单 03）：无状态实例，全部会话共享；工作区经执行上下文逐会话注入。
   // shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
   const shellEnv = process.env['CODEXLIKE_SHELL'];
-  const tools = createBuiltinTools({
-    env: process.env,
-    shell:
-      shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
-        ? shellEnv
-        : undefined,
+  // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
+  // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
+  const browserManager = createBrowserSessionManager({
+    progress: (line) => console.log(`[browser] ${line}`),
   });
+  const browserTools = createBrowserTools({
+    manager: browserManager,
+    // 截图保存到会话数据目录（约定路径，重启后 UI 仍可读回）
+    screenshotDirFor: (sessionId) => sessionScreenshotDir(dataDir(), sessionId),
+  });
+  const tools = [
+    ...createBuiltinTools({
+      env: process.env,
+      shell:
+        shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
+          ? shellEnv
+          : undefined,
+    }),
+    ...browserTools,
+  ];
   // AGENTS.md 自动注入（工单 07）：全局 + 项目根 → cwd 逐层发现，
   // 会话创建与恢复时各计算一次系统提示（agent-core 不依赖 fs，发现逻辑注入宿主）
   const systemPromptFor = (record: SessionRecord) =>
     composeSystemPrompt(
       discoverAgentsInstructions({ workspacePath: record.workspacePath }),
     );
-  const manager = createSessionManager({ persistence, tools, systemPromptFor });
+  // 截图附图开关（工单 11）：端点支持图片输入时设 CODEXLIKE_ATTACH_TOOL_IMAGES=1，
+  // 截图以 image_url 附给模型；默认关闭走降级路径（输出文本含文件路径）。
+  const attachToolImages = ['1', 'true'].includes(
+    (process.env['CODEXLIKE_ATTACH_TOOL_IMAGES'] ?? '').toLowerCase(),
+  );
+  const manager = createSessionManager({
+    persistence,
+    tools,
+    systemPromptFor,
+    attachToolImages,
+  });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
   // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置
@@ -156,6 +182,8 @@ void app.whenReady().then(() => {
     manager,
     profiles: store,
     getWindow: () => mainWindow,
+    dataDir: dataDir(),
+    browserManager,
   });
   mainWindow = createMainWindow();
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
@@ -165,8 +193,21 @@ void app.whenReady().then(() => {
     app.quit();
   });
 
-  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）
-  app.on('will-quit', () => {
-    persistence.close();
+  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）；
+  // 浏览器先优雅关闭（Chromium 子进程退出），完成后再真正退出
+  let cleanupDone = false;
+  app.on('will-quit', (event) => {
+    if (cleanupDone) {
+      return;
+    }
+    event.preventDefault();
+    cleanupDone = true;
+    void browserManager
+      .close()
+      .catch(() => {})
+      .finally(() => {
+        persistence.close();
+        app.quit();
+      });
   });
 });

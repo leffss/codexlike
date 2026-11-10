@@ -107,4 +107,16 @@ describe('summarizeToolCall（工具卡片参数摘要）', () => {
     expect(summarizeToolCall('mcp_tool', '{"a":1}')).toContain('a');
     expect(summarizeToolCall('read_file', '不是 json')).toBe('不是 json');
   });
+
+  it('浏览器五件工具给出人可读摘要', () => {
+    expect(
+      summarizeToolCall('browser_navigate', '{"url":"https://example.com/docs"}'),
+    ).toBe('https://example.com/docs');
+    expect(summarizeToolCall('browser_click', '{"selector":"#submit"}')).toBe('点击 #submit');
+    expect(
+      summarizeToolCall('browser_type', '{"selector":"#q","text":"playwright"}'),
+    ).toBe('在 #q 输入 playwright');
+    expect(summarizeToolCall('browser_screenshot', '{}')).toBe('整页截图');
+    expect(summarizeToolCall('browser_read', '{}')).toBe('提取页面正文');
+  });
 });
