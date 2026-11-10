@@ -51,6 +51,25 @@ describe('initialTranscript（时间线 → 消息流初始状态）', () => {
       running: false,
     });
   });
+
+  it('重启恢复：被中断的助手消息保留中断点标记（aborted → interrupted）', () => {
+    const items: TranscriptItem[] = [
+      { kind: 'message', message: stored({ id: 'm1', role: 'user', content: '慢慢说' }) },
+      {
+        kind: 'message',
+        message: stored({
+          id: 'm2',
+          role: 'assistant',
+          content: '被打断的部分',
+          aborted: true,
+          createdAt: '2026-11-10T08:00:02.000Z',
+        }),
+      },
+    ];
+
+    const view = initialTranscript(items);
+    expect(view[1]).toMatchObject({ id: 'm2', interrupted: true });
+  });
 });
 
 describe('applySessionEvent（工具事件归并）', () => {
@@ -109,6 +128,12 @@ describe('summarizeToolCall（工具卡片参数摘要）', () => {
 
     expect(summarizeToolCall('mcp_tool', '{"a":1}')).toContain('a');
     expect(summarizeToolCall('read_file', '不是 json')).toBe('不是 json');
+
+    // MCP 工具摘要（工单 12）：text 类字段优先，否则压缩 JSON
+    expect(summarizeToolCall('mcp_fake_echo', '{"text":"你好"}')).toBe(
+      'MCP mcp_fake_echo：你好',
+    );
+    expect(summarizeToolCall('mcp_fake_x', '{"n":1}')).toBe('MCP mcp_fake_x {"n":1}');
   });
 
   it('浏览器五件工具给出人可读摘要', () => {

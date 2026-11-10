@@ -17,6 +17,19 @@ export type {
 } from './session/manager';
 export { createSessionManager } from './session/manager';
 
+// 子代理编排（工单 13，GLOSSARY「子代理」）：spawn_subagent 工具由 createAgentSession
+// 在 subagents 配置存在时自动追加；此处导出常量与类型供宿主装配与测试
+export type {
+  SubagentOrchestrator,
+  SubagentHostPort,
+  SubagentsConfig,
+  SubagentRuntimeSettings,
+} from './session/subagent';
+export {
+  DEFAULT_SUBAGENT_MAX_CONCURRENT,
+  SUBAGENT_TOOL_NAME,
+} from './session/subagent';
+
 // 工具域：注册表与六件内置工具（依赖 node:fs / node:child_process，仅 Node 宿主可用）
 export { createToolRegistry, runTool } from './tools/registry';
 export type { ToolRegistry } from './tools/registry';
@@ -39,6 +52,13 @@ export type {
   WebSearchToolOptions,
 } from './tools/web-search';
 export { resolveInWorkspace } from './tools/workspace';
+// MCP 客户端（工单 12，stdio）：连接管理 + 工具发现 + ToolDefinition 适配
+export {
+  createMcpManager,
+  MCP_DEFAULT_CALL_TIMEOUT_MS,
+  MCP_DEFAULT_CONNECT_TIMEOUT_MS,
+} from './mcp/manager';
+export type { McpManager, McpManagerOptions } from './mcp/manager';
 // AGENTS.md 发现（依赖 node:fs / git 探测，Node 宿主专用）
 export {
   AGENTS_MD_MAX_BYTES,
@@ -67,3 +87,19 @@ export type {
   ChromiumInstaller,
   CliChromiumInstallerOptions,
 } from './browser/chromium';
+// git 服务（simple-git，改动面板的数据源；工单 05）
+export { createGitService } from './git/git-service';
+// 托管 Worktree 管理（worktree 模式会话的隔离副本；工单 09）
+export {
+  WORKTREE_INCLUDE_FILE,
+  WORKTREE_KEEP_DEFAULT,
+  createWorktreeService,
+} from './worktree/worktree-service';
+export type {
+  ManagedWorktree,
+  WorktreeCleanupResult,
+  WorktreeCleanupSession,
+  WorktreeService,
+} from './worktree/worktree-service';
+// commit 消息生成（一次不发工具的 LLM 请求；mock 依赖注入，可脱离 Electron 测试）
+export { generateCommitMessage } from './git/commit-message';

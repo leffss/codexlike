@@ -10,6 +10,7 @@ import type { ToolDefinition } from '../tools/types';
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { ApprovalMode } from './approval';
 import type { SessionPersistence } from './persistence';
+import type { SubagentsConfig } from './subagent';
 import type {
   CompactRecord,
   SessionRecord,
@@ -19,8 +20,16 @@ import type {
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
-  /** 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin） */
-  tools?: ToolDefinition[];
+  /**
+   * 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
+   * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
+   */
+  tools?: ToolDefinition[] | (() => ToolDefinition[]);
+  /**
+   * 子代理编排配置（工单 13）：传入即向会话工具表追加 spawn_subagent。
+   * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
+   */
+  subagents?: SubagentsConfig;
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
@@ -42,7 +51,14 @@ export interface CreateSessionManagerOptions {
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
 export interface SessionManager {
-  create(options: { workspacePath: string; title?: string }): AgentSession;
+  create(options: {
+    workspacePath: string;
+    title?: string;
+    /** 运行位置（默认 local 本目录直跑；worktree 由宿主先检出副本再传入其路径） */
+    workspaceMode?: 'local' | 'worktree';
+    /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
+    id?: string;
+  }): AgentSession;
   /** 全部会话记录（含已归档），按 updatedAt 倒序 */
   list(): SessionRecord[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
@@ -55,7 +71,10 @@ export interface SessionManager {
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
-  /** 审批模式切换（三档）：落库并对已实例化会话立即生效；不存在返回 null */
+  /**
+   * 审批模式切换（三档）：落库（随会话记录跨重启恢复）并对已实例化会话立即
+   * 生效（下一次工具调用）；拦截语义由工单 04 的审批状态机实现。不存在返回 null。
+   */
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
@@ -96,6 +115,7 @@ export function createSessionManager(
       persistence,
       history,
       tools: options.tools,
+      subagents: options.subagents,
       systemPrompt: systemPromptFor?.(record) ?? '',
       attachToolImages: options.attachToolImages,
       languageModelFor,
@@ -129,12 +149,14 @@ export function createSessionManager(
   }
 
   return {
-    create({ workspacePath, title }) {
+    create({ workspacePath, title, workspaceMode = 'local', id }) {
       const timestamp = now();
       const record: SessionRecord = {
-        id: generateId(),
+        // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
+        id: id ?? generateId(),
         title: title ?? (basename(workspacePath) || workspacePath),
         workspacePath,
+        workspaceMode,
         providerProfileId: null,
         model: null,
         status: 'idle',

@@ -25,6 +25,7 @@ function sessionRecord(): SessionRecord {
     providerProfileId: null,
     model: null,
     status: 'idle',
+    workspaceMode: 'local',
     approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-10T08:00:00.000Z',
@@ -268,12 +269,13 @@ describe('AgentSession.sendMessage（会话流式循环）', () => {
       expect(lastEvent.message.content).toBe('部分回复');
     }
 
-    // 中断后落库的是部分文本；状态回 idle
+    // 中断后落库的是部分文本（带中断标记）；状态回 idle
     const messages = persistence.listMessages('session-1');
     expect(messages.map((m) => [m.role, m.content])).toEqual([
       ['user', '慢慢说'],
       ['assistant', '部分回复'],
     ]);
+    expect(messages[1]?.aborted).toBe(true);
     expect(persistence.listSessions().at(0)?.status).toBe('idle');
 
     // 会话可继续：下一轮正常完成

@@ -14,8 +14,8 @@ const api: CodexLikeApi = {
   },
   sessions: {
     list: () => ipcRenderer.invoke(IPC.sessions.list),
-    create: (workspacePath) =>
-      ipcRenderer.invoke(IPC.sessions.create, workspacePath),
+    create: (workspacePath, workspaceMode) =>
+      ipcRenderer.invoke(IPC.sessions.create, workspacePath, workspaceMode),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) => ipcRenderer.invoke(IPC.sessions.messages, sessionId),
     send: (sessionId, text, providerProfileId, mentionPaths) =>
@@ -26,6 +26,7 @@ const api: CodexLikeApi = {
         providerProfileId,
         mentionPaths,
       ),
+    interrupt: (sessionId) => ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>
@@ -43,10 +44,24 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.respondApproval, sessionId, requestId, decision),
     pendingApproval: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.pendingApproval, sessionId),
+    pendingApprovals: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.pendingApprovals, sessionId),
   },
   searchSettings: {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
+  },
+  subagentSettings: {
+    get: () => ipcRenderer.invoke(IPC.subagentSettings.get),
+    set: (input) => ipcRenderer.invoke(IPC.subagentSettings.set, input),
+  },
+  mcp: {
+    overview: () => ipcRenderer.invoke(IPC.mcp.overview),
+    addServer: (input) => ipcRenderer.invoke(IPC.mcp.addServer, input),
+    removeServer: (id) => ipcRenderer.invoke(IPC.mcp.removeServer, id),
+    reconnect: (id) => ipcRenderer.invoke(IPC.mcp.reconnect, id),
+    setToolEnabled: (toolName, enabled) =>
+      ipcRenderer.invoke(IPC.mcp.setToolEnabled, toolName, enabled),
   },
   onSessionEvent: (listener) => {
     const handler: (
@@ -57,6 +72,17 @@ const api: CodexLikeApi = {
     return () => {
       ipcRenderer.removeListener(IPC.sessionEvents, handler);
     };
+  },
+  git: {
+    status: (sessionId) => ipcRenderer.invoke(IPC.git.status, sessionId),
+    diff: (sessionId, path, oldPath) =>
+      ipcRenderer.invoke(IPC.git.diff, sessionId, path, oldPath),
+    createBranch: (sessionId) =>
+      ipcRenderer.invoke(IPC.git.createBranch, sessionId),
+    generateCommitMessage: (sessionId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.git.commitMessage, sessionId, providerProfileId),
+    commit: (sessionId, message) =>
+      ipcRenderer.invoke(IPC.git.commit, sessionId, message),
   },
 };
 

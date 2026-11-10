@@ -17,7 +17,9 @@ export type { CreateLanguageModelOptions } from './provider/language-model';
 export { createLanguageModelFromProfile } from './provider/language-model';
 
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
+// （ApprovalMode 定义在 ./session/approval，经下方审批域出口统一导出）
 export type {
+  ApprovalDecisionRecord,
   CompactRecord,
   CompactResult,
   MentionAttachment,
@@ -27,6 +29,7 @@ export type {
   SessionStatus,
   StoredMessage,
   TranscriptItem,
+  WorkspaceMode,
 } from './session/types';
 
 // 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
@@ -47,6 +50,14 @@ export type {
   ToolPermission,
   ToolResult,
 } from './tools/types';
+
+// MCP 域类型（GLOSSARY「MCP」，工单 12）：type-only，连接管理实现（Node 专属）在 ./node 出口
+export type {
+  McpDiscoveredTool,
+  McpServerConfig,
+  McpServerState,
+  McpServerStatus,
+} from './mcp/types';
 // 输入框解析层（纯函数，浏览器安全；ui 的命令菜单与发送分发直接值导入）
 export {
   extractMentionPaths,
@@ -66,3 +77,17 @@ export type {
   SlashCommandDef,
   SlashCommandName,
 } from './composer/slash-command';
+
+// git 域类型（改动面板数据形状）：type-only，git 服务实现（simple-git，Node 专属）在 ./node 出口
+export type {
+  GitBranchResult,
+  GitChangeKind,
+  GitCommitResult,
+  GitFileChange,
+  GitFileDiff,
+  GitService,
+  GitStatus,
+} from './git/git-service';
+// 会话名 → codexlike/<会话名> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
+export { codexlikeBranchName } from './git/branch-name';
+export { buildCommitMessagePrompt } from './git/commit-message';

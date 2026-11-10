@@ -17,6 +17,7 @@ import {
   createSessionManager,
   createSqliteSessionStore,
   createTavilySearchSource,
+  createWorktreeService,
   discoverAgentsInstructions,
   validateProviderProfile,
   type SearchSource,
@@ -28,13 +29,22 @@ import {
   type ProfileStore,
   type SafeStorageLike,
 } from './profiles/profile-store';
+import { registerGitHandlers } from './git/git-ipc';
 import {
   createSearchSettingsStore,
   type SearchSettingsStore,
 } from './search/search-settings-store';
 import { registerSessionHandlers } from './sessions/session-ipc';
 import { sessionScreenshotDir } from './sessions/screenshots';
+import {
+  createSubagentSettingsStore,
+  type SubagentSettings,
+  type SubagentSettingsStore,
+} from './subagents/subagent-settings-store';
 import { IPC } from './shared/ipc';
+import { createMcpStore } from './mcp/mcp-store';
+import { createMcpService } from './mcp/mcp-service';
+import { registerMcpHandlers } from './mcp/mcp-ipc';
 
 /**
  * 把 Electron safeStorage（async API，Electron 45 起同步版已弃用）
@@ -161,6 +171,46 @@ function registerSearchSettingsHandlers(
   });
 }
 
+/**
+ * 注册子代理全局设置的 IPC 指令（工单 13）。
+ * 设置经内存缓存注入 SubagentsConfig（逐次解析），保存后对下一次委派即时生效；
+ * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验）。
+ */
+function registerSubagentSettingsHandlers(options: {
+  store: SubagentSettingsStore;
+  profiles: ProfileStore;
+  onSaved: (settings: SubagentSettings) => Promise<void>;
+}): void {
+  const { store, profiles, onSaved } = options;
+  ipcMain.handle(IPC.subagentSettings.get, () => store.get());
+  ipcMain.handle(IPC.subagentSettings.set, (_e: IpcMainInvokeEvent, input: unknown) => {
+    if (typeof input !== 'object' || input === null) {
+      throw new Error('子代理设置输入不合法');
+    }
+    const { providerProfileId, maxConcurrent } = input as Record<string, unknown>;
+    const profileId =
+      providerProfileId === null || providerProfileId === ''
+        ? null
+        : String(providerProfileId);
+    return (async () => {
+      if (profileId !== null) {
+        const exists = (await profiles.list()).some((p) => p.id === profileId);
+        if (!exists) {
+          throw new Error('所选 Provider Profile 不存在，请重新选择子代理模型');
+        }
+      }
+      const settings = await store.set({
+        providerProfileId: profileId,
+        maxConcurrent: Number(maxConcurrent),
+      });
+      await onSaved(settings);
+      return settings;
+    })().catch((error: unknown) => {
+      throw error instanceof Error ? error : new Error(String(error));
+    });
+  });
+}
+
 void app.whenReady().then(async () => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
@@ -198,17 +248,36 @@ void app.whenReady().then(async () => {
     // 截图保存到会话数据目录（约定路径，重启后 UI 仍可读回）
     screenshotDirFor: (sessionId) => sessionScreenshotDir(dataDir(), sessionId),
   });
-  const tools = [
-    ...createBuiltinTools({
-      env: process.env,
-      shell:
-        shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
-          ? shellEnv
-          : undefined,
-      webSearch: { searchSource: () => searchSource },
-    }),
-    ...browserTools,
-  ];
+
+  const builtinTools = createBuiltinTools({
+    env: process.env,
+    shell:
+      shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
+        ? shellEnv
+        : undefined,
+    webSearch: { searchSource: () => searchSource },
+  });
+
+  // 子代理全局设置（工单 13）：内存缓存注入 SubagentsConfig（逐次解析），
+  // 设置页保存后对下一次委派即时生效（无需重启会话）
+  const subagentSettingsStore = createSubagentSettingsStore({ dir: dataDir() });
+  const profileStore = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
+  let subagentSettings = await subagentSettingsStore.get();
+  const refreshSubagentSettings = async () => {
+    subagentSettings = await subagentSettingsStore.get();
+  };
+
+  // MCP（工单 12）：stdio server 的配置存储 + 连接管理；启动时连接全部已配置
+  // server（失败不拖垮应用，状态在设置页可见）。会话工具 = 内置 + 启用的 MCP 工具，
+  // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
+  const mcpService = createMcpService({
+    store: createMcpStore({ dir: dataDir(), safeStorage: asSafeStorageLike() }),
+  });
+  await mcpService.startup();
+
+
+  // 会话工具工厂（主会话与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
+  const sessionTools = () => [...mcpService.sessionTools(builtinTools), ...browserTools];
   // AGENTS.md 自动注入（工单 07）：全局 + 项目根 → cwd 逐层发现，
   // 会话创建与恢复时各计算一次系统提示（agent-core 不依赖 fs，发现逻辑注入宿主）
   const systemPromptFor = (record: SessionRecord) =>
@@ -222,11 +291,32 @@ void app.whenReady().then(async () => {
   );
   const manager = createSessionManager({
     persistence,
-    tools,
+    tools: sessionTools,
     systemPromptFor,
     attachToolImages,
+    subagents: {
+      // 子代理工具集 = 完整会话工具（内置 + MCP + 浏览器，同一工厂逐次解析；
+      // 编排器剔除 spawn_subagent 防递归）
+      tools: sessionTools,
+      settings: () => subagentSettings,
+      // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前会话所选）
+      resolveProfile: async () => {
+        const profileId = subagentSettings.providerProfileId;
+        if (profileId === null) {
+          return null;
+        }
+        const found = (await profileStore.list()).find((p) => p.id === profileId);
+        return found ?? null;
+      },
+    },
   });
-  const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
+  const store = profileStore;
+
+  // 托管 Worktree（工单 09）：worktree 模式会话的隔离副本根目录
+  // （~/.codexlike/worktrees，CODEXLIKE_HOME 隔离由 dataDir 统一解析）
+  const worktreeService = createWorktreeService({
+    worktreesDir: join(dataDir(), 'worktrees'),
+  });
 
   // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
   // 进程刚启动不可能有真实运行中的流，统一重置（manager.get 的恢复路径会落库 idle）
@@ -236,15 +326,37 @@ void app.whenReady().then(async () => {
     }
   }
 
+  // 启动时跑一次 LRU 清理：会话已删除/已归档的托管 Worktree 超量部分回收
+  // （运行中的永不清理；此刻无运行中会话，主要是孤儿目录与超量归档副本）
+  void worktreeService
+    .cleanup({ sessions: manager.list() })
+    .then((result) => {
+      if (result.removed.length > 0) {
+        console.log(`[main] 已清理 ${result.removed.length} 个过期托管 Worktree`);
+      }
+    })
+    .catch((error: unknown) => {
+      console.error('[main] worktree 启动清理失败', error);
+    });
+
   registerProviderProfileHandlers(store);
   registerSearchSettingsHandlers(searchSettings, refreshSearchSource);
+  registerSubagentSettingsHandlers({
+    store: subagentSettingsStore,
+    profiles: profileStore,
+    onSaved: refreshSubagentSettings,
+  });
+  registerMcpHandlers(mcpService);
   registerSessionHandlers({
     manager,
     profiles: store,
     getWindow: () => mainWindow,
     dataDir: dataDir(),
     browserManager,
+    worktreeService,
   });
+  // 改动面板 + git 集成（工单 05）
+  registerGitHandlers({ manager, profiles: store });
   mainWindow = createMainWindow();
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
@@ -253,11 +365,12 @@ void app.whenReady().then(async () => {
     app.quit();
   });
 
-  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）；
-  // 浏览器收尾尽力而为（不阻塞退出流程：preventDefault + 二次 quit 在
-  // Electron 45 上会让进程挂起不退）
+  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）、
+  // 断开 MCP 子进程与浏览器收尾（尽力而为，不阻塞退出流程：
+  // preventDefault + 二次 quit 在 Electron 45 上会让进程挂起不退）
   app.on('will-quit', () => {
     persistence.close();
+    void mcpService.shutdown();
     void browserManager.close().catch(() => {});
   });
 });

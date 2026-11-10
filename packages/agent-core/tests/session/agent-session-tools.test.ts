@@ -1,5 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -28,6 +28,7 @@ function sessionRecord(workspacePath: string): SessionRecord {
     providerProfileId: null,
     model: null,
     status: 'idle',
+    workspaceMode: 'local',
     approvalMode: 'suggest',
     archivedAt: null,
     createdAt: '2026-11-11T08:00:00.000Z',
@@ -366,5 +367,119 @@ describe('AgentSession 工具循环（六件工具默认放行）', () => {
     expect(resultEvent?.call.output).toContain('未配置搜索源');
     expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('未配置搜索源');
     expect(events.at(-1)?.type).toBe('assistant-done');
+  });
+
+  it(
+    '工具执行中点停止（AbortSignal）：子进程被杀，结果标记为用户中断，本轮终止后可继续发消息',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+      const model = scriptedModel([
+        {
+          kind: 'tool',
+          calls: [
+            {
+              toolCallId: 'c1',
+              toolName: 'run_terminal_command',
+              input: { command: 'echo started; sleep 30', timeoutMs: 120_000 },
+            },
+          ],
+        },
+        { kind: 'text', deltas: ['（不应被请求）'] },
+      ]);
+      const { session, persistence } = makeSession(model, workspace);
+
+      const controller = new AbortController();
+      const events: SessionEvent[] = [];
+      const startedAt = Date.now();
+      // 700ms 后点停止：此时长命令已在执行中（echo started 已产出、sleep 30 进行中）。
+      // 不能在收到 tool-call 事件后再 abort——生成器在 yield 处暂停，工具尚未启动。
+      // 审批门（04）：suggest 档命令审批，批准后工具才开始执行，
+      // 700ms 后的 abort 因此落在执行中（子进程被杀），而非等待审批时。
+      const stopTimer = setTimeout(() => controller.abort(), 700);
+      for await (const event of session.sendMessage({
+        text: '跑个长命令',
+        profile,
+        signal: controller.signal,
+      })) {
+        events.push(event);
+        if (event.type === 'approval-request') {
+          session.respondApproval(event.request.id, 'approve');
+        }
+      }
+      clearTimeout(stopTimer);
+      const elapsed = Date.now() - startedAt;
+
+      // 结果事件标记用户中断（而非超时），进程树已被杀（不会等满 30 秒）
+      const resultEvent = events.find(
+        (e): e is Extract<SessionEvent, { type: 'tool-result' }> => e.type === 'tool-result',
+      );
+      expect(resultEvent?.call.isError).toBe(true);
+      expect(resultEvent?.call.output).toContain('started');
+      expect(resultEvent?.call.output).toContain('已被用户中断');
+      expect(resultEvent?.call.output).not.toContain('超时');
+      expect(elapsed).toBeLessThan(15_000);
+
+      // 本轮终止：assistant-aborted 收尾，状态回 idle
+      expect(events.at(-1)?.type).toBe('assistant-aborted');
+      expect(persistence.listSessions().at(0)?.status).toBe('idle');
+
+      // 中断的工具调用记录落库（含用户中断标记）
+      const stored = persistence.listToolCalls('session-1');
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.isError).toBe(true);
+      expect(stored[0]?.output).toContain('已被用户中断');
+
+      // 中断后可继续发新消息，上下文包含中断前的历史
+      const second = await collect(session.sendMessage({ text: '刚才怎样', profile }));
+      expect(second.at(-1)?.type).toBe('assistant-done');
+      const secondPrompt = JSON.stringify(model.doStreamCalls.at(-1)?.prompt);
+      expect(secondPrompt).toContain('跑个长命令');
+      expect(secondPrompt).toContain('刚才怎样');
+    },
+    60_000,
+  );
+
+  it('tool-call 事件与执行之间点停止：工具不再启动，结果标记未执行', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+    const model = scriptedModel([
+      {
+        kind: 'tool',
+        calls: [
+          {
+            toolCallId: 'c1',
+            toolName: 'run_terminal_command',
+            // 若仍被执行会留下痕迹文件，用于断言「未执行」
+            input: { command: 'echo leaked > interrupted-marker.txt' },
+          },
+        ],
+      },
+      { kind: 'text', deltas: ['（不应被请求）'] },
+    ]);
+    const { session, persistence } = makeSession(model, workspace);
+
+    const controller = new AbortController();
+    const events: SessionEvent[] = [];
+    for await (const event of session.sendMessage({
+      text: '写个文件',
+      profile,
+      signal: controller.signal,
+    })) {
+      events.push(event);
+      if (event.type === 'tool-call') {
+        // 生成器在 yield 处暂停：此刻 abort，工具尚未启动
+        controller.abort();
+      }
+    }
+
+    const resultEvent = events.find(
+      (e): e is Extract<SessionEvent, { type: 'tool-result' }> => e.type === 'tool-result',
+    );
+    expect(resultEvent?.call.isError).toBe(true);
+    expect(resultEvent?.call.output).toContain('已被用户中断');
+    expect(events.at(-1)?.type).toBe('assistant-aborted');
+
+    // 工具确实未执行（无痕迹文件），记录落库
+    expect(existsSync(join(workspace, 'interrupted-marker.txt'))).toBe(false);
+    expect(persistence.listToolCalls('session-1')[0]?.output).toContain('已被用户中断');
   });
 });

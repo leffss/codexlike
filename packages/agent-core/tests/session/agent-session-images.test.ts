@@ -31,6 +31,7 @@ function sessionRecord(workspacePath: string): SessionRecord {
     model: null,
     status: 'idle',
     approvalMode: 'suggest',
+    workspaceMode: 'local',
     archivedAt: null,
     createdAt: '2026-11-11T08:00:00.000Z',
     updatedAt: '2026-11-11T08:00:00.000Z',

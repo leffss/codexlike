@@ -89,10 +89,11 @@ async function main() {
     // 1) 设置页创建 Profile（本地 mock）
     await window.getByRole('button', { name: '设置', exact: true }).click();
     await window.getByRole('button', { name: '+ 新建 Profile' }).click();
-    await window.getByLabel('名称').fill('Mock');
-    await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
-    await window.getByLabel('API Key').fill('sk-e2e');
-    await window.getByLabel('模型').fill('mock-model');
+    const profileForm = window.locator('form');
+    await profileForm.getByLabel('名称').fill('Mock');
+    await profileForm.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
+    await profileForm.getByLabel('API Key').fill('sk-e2e');
+    await profileForm.getByLabel('模型').fill('mock-model');
     // 设置页现在有两个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
     await window
       .locator('form')
@@ -103,6 +104,8 @@ async function main() {
     // 2) 建会话（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
 
     const composer = window.getByTestId('composer-input');

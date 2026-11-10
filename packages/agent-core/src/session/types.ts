@@ -12,18 +12,33 @@ import type { ToolCallRecord } from '../tools/types';
  */
 export type SessionStatus = 'idle' | 'streaming' | 'waiting-approval';
 
+/**
+ * 审批模式（GLOSSARY「审批模式」）三档：`readonly` 只读 / `suggest` 协作 / `full` 自主。
+ * 会话级、可随时切换、随会话记录持久化（恢复用）。
+ * 定义在 ./approval（工单 04 审批状态机），本文件经 import 引用。
+ */
+
+/**
+ * 会话运行位置（GLOSSARY「托管 Worktree」）：`local` 本目录直跑（默认）；
+ * `worktree` 托管 Worktree 隔离副本——workspacePath 指向 `~/.codexlike/worktrees/<会话id>`，
+ * 由宿主在会话创建前先检出（agent-core 的 worktree 模块），落库后恢复天然指向原副本。
+ */
+export type WorkspaceMode = 'local' | 'worktree';
+
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
   id: string;
   /** 侧栏显示名，默认取工作区目录名 */
   title: string;
-  /** 绑定的工作区目录，agent 的所有文件与终端操作都被限制在其中 */
+  /** 绑定的工作区目录，agent 的所有文件、终端操作都被限制在其中 */
   workspacePath: string;
+  /** 运行位置（本目录直跑 / 托管 Worktree）；旧库无此列恢复为 local */
+  workspaceMode: WorkspaceMode;
   /** 最近一次发送消息所用的 Provider Profile（模型选择器「对下一条生效」的落点） */
   providerProfileId: string | null;
   /** 最近一次发送消息所用的模型标识 */
   model: string | null;
-  /** 审批模式（三档，随时切换、对下一次工具调用立即生效；新建会话默认 suggest） */
+  /** 审批模式（三档，随时切换、对下一次工具调用立即生效；新建默认 suggest，旧库无此列恢复默认值） */
   approvalMode: ApprovalMode;
   status: SessionStatus;
   /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
@@ -32,6 +47,22 @@ export interface SessionRecord {
   createdAt: string;
   /** ISO 8601；listSessions 按此倒序 */
   updatedAt: string;
+}
+
+/**
+ * 审批决定记录（approval_decisions 表一行）。
+ * 审批卡片三选一（spec）：`allow` 批准一次 / `allow-always` 本会话总是允许 / `deny` 拒绝。
+ * `allow-always` 的 subject（命令首词/前缀）即「总是允许」清单——重启恢复后仍生效。
+ * 写入方为工单 04 的审批状态机；本工单提供持久化与恢复接口。
+ */
+export interface ApprovalDecisionRecord {
+  id: string;
+  sessionId: string;
+  decision: 'allow' | 'allow-always' | 'deny';
+  /** 记忆主体：命令首词/前缀（如 `npm`），或工具名 */
+  subject: string;
+  /** ISO 8601 */
+  createdAt: string;
 }
 
 /** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
@@ -43,7 +74,16 @@ export interface StoredMessage {
   id: string;
   sessionId: string;
   role: MessageRole;
+  /** 用户原文 / 助手回复全文 / 错误提示；@引用 内容不混入（单独存 mentions） */
   content: string;
+  /**
+   * 该条 user 消息携带的 @引用（GLOSSARY「@ Mention」）。
+   * 持久化它，重启恢复时才能把附件内容重组进模型上下文（快照等价性，工单 06）；
+   * 非 user 消息与无引用的 user 消息为 undefined。
+   */
+  mentions?: MentionAttachment[];
+  /** 助手回复被用户中断：content 为已生成的部分文本（UI 中断点标记恢复用） */
+  aborted?: boolean;
   /** ISO 8601 */
   createdAt: string;
 }
@@ -109,7 +149,25 @@ export type SessionEvent =
   /**
    * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
    * 发出后会话进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
+   * 子代理的命令审批（工单 13）同样走本事件（request.subagentId 标注来源）。
    */
   | { type: 'approval-request'; request: ApprovalRequest }
   /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本会话总是允许） */
-  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision };
+  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision }
+  /**
+   * 子代理委派进入排队（工单 13，GLOSSARY「子代理」）：并发上限满，
+   * FIFO 等待；有空位即转 subagent-start。UI 嵌套卡片显示排队状态。
+   */
+  | { type: 'subagent-queued'; subagentId: string; task: string }
+  /** 子代理开始运行（排队结束或直接有空位） */
+  | { type: 'subagent-start'; subagentId: string; task: string; toolCallId: string }
+  /**
+   * 子代理内部工具调用进度（嵌套卡片显示「当前活动工具」）：
+   * phase=call 开始执行（运行中），phase=result 完成（含截断输出与失败标记）。
+   */
+  | { type: 'subagent-tool'; subagentId: string; phase: 'call' | 'result'; call: ToolCallRecord }
+  /**
+   * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
+   * ok=false 表示失败或被中断（report 为中文原因）。
+   */
+  | { type: 'subagent-report'; subagentId: string; task: string; report: string; ok: boolean };

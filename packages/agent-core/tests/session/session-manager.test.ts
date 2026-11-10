@@ -80,6 +80,30 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     persistence.close();
   });
 
+  it('create 支持 worktree 模式与外部生成的会话 id（宿主先建 worktree 再落库）', () => {
+    const persistence = createSqliteSessionStore(':memory:');
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+
+    // 宿主（desktop 主进程）先创建托管 worktree、再以同一 id 落库：workspacePath 指向副本
+    const session = manager.create({
+      id: 'wt-session-1',
+      workspacePath: 'C:\\home\\.codexlike\\worktrees\\wt-session-1',
+      workspaceMode: 'worktree',
+      title: 'demo',
+    });
+
+    expect(session.id).toBe('wt-session-1');
+    expect(session.record.workspaceMode).toBe('worktree');
+    expect(manager.list()[0]?.workspaceMode).toBe('worktree');
+    // 默认（不传模式）仍是本目录直跑
+    const local = manager.create({ workspacePath: 'C:\\work\\demo' });
+    expect(local.record.workspaceMode).toBe('local');
+    persistence.close();
+  });
+
   it('get 惰性恢复既有会话：历史完整接续（等价应用重启后继续对话）', async () => {
     const dbPath = join(
       (() => {
@@ -253,5 +277,39 @@ describe('createSessionManager（会话创建 / 列表 / 恢复）', () => {
     expect(restored.record.status).toBe('idle');
     expect(persistence.listSessions().find((r) => r.id === created.id)?.status).toBe('idle');
     persistence.close();
+  });
+
+  it('审批模式默认 suggest，切换后落库并跨重启恢复（工单 06 恢复语义，档位由工单 04 定义）', () => {
+    const dbPath = join(
+      (() => {
+        const dir = mkdtempSync(join(tmpdir(), 'codexlike-mgr-'));
+        tempDirs.push(dir);
+        return dir;
+      })(),
+      'codexlike.db',
+    );
+
+    const persistence1 = createSqliteSessionStore(dbPath);
+    const first = createSessionManager({
+      persistence: persistence1,
+      languageModelFor: () => okModel(),
+    });
+    const session = first.create({ workspacePath: 'C:\\work\\demo' });
+    expect(session.record.approvalMode).toBe('suggest');
+
+    expect(first.setApprovalMode(session.id, 'full')?.approvalMode).toBe('full');
+    expect(first.list()[0]?.approvalMode).toBe('full');
+    expect(first.setApprovalMode('nope', 'full')).toBeNull();
+    persistence1.close();
+
+    // 等价重启：审批模式随会话记录恢复
+    const persistence2 = createSqliteSessionStore(dbPath);
+    const second = createSessionManager({
+      persistence: persistence2,
+      languageModelFor: () => okModel(),
+    });
+    expect(second.list()[0]?.approvalMode).toBe('full');
+    expect(second.get(session.id)?.record.approvalMode).toBe('full');
+    persistence2.close();
   });
 });
