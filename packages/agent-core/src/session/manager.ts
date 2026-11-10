@@ -10,7 +10,12 @@ import type { ToolDefinition } from '../tools/types';
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { ApprovalMode } from './approval';
 import type { SessionPersistence } from './persistence';
-import type { SessionRecord, StoredMessage, TranscriptItem } from './types';
+import type {
+  CompactRecord,
+  SessionRecord,
+  StoredMessage,
+  TranscriptItem,
+} from './types';
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
@@ -50,6 +55,8 @@ export interface SessionManager {
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
   /** 审批模式切换（三档）：落库并对已实例化会话立即生效；不存在返回 null */
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
+  /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
+  latestCompact(sessionId: string): CompactRecord | null;
 }
 
 export function createSessionManager(
@@ -198,6 +205,11 @@ export function createSessionManager(
         cache.get(sessionId)?.setApprovalMode(mode);
       }
       return next;
+    },
+
+    latestCompact(sessionId) {
+      const compacts = persistence.listCompacts(sessionId);
+      return compacts.length === 0 ? null : compacts[compacts.length - 1]!;
     },
   };
 }

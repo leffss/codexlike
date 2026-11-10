@@ -27,7 +27,9 @@ function assert(condition, message) {
 
 /**
  * 本地 OpenAI 兼容 mock：第 1 次 /chat/completions 返回 tool_call（write_file），
- * 之后返回流式 markdown（含代码块）——覆盖「工具调用 → 执行 → 回填 → 最终回复」全链路。
+ * 第 2 次返回 tool_call（web_search），之后返回流式 markdown（含代码块）——
+ * 覆盖「工具调用 → 执行 → 回填 → 最终回复」全链路。
+ * 另提供 Tavily 兼容的 POST /search 端点（记录请求体供断言），经 CODEXLIKE_TAVILY_URL 注入主进程。
  */
 function startMockProvider() {
   const textChunks = [
@@ -37,7 +39,32 @@ function startMockProvider() {
     '```\n',
   ];
   let requestCount = 0;
+  /** /search 收到的请求体（断言 api_key + query 真实进入请求） */
+  const searchRequests = [];
   const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/search') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += String(chunk);
+      });
+      req.on('end', () => {
+        searchRequests.push(JSON.parse(body));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            query: 'tavily',
+            results: [
+              {
+                title: 'Tavily Search API',
+                url: 'https://docs.tavily.com',
+                content: 'Search API for AI agents.',
+              },
+            ],
+          }),
+        );
+      });
+      return;
+    }
     if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
       requestCount += 1;
       res.writeHead(200, {
@@ -60,25 +87,31 @@ function startMockProvider() {
         res.end();
       };
 
-      if (requestCount === 1) {
-        // 第一轮：发起 write_file 工具调用（agent 会真实写文件并把结果回填）
+      const toolCallRound = (callId, name, args) => {
         send({
           delta: {
             tool_calls: [
               {
                 index: 0,
-                id: 'call-e2e',
+                id: callId,
                 type: 'function',
-                function: {
-                  name: 'write_file',
-                  arguments: JSON.stringify({ path: 'e2e.txt', content: '工具链路 OK' }),
-                },
+                function: { name, arguments: JSON.stringify(args) },
               },
             ],
           },
           finish_reason: null,
         });
         setTimeout(() => finishWith('tool_calls'), 30);
+      };
+
+      if (requestCount === 1) {
+        // 第一轮：发起 write_file 工具调用（agent 会真实写文件并把结果回填）
+        toolCallRound('call-e2e', 'write_file', { path: 'e2e.txt', content: '工具链路 OK' });
+        return;
+      }
+      if (requestCount === 2) {
+        // 第二轮：发起 web_search 工具调用（agent 会真实请求 /search mock 并把结果回填）
+        toolCallRound('call-search', 'web_search', { query: 'tavily search api' });
         return;
       }
 
@@ -98,16 +131,17 @@ function startMockProvider() {
   });
   return new Promise((resolveServer) => {
     server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port });
+      resolveServer({ server, port: server.address().port, searchRequests });
     });
   });
 }
 
-async function launchApp(homeDir) {
+async function launchApp(homeDir, tavilyUrl) {
   const env = {
     ...process.env,
     CODEXLIKE_HOME: homeDir,
     CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
+    CODEXLIKE_TAVILY_URL: tavilyUrl,
     // 生产模式：不带 VITE_DEV_SERVER_URL，主进程以 file:// 加载 ui/dist
     VITE_DEV_SERVER_URL: '',
   };
@@ -128,15 +162,16 @@ async function launchApp(homeDir) {
 }
 
 async function main() {
-  const { server, port } = await startMockProvider();
+  const { server, port, searchRequests } = await startMockProvider();
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-'));
   // 预置工作区目录（CODEXLIKE_TEST_WORKSPACE 钩子返回它）
   mkdirSync(join(homeDir, 'workspace'));
+  const tavilyUrl = `http://127.0.0.1:${port}/search`;
 
   let app;
   try {
-    // 1) 启动 → 设置页创建 Profile（baseURL 指向本地 mock）
-    const first = await launchApp(homeDir);
+    // 1) 启动 → 设置页创建 Profile（baseURL 指向本地 mock）+ 配置搜索源 key
+    const first = await launchApp(homeDir, tavilyUrl);
     app = first.app;
     let window = first.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -145,9 +180,27 @@ async function main() {
     await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
     await window.getByLabel('API Key').fill('sk-e2e');
     await window.getByLabel('模型').fill('mock-model');
-    await window.getByRole('button', { name: /保存|创建/ }).click();
+    // 设置页现在有两个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
+    await window
+      .locator('form')
+      .getByRole('button', { name: /保存|创建/ })
+      .click();
     await window.getByText('Mock').first().waitFor();
     console.log('[e2e] Provider Profile 已创建（真实 safeStorage 加密落盘）');
+
+    // 1b) 搜索源配置：填 Tavily key 保存 → 状态变「已配置」（key 加密落盘）
+    await window.getByTestId('search-api-key-input').fill('tvly-e2e-key');
+    await window.getByTestId('search-api-key-save').click();
+    await window.getByText('已配置').first().waitFor();
+    const searchSettingsRaw = readFileSync(
+      join(homeDir, 'search-settings.json'),
+      'utf8',
+    );
+    assert(
+      !searchSettingsRaw.includes('tvly-e2e-key'),
+      '搜索 key 明文落盘（search-settings.json 含原始 key）',
+    );
+    console.log('[e2e] 搜索源已配置（真实 safeStorage 加密落盘）');
 
     // 2) 返回工作台 → 新建会话（目录选择器经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByRole('button', { name: '返回工作台' }).click();
@@ -194,9 +247,39 @@ async function main() {
     );
     console.log('[e2e] 消息往返完成：工具调用 + 流式 markdown + 代码块高亮可见');
 
+    // 3b) 第二条消息：模型发起 web_search → 主进程真实请求 /search mock → 结果回填 → 卡片渲染
+    // （click 自带 actionability 等待：上一轮流式结束后按钮重新可用才触发）
+    await window.getByTestId('composer-input').fill('搜一下 tavily search api');
+    await window.getByTestId('composer-send').click();
+    const searchCard = window.getByTestId('tool-call-card').filter({
+      hasText: 'web_search',
+    });
+    await searchCard.waitFor({ timeout: 20_000 });
+    await searchCard.getByTestId('tool-call-toggle').click();
+    // 展开后的输出区含「标题 / URL / 摘要」三要素
+    const searchOutput = searchCard.getByTestId('tool-call-output');
+    await searchOutput.waitFor({ timeout: 10_000 });
+    const searchText = await searchOutput.textContent();
+    assert(
+      searchText !== null &&
+        searchText.includes('Tavily Search API') &&
+        searchText.includes('https://docs.tavily.com') &&
+        searchText.includes('Search API for AI agents.'),
+      `web_search 卡片输出不完整：${searchText ?? '(空)'}`,
+    );
+    // mock 端真实收到了 api_key + query（请求形态与设置页保存的 key 一致）
+    await new Promise((r) => setTimeout(r, 300));
+    assert(searchRequests.length >= 1, '搜索请求未到达 mock /search 端点');
+    assert(
+      searchRequests[0]?.api_key === 'tvly-e2e-key' &&
+        searchRequests[0]?.query === 'tavily search api',
+      `搜索请求体不正确：${JSON.stringify(searchRequests[0])}`,
+    );
+    console.log('[e2e] web_search 全链路：key 配置 → 工具调用 → mock 搜索 → 卡片可展开');
+
     // 4) 关闭 → 重启（等价应用重启）：侧栏会话列表、消息历史与工具卡片完整恢复
     await app.close();
-    const second = await launchApp(homeDir);
+    const second = await launchApp(homeDir, tavilyUrl);
     app = second.app;
     window = second.window;
     await window.getByTestId('session-item').first().waitFor({ timeout: 15_000 });

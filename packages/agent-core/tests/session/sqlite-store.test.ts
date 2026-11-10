@@ -192,3 +192,93 @@ describe('createSqliteSessionStore（SQLite 会话持久化）', () => {
     store.close();
   });
 });
+
+describe('SessionPersistence compact 落库（工单 08）', () => {
+  it('replaceHistory 单事务替换消息历史并追加 compact 记录；重开库完整恢复', () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteSessionStore(dbPath);
+    store.insertSession(sessionRecord());
+    store.insertMessage(message({ id: 'm1', content: '旧问题1' }));
+    store.insertMessage(message({ id: 'm2', role: 'assistant', content: '旧回复1', createdAt: '2026-11-10T08:00:02.000Z' }));
+    store.insertMessage(message({ id: 'm3', content: '旧问题2', createdAt: '2026-11-10T08:00:03.000Z' }));
+
+    store.replaceHistory(
+      'session-1',
+      [
+        message({ id: 'summary-1', role: 'compact-summary', content: '摘要', createdAt: '2026-11-10T09:00:00.000Z' }),
+        message({ id: 'kept-1', content: '旧问题2', createdAt: '2026-11-10T09:00:01.000Z' }),
+      ],
+      {
+        id: 'compact-1',
+        sessionId: 'session-1',
+        summary: '摘要',
+        messagesCompacted: 2,
+        createdAt: '2026-11-10T09:00:02.000Z',
+      },
+    );
+    store.close();
+
+    const reopened = createSqliteSessionStore(dbPath);
+    expect(reopened.listMessages('session-1').map((m) => [m.id, m.role])).toEqual([
+      ['summary-1', 'compact-summary'],
+      ['kept-1', 'user'],
+    ]);
+    expect(reopened.listCompacts('session-1')).toEqual([
+      {
+        id: 'compact-1',
+        sessionId: 'session-1',
+        summary: '摘要',
+        messagesCompacted: 2,
+        createdAt: '2026-11-10T09:00:02.000Z',
+      },
+    ]);
+    reopened.close();
+  });
+
+  it('listCompacts 按时间正序（多次压缩累积，末条为当前生效摘要）', () => {
+    const store = createSqliteSessionStore(':memory:');
+    store.insertSession(sessionRecord());
+    const compact = (id: string, at: string) =>
+      store.replaceHistory(
+        'session-1',
+        [message({ id: `s-${id}`, role: 'compact-summary', content: `摘要${id}`, createdAt: at })],
+        {
+          id,
+          sessionId: 'session-1',
+          summary: `摘要${id}`,
+          messagesCompacted: 2,
+          createdAt: at,
+        },
+      );
+    compact('c-2', '2026-11-10T09:00:00.000Z');
+    compact('c-1', '2026-11-10T08:00:00.000Z');
+
+    expect(store.listCompacts('session-1').map((c) => c.id)).toEqual(['c-1', 'c-2']);
+    expect(store.listCompacts('nope')).toEqual([]);
+    store.close();
+  });
+
+  it('工单 02/07 时代的旧库（无 compact_records 表）打开时自动建表，旧数据不受影响', () => {
+    const dbPath = tempDbPath();
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO sessions VALUES ('session-1', 'demo', 'C:\\work', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO messages VALUES ('m1', 'session-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
+    `);
+    db.close();
+
+    const store = createSqliteSessionStore(dbPath);
+    expect(store.listMessages('session-1')).toHaveLength(1);
+    expect(store.listCompacts('session-1')).toEqual([]);
+    store.close();
+  });
+});

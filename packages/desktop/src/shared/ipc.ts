@@ -10,9 +10,11 @@ import type {
 } from '@codexlike/agent-core';
 
 import type { SessionStatusInfo } from '../sessions/status';
+import type { SearchSettings } from '../search/search-settings-store';
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
+export type { SearchSettings };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -43,6 +45,8 @@ export const IPC = {
     archive: 'sessions:archive',
     /** /status：上下文用量估算 + 模型 + 审批模式 */
     status: 'sessions:status',
+    /** /compact：手动压缩历史为摘要（保留最近 3 轮）；成功返回压缩概要 */
+    compact: 'sessions:compact',
     /** @引用 菜单候选：工作区文件相对路径列表 */
     workspaceFiles: 'sessions:workspace-files',
     /** 审批模式切换（三档）：落库并对下一次工具调用立即生效 */
@@ -51,6 +55,11 @@ export const IPC = {
     respondApproval: 'sessions:respond-approval',
     /** 当前等待审批的请求（切回会话时恢复审批卡片）；无等待返回 null */
     pendingApproval: 'sessions:pending-approval',
+  },
+  /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
+  searchSettings: {
+    get: 'search-settings:get',
+    set: 'search-settings:set',
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
@@ -102,6 +111,14 @@ export interface CodexLikeApi {
     archive(sessionId: string, archived: boolean): Promise<SessionRecord | null>;
     /** /status 数据；会话不存在返回 null */
     status(sessionId: string): Promise<SessionStatusInfo | null>;
+    /**
+     * /compact：用所选 Provider Profile 的模型压缩历史为摘要（保留最近 3 轮）。
+     * 压缩失败（模型错误 / 历史过短 / 会话正忙）以异常抛回，原历史不受损，可重试。
+     */
+    compact(
+      sessionId: string,
+      providerProfileId: string,
+    ): Promise<{ compactedMessages: number }>;
     /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
     workspaceFiles(sessionId: string): Promise<string[]>;
     /** 切换审批模式（readonly / suggest / full），对下一次工具调用立即生效；会话不存在返回 null */
@@ -120,6 +137,12 @@ export interface CodexLikeApi {
     ): Promise<boolean>;
     /** 当前等待审批的请求（UI 切回会话时恢复审批卡片）；无等待或会话不存在返回 null */
     pendingApproval(sessionId: string): Promise<ApprovalRequest | null>;
+  };
+  searchSettings: {
+    /** 当前搜索源设置（apiKey 已解密，仅存在于渲染进程内存；'' 表示未配置） */
+    get(): Promise<SearchSettings>;
+    /** 保存搜索源 API key（空字符串清除）；safeStorage 不可用时以异常抛回 */
+    set(input: { apiKey: string }): Promise<SearchSettings>;
   };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(

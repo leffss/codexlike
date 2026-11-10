@@ -141,7 +141,11 @@ async function main() {
     await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
     await window.getByLabel('API Key').fill('sk-e2e');
     await window.getByLabel('模型').fill('mock-model');
-    await window.getByRole('button', { name: /保存|创建/ }).click();
+    // 设置页有两个「保存」按钮（Profile 表单与搜索源区，工单 10），限定在表单内点击
+    await window
+      .locator('form')
+      .getByRole('button', { name: /保存|创建/ })
+      .click();
     await window.getByText('Mock').first().waitFor();
 
     await window.getByRole('button', { name: '返回工作台' }).click();
