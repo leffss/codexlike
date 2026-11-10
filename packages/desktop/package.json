@@ -20,7 +20,8 @@
     "test:e2e:approvals": "node e2e/approvals.mjs",
     "test:e2e:changes": "node e2e/changes.mjs",
     "test:e2e:interrupt": "node e2e/interrupt.mjs",
-    "test:e2e:compact": "node e2e/compact.mjs"
+    "test:e2e:compact": "node e2e/compact.mjs",
+    "test:e2e:worktree": "node e2e/worktree.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"

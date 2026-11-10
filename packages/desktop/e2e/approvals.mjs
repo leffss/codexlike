@@ -150,6 +150,8 @@ async function main() {
 
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
     console.log('[e2e] 会话已创建（默认 suggest 审批模式）');
 

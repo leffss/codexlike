@@ -13,7 +13,8 @@
     "test:e2e:commands": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:commands",
     "test:e2e:compact": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:compact",
     "test:e2e:changes": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:changes",
-    "test:e2e:interrupt": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interrupt"
+    "test:e2e:interrupt": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interrupt",
+    "test:e2e:worktree": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worktree"
   },
   "devDependencies": {
     "concurrently": "^10.0.7"

@@ -103,6 +103,8 @@ async function main() {
     // 2) 建会话（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByRole('button', { name: '返回工作台' }).click();
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
 
     const composer = window.getByTestId('composer-input');

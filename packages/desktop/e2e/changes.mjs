@@ -174,6 +174,8 @@ async function main() {
     await window.getByRole('button', { name: '返回工作台' }).click();
 
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('session-item').first().waitFor({ timeout: 10_000 });
     await window.getByTestId('composer-input').fill('创建 e2e-change.txt');
     await window.getByTestId('composer-send').click();
@@ -256,6 +258,8 @@ async function main() {
     app = second.app;
     window = second.window;
     await window.getByTestId('new-session').click();
+    // 新建会话对话框：选运行位置（默认本目录直跑）
+    await window.getByTestId('create-session-confirm').click();
     await window.getByTestId('composer-input').waitFor({ timeout: 10_000 });
     await window.getByTestId('changes-toggle').click();
     await window.getByTestId('changes-not-git').waitFor({ timeout: 10_000 });
