@@ -47,6 +47,14 @@ const api: CodexLikeApi = {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
   },
+  mcp: {
+    overview: () => ipcRenderer.invoke(IPC.mcp.overview),
+    addServer: (input) => ipcRenderer.invoke(IPC.mcp.addServer, input),
+    removeServer: (id) => ipcRenderer.invoke(IPC.mcp.removeServer, id),
+    reconnect: (id) => ipcRenderer.invoke(IPC.mcp.reconnect, id),
+    setToolEnabled: (toolName, enabled) =>
+      ipcRenderer.invoke(IPC.mcp.setToolEnabled, toolName, enabled),
+  },
   onSessionEvent: (listener) => {
     const handler: (
       _event: Electron.IpcRendererEvent,

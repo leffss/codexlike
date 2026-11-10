@@ -17,10 +17,13 @@ import type {
 
 import type { SessionStatusInfo } from '../sessions/status';
 import type { SearchSettings } from '../search/search-settings-store';
+import type { McpServerView } from '../mcp/mcp-service';
+import type { McpServerInput } from '../mcp/mcp-store';
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
 export type { SearchSettings };
+export type { McpServerView, McpServerInput };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -68,6 +71,14 @@ export const IPC = {
   searchSettings: {
     get: 'search-settings:get',
     set: 'search-settings:set',
+  },
+  /** MCP servers（工单 12）：配置 + 连接状态 + 工具启停 */
+  mcp: {
+    overview: 'mcp:overview',
+    addServer: 'mcp:add-server',
+    removeServer: 'mcp:remove-server',
+    reconnect: 'mcp:reconnect',
+    setToolEnabled: 'mcp:set-tool-enabled',
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
@@ -170,6 +181,18 @@ export interface CodexLikeApi {
     get(): Promise<SearchSettings>;
     /** 保存搜索源 API key（空字符串清除）；safeStorage 不可用时以异常抛回 */
     set(input: { apiKey: string }): Promise<SearchSettings>;
+  };
+  mcp: {
+    /** 全部 MCP server：配置 + 连接状态 + 发现到的工具（含启停） */
+    overview(): Promise<{ servers: McpServerView[] }>;
+    /** 添加 server（保存配置并立即连接）；输入不合法以中文异常抛回 */
+    addServer(input: McpServerInput): Promise<McpServerView>;
+    /** 删除 server（断开连接）；不存在返回 false */
+    removeServer(id: string): Promise<boolean>;
+    /** 手动重连（崩溃/启动失败后的显式重连入口） */
+    reconnect(id: string): Promise<McpServerView>;
+    /** 工具启停：对后续会话消息即时生效 */
+    setToolEnabled(toolName: string, enabled: boolean): Promise<void>;
   };
   /** 订阅会话事件流；返回取消订阅函数 */
   onSessionEvent(

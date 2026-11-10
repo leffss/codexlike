@@ -49,6 +49,14 @@ export type {
   ToolPermission,
   ToolResult,
 } from './tools/types';
+
+// MCP 域类型（GLOSSARY「MCP」，工单 12）：type-only，连接管理实现（Node 专属）在 ./node 出口
+export type {
+  McpDiscoveredTool,
+  McpServerConfig,
+  McpServerState,
+  McpServerStatus,
+} from './mcp/types';
 // 输入框解析层（纯函数，浏览器安全；ui 的命令菜单与发送分发直接值导入）
 export {
   extractMentionPaths,

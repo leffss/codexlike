@@ -54,8 +54,15 @@ function summarizeByTool(toolName: string, args: Record<string, unknown>): strin
       return `$ ${asString(args['command']) ?? '?'}`;
     case 'web_search':
       return `搜「${asString(args['query']) ?? '?'}」`;
-    default:
+    default: {
+      // MCP 工具（mcp_<server>_<tool>，工单 12）：参数是任意 JSON Schema，
+      // 有 text/query/command 类字段时优先取值，否则压缩 JSON
+      if (toolName.startsWith('mcp_')) {
+        const notable = asString(args['text']) ?? asString(args['query']) ?? asString(args['command']) ?? asString(args['path']);
+        return notable !== undefined ? `MCP ${toolName}：${notable}` : `MCP ${toolName} ${JSON.stringify(args)}`;
+      }
       return JSON.stringify(args);
+    }
   }
 }
 
