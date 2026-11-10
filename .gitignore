@@ -1,0 +1,14 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+release/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地环境
+.env
+.env.*
