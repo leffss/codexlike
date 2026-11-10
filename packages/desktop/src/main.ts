@@ -11,8 +11,27 @@ import {
 
 import { validateProviderProfile } from '@codexlike/agent-core';
 
-import { createProfileStore, type ProfileStore } from './profiles/profile-store';
+import {
+  createProfileStore,
+  type ProfileStore,
+  type SafeStorageLike,
+} from './profiles/profile-store';
 import { IPC } from './shared/ipc';
+
+/**
+ * 把 Electron safeStorage（async API，Electron 45 起同步版已弃用）
+ * 适配为存储层的 SafeStorageLike。
+ */
+function asSafeStorageLike(): SafeStorageLike {
+  return {
+    isEncryptionAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
+    encryptString: (plainText) => safeStorage.encryptStringAsync(plainText),
+    decryptString: async (encrypted) => {
+      const { result } = await safeStorage.decryptStringAsync(encrypted);
+      return result;
+    },
+  };
+}
 
 /** 应用数据目录（spec 约定：`~/.codexlike/`） */
 function dataDir(): string {
@@ -60,7 +79,7 @@ function registerProviderProfileHandlers(store: ProfileStore): void {
         throw new Error('update：id 必须是字符串');
       }
       const parsed = assertValidInput(input);
-      return store.update(id, parsed) ?? null;
+      return store.update(id, parsed);
     },
   );
 
@@ -93,7 +112,7 @@ function assertValidInput(input: unknown) {
 }
 
 void app.whenReady().then(() => {
-  const store = createProfileStore({ dir: dataDir(), safeStorage });
+  const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
   registerProviderProfileHandlers(store);
   createMainWindow();
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
