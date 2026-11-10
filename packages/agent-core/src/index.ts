@@ -20,3 +20,14 @@ export type {
 } from './session/types';
 export type { SessionPersistence } from './session/persistence';
 export { createSqliteSessionStore } from './session/persistence';
+export type {
+  AgentSession,
+  CreateAgentSessionOptions,
+  SendMessageOptions,
+} from './session/agent-session';
+export { createAgentSession } from './session/agent-session';
+export type {
+  CreateSessionManagerOptions,
+  SessionManager,
+} from './session/manager';
+export { createSessionManager } from './session/manager';
