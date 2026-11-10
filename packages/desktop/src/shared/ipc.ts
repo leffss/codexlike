@@ -3,7 +3,7 @@ import type {
   ProviderProfileInput,
   SessionEvent,
   SessionRecord,
-  StoredMessage,
+  TranscriptItem,
 } from '@codexlike/agent-core';
 
 /**
@@ -61,8 +61,8 @@ export interface CodexLikeApi {
     create(workspacePath: string): Promise<SessionRecord>;
     /** 原生目录选择器；取消返回 null */
     selectWorkspace(): Promise<string | null>;
-    /** 指定会话的消息历史（含 error 消息） */
-    messages(sessionId: string): Promise<StoredMessage[]>;
+    /** 指定会话的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */
+    messages(sessionId: string): Promise<TranscriptItem[]>;
     /**
      * 发送消息：成功即启动流式回复（事件经 onSessionEvent 推送）。
      * 会话正在回复中 / Profile 不存在等启动失败以异常抛回。

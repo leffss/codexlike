@@ -3,11 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
-import type { UiMessage } from '../lib/session-view';
+import type { UiItem } from '../lib/session-view';
+import { ToolCallCard } from './ToolCallCard';
 
-/** 中栏上部：消息流。用户消息、助手 markdown 流式回复、错误提示卡片。 */
+/** 中栏上部：消息流。用户消息、助手 markdown 流式回复、工具卡片、错误提示卡片。 */
 export function MessageStream(props: {
-  messages: UiMessage[];
+  items: UiItem[];
   emptyHint?: ReactNode;
 }) {
   return (
@@ -15,23 +16,27 @@ export function MessageStream(props: {
       className="min-h-0 flex-1 overflow-y-auto bg-slate-950/40 px-4 py-4"
       data-testid="message-stream"
     >
-      {props.messages.length === 0 ? (
+      {props.items.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-600">
           <p className="text-sm">消息流为空</p>
           {props.emptyHint}
         </div>
       ) : (
         <ol className="mx-auto flex max-w-3xl flex-col gap-4">
-          {props.messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {props.items.map((item) =>
+            item.kind === 'tool-call' ? (
+              <ToolCallCard key={`tool-${item.id}`} call={item} />
+            ) : (
+              <MessageBubble key={item.id} message={item} />
+            ),
+          )}
         </ol>
       )}
     </div>
   );
 }
 
-function MessageBubble(props: { message: UiMessage }) {
+function MessageBubble(props: { message: Exclude<UiItem, { kind: 'tool-call' }> }) {
   const { message } = props;
 
   if (message.role === 'user') {

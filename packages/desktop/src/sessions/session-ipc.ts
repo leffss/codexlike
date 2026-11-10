@@ -67,7 +67,7 @@ export function registerSessionHandlers(options: {
     if (typeof sessionId !== 'string') {
       throw new Error('messages：sessionId 必须是字符串');
     }
-    return manager.messages(sessionId);
+    return manager.transcript(sessionId);
   });
 
   ipcMain.handle(

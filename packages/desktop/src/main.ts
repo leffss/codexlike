@@ -10,6 +10,7 @@ import {
 } from 'electron';
 
 import {
+  createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
   validateProviderProfile,
@@ -121,7 +122,17 @@ function assertValidInput(input: unknown) {
 void app.whenReady().then(() => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
-  const manager = createSessionManager({ persistence });
+  // 六件内置工具：无状态实例，全部会话共享；工作区经执行上下文逐会话注入。
+  // shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
+  const shellEnv = process.env['CODEXLIKE_SHELL'];
+  const tools = createBuiltinTools({
+    env: process.env,
+    shell:
+      shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
+        ? shellEnv
+        : undefined,
+  });
+  const manager = createSessionManager({ persistence, tools });
   const store = createProfileStore({ dir: dataDir(), safeStorage: asSafeStorageLike() });
 
   // 上次退出若在流式中途被杀，库里会残留 streaming；进程刚启动不可能有真实运行中的流，统一重置

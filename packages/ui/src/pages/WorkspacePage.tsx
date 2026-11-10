@@ -7,8 +7,8 @@ import { MessageStream } from '../components/MessageStream';
 import { SessionSidebar } from '../components/SessionSidebar';
 import {
   applySessionEvent,
-  initialMessages,
-  type UiMessage,
+  initialTranscript,
+  type UiItem,
 } from '../lib/session-view';
 
 /**
@@ -20,7 +20,7 @@ export function WorkspacePage(props: {
 }) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [messages, setMessages] = useState<UiItem[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
@@ -39,7 +39,7 @@ export function WorkspacePage(props: {
     setCurrentId(id);
     currentIdRef.current = id;
     const history = await window.codexlike.sessions.messages(id);
-    setMessages(initialMessages(history));
+    setMessages(initialTranscript(history));
     setStreaming(false);
   }, []);
 
@@ -60,7 +60,7 @@ export function WorkspacePage(props: {
         setCurrentId(latest.id);
         currentIdRef.current = latest.id;
         const history = await window.codexlike.sessions.messages(latest.id);
-        setMessages(initialMessages(history));
+        setMessages(initialTranscript(history));
       }
     })();
   }, []);
@@ -155,7 +155,7 @@ export function WorkspacePage(props: {
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <MessageStream
-          messages={messages}
+          items={messages}
           emptyHint={
             profiles.length === 0 ? (
               <button

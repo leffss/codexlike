@@ -5,6 +5,7 @@ import type { SessionEvent, StoredMessage } from '@codexlike/agent-core';
 import {
   applySessionEvent,
   initialMessages,
+  type UiItem,
 } from '../src/lib/session-view';
 
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
@@ -51,7 +52,7 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
       },
     ];
 
-    let state = initialMessages([]);
+    let state: UiItem[] = initialMessages([]);
     for (const event of events) {
       state = applySessionEvent(state, event);
     }
@@ -63,7 +64,7 @@ describe('applySessionEvent（流式事件 → 消息流增量更新）', () => 
   });
 
   it('流式进行中：assistant 消息带 streaming 标记，delta 增量追加', () => {
-    let state = initialMessages([]);
+    let state: UiItem[] = initialMessages([]);
     state = applySessionEvent(state, {
       type: 'user-message',
       message: stored(),
