@@ -181,8 +181,38 @@ export function registerSessionHandlers(options: {
         workspacePath: record.workspacePath,
       }),
       providerProfileName,
+      latestCompact: manager.latestCompact(sessionId),
     });
   });
+
+  ipcMain.handle(
+    IPC.sessions.compact,
+    async (
+      _e: IpcMainInvokeEvent,
+      sessionId: unknown,
+      profileId: unknown,
+    ) => {
+      if (typeof sessionId !== 'string' || typeof profileId !== 'string') {
+        throw new Error('compact：参数不合法');
+      }
+      if (profileId === '') {
+        throw new Error('请先选择模型（Provider Profile）');
+      }
+      const session = manager.get(sessionId);
+      if (session === null) {
+        throw new Error('会话不存在或已损坏');
+      }
+      const profile = (await profiles.list()).find(
+        (candidate: ProviderProfile) => candidate.id === profileId,
+      );
+      if (profile === undefined) {
+        throw new Error('所选 Provider Profile 不存在，请重新选择模型');
+      }
+      // 失败（模型错误/历史过短/会话正忙）以中文异常抛回渲染层；原历史不受损，可重试
+      const result = await session.compact({ profile });
+      return { compactedMessages: result.compactedMessages };
+    },
+  );
 
   ipcMain.handle(
     IPC.sessions.workspaceFiles,
