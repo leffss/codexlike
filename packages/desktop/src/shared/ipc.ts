@@ -8,6 +8,12 @@ import type {
   SessionRecord,
   TranscriptItem,
 } from '@codexlike/agent-core';
+import type {
+  GitBranchResult,
+  GitCommitResult,
+  GitFileDiff,
+  GitStatus,
+} from '@codexlike/agent-core';
 
 import type { SessionStatusInfo } from '../sessions/status';
 import type { SearchSettings } from '../search/search-settings-store';
@@ -65,6 +71,19 @@ export const IPC = {
   },
   /** 主→渲染：会话事件流（SessionEventEnvelope） */
   sessionEvents: 'session:events',
+  /** 改动面板 + git 集成（工单 05）：status/diff/分支/提交消息生成/提交 */
+  git: {
+    /** 工作区 git 状态（非 git 工作区返回 isGitRepo=false，不报错） */
+    status: 'git:status',
+    /** 单文件 diff（新旧两侧全文，Monaco 双栏渲染） */
+    diff: 'git:diff',
+    /** 一键创建 codexlike/<会话名> 分支（分支名由会话名生成） */
+    createBranch: 'git:create-branch',
+    /** 由模型按会话内容生成提交消息草稿（一次不发工具的请求） */
+    commitMessage: 'git:commit-message',
+    /** 提交当前全部变更（消息可编辑后传入） */
+    commit: 'git:commit',
+  },
 } as const;
 
 /** 事件流信封：按会话 ID 多路复用 */
@@ -156,4 +175,20 @@ export interface CodexLikeApi {
   onSessionEvent(
     listener: (envelope: SessionEventEnvelope) => void,
   ): () => void;
+  /** 改动面板 + git 集成（工单 05） */
+  git: {
+    /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */
+    status(sessionId: string): Promise<GitStatus>;
+    /** 单文件改动（新旧两侧全文）；oldPath 为重命名场景的原路径 */
+    diff(sessionId: string, path: string, oldPath?: string): Promise<GitFileDiff>;
+    /** 创建（或切换到已存在的）codexlike/<会话名> 分支 */
+    createBranch(sessionId: string): Promise<GitBranchResult>;
+    /** 模型按会话内容生成提交消息草稿（可编辑后提交）；失败抛中文异常 */
+    generateCommitMessage(
+      sessionId: string,
+      providerProfileId: string,
+    ): Promise<string>;
+    /** 提交当前全部变更；无变更时 committed=false */
+    commit(sessionId: string, message: string): Promise<GitCommitResult>;
+  };
 }
