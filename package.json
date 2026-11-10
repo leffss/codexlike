@@ -1,0 +1,16 @@
+{
+  "name": "codexlike",
+  "version": "0.1.0",
+  "description": "CodexLike：本地 AI coding agent 桌面工作台（类似 Codex Desktop 的功能平替）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @codexlike/agent-core run build && concurrently -n agent-core,ui,desktop -c yellow,cyan,green \"pnpm --filter @codexlike/agent-core run build:watch\" \"pnpm --filter @codexlike/ui run dev\" \"pnpm --filter @codexlike/desktop run dev\"",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
+  }
+}
