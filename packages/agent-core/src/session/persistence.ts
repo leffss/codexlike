@@ -1,14 +1,18 @@
 import { DatabaseSync } from 'node:sqlite';
 
 import type { ToolCallRecord } from '../tools/types';
-import type { SessionRecord, StoredMessage } from './types';
+import type {
+  ApprovalDecisionRecord,
+  SessionRecord,
+  StoredMessage,
+} from './types';
 
 /**
  * 会话持久化接口（spec「会话与持久化」节）。
  * 以接口注入：生产环境用 SQLite 文件库（`~/.codexlike/`），
  * 测试可换内存库或内存实现（ADR-0002：agent-core 可用 Node 内置 API，不依赖 Electron）。
  *
- * 前瞻：审批决定、compact 记录在后续工单各自建表，届时在此接口上扩展方法。
+ * 前瞻：compact 记录在后续工单建表，届时在此接口上扩展方法。
  */
 export interface SessionPersistence {
   insertSession(record: SessionRecord): void;
@@ -26,6 +30,10 @@ export interface SessionPersistence {
   insertToolCall(call: ToolCallRecord): void;
   /** 指定会话的工具调用记录，按写入顺序 */
   listToolCalls(sessionId: string): ToolCallRecord[];
+  /** 审批决定（工单 04「总是允许」记忆的持久化；写入方为审批状态机） */
+  insertApprovalDecision(decision: ApprovalDecisionRecord): void;
+  /** 指定会话的审批决定，按写入顺序 */
+  listApprovalDecisions(sessionId: string): ApprovalDecisionRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -38,6 +46,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   provider_profile_id TEXT,
   model TEXT,
   status TEXT NOT NULL,
+  approval_mode TEXT,
   archived_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -64,6 +73,15 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session_created
   ON tool_calls(session_id, created_at);
+CREATE TABLE IF NOT EXISTS approval_decisions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  decision TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_approval_decisions_session_created
+  ON approval_decisions(session_id, created_at);
 `;
 
 interface SessionRow {
@@ -73,9 +91,18 @@ interface SessionRow {
   provider_profile_id: string | null;
   model: string | null;
   status: string;
+  approval_mode: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface ApprovalDecisionRow {
+  id: string;
+  session_id: string;
+  decision: string;
+  subject: string;
+  created_at: string;
 }
 
 interface MessageRow {
@@ -112,6 +139,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   } catch {
     // 列已存在（新库或已迁移）
   }
+  // 旧库迁移：工单 03 时代的 sessions 表没有 approval_mode（工单 06 恢复审批模式需要）
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN approval_mode TEXT');
+  } catch {
+    // 列已存在
+  }
   // 旧库迁移：工单 03 时代的 messages 表没有 mentions / aborted（工单 06 恢复等价性需要）
   try {
     db.exec('ALTER TABLE messages ADD COLUMN mentions TEXT');
@@ -125,10 +158,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   const insertSession = db.prepare(
-    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   const updateSessionStmt = db.prepare(
-    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, archived_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, archived_at = ?, updated_at = ? WHERE id = ?',
   );
   const insertMessageStmt = db.prepare(
     'INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -145,6 +178,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   const listToolCallsStmt = db.prepare(
     'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at, rowid',
   );
+  const insertApprovalDecisionStmt = db.prepare(
+    'INSERT INTO approval_decisions (id, session_id, decision, subject, created_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  const listApprovalDecisionsStmt = db.prepare(
+    'SELECT * FROM approval_decisions WHERE session_id = ? ORDER BY created_at, rowid',
+  );
 
   function toRecord(row: SessionRow): SessionRecord {
     return {
@@ -154,6 +193,11 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       providerProfileId: row.provider_profile_id,
       model: row.model,
       status: row.status as SessionRecord['status'],
+      // 旧库行无 approval_mode（NULL）：恢复为默认档 suggest
+      approvalMode:
+        row.approval_mode === 'readonly' || row.approval_mode === 'full'
+          ? row.approval_mode
+          : 'suggest',
       archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -169,6 +213,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.providerProfileId,
         record.model,
         record.status,
+        record.approvalMode,
         record.archivedAt,
         record.createdAt,
         record.updatedAt,
@@ -189,6 +234,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.providerProfileId,
         next.model,
         next.status,
+        next.approvalMode,
         next.archivedAt,
         next.updatedAt,
         id,
@@ -266,6 +312,28 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           createdAt: row.created_at,
         }),
       );
+    },
+
+    insertApprovalDecision(decision) {
+      insertApprovalDecisionStmt.run(
+        decision.id,
+        decision.sessionId,
+        decision.decision,
+        decision.subject,
+        decision.createdAt,
+      );
+    },
+
+    listApprovalDecisions(sessionId) {
+      return (
+        listApprovalDecisionsStmt.all(sessionId) as unknown as ApprovalDecisionRow[]
+      ).map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        decision: row.decision as ApprovalDecisionRecord['decision'],
+        subject: row.subject,
+        createdAt: row.created_at,
+      }));
     },
 
     close() {

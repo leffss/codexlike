@@ -8,6 +8,13 @@ import type { ToolCallRecord } from '../tools/types';
 /** 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中 */
 export type SessionStatus = 'idle' | 'streaming';
 
+/**
+ * 审批模式（GLOSSARY「审批模式」）三档：`readonly` 只读 / `suggest` 协作 / `full` 自主。
+ * 会话级、可随时切换、随会话记录持久化（恢复用）。
+ * 语义（拦截行为）由工单 04 的审批状态机实现；本工单只负责持久化与恢复。
+ */
+export type ApprovalMode = 'readonly' | 'suggest' | 'full';
+
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
   id: string;
@@ -20,12 +27,30 @@ export interface SessionRecord {
   /** 最近一次发送消息所用的模型标识 */
   model: string | null;
   status: SessionStatus;
+  /** 审批模式（默认 suggest）；旧库无此列的记录恢复为默认值 */
+  approvalMode: ApprovalMode;
   /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
   archivedAt: string | null;
   /** ISO 8601 */
   createdAt: string;
   /** ISO 8601；listSessions 按此倒序 */
   updatedAt: string;
+}
+
+/**
+ * 审批决定记录（approval_decisions 表一行）。
+ * 审批卡片三选一（spec）：`allow` 批准一次 / `allow-always` 本会话总是允许 / `deny` 拒绝。
+ * `allow-always` 的 subject（命令首词/前缀）即「总是允许」清单——重启恢复后仍生效。
+ * 写入方为工单 04 的审批状态机；本工单提供持久化与恢复接口。
+ */
+export interface ApprovalDecisionRecord {
+  id: string;
+  sessionId: string;
+  decision: 'allow' | 'allow-always' | 'deny';
+  /** 记忆主体：命令首词/前缀（如 `npm`），或工具名 */
+  subject: string;
+  /** ISO 8601 */
+  createdAt: string;
 }
 
 /** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文） */

@@ -9,7 +9,13 @@ import type { ToolDefinition } from '../tools/types';
 
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { SessionPersistence } from './persistence';
-import type { SessionRecord, StoredMessage, TranscriptItem } from './types';
+import type {
+  ApprovalDecisionRecord,
+  ApprovalMode,
+  SessionRecord,
+  StoredMessage,
+  TranscriptItem,
+} from './types';
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
@@ -47,6 +53,15 @@ export interface SessionManager {
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
+  /**
+   * 切换审批模式（GLOSSARY「审批模式」）并落库（随会话记录跨重启恢复）。
+   * 拦截语义由工单 04 的审批状态机实现；不存在返回 null。
+   */
+  setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
+  /** 记录一次审批决定（工单 04 审批卡片「总是允许」记忆的落点） */
+  recordApprovalDecision(decision: ApprovalDecisionRecord): void;
+  /** 指定会话的审批决定（重启恢复后「总是允许」清单仍生效的数据源） */
+  approvalDecisions(sessionId: string): ApprovalDecisionRecord[];
 }
 
 export function createSessionManager(
@@ -123,6 +138,7 @@ export function createSessionManager(
         providerProfileId: null,
         model: null,
         status: 'idle',
+        approvalMode: 'suggest',
         archivedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -182,6 +198,18 @@ export function createSessionManager(
         archivedAt: archived ? now() : null,
         updatedAt: now(),
       });
+    },
+
+    setApprovalMode(sessionId, mode) {
+      return patchRecord(sessionId, { approvalMode: mode, updatedAt: now() });
+    },
+
+    recordApprovalDecision(decision) {
+      persistence.insertApprovalDecision(decision);
+    },
+
+    approvalDecisions(sessionId) {
+      return persistence.listApprovalDecisions(sessionId);
     },
   };
 }
