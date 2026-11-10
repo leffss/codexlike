@@ -19,8 +19,11 @@ import type {
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
-  /** 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin） */
-  tools?: ToolDefinition[];
+  /**
+   * 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
+   * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
+   */
+  tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**

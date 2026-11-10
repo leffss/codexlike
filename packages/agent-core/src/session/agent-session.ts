@@ -56,9 +56,11 @@ export interface CreateAgentSessionOptions {
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
    * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
+   * 支持工厂函数：每条消息发送时逐次解析——设置页对 MCP 工具的启停、
+   * server 连接状态变化对后续消息即时生效（工单 12），无需重建会话。
    * 工具执行前经审批门（工单 04）：readonly 拒绝、suggest 命令审批、full 全放行。
    */
-  tools?: ToolDefinition[];
+  tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 恢复会话时传入的历史「总是允许」记忆（命令首词，随会话入库） */
@@ -233,8 +235,6 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
     : [];
   const systemPrompt = options.systemPrompt ?? '';
   const modelFor = options.languageModelFor ?? createLanguageModelFromProfile;
-  const toolsByName = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
-  const modelTools = toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
 
@@ -296,6 +296,14 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
         };
         persistence.insertMessage(userMessage);
         yield { type: 'user-message', message: userMessage };
+
+        // 工具逐条消息解析（工单 12）：工厂函数让设置页的 MCP 工具启停、
+        // server 断线/重连对后续消息即时生效；数组形式行为不变
+        const resolvedTools =
+          typeof options.tools === 'function' ? options.tools() : (options.tools ?? []);
+        const toolsByName = new Map(resolvedTools.map((tool) => [tool.name, tool]));
+        const modelTools =
+          toolsByName.size > 0 ? toModelTools([...toolsByName.values()]) : undefined;
 
         const assistantMessageId = generateId();
         yield { type: 'assistant-start', messageId: assistantMessageId };
