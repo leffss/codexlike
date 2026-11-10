@@ -29,7 +29,8 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/provider": "^4.0.37",
-    "ai": "^7.0.0"
+    "ai": "^7.0.0",
+    "simple-git": "^4.0.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
