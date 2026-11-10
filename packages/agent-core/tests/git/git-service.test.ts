@@ -156,3 +156,66 @@ describe('git 服务：diffFile（单文件新旧两侧内容）', () => {
     );
   });
 });
+
+describe('git 服务：createSessionBranch（codexlike/<会话名> 分支）', () => {
+  it('创建并切换到新分支，created=true', async () => {
+    const repo = makeRepo();
+    const service = createGitService(repo);
+    const result = await service.createSessionBranch('codexlike/修复登录');
+    expect(result).toEqual({ branch: 'codexlike/修复登录', created: true });
+    expect((await service.status()).branch).toBe('codexlike/修复登录');
+  });
+
+  it('分支已存在：切换过去并返回 created=false（可重复点击）', async () => {
+    const repo = makeRepo();
+    const service = createGitService(repo);
+    await service.createSessionBranch('codexlike/修复登录');
+    // 切回 main 制造「分支已存在」场景
+    git(repo, 'checkout', 'main');
+    const result = await service.createSessionBranch('codexlike/修复登录');
+    expect(result).toEqual({ branch: 'codexlike/修复登录', created: false });
+    expect((await service.status()).branch).toBe('codexlike/修复登录');
+  });
+
+  it('非 git 目录：中文报错不崩溃', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'codexlike-nogit3-'));
+    repos.push(plain);
+    await expect(createGitService(plain).createSessionBranch('codexlike/x')).rejects.toThrow(
+      '当前工作区不是 git 仓库',
+    );
+  });
+});
+
+describe('git 服务：commitAll（一键提交全部变更）', () => {
+  it('提交 untracked + 修改，返回哈希，提交后 status 干净', async () => {
+    const repo = makeRepo();
+    writeFileSync(join(repo, 'new.txt'), '新文件');
+    writeFileSync(join(repo, 'README.md'), '# 改\n');
+    const service = createGitService(repo);
+
+    const result = await service.commitAll('添加 new.txt 并修改 README');
+    expect(result.committed).toBe(true);
+    expect(result.commitHash).toMatch(/^[0-9a-f]{7,40}$/);
+    const head = git(repo, 'log', '-1', '--pretty=%H');
+    expect(result.commitHash).toBe(head.trim());
+    expect((await service.status()).files).toEqual([]);
+    expect(git(repo, 'log', '-1', '--pretty=%s').trim()).toBe('添加 new.txt 并修改 README');
+  });
+
+  it('没有可提交的变更：committed=false 且有中文原因，不抛错', async () => {
+    const repo = makeRepo();
+    const result = await createGitService(repo).commitAll('空提交');
+    expect(result.committed).toBe(false);
+    expect(result.commitHash).toBeNull();
+    expect(result.reason).toContain('没有可提交的变更');
+  });
+
+  it('提交落在当前分支（如 codexlike/* 会话分支）', async () => {
+    const repo = makeRepo();
+    const service = createGitService(repo);
+    await service.createSessionBranch('codexlike/会话一');
+    writeFileSync(join(repo, 'work.txt'), '工作成果');
+    await service.commitAll('会话分支上的提交');
+    expect(git(repo, 'branch', '--contains', 'HEAD').trim()).toBe('* codexlike/会话一');
+  });
+});

@@ -48,6 +48,27 @@ export interface GitService {
    * @param oldPath 重命名场景 HEAD 中的原路径（可选）
    */
   diffFile(path: string, oldPath?: string): Promise<GitFileDiff>;
+  /**
+   * 创建（或切换到已存在的）`codexlike/<会话名>` 分支。
+   * 创建成功 created=true；分支已存在则切换过去（created=false），可重复调用。
+   */
+  createSessionBranch(name: string): Promise<GitBranchResult>;
+  /** 提交当前全部变更（含 untracked，等价 `git add -A` + `git commit`） */
+  commitAll(message: string): Promise<GitCommitResult>;
+}
+
+export interface GitBranchResult {
+  branch: string;
+  /** true = 新建并切换；false = 分支已存在，仅切换 */
+  created: boolean;
+}
+
+export interface GitCommitResult {
+  committed: boolean;
+  /** 提交哈希；未提交为 null */
+  commitHash: string | null;
+  /** 未提交原因（中文，如「没有可提交的变更」） */
+  reason?: string;
 }
 
 /** git status 的 index/workdir 两列 code 合成面板显示的单一变更类型 */
@@ -170,6 +191,43 @@ export function createGitService(workspacePath: string): GitService {
         modified = ''; // 已删除
       }
       return { path, original, modified };
+    },
+
+    async createSessionBranch(name: string): Promise<GitBranchResult> {
+      if (!(await git.checkIsRepo())) {
+        throw new Error('当前工作区不是 git 仓库，无法创建分支');
+      }
+      try {
+        // checkout -b：创建并切换（agent 的后续提交落在新分支上）。
+        // 注：simple-git 4 的 checkoutBranch(name) 会把 start-point 拼成 undefined，故走 raw。
+        await git.raw(['checkout', '-b', name]);
+        return { branch: name, created: true };
+      } catch (error) {
+        // 分支已存在：切换过去（重复点击幂等）
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('already exists')) {
+          await git.raw(['checkout', name]);
+          return { branch: name, created: false };
+        }
+        throw error;
+      }
+    },
+
+    async commitAll(message: string): Promise<GitCommitResult> {
+      if (!(await git.checkIsRepo())) {
+        throw new Error('当前工作区不是 git 仓库，无法提交');
+      }
+      const status = await this.status();
+      if (status.files.length === 0) {
+        return { committed: false, commitHash: null, reason: '没有可提交的变更' };
+      }
+      await git.raw(['add', '-A']);
+      const summary = await git.commit(message);
+      const commitHash =
+        typeof summary.commit === 'string' && summary.commit !== ''
+          ? summary.commit
+          : null;
+      return { committed: true, commitHash };
     },
   };
 }

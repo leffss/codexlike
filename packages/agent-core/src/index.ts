@@ -55,3 +55,17 @@ export type {
   SlashCommandDef,
   SlashCommandName,
 } from './composer/slash-command';
+
+// git 域类型（改动面板数据形状）：type-only，git 服务实现（simple-git，Node 专属）在 ./node 出口
+export type {
+  GitBranchResult,
+  GitChangeKind,
+  GitCommitResult,
+  GitFileChange,
+  GitFileDiff,
+  GitService,
+  GitStatus,
+} from './git/git-service';
+// 会话名 → codexlike/<会话名> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
+export { codexlikeBranchName } from './git/branch-name';
+export { buildCommitMessagePrompt } from './git/commit-message';
