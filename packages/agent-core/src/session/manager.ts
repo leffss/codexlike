@@ -8,7 +8,7 @@ import type { ProviderProfile } from '../provider/provider-profile';
 
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { SessionPersistence } from './persistence';
-import type { SessionRecord, StoredMessage } from './types';
+import type { CompactRecord, SessionRecord, StoredMessage } from './types';
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
@@ -42,6 +42,8 @@ export interface SessionManager {
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
+  /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
+  latestCompact(sessionId: string): CompactRecord | null;
 }
 
 export function createSessionManager(
@@ -156,6 +158,11 @@ export function createSessionManager(
         archivedAt: archived ? now() : null,
         updatedAt: now(),
       });
+    },
+
+    latestCompact(sessionId) {
+      const compacts = persistence.listCompacts(sessionId);
+      return compacts.length === 0 ? null : compacts[compacts.length - 1]!;
     },
   };
 }
