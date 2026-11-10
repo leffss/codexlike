@@ -46,7 +46,8 @@ export function registerSessionHandlers(options: {
     if (!isDirectory) {
       throw new Error(`工作区目录不存在：${workspacePath}`);
     }
-    return manager.create({ workspacePath });
+    // 返回可结构化克隆的记录快照（AgentSession 含闭包，不可跨 IPC）
+    return manager.create({ workspacePath }).record;
   });
 
   ipcMain.handle(IPC.sessions.selectWorkspace, async () => {

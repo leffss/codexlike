@@ -14,7 +14,8 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*"
@@ -23,6 +24,7 @@
     "@types/node": "^24.0.0",
     "electron": "^45.2.3",
     "esbuild": "^0.28.2",
+    "playwright-core": "^1.65.0",
     "typescript": "^5.9.0",
     "vitest": "^5.1.0",
     "wait-on": "^9.5.1"

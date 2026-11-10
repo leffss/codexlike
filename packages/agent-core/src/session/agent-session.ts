@@ -31,6 +31,8 @@ export interface CreateAgentSessionOptions {
 
 export interface AgentSession {
   readonly id: string;
+  /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
+  readonly record: SessionRecord;
   /**
    * 发送一条用户消息并流式聚合模型回复为会话事件流。
    * 单会话同一时刻只允许一个流（并发发送直接抛错）；
@@ -79,6 +81,7 @@ export function createAgentSession(options: CreateAgentSessionOptions): AgentSes
 
   return {
     id: record.id,
+    record,
 
     async *sendMessage({ text, profile, signal }) {
       if (busy) {
