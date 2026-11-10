@@ -491,3 +491,78 @@ describe('AgentSession.compact（手动压缩）', () => {
     expect(textOf(lastCall.prompt[9]!.content)).toBe('重启后继续');
   });
 });
+
+describe('compact 与工具调用记录的合并融合（工单 03+08）', () => {
+  it('压缩落地时同步清理被压缩轮次的工具调用记录（保留轮次的不动）', async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    const summary = '含工具调用的压缩摘要';
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({ stream: textStream(['回复']) }),
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: summary }],
+        finishReason: { unified: 'stop' as const, raw: 'stop' },
+        usage: {
+          inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 2, text: undefined, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    });
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      generateId: (() => {
+        let n = 0;
+        return () => `id-${++n}`;
+      })(),
+    });
+
+    // 5 轮对话，第 1、2 轮带工具调用记录（模拟 03 的 insertToolCall）
+    for (let i = 1; i <= 5; i += 1) {
+      for await (const event of session.sendMessage({ text: `第${i}轮问题`, profile })) {
+        expect(event.type).not.toBe('error');
+      }
+    }
+    const stored = persistence.listMessages('session-1');
+    const secondRoundEndAt = stored.filter((m) => m.role === 'assistant')[1]!.createdAt;
+    persistence.insertToolCall({
+      id: 'tc-1',
+      sessionId: 'session-1',
+      toolName: 'read_file',
+      arguments: '{}',
+      output: '第1轮的读取结果',
+      isError: false,
+      createdAt: secondRoundEndAt,
+    });
+    persistence.insertToolCall({
+      id: 'tc-2',
+      sessionId: 'session-1',
+      toolName: 'read_file',
+      arguments: '{}',
+      output: '第2轮的读取结果',
+      isError: false,
+      createdAt: secondRoundEndAt,
+    });
+    // 保留轮次（第 3 轮内）的工具调用：晚于第 3 轮 user 消息
+    persistence.insertToolCall({
+      id: 'tc-3',
+      sessionId: 'session-1',
+      toolName: 'grep',
+      arguments: '{}',
+      output: '第3轮的搜索结果',
+      isError: false,
+      createdAt: stored.filter((m) => m.role === 'user')[3]!.createdAt,
+    });
+    expect(persistence.listToolCalls('session-1')).toHaveLength(3);
+
+    await session.compact({ profile });
+
+    // 被压缩轮次（1、2）的工具调用清理；保留轮次（3）的不动
+    const remaining = persistence.listToolCalls('session-1');
+    expect(remaining.map((call) => call.id)).toEqual(['tc-3']);
+  });
+});

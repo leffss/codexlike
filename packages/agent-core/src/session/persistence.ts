@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import type { ToolCallRecord } from '../tools/types';
 import type { CompactRecord, SessionRecord, StoredMessage } from './types';
 
 /**
@@ -7,7 +8,7 @@ import type { CompactRecord, SessionRecord, StoredMessage } from './types';
  * 以接口注入：生产环境用 SQLite 文件库（`~/.codexlike/`），
  * 测试可换内存库或内存实现（ADR-0002：agent-core 可用 Node 内置 API，不依赖 Electron）。
  *
- * 前瞻：工具调用记录、审批决定在后续工单各自建表，届时在此接口上扩展方法。
+ * 前瞻：审批决定在后续工单建表，届时在此接口上扩展方法。
  */
 export interface SessionPersistence {
   insertSession(record: SessionRecord): void;
@@ -19,12 +20,15 @@ export interface SessionPersistence {
   insertMessage(message: StoredMessage): void;
   /**
    * /compact 落地（工单 08）：单事务内把会话消息历史整体替换（摘要 + 保留轮次），
-   * 并追加 compact 记录。事务保证压缩结果原子可见——旧历史要么完整保留、要么完整被替换。
+   * 并追加 compact 记录；pruneToolCallsBefore 同时清理该会话中更早的工具调用记录
+   * （被压缩轮次的工具卡片随历史一起折叠进摘要）。事务保证压缩结果原子可见——
+   * 旧历史要么完整保留、要么完整被替换。
    */
   replaceHistory(
     sessionId: string,
     messages: StoredMessage[],
     compact: CompactRecord,
+    pruneToolCallsBefore?: string,
   ): void;
   /** 全部会话，按 updatedAt 倒序（最近使用的排最前） */
   listSessions(): SessionRecord[];
@@ -32,6 +36,10 @@ export interface SessionPersistence {
   listMessages(sessionId: string): StoredMessage[];
   /** 指定会话的 compact 记录，按时间正序（最后一条为当前生效摘要） */
   listCompacts(sessionId: string): CompactRecord[];
+  /** 工具调用记录（一次调用完成时写入一条完整记录） */
+  insertToolCall(call: ToolCallRecord): void;
+  /** 指定会话的工具调用记录，按写入顺序 */
+  listToolCalls(sessionId: string): ToolCallRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -64,6 +72,17 @@ CREATE TABLE IF NOT EXISTS compact_records (
   messages_compacted INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  arguments TEXT NOT NULL,
+  output TEXT NOT NULL,
+  is_error INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session_created
+  ON tool_calls(session_id, created_at);
 `;
 
 interface SessionRow {
@@ -91,6 +110,16 @@ interface CompactRow {
   session_id: string;
   summary: string;
   messages_compacted: number;
+  created_at: string;
+}
+
+interface ToolCallRow {
+  id: string;
+  session_id: string;
+  tool_name: string;
+  arguments: string;
+  output: string;
+  is_error: number;
   created_at: string;
 }
 
@@ -127,11 +156,20 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   const deleteMessagesStmt = db.prepare(
     'DELETE FROM messages WHERE session_id = ?',
   );
+  const deleteToolCallsBeforeStmt = db.prepare(
+    'DELETE FROM tool_calls WHERE session_id = ? AND created_at < ?',
+  );
   const insertCompactStmt = db.prepare(
     'INSERT INTO compact_records (id, session_id, summary, messages_compacted, created_at) VALUES (?, ?, ?, ?, ?)',
   );
   const listCompactsStmt = db.prepare(
     'SELECT * FROM compact_records WHERE session_id = ? ORDER BY created_at, rowid',
+  );
+  const insertToolCallStmt = db.prepare(
+    'INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  const listToolCallsStmt = db.prepare(
+    'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at, rowid',
   );
 
   function toRecord(row: SessionRow): SessionRecord {
@@ -193,9 +231,9 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       );
     },
 
-    replaceHistory(sessionId, messages, compact) {
-      // 单事务：删除旧消息 + 写入新历史（摘要 + 保留轮次）+ 追加 compact 记录，
-      // 三步原子落地（中途失败整体回滚，旧历史不受损）
+    replaceHistory(sessionId, messages, compact, pruneToolCallsBefore) {
+      // 单事务：删除旧消息 + 写入新历史（摘要 + 保留轮次）+ 追加 compact 记录
+      // + 清理被压缩轮次的工具调用记录，原子落地（中途失败整体回滚，旧历史不受损）
       db.exec('BEGIN');
       try {
         deleteMessagesStmt.run(sessionId);
@@ -215,6 +253,9 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           compact.messagesCompacted,
           compact.createdAt,
         );
+        if (pruneToolCallsBefore !== undefined) {
+          deleteToolCallsBeforeStmt.run(sessionId, pruneToolCallsBefore);
+        }
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
@@ -248,6 +289,32 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         messagesCompacted: row.messages_compacted,
         createdAt: row.created_at,
       }));
+    },
+
+    insertToolCall(call) {
+      insertToolCallStmt.run(
+        call.id,
+        call.sessionId,
+        call.toolName,
+        call.arguments,
+        call.output,
+        call.isError ? 1 : 0,
+        call.createdAt,
+      );
+    },
+
+    listToolCalls(sessionId) {
+      return (listToolCallsStmt.all(sessionId) as unknown as ToolCallRow[]).map(
+        (row) => ({
+          id: row.id,
+          sessionId: row.session_id,
+          toolName: row.tool_name,
+          arguments: row.arguments,
+          output: row.output,
+          isError: row.is_error === 1,
+          createdAt: row.created_at,
+        }),
+      );
     },
 
     close() {

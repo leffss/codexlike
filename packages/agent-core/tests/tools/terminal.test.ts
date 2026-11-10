@@ -1,0 +1,173 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { createTerminalTool } from '../../src/tools/terminal';
+import type { ToolExecutionContext } from '../../src/tools/types';
+
+function makeWorkspace(): string {
+  return mkdtempSync(join(tmpdir(), 'codexlike-ws-'));
+}
+
+function context(workspacePath: string): ToolExecutionContext {
+  return { workspacePath };
+}
+
+/** 与生产宿主同构：传完整 process.env，工具层做白名单过滤 */
+const baseEnv = { ...process.env };
+
+describe('run_terminal_command 工具（默认 Git Bash）', () => {
+  const tool = createTerminalTool({ env: baseEnv });
+
+  it(
+    '基础命令执行并返回 stdout',
+    async () => {
+      const workspace = makeWorkspace();
+      const result = await tool.execute({ command: 'echo hello-from-bash' }, context(workspace));
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('hello-from-bash');
+    },
+    15_000,
+  );
+
+  it(
+    'POSIX 命令组合（ls、&&、管道）在 Windows 上经 Git Bash 正常执行',
+    async () => {
+      const workspace = makeWorkspace();
+      writeFileSync(join(workspace, 'a.txt'), 'x');
+      writeFileSync(join(workspace, 'b.txt'), 'y');
+
+      const result = await tool.execute(
+        { command: 'ls *.txt | sort && echo done' },
+        context(workspace),
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('a.txt');
+      expect(result.output).toContain('b.txt');
+      expect(result.output).toContain('done');
+    },
+    15_000,
+  );
+
+  it(
+    'cwd 默认为工作区（pwd 落在工作区内），stderr 单独成节，非零退出码标记为失败',
+    async () => {
+      const workspace = makeWorkspace();
+      const pwd = await tool.execute({ command: 'pwd' }, context(workspace));
+      expect(pwd.isError).toBe(false);
+      expect(pwd.output.toLowerCase()).toContain('codexlike-ws-');
+
+      const failing = await tool.execute(
+        { command: 'echo Oops >&2; exit 3' },
+        context(workspace),
+      );
+      expect(failing.isError).toBe(true);
+      expect(failing.output).toContain('Oops');
+      expect(failing.output).toContain('3');
+    },
+    15_000,
+  );
+
+  it(
+    '超时：强制终止并返回已收集输出与超时标记',
+    async () => {
+      const workspace = makeWorkspace();
+      const result = await tool.execute(
+        { command: 'echo started; sleep 30', timeoutMs: 500 },
+        context(workspace),
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain('started');
+      expect(result.output).toContain('超时');
+    },
+    15_000,
+  );
+
+  it(
+    '超长输出被截断并带标记',
+    async () => {
+      const workspace = makeWorkspace();
+      const small = createTerminalTool({ env: baseEnv, maxOutputLength: 200 });
+      const result = await small.execute({ command: 'seq 1 20000' }, context(workspace));
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('[输出已截断');
+      expect(result.output.length).toBeLessThan(1_000);
+    },
+    15_000,
+  );
+
+  it(
+    '环境变量白名单：PATH 等基础项可用，未列名变量不透传',
+    async () => {
+      const workspace = makeWorkspace();
+      const withSecret = { ...baseEnv, CODEXLIKE_TEST_SECRET: 'do-not-leak' };
+      const strict = createTerminalTool({ env: withSecret });
+
+      const pathOk = await strict.execute({ command: 'printenv PATH' }, context(workspace));
+      expect(pathOk.isError).toBe(false);
+      expect(pathOk.output.trim().length).toBeGreaterThan(0);
+
+      const leak = await strict.execute(
+        { command: 'printenv CODEXLIKE_TEST_SECRET && echo LEAKED || echo NOT_LEAKED' },
+        context(workspace),
+      );
+      expect(leak.output).toContain('NOT_LEAKED');
+      expect(leak.output).not.toContain('do-not-leak');
+    },
+    15_000,
+  );
+
+  it(
+    '命令中的 Windows 反斜杠绝对路径在工具层转换为 POSIX（bash 可直接使用）',
+    async () => {
+      const workspace = makeWorkspace();
+      writeFileSync(join(workspace, 'note.txt'), 'path-conversion-works');
+
+      const result = await tool.execute(
+        { command: `cat "${workspace}\\note.txt"` },
+        context(workspace),
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('path-conversion-works');
+    },
+    15_000,
+  );
+
+  it(
+    'cwd 参数限定子目录；越界 cwd 被拒',
+    async () => {
+      const workspace = makeWorkspace();
+      const inSub = await tool.execute(
+        { command: 'pwd', cwd: '.' },
+        context(workspace),
+      );
+      expect(inSub.isError).toBe(false);
+
+      const escape = await tool.execute(
+        { command: 'pwd', cwd: '..' },
+        context(workspace),
+      );
+      expect(escape.isError).toBe(true);
+      expect(escape.output).toContain('路径越界');
+    },
+    15_000,
+  );
+
+  it(
+    '可配置 PowerShell：命令经 powershell.exe 执行',
+    async () => {
+      if (process.platform !== 'win32') return; // Windows 优先（spec），其它平台跳过
+      const workspace = makeWorkspace();
+      const powershell = createTerminalTool({ env: baseEnv, shell: 'powershell' });
+      const result = await powershell.execute(
+        { command: 'Write-Output hello-from-ps' },
+        context(workspace),
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('hello-from-ps');
+    },
+    30_000,
+  );
+});

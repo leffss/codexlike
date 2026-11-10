@@ -1,5 +1,11 @@
-import type { MessageRole, SessionEvent, StoredMessage } from '@codexlike/agent-core';
+import type {
+  MessageRole,
+  SessionEvent,
+  StoredMessage,
+  TranscriptItem,
+} from '@codexlike/agent-core';
 
+/** 消息流里一条消息的 UI 状态（含流式/中断标记）；kind 为联合判别保留位 */
 /**
  * 本地状态消息角色（工单 07）：命令反馈与 /status 展示。
  * 只存在于渲染层（不落库、不进模型上下文、不来自 SessionEvent）。
@@ -8,6 +14,7 @@ export type LocalMessageRole = 'status';
 
 /** 消息流里一条消息的 UI 状态（含流式/中断标记） */
 export interface UiMessage {
+  kind?: undefined;
   id: string;
   role: MessageRole | LocalMessageRole;
   content: string;
@@ -16,6 +23,23 @@ export interface UiMessage {
   /** 助手消息被用户中断，content 为部分内容 */
   interrupted?: boolean;
 }
+
+/** 消息流里一张工具卡片的 UI 状态 */
+export interface UiToolCall {
+  kind: 'tool-call';
+  id: string;
+  toolName: string;
+  /** 参数 JSON 字符串（展示时解析） */
+  arguments: string;
+  /** 截断后的执行输出 */
+  output: string;
+  isError: boolean;
+  /** tool-call 事件已到、tool-result 未到 */
+  running?: boolean;
+}
+
+/** 消息流条目：消息或工具卡片 */
+export type UiItem = UiMessage | UiToolCall;
 
 /** 会话切换 / 应用启动时，把持久化历史映射为消息流初始状态 */
 export function initialMessages(history: StoredMessage[]): UiMessage[] {
@@ -26,14 +50,35 @@ export function initialMessages(history: StoredMessage[]): UiMessage[] {
   }));
 }
 
+/** 会话时间线（消息 + 工具调用）→ 消息流初始状态 */
+export function initialTranscript(items: TranscriptItem[]): UiItem[] {
+  return items.map((item) =>
+    item.kind === 'message'
+      ? {
+          id: item.message.id,
+          role: item.message.role,
+          content: item.message.content,
+        }
+      : {
+          kind: 'tool-call',
+          id: item.call.id,
+          toolName: item.call.toolName,
+          arguments: item.call.arguments,
+          output: item.call.output,
+          isError: item.call.isError,
+          running: false,
+        },
+  );
+}
+
 /**
  * 流式事件 → 消息流增量更新（纯函数，React state 的归并核心）。
  * 未知 messageId 的 delta/完成事件被忽略：事件流可能在会话切换后迟到。
  */
 export function applySessionEvent(
-  messages: UiMessage[],
+  messages: UiItem[],
   event: SessionEvent,
-): UiMessage[] {
+): UiItem[] {
   switch (event.type) {
     case 'user-message':
       return [
@@ -58,21 +103,21 @@ export function applySessionEvent(
 
     case 'assistant-delta':
       return messages.map((message) =>
-        message.id === event.messageId
+        message.kind === undefined && message.id === event.messageId
           ? { ...message, content: message.content + event.delta }
           : message,
       );
 
     case 'assistant-done':
       return messages.map((message) =>
-        message.id === event.message.id
+        message.kind === undefined && message.id === event.message.id
           ? { ...message, content: event.message.content, streaming: undefined }
           : message,
       );
 
     case 'assistant-aborted':
       return messages.map((message) =>
-        message.id === event.message.id
+        message.kind === undefined && message.id === event.message.id
           ? {
               ...message,
               content: event.message.content,
@@ -80,6 +125,32 @@ export function applySessionEvent(
               interrupted: true,
             }
           : message,
+      );
+
+    case 'tool-call':
+      return [
+        ...messages,
+        {
+          kind: 'tool-call',
+          id: event.call.id,
+          toolName: event.call.toolName,
+          arguments: event.call.arguments,
+          output: '',
+          isError: false,
+          running: true,
+        },
+      ];
+
+    case 'tool-result':
+      return messages.map((item) =>
+        item.kind === 'tool-call' && item.id === event.call.id
+          ? {
+              ...item,
+              output: event.call.output,
+              isError: event.call.isError,
+              running: false,
+            }
+          : item,
       );
 
     case 'error':

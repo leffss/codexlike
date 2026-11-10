@@ -5,13 +5,21 @@ import type { LanguageModel } from 'ai';
 
 import { createLanguageModelFromProfile } from '../provider/language-model';
 import type { ProviderProfile } from '../provider/provider-profile';
+import type { ToolDefinition } from '../tools/types';
 
 import { createAgentSession, type AgentSession } from './agent-session';
 import type { SessionPersistence } from './persistence';
-import type { CompactRecord, SessionRecord, StoredMessage } from './types';
+import type {
+  CompactRecord,
+  SessionRecord,
+  StoredMessage,
+  TranscriptItem,
+} from './types';
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
+  /** 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin） */
+  tools?: ToolDefinition[];
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
@@ -36,6 +44,8 @@ export interface SessionManager {
   list(): SessionRecord[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
   messages(sessionId: string): StoredMessage[];
+  /** 指定会话的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
+  transcript(sessionId: string): TranscriptItem[];
   /** 惰性恢复会话对象；不存在返回 null；同 id 返回缓存实例 */
   get(sessionId: string): AgentSession | null;
   /** /rename：更新标题并落库；不存在返回 null */
@@ -57,6 +67,10 @@ export function createSessionManager(
 
   const cache = new Map<string, AgentSession>();
 
+  function createdAtOf(item: TranscriptItem): string {
+    return item.kind === 'message' ? item.message.createdAt : item.call.createdAt;
+  }
+
   function restore(record: SessionRecord): AgentSession {
     const history = persistence.listMessages(record.id);
     // 上次退出时若流式中途被杀，库里会残留 streaming；恢复即视为空闲
@@ -76,6 +90,7 @@ export function createSessionManager(
       record,
       persistence,
       history,
+      tools: options.tools,
       systemPrompt: systemPromptFor?.(record) ?? '',
       languageModelFor,
       now,
@@ -129,6 +144,22 @@ export function createSessionManager(
 
     messages(sessionId) {
       return persistence.listMessages(sessionId);
+    },
+
+    transcript(sessionId) {
+      const items: TranscriptItem[] = [
+        ...persistence.listMessages(sessionId).map(
+          (message): TranscriptItem => ({ kind: 'message', message }),
+        ),
+        ...persistence.listToolCalls(sessionId).map(
+          (call): TranscriptItem => ({ kind: 'tool-call', call }),
+        ),
+      ];
+      // stable sort：同 createdAt 保持 messages 在前的插入顺序
+      items.sort((a, b) =>
+        createdAtOf(a) < createdAtOf(b) ? -1 : createdAtOf(a) > createdAtOf(b) ? 1 : 0,
+      );
+      return items;
     },
 
     get(sessionId) {
