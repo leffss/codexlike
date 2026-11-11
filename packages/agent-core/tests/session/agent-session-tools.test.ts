@@ -593,7 +593,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     const startedAt = Date.now();
     // 批准后 1000ms 点停止：此时长命令已在执行中（echo started 已产出、sleep 30 进行中）。
     // 不能在收到 tool-call 事件后立刻 abort——生成器在 yield 处暂停，工具尚未启动；
-    // 也不能从 sendMessage 起算固定延时——满载并发下 approval-request 迟到，
+    // 也不能从 sendMessage 起算固定延时——满载并发下 interaction-request 迟到，
     // abort 落在等待审批期（2026-11-11 全量并发 flaky 实证）。
     // 从批准点起算，abort 必落执行中（子进程被杀）。
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
@@ -603,8 +603,8 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       signal: controller.signal,
     })) {
       events.push(event);
-      if (event.type === "approval-request") {
-        session.respondApproval(event.request.id, "approve");
+      if (event.type === "interaction-request") {
+        session.respondApproval(event.interaction.request.id, "approve");
         stopTimer = setTimeout(() => controller.abort(), 1000);
       }
     }

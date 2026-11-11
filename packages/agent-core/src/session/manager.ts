@@ -101,6 +101,7 @@ export interface SessionManager {
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
+  cancelInteractions(reason: string): void;
 }
 
 export function createSessionManager(
@@ -114,11 +115,27 @@ export function createSessionManager(
   const generateId = options.generateId ?? randomUUID;
 
   const cache = new Map<string, AgentSession>();
+  // 启动即终结所有残留请求：transcript 可在 get 前读取，绝不重放待执行工具。
+  for (const session of persistence.listSessions()) {
+    for (const interaction of persistence.listInteractions(session.id)) {
+      if (interaction.status === "pending")
+        persistence.settleInteraction({
+          ...interaction,
+          status: "cancelled",
+          resolvedAt: now(),
+          cancelReason: "应用已重启，原执行已结束",
+        });
+    }
+    if (session.status !== "idle")
+      persistence.updateSession(session.id, { status: "idle" });
+  }
 
   function createdAtOf(item: TranscriptItem): string {
     return item.kind === "message"
       ? item.message.createdAt
-      : item.call.createdAt;
+      : item.kind === "interaction"
+        ? item.interaction.request.createdAt
+        : item.call.createdAt;
   }
 
   function restore(record: SessionRecord): AgentSession {
@@ -178,6 +195,9 @@ export function createSessionManager(
   }
 
   return {
+    cancelInteractions(reason) {
+      for (const session of cache.values()) session.cancelInteractions(reason);
+    },
     create({
       workspacePath,
       title,
@@ -215,6 +235,8 @@ export function createSessionManager(
     },
 
     transcript(sessionId) {
+      const messages = persistence.listMessages(sessionId);
+      const turnIds = new Set(messages.map((message) => message.id));
       const items: TranscriptItem[] = [
         ...persistence
           .listMessages(sessionId)
@@ -222,6 +244,13 @@ export function createSessionManager(
         ...persistence
           .listToolCalls(sessionId)
           .map((call): TranscriptItem => ({ kind: "tool-call", call })),
+        ...persistence
+          .listInteractions(sessionId)
+          .filter((interaction) => turnIds.has(interaction.request.turnId))
+          .map((interaction): TranscriptItem => ({
+            kind: "interaction",
+            interaction,
+          })),
       ];
       // stable sort：同 createdAt 保持 messages 在前的插入顺序
       items.sort((a, b) =>

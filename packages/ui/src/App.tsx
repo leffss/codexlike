@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from "react";
+import { createWorkspaceState } from "./lib/workspace-state";
 
-import { ThemeProvider, useTheme } from './lib/theme';
-import { SettingsPage } from './pages/SettingsPage';
-import { WorkspacePage } from './pages/WorkspacePage';
+import { ThemeProvider, useTheme } from "./lib/theme";
+import { SettingsPage } from "./pages/SettingsPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 
-type View = 'workspace' | 'settings';
+type View = "workspace" | "settings";
 
 /** 顶栏：品牌 / 视图切换 / 主题快捷切换 */
 function Header(props: { view: View; onSwitch: (view: View) => void }) {
@@ -16,17 +17,19 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
         <span className="text-sm font-semibold tracking-wide text-fg">
           CodexLike
         </span>
-        <span className="text-xs text-fg-subtle">本地 AI coding agent 工作台</span>
+        <span className="text-xs text-fg-subtle">
+          本地 AI coding agent 工作台
+        </span>
       </div>
       <nav className="flex items-center gap-1">
         <button
           type="button"
           data-testid="theme-toggle"
-          title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
+          title={theme === "dark" ? "切换为浅色主题" : "切换为深色主题"}
           className="rounded px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          {theme === 'dark' ? (
+          {theme === "dark" ? (
             /* 太阳（当前深色，点击切浅） */
             <svg
               width="14"
@@ -55,11 +58,12 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
             </svg>
           )}
         </button>
-        {props.view === 'settings' ? (
+        {props.view === "settings" ? (
           <button
             type="button"
             className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
-            onClick={() => props.onSwitch('workspace')}
+            data-testid="settings-back"
+            onClick={() => props.onSwitch("workspace")}
           >
             返回工作台
           </button>
@@ -67,7 +71,8 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
           <button
             type="button"
             className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
-            onClick={() => props.onSwitch('settings')}
+            data-testid="settings-open"
+            onClick={() => props.onSwitch("settings")}
           >
             设置
           </button>
@@ -78,14 +83,30 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
 }
 
 function AppShell() {
-  const [view, setView] = useState<View>('workspace');
+  const [view, setView] = useState<View>("workspace");
+  const [workspaceState] = useState(createWorkspaceState);
+  // 设置页期间仍接收交互终态；后台会话切回不会复活已完成请求。
+  useEffect(
+    () =>
+      window.codexlike.onSessionEvent(({ event }) => {
+        if (
+          event.type === "interaction-request" ||
+          event.type === "interaction-resolved"
+        )
+          workspaceState.observe(event.interaction);
+      }),
+    [workspaceState]
+  );
 
   return (
     <div className="flex h-full flex-col">
       <Header view={view} onSwitch={setView} />
       <main className="min-h-0 flex-1">
-        {view === 'workspace' ? (
-          <WorkspacePage onOpenSettings={() => setView('settings')} />
+        {view === "workspace" ? (
+          <WorkspacePage
+            state={workspaceState}
+            onOpenSettings={() => setView("settings")}
+          />
         ) : (
           <SettingsPage />
         )}

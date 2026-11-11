@@ -98,6 +98,19 @@ export type {
 
 // 上下文用量估算（/status 与 compact 共用的稳定接口）
 export { estimateTokens } from "./context/tokens";
+export { composeStoredMessageContent } from "./context/stored-message";
+export type {
+  InteractionSource,
+  QuestionOption,
+  InteractiveQuestion,
+  ApprovalInteractionRequest,
+  QuestionsInteractionRequest,
+  InteractionRequest,
+  QuestionAnswer,
+  InteractionResponse,
+  InteractionRecord,
+  QuestionAnswerSnapshot,
+} from "./interaction/types";
 // 上下文告警（code review 修复 2）：估算 → 阈值触发的纯逻辑（spec 验收场景 4）
 export {
   CONTEXT_WARNING_THRESHOLD_RATIO,

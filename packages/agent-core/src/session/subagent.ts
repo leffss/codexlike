@@ -21,6 +21,11 @@ import {
   type ToolModelMessage,
 } from "ai";
 
+import { createQuestionsTool } from "../interaction/questions";
+import type {
+  InteractionRecord,
+  InteractionRequest,
+} from "../interaction/types";
 import type { AgentResourceSnapshot } from "../context/resource-types";
 import { createLanguageModelFromProfile } from "../provider/language-model";
 import type {
@@ -35,12 +40,7 @@ import type {
   ToolResult,
 } from "../tools/types";
 
-import {
-  decideApproval,
-  type ApprovalDecision,
-  type ApprovalMode,
-  type ApprovalRequest,
-} from "./approval";
+import { decideApproval, type ApprovalMode } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
 import type { SessionEvent } from "./types";
 
@@ -101,7 +101,18 @@ export interface SubagentHostPort {
    * 子代理的命令审批：注册等待（主会话 waiter 表）并以 approval-request 事件
    * 推给 UI（request.subagentId 标注来源）；resolve 由 respondApproval 触发。
    */
-  requestApproval(request: ApprovalRequest): Promise<ApprovalDecision>;
+  requestInteraction(
+    request:
+      | Omit<
+          Extract<InteractionRequest, { kind: "questions" }>,
+          "id" | "sessionId" | "turnId" | "createdAt"
+        >
+      | Omit<
+          Extract<InteractionRequest, { kind: "approval" }>,
+          "id" | "sessionId" | "turnId" | "createdAt"
+        >
+  ): Promise<InteractionRecord>;
+  emit(event: SessionEvent): void;
   now(): string;
   generateId(): string;
 }
@@ -136,18 +147,7 @@ interface SubagentEntry {
 export interface SubagentOrchestrator {
   /** spawn_subagent 工具定义（加入会话工具表） */
   readonly tool: ToolDefinition;
-  /**
-   * 会话侧注入事件（子代理的 approval-request / approval-resolved）：
-   * 与子代理进度事件共用同一缓冲，保持时间线顺序（工具卡片 → 审批卡片 → 结果）。
-   */
-  pushEvent(event: SessionEvent): void;
-  /**
-   * 转发子代理事件直至全部结束（排队→运行→报告）。
-   * 会话工具循环在轮末调用：内部 await 至全部子代理 settle，期间实时产出进度事件。
-   */
-  pump(): AsyncGenerator<SessionEvent>;
-  /** 非阻塞取出事件缓冲（break/error 路径的兜底转发） */
-  drain(): SessionEvent[];
+  wait(): Promise<void>;
   /** 是否还有未结束的子代理（queued 或 running） */
   hasPending(): boolean;
   /**
@@ -191,14 +191,9 @@ export function createSubagentOrchestrator(
 
   const modelFor = config.languageModelFor ?? createLanguageModelFromProfile;
 
-  // 事件缓冲 + 唤醒（pump 的实时转发机制）
-  const buffer: SessionEvent[] = [];
-  let wake: (() => void) | null = null;
-
-  function emit(event: SessionEvent): void {
-    buffer.push(event);
-    wake?.();
-  }
+  // 事件直接送主会话共享缓冲；仅跟踪运行 Promise，不再维护第二条事件队列。
+  const running = new Set<Promise<void>>();
+  const emit = port.emit;
 
   const entries = new Map<string, SubagentEntry>();
   /** 「同主模型」回退 Profile：spawn 时暂存本次 sendMessage 的 profile */
@@ -240,7 +235,11 @@ export function createSubagentOrchestrator(
         toolCallId: next.toolCallId,
       });
       // 后台运行：结束（成功/失败/中断）后释放槽位并推进队列
-      void runSubagent(next, signal).finally(() => startQueued(signal));
+      const task = runSubagent(next, signal).finally(() => {
+        running.delete(task);
+        startQueued(signal);
+      });
+      running.add(task);
     }
   }
 
@@ -249,8 +248,11 @@ export function createSubagentOrchestrator(
     definition: ToolDefinition,
     input: unknown,
     entry: SubagentEntry,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    toolCallId: string
   ): Promise<ToolResult> {
+    if (signal?.aborted)
+      return { output: "工具调用已取消，未执行", isError: true };
     const command = commandOfToolInput(input);
     const approvalMode = port.approvalMode();
     const gate = decideApproval({
@@ -267,16 +269,24 @@ export function createSubagentOrchestrator(
       };
     }
     if (gate.kind === "ask") {
-      const request: ApprovalRequest = {
-        id: port.generateId(),
-        sessionId: port.sessionId,
+      const interaction = await port.requestInteraction({
+        kind: "approval",
+        toolCallId,
+        source: {
+          kind: "subagent",
+          subagentId: entry.subagentId,
+          task: entry.task,
+        },
         toolName: definition.name,
         command: command ?? definition.name,
         commandWord: gate.commandWord,
-        createdAt: port.now(),
-        subagentId: entry.subagentId,
-      };
-      const decision = await port.requestApproval(request);
+      });
+      const decision =
+        interaction.response?.kind === "approval"
+          ? interaction.response.decision
+          : null;
+      if (interaction.status === "cancelled" || signal?.aborted)
+        return { output: "工具调用已取消，未执行", isError: true };
       if (decision === "reject") {
         return {
           output:
@@ -291,6 +301,7 @@ export function createSubagentOrchestrator(
       approvalMode,
       // 工单 11：子代理与主会话共享同一会话级浏览器 context/Cookie
       sessionId: port.sessionId,
+      toolCallId,
       signal,
     });
   }
@@ -319,7 +330,23 @@ export function createSubagentOrchestrator(
         throw new Error("未解析到子代理模型（Provider Profile）");
       }
       const messages: ModelMessage[] = [{ role: "user", content: entry.task }];
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const questionsTool = createQuestionsTool((questions, toolCallId) =>
+        port.requestInteraction({
+          kind: "questions",
+          questions,
+          toolCallId,
+          source: {
+            kind: "subagent",
+            subagentId: entry.subagentId,
+            task: entry.task,
+          },
+        })
+      );
       const subagentTools = resolveSubagentTools();
+      if (subagentTools.some((tool) => tool.name === questionsTool.name))
+        throw new Error(`工具名称冲突：${questionsTool.name}`);
+      subagentTools.push(questionsTool);
       const toolsByName = new Map(
         subagentTools.map((tool) => [tool.name, tool])
       );
@@ -336,6 +363,10 @@ export function createSubagentOrchestrator(
 
       let settled = false;
       while (!settled) {
+        if (signal?.aborted) {
+          aborted = true;
+          break;
+        }
         const result = streamText({
           // 全部轮次复用入队时捕获的档位快照（运行中主会话切档不影响本任务）
           model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
@@ -412,7 +443,13 @@ export function createSubagentOrchestrator(
               isError: true,
             };
           } else {
-            executed = await gateAndRun(definition, call.input, entry, signal);
+            executed = await gateAndRun(
+              definition,
+              call.input,
+              entry,
+              signal,
+              call.toolCallId
+            );
           }
 
           const completed = {
@@ -491,6 +528,8 @@ export function createSubagentOrchestrator(
     // 委派本身是元操作：readonly 下放行（子代理内部工具仍受审批模式约束）
     permission: "readonly",
     async execute(args, context) {
+      if (context.signal?.aborted)
+        return { output: "委派已取消，未执行", isError: true };
       const task =
         typeof (args as { task?: unknown } | null)?.task === "string"
           ? (args as { task: string }).task.trim()
@@ -531,11 +570,8 @@ export function createSubagentOrchestrator(
 
   return {
     tool,
-    pushEvent(event) {
-      emit(event);
-    },
-    drain() {
-      return buffer.splice(0, buffer.length);
+    async wait() {
+      while (running.size) await Promise.all([...running]);
     },
     hasPending,
     resultFor(toolCallId) {
@@ -545,20 +581,6 @@ export function createSubagentOrchestrator(
         }
       }
       return undefined;
-    },
-    async *pump() {
-      while (true) {
-        while (buffer.length > 0) {
-          yield buffer.shift()!;
-        }
-        if (!hasPending() && buffer.length === 0) {
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-        });
-        wake = null;
-      }
     },
   };
 }

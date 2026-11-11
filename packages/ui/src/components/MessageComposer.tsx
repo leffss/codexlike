@@ -139,6 +139,9 @@ const THINKING_PILL_STYLES: Record<
  * - 本轮回复进行中（流式输出或工具执行）时发送按钮切换为「停止」，打断当前轮。
  */
 export function MessageComposer(props: {
+  /** 草稿由 App 按会话保存；未传时保持独立使用能力。 */
+  draftValue?: string;
+  onDraftChange?: (text: string) => void;
   profiles: ProviderProfile[];
   selectedProfileId: string;
   onSelectProfile: (id: string) => void;
@@ -166,7 +169,12 @@ export function MessageComposer(props: {
   thinkingEffort: ThinkingEffort | null;
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
 }) {
-  const [value, setValue] = useState("");
+  const [localValue, setLocalValue] = useState("");
+  const value = props.draftValue ?? localValue;
+  function setValue(next: string) {
+    setLocalValue(next);
+    props.onDraftChange?.(next);
+  }
   const [menu, setMenu] = useState<ComposerMenuState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** Esc 关闭菜单的签名（value + 光标）：draft 未变化前不再自动弹出 */
@@ -420,7 +428,7 @@ export function MessageComposer(props: {
           />
         </div>
         {/* 底部工具栏：左审批胶囊 + 思考档位胶囊，右模型选择 + 圆形动作按钮 */}
-        <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
           <div className="flex items-center gap-2">
             <div
               className={`relative shrink-0 rounded-full border ${approvalPill.pill} ${
@@ -492,7 +500,7 @@ export function MessageComposer(props: {
               <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
             </div>
           </div>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
             <button
               type="button"
               data-testid="composer-skills"
@@ -504,14 +512,14 @@ export function MessageComposer(props: {
               技能
             </button>
             <div
-              className="relative shrink-0"
+              className="relative min-w-0"
               title="模型（Provider Profile）：对下一条消息生效"
             >
               <select
                 data-testid="profile-select"
                 value={props.selectedProfileId}
                 onChange={(event) => props.onSelectProfile(event.target.value)}
-                className="max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-fg-muted focus:outline-none"
+                className="w-full max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-fg-muted focus:outline-none"
               >
                 {props.profiles.length === 0 && (
                   <option value="">未配置模型</option>

@@ -734,7 +734,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       [Symbol.asyncIterator]();
     let approvalRequest: Extract<
       SessionEvent,
-      { type: "approval-request" }
+      { type: "interaction-request" }
     > | null = null;
     for (
       let head = await iterator.next();
@@ -742,27 +742,31 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       head = await iterator.next()
     ) {
       events.push(head.value);
-      if (head.value.type === "approval-request") {
+      if (head.value.type === "interaction-request") {
         approvalRequest = head.value;
         break;
       }
     }
     // 子代理的写入弹卡（request.subagentId 标注来源），拒绝
     expect(approvalRequest).not.toBeNull();
-    expect(approvalRequest!.request.subagentId).toBeDefined();
-    expect(approvalRequest!.request.toolName).toBe("write_file");
+    if (
+      approvalRequest!.interaction.request.kind !== "approval" ||
+      approvalRequest!.interaction.request.source.kind !== "subagent"
+    )
+      throw new Error("预期子代理审批");
+    expect(approvalRequest!.interaction.request.toolName).toBe("write_file");
     expect(session.resourceState.active?.loaded).toEqual([
       expect.objectContaining({
-        executorId: approvalRequest!.request.subagentId,
+        executorId: approvalRequest!.interaction.request.source.subagentId,
         name: "alpha",
       }),
     ]);
     expect(
-      events.filter((event) => event.type === "approval-request")
+      events.filter((event) => event.type === "interaction-request")
     ).toHaveLength(1);
-    expect(session.respondApproval(approvalRequest!.request.id, "reject")).toBe(
-      true
-    );
+    expect(
+      session.respondApproval(approvalRequest!.interaction.request.id, "reject")
+    ).toBe(true);
 
     for (
       let head = await iterator.next();
@@ -890,10 +894,10 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       .sendMessage({ text: "委派跑命令", profile })
       [Symbol.asyncIterator]();
 
-    // 推进到子代理的审批请求（approval-request 带 subagentId）
+    // 推进到子代理的审批请求（interaction-request 带 subagentId）
     let approvalRequest: Extract<
       SessionEvent,
-      { type: "approval-request" }
+      { type: "interaction-request" }
     > | null = null;
     for (
       let head = await iterator.next();
@@ -901,22 +905,26 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       head = await iterator.next()
     ) {
       events.push(head.value);
-      if (head.value.type === "approval-request") {
+      if (head.value.type === "interaction-request") {
         approvalRequest = head.value;
         break;
       }
     }
     expect(approvalRequest).not.toBeNull();
-    expect(approvalRequest!.request.subagentId).toBeDefined();
-    expect(approvalRequest!.request.command).toContain(
+    if (
+      approvalRequest!.interaction.request.kind !== "approval" ||
+      approvalRequest!.interaction.request.source.kind !== "subagent"
+    )
+      throw new Error("预期子代理审批");
+    expect(approvalRequest!.interaction.request.command).toContain(
       "rm codexlike-subagent-target"
     );
 
     // id 不匹配的响应返回 false；always 批准生效但不记忆（ADR 0004）
     expect(session.respondApproval("not-the-id", "approve")).toBe(false);
-    expect(session.respondApproval(approvalRequest!.request.id, "always")).toBe(
-      true
-    );
+    expect(
+      session.respondApproval(approvalRequest!.interaction.request.id, "always")
+    ).toBe(true);
 
     // 消费剩余事件：审批卡片转结果态、命令真实执行、报告回流、主会话收尾
     for (
@@ -929,8 +937,8 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(
       events.some(
         (e) =>
-          e.type === "approval-resolved" &&
-          e.requestId === approvalRequest!.request.id
+          e.type === "interaction-resolved" &&
+          e.interaction.request.id === approvalRequest!.interaction.request.id
       )
     ).toBe(true);
     // 真实执行（目标不存在 → rm 报错回填）

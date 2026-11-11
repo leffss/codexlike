@@ -110,7 +110,7 @@ async function main() {
     // assist 档：MCP 工具（无命令参数、非危险）自动放行，不弹审批卡
     await new Promise((r) => setTimeout(r, 500));
     assert(
-      (await window.getByTestId("approval-card").count()) === 0,
+      (await window.getByTestId("interaction-panel").count()) === 0,
       "assist 档 MCP 工具不应弹审批卡"
     );
     console.log("[e2e] assist 模式：MCP 工具调用自动放行（无审批卡）");

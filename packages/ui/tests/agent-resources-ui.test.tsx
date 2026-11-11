@@ -121,6 +121,30 @@ describe("规范与技能只读面板", () => {
 });
 
 describe("技能输入入口", () => {
+  it("普通输入从会话草稿恢复，即使禁用发送仍保留输入内容与停止按钮", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageComposer, {
+        profiles: [],
+        selectedProfileId: "",
+        onSelectProfile: () => {},
+        onSend: () => {},
+        workspaceFiles: [],
+        disabled: true,
+        hint: "",
+        approvalMode: "assist",
+        onSelectApprovalMode: () => {},
+        thinkingEffort: "auto",
+        onSelectThinkingEffort: () => {},
+        draftValue: "切会话前的输入",
+        onDraftChange: () => {},
+        streaming: true,
+      })
+    );
+    expect(html).toContain("切会话前的输入");
+    expect(html).toContain("flex flex-wrap items-center justify-between");
+    expect(html).toContain("composer-stop");
+    expect(html).not.toContain("composer-send");
+  });
   it("提供不提交表单的技能按钮", () => {
     const html = renderToStaticMarkup(
       createElement(MessageComposer, {

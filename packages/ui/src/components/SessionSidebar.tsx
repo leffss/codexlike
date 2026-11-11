@@ -1,9 +1,9 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from "react";
 
-import type { SessionRecord } from '@codexlike/agent-core';
+import type { SessionRecord } from "@codexlike/agent-core";
 
-import { groupSessionsByProject } from '../lib/project-groups';
-import { formatRelativeTime } from '../lib/relative-time';
+import { groupSessionsByProject } from "../lib/project-groups";
+import { formatRelativeTime } from "../lib/relative-time";
 
 function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   const next = new Set(set);
@@ -31,8 +31,8 @@ function FolderIcon(props: { open: boolean }) {
       <path
         d={
           props.open
-            ? 'M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 6v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12V4.25z'
-            : 'M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z'
+            ? "M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 6v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12V4.25z"
+            : "M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z"
         }
       />
     </svg>
@@ -58,14 +58,14 @@ export function SessionSidebar(props: {
   onArchive: (id: string, archived: boolean) => void;
 }) {
   // 折叠状态仅存组件内存（与刷新后全展开的既有行为一致，不持久化）
-  const [collapsedProjects, setCollapsedProjects] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
+  const [collapsedProjects, setCollapsedProjects] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
-    () => new Set(),
+    () => new Set()
   );
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState('');
+  const [editingTitle, setEditingTitle] = useState("");
 
   // 全列表共享的分钟级时钟：相对时间文案随时间推移刷新（非每行一个定时器）
   const [now, setNow] = useState(() => Date.now());
@@ -79,16 +79,16 @@ export function SessionSidebar(props: {
   function submitRename(id: string) {
     const title = editingTitle.trim();
     setEditingId(null);
-    if (title !== '') {
+    if (title !== "") {
       props.onRename(id, title);
     }
   }
 
   function onRenameKeyDown(event: KeyboardEvent<HTMLInputElement>, id: string) {
-    if (event.key === 'Enter') {
+    if (event.key === "Enter") {
       event.preventDefault();
       submitRename(id);
-    } else if (event.key === 'Escape') {
+    } else if (event.key === "Escape") {
       event.preventDefault();
       setEditingId(null);
     }
@@ -96,7 +96,7 @@ export function SessionSidebar(props: {
 
   function renderSessionItem(session: SessionRecord) {
     const relative = formatRelativeTime(session.updatedAt, now);
-    const absoluteTime = new Date(session.updatedAt).toLocaleString('zh-CN');
+    const absoluteTime = new Date(session.updatedAt).toLocaleString("zh-CN");
 
     return (
       <li key={session.id} className="group relative mt-0.5">
@@ -114,10 +114,11 @@ export function SessionSidebar(props: {
           <button
             type="button"
             data-testid="session-item"
+            data-session-id={session.id}
             className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm ${
               session.id === props.currentId
-                ? 'bg-selected text-fg'
-                : 'text-fg-muted hover:bg-hover hover:text-fg'
+                ? "bg-selected text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
             onClick={() => props.onSelect(session.id)}
           >
@@ -125,7 +126,7 @@ export function SessionSidebar(props: {
               {session.title}
             </span>
             <span className="ml-auto flex shrink-0 items-center gap-1">
-              {session.workspaceMode === 'worktree' && (
+              {session.workspaceMode === "worktree" && (
                 <span
                   data-testid="worktree-badge"
                   title={`托管 Worktree：${session.workspacePath}`}
@@ -134,7 +135,7 @@ export function SessionSidebar(props: {
                   worktree
                 </span>
               )}
-              {session.status === 'streaming' ? (
+              {session.status === "streaming" ? (
                 <span
                   title="会话正在运行中"
                   className="flex items-center gap-1 rounded bg-ok-bg px-1 py-px text-[10px] text-ok-fg"
@@ -142,13 +143,17 @@ export function SessionSidebar(props: {
                   <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ok-fg" />
                   运行中
                 </span>
-              ) : session.status === 'waiting-approval' ? (
+              ) : session.status === "waiting-user" ||
+                session.status === "waiting-approval" ? (
                 <span className="rounded bg-warn-bg px-1 py-px text-[10px] text-warn-fg">
-                  等待审批
+                  等待用户
                 </span>
               ) : null}
-              {relative !== '' && (
-                <span className="text-[10px] text-fg-subtle" title={absoluteTime}>
+              {relative !== "" && (
+                <span
+                  className="text-[10px] text-fg-subtle"
+                  title={absoluteTime}
+                >
                   {relative}
                 </span>
               )}
@@ -209,7 +214,7 @@ export function SessionSidebar(props: {
           }
         >
           <span className="w-3 shrink-0 text-center text-fg-subtle">
-            {expanded ? '▾' : '▸'}
+            {expanded ? "▾" : "▸"}
           </span>
           <FolderIcon open={expanded} />
           <span className="truncate">{group.name}</span>
@@ -233,7 +238,7 @@ export function SessionSidebar(props: {
                 setExpandedArchived((prev) => toggleKey(prev, group.key))
               }
             >
-              {archivedOpen ? '收起' : '展开'}已归档（{group.archived.length}）
+              {archivedOpen ? "收起" : "展开"}已归档（{group.archived.length}）
             </button>
             {archivedOpen && (
               <ul className="mt-0.5" data-testid="archived-list">
@@ -276,7 +281,7 @@ export function SessionSidebar(props: {
           className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={props.onCreate}
         >
-          {props.creating ? '创建中…' : '+ 新建会话'}
+          {props.creating ? "创建中…" : "+ 新建会话"}
         </button>
       </div>
 

@@ -3,6 +3,10 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ToolCallRecord } from "../tools/types";
+import type {
+  InteractionRecord,
+  QuestionAnswerSnapshot,
+} from "../interaction/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
 import type { CompactRecord, SessionRecord, StoredMessage } from "./types";
 
@@ -21,6 +25,13 @@ export interface SessionPersistence {
     patch: Partial<Omit<SessionRecord, "id" | "createdAt">>
   ): void;
   insertMessage(message: StoredMessage): void;
+  insertInteraction(interaction: InteractionRecord): void;
+  listInteractions(sessionId: string): InteractionRecord[];
+  /** pending → 终态；问答快照与终态在同一事务提交，重复提交返回 false。 */
+  settleInteraction(
+    interaction: InteractionRecord,
+    snapshot?: QuestionAnswerSnapshot
+  ): boolean;
   /**
    * /compact 落地（工单 08）：单事务内把会话消息历史整体替换（摘要 + 保留轮次），
    * 并追加 compact 记录；pruneToolCallsBefore 同时清理该会话中更早的工具调用记录
@@ -95,6 +106,13 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session_created
   ON tool_calls(session_id, created_at);
+CREATE TABLE IF NOT EXISTS interactions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  record TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_interactions_session ON interactions(session_id, created_at);
 CREATE TABLE IF NOT EXISTS approvals (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   command_word TEXT NOT NULL,
@@ -126,6 +144,7 @@ interface MessageRow {
   created_at: string;
   mentions: string | null;
   aborted: number | null;
+  question_answers: string | null;
 }
 
 interface CompactRow {
@@ -198,6 +217,11 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     // 列已存在
   }
 
+  const messageColumns = db.prepare("PRAGMA table_info(messages)").all();
+  if (!messageColumns.some((column) => column.name === "question_answers")) {
+    db.exec("ALTER TABLE messages ADD COLUMN question_answers TEXT");
+  }
+
   const insertSession = db.prepare(
     "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
@@ -205,7 +229,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
-    "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listSessionsStmt = db.prepare(
     "SELECT * FROM sessions ORDER BY updated_at DESC, rowid DESC"
@@ -245,7 +269,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       workspacePath: row.workspace_path,
       providerProfileId: row.provider_profile_id,
       model: row.model,
-      status: row.status as SessionRecord["status"],
+      status:
+        row.status === "waiting-approval"
+          ? "waiting-user"
+          : (row.status as SessionRecord["status"]),
       // 审批模式读侧迁移（ADR 0004，不回写数据）：旧三档值映射到新三档
       // （readonly→ask、suggest→assist、full→full-access）；
       // 非法/缺失/损坏值恢复为默认档 assist
@@ -276,7 +303,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       message.mentions === undefined || message.mentions.length === 0
         ? null
         : JSON.stringify(message.mentions),
-      message.aborted === true ? 1 : 0
+      message.aborted === true ? 1 : 0,
+      message.questionAnswers?.length
+        ? JSON.stringify(message.questionAnswers)
+        : null
     );
   }
 
@@ -323,6 +353,72 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
 
     insertMessage(message) {
       insertMessage(message);
+    },
+
+    insertInteraction(interaction) {
+      db.prepare(
+        "INSERT INTO interactions (id, session_id, record, created_at) VALUES (?, ?, ?, ?)"
+      ).run(
+        interaction.request.id,
+        interaction.request.sessionId,
+        JSON.stringify(interaction),
+        interaction.request.createdAt
+      );
+    },
+
+    listInteractions(sessionId) {
+      return db
+        .prepare(
+          "SELECT record FROM interactions WHERE session_id = ? ORDER BY created_at, rowid"
+        )
+        .all(sessionId)
+        .map((row) => JSON.parse(String(row.record)) as InteractionRecord);
+    },
+
+    settleInteraction(interaction, snapshot) {
+      db.exec("BEGIN");
+      try {
+        const row = db
+          .prepare(
+            "SELECT record FROM interactions WHERE id = ? AND session_id = ?"
+          )
+          .get(interaction.request.id, interaction.request.sessionId);
+        if (
+          !row ||
+          (JSON.parse(String(row.record)) as InteractionRecord).status !==
+            "pending"
+        ) {
+          db.exec("ROLLBACK");
+          return false;
+        }
+        if (snapshot !== undefined) {
+          const message = db
+            .prepare(
+              "SELECT question_answers FROM messages WHERE id = ? AND session_id = ? AND role = 'user'"
+            )
+            .get(interaction.request.turnId, interaction.request.sessionId);
+          if (!message)
+            throw new Error("交互所属的用户消息不存在，无法保存回答");
+          const answers = message.question_answers
+            ? (JSON.parse(
+                String(message.question_answers)
+              ) as QuestionAnswerSnapshot[])
+            : [];
+          answers.push(snapshot);
+          db.prepare(
+            "UPDATE messages SET question_answers = ? WHERE id = ?"
+          ).run(JSON.stringify(answers), interaction.request.turnId);
+        }
+        db.prepare("UPDATE interactions SET record = ? WHERE id = ?").run(
+          JSON.stringify(interaction),
+          interaction.request.id
+        );
+        db.exec("COMMIT");
+        return true;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     replaceHistory(sessionId, messages, compact, pruneToolCallsBefore) {
@@ -376,6 +472,14 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
               }
             } catch {
               // 忽略损坏的 mentions 列
+            }
+          }
+          if (row.question_answers) {
+            try {
+              const parsed: unknown = JSON.parse(row.question_answers);
+              if (Array.isArray(parsed)) message.questionAnswers = parsed;
+            } catch {
+              // 损坏的旧数据不阻塞历史读取。
             }
           }
           if (row.aborted === 1) {

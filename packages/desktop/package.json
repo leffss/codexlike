@@ -24,6 +24,7 @@
     "test:e2e:skills": "node e2e/skills.mjs",
     "test:e2e:browser": "node e2e/browser.mjs",
     "test:e2e:approvals": "node e2e/approvals.mjs",
+    "test:e2e:interactions": "node e2e/interactions.mjs",
     "test:e2e:changes": "node e2e/changes.mjs",
     "test:e2e:interrupt": "node e2e/interrupt.mjs",
     "test:e2e:compact": "node e2e/compact.mjs",
@@ -35,7 +36,7 @@
     "test:e2e:projects": "node e2e/projects-sidebar.mjs",
     "test:e2e:theme": "node e2e/theme.mjs",
     "test:e2e:thinking": "node e2e/thinking.mjs",
-    "test:e2e:all": "node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs"
+    "test:e2e:all": "node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/interactions.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs"
   },
   "devDependencies": {
     "@codexlike/agent-core": "workspace:*",

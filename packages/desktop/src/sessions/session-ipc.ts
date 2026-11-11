@@ -386,6 +386,41 @@ export function registerSessionHandlers(options: {
   );
 
   ipcMain.handle(
+    IPC.sessions.pendingInteractions,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("pendingInteractions：sessionId 必须是非空字符串");
+      }
+      return manager.get(sessionId)?.pendingInteractions ?? [];
+    }
+  );
+
+  ipcMain.handle(
+    IPC.sessions.respondInteraction,
+    (
+      _e: IpcMainInvokeEvent,
+      sessionId: unknown,
+      requestId: unknown,
+      response: unknown
+    ) => {
+      if (
+        typeof sessionId !== "string" ||
+        sessionId.trim() === "" ||
+        typeof requestId !== "string" ||
+        requestId.trim() === ""
+      ) {
+        throw new Error("respondInteraction：参数不合法");
+      }
+      const session = manager.get(sessionId);
+      if (session === null) {
+        throw new Error("会话不存在或已损坏");
+      }
+      // Core 以自身持有的请求校验响应，不能信任渲染层提供的题目、来源或授权范围。
+      return session.respondInteraction(requestId, response);
+    }
+  );
+
+  ipcMain.handle(
     IPC.sessions.respondApproval,
     (
       _e: IpcMainInvokeEvent,

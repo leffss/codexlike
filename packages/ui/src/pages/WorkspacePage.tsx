@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  createWorkspaceState,
+  type WorkspaceState,
+} from "../lib/workspace-state";
+import { InteractionPanel } from "../components/InteractionPanel";
 
 import {
   evaluateContextWarning,
   resolveComposerSubmission,
   type ApprovalMode,
   type ProviderProfile,
+  type SessionEvent,
   type SessionRecord,
   type SessionResourcesView,
   type ThinkingEffort,
@@ -21,6 +33,8 @@ import { SessionSidebar } from "../components/SessionSidebar";
 import {
   applySessionEvent,
   initialTranscript,
+  hydrateTranscript,
+  mergeInteractions,
   type UiItem,
 } from "../lib/session-view";
 import {
@@ -34,7 +48,23 @@ import {
  * 会话与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
  * 斜杠命令与 @引用 在发送前经解析层分发（工单 07）。
  */
-export function WorkspacePage(props: { onOpenSettings: () => void }) {
+export function WorkspacePage(props: {
+  onOpenSettings: () => void;
+  state?: WorkspaceState;
+}) {
+  const [localState] = useState(createWorkspaceState);
+  const workspaceState = props.state ?? localState;
+  useSyncExternalStore(
+    workspaceState.subscribe,
+    workspaceState.version,
+    workspaceState.version
+  );
+  const loadingRef = useRef<{
+    sessionId: string;
+    generation: number;
+    events: SessionEvent[];
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
@@ -69,6 +99,12 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
   currentIdRef.current = currentId;
   /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；sessions 列表随事件刷新） */
   const current = sessions.find((session) => session.id === currentId) ?? null;
+  const pending = currentId === null ? [] : workspaceState.pending(currentId);
+  const interaction = pending[0];
+  const displayMessages =
+    currentId === null
+      ? messages
+      : mergeInteractions(messages, workspaceState.records(currentId));
 
   const refreshSessions = useCallback(async () => {
     const list = await window.codexlike.sessions.list();
@@ -146,6 +182,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
   const openSession = useCallback(
     async (id: string) => {
       setCurrentId(id);
+      workspaceState.activeSessionId = id;
       currentIdRef.current = id;
       const request = ++sessionRequestRef.current;
       const isCurrent = () =>
@@ -157,32 +194,73 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       setCompacting(false);
       setFullAccessPending(false);
       void refreshResources(id);
-      const history = await window.codexlike.sessions.messages(id);
-      if (!isCurrent()) return;
-      let items = initialTranscript(history);
+      setLoading(true);
       setStreaming(false);
-      // 切换会话后按该会话的当前用量重估上下文告警
-      void refreshContextWarning(id);
-      // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
-      // （主会话与子代理可能并行等待——工单 13，全部恢复）
+      const buffer = {
+        sessionId: id,
+        generation: request,
+        events: [] as SessionEvent[],
+      };
+      loadingRef.current = buffer;
+      const snapshotVersion = workspaceState.version();
       try {
-        const pendingList =
-          await window.codexlike.sessions.pendingApprovals(id);
+        const [history, pendingList, list] = await Promise.all([
+          window.codexlike.sessions.messages(id),
+          window.codexlike.sessions.pendingInteractions(id),
+          window.codexlike.sessions.list(),
+        ]);
         if (!isCurrent()) return;
-        if (pendingList.length > 0) {
-          for (const request of pendingList) {
-            items = applySessionEvent(items, {
-              type: "approval-request",
-              request,
-            });
-          }
-          setStreaming(true);
+        workspaceState.reconcile(
+          id,
+          history.flatMap((item) =>
+            item.kind === "interaction" ? [item.interaction] : []
+          ),
+          snapshotVersion
+        );
+        for (const record of pendingList) workspaceState.observe(record);
+        setMessages(
+          mergeInteractions(
+            hydrateTranscript(history, buffer.events),
+            workspaceState.records(id)
+          )
+        );
+        setSessions(list);
+        const status = list.find((session) => session.id === id)?.status;
+        let running =
+          status === "streaming" ||
+          status === "waiting-user" ||
+          status === "waiting-approval";
+        for (const event of buffer.events) {
+          if (
+            event.type === "assistant-start" ||
+            event.type === "interaction-request"
+          )
+            running = true;
+          if (
+            event.type === "assistant-done" ||
+            event.type === "assistant-aborted" ||
+            event.type === "error"
+          )
+            running = false;
         }
-      } catch {
-        // 查询失败不阻塞会话打开
+        setStreaming(running || workspaceState.pending(id).length > 0);
+      } catch (error) {
+        if (!isCurrent()) return;
+        setMessages([
+          {
+            id: `load-${request}`,
+            role: "error",
+            content: `读取会话失败：${error instanceof Error ? error.message : String(error)}`,
+          },
+        ]);
+      } finally {
+        if (isCurrent()) {
+          loadingRef.current = null;
+          setLoading(false);
+        }
       }
       if (!isCurrent()) return;
-      setMessages(items);
+      void refreshContextWarning(id);
       // @引用 菜单候选：随会话（工作区）切换重新枚举
       try {
         const files = await window.codexlike.sessions.workspaceFiles(id);
@@ -191,34 +269,46 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         if (isCurrent()) setWorkspaceFiles([]);
       }
     },
-    [refreshContextWarning, refreshResources]
+    [refreshContextWarning, refreshResources, workspaceState]
   );
 
   useEffect(() => {
+    let active = true;
     void (async () => {
       const [list, profileList] = await Promise.all([
         window.codexlike.sessions.list(),
         window.codexlike.providerProfiles.list(),
       ]);
+      if (!active) return;
       setSessions(list);
       setProfiles(profileList);
       if (profileList.length > 0) {
         setSelectedProfileId((prev) => prev || profileList[0]!.id);
       }
       // 启动时自动打开最近的未归档会话（若有）
-      const latest = list.find((session) => session.archivedAt === null);
+      const latest =
+        list.find((session) => session.id === workspaceState.activeSessionId) ??
+        list.find((session) => session.archivedAt === null);
       if (latest !== undefined && currentIdRef.current === null) {
         await openSession(latest.id);
       }
     })();
+    return () => {
+      active = false;
+    };
   }, [openSession]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
     return window.codexlike.onSessionEvent(({ sessionId, event }) => {
       if (sessionId === currentIdRef.current) {
-        setMessages((prev) => applySessionEvent(prev, event));
-        if (event.type === "assistant-start") {
+        if (loadingRef.current?.sessionId === sessionId)
+          loadingRef.current.events.push(event);
+        else setMessages((prev) => applySessionEvent(prev, event));
+        if (
+          event.type === "assistant-start" ||
+          event.type === "interaction-request"
+        ) {
           setStreaming(true);
         }
         if (
@@ -246,14 +336,29 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         event.type === "assistant-done" ||
         event.type === "assistant-aborted" ||
         event.type === "error" ||
-        event.type === "approval-request" ||
-        event.type === "approval-resolved"
+        event.type === "interaction-request" ||
+        event.type === "interaction-resolved"
       ) {
         // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
         void refreshSessions();
       }
     });
-  }, [refreshSessions, refreshContextWarning, refreshResources]);
+  }, [
+    refreshSessions,
+    refreshContextWarning,
+    refreshResources,
+    workspaceState,
+  ]);
+
+  useEffect(
+    () => () => {
+      // 页面卸载后的迟到加载不能写回新工作台页面。
+      sessionRequestRef.current += 1;
+      resourceRequestRef.current += 1;
+      currentIdRef.current = null;
+    },
+    []
+  );
 
   /** 侧栏「+ 新建会话」：选目录 → 模式对话框（本目录直跑 / worktree 模式）→ 创建 */
   async function startCreateSession() {
@@ -318,7 +423,9 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       currentId === null ||
       selectedProfileId === "" ||
       streaming ||
-      compacting
+      compacting ||
+      loading ||
+      workspaceState.pending(currentId).length > 0
     ) {
       return;
     }
@@ -387,6 +494,11 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
           pushLocalStatus("压缩需要先选择模型（Provider Profile）");
           return;
         }
+        const compactSessionId = current!.id;
+        const compactGeneration = sessionRequestRef.current;
+        const compactIsCurrent = () =>
+          currentIdRef.current === compactSessionId &&
+          sessionRequestRef.current === compactGeneration;
         setCompacting(true);
         try {
           const result = await window.codexlike.sessions.compact(
@@ -395,19 +507,31 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
           );
           await refreshSessions();
           // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
-          const history = await window.codexlike.sessions.messages(current!.id);
+          const snapshotVersion = workspaceState.version();
+          const history =
+            await window.codexlike.sessions.messages(compactSessionId);
+          workspaceState.reconcile(
+            compactSessionId,
+            history.flatMap((item) =>
+              item.kind === "interaction" ? [item.interaction] : []
+            ),
+            snapshotVersion
+          );
+          if (!compactIsCurrent()) return;
           setMessages(initialTranscript(history));
           // 压缩后用量下降，告警随之重估（大概率消失）
-          await refreshContextWarning(current!.id);
+          await refreshContextWarning(compactSessionId);
+          if (!compactIsCurrent()) return;
           pushLocalStatus(
             `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`
           );
         } catch (error) {
+          if (!compactIsCurrent()) return;
           pushLocalStatus(
             `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`
           );
         } finally {
-          setCompacting(false);
+          if (compactIsCurrent()) setCompacting(false);
         }
         return;
       }
@@ -508,6 +632,11 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
 
   /** 输入框提交入口：解析层分发（斜杠命令 / 普通消息 + @引用） */
   function handleSubmit(text: string) {
+    if (
+      loading ||
+      (currentId !== null && workspaceState.pending(currentId).length > 0)
+    )
+      return;
     const submission = resolveComposerSubmission(text);
     if (submission === null) {
       return;
@@ -517,30 +646,6 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       return;
     }
     void send(submission.text, submission.mentionPaths);
-  }
-
-  /** 审批响应（审批卡片三键）：经 IPC 唤醒等待中的工具循环 */
-  async function respondApproval(
-    id: string,
-    decision: "approve" | "reject" | "always"
-  ) {
-    if (currentId === null) {
-      return;
-    }
-    try {
-      const accepted = await window.codexlike.sessions.respondApproval(
-        currentId,
-        id,
-        decision
-      );
-      if (!accepted) {
-        pushLocalStatus("该审批请求已失效（可能已被响应）");
-      }
-    } catch (error) {
-      pushLocalStatus(
-        `审批响应失败：${error instanceof Error ? error.message : String(error)}`
-      );
-    }
   }
 
   /**
@@ -659,7 +764,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <MessageStream
-              items={messages}
+              items={displayMessages}
               compacting={compacting}
               emptyHint={
                 profiles.length === 0 ? (
@@ -672,9 +777,6 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
                   </button>
                 ) : undefined
               }
-              onApprovalRespond={(id, decision) =>
-                void respondApproval(id, decision)
-              }
             />
             {contextWarning !== null && (
               <div
@@ -684,29 +786,75 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
                 {contextWarning}
               </div>
             )}
-            <MessageComposer
-              key={currentId ?? "no-session"}
-              profiles={profiles}
-              selectedProfileId={selectedProfileId}
-              onSelectProfile={setSelectedProfileId}
-              onSend={handleSubmit}
-              workspaceFiles={workspaceFiles}
-              skills={resources?.preview.catalog.skills}
-              onOpenSkills={refreshCurrentResources}
-              disabled={
-                currentId === null ||
-                profiles.length === 0 ||
-                streaming ||
-                compacting
-              }
-              streaming={streaming}
-              onStop={() => void stop()}
-              hint={composerHint}
-              approvalMode={current?.approvalMode ?? null}
-              onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-              thinkingEffort={currentId === null ? null : thinkingEffort}
-              onSelectThinkingEffort={setThinkingEffort}
-            />
+            {interaction ? (
+              <InteractionPanel
+                key={interaction.request.id}
+                record={interaction}
+                count={pending.length}
+                draft={workspaceState.draft(
+                  interaction.request.sessionId,
+                  interaction.request.id
+                )}
+                {...workspaceState.submission(
+                  interaction.request.sessionId,
+                  interaction.request.id
+                )}
+                onChange={(action) =>
+                  workspaceState.edit(
+                    interaction.request.sessionId,
+                    interaction.request.id,
+                    action
+                  )
+                }
+                onRespond={(response) =>
+                  void workspaceState.submit(
+                    interaction.request.sessionId,
+                    interaction.request.id,
+                    response,
+                    (sessionId, requestId, payload) =>
+                      window.codexlike.sessions.respondInteraction(
+                        sessionId,
+                        requestId,
+                        payload
+                      )
+                  )
+                }
+                onStop={() => void stop()}
+              />
+            ) : (
+              <MessageComposer
+                key={currentId ?? "no-session"}
+                draftValue={
+                  currentId === null ? "" : workspaceState.composer(currentId)
+                }
+                onDraftChange={(text) => {
+                  if (currentId !== null)
+                    workspaceState.setComposer(currentId, text);
+                }}
+                profiles={profiles}
+                selectedProfileId={selectedProfileId}
+                onSelectProfile={setSelectedProfileId}
+                onSend={handleSubmit}
+                workspaceFiles={workspaceFiles}
+                skills={resources?.preview.catalog.skills}
+                onOpenSkills={refreshCurrentResources}
+                disabled={
+                  currentId === null ||
+                  profiles.length === 0 ||
+                  streaming ||
+                  compacting ||
+                  loading ||
+                  pending.length > 0
+                }
+                streaming={streaming}
+                onStop={() => void stop()}
+                hint={composerHint}
+                approvalMode={current?.approvalMode ?? null}
+                onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+                thinkingEffort={currentId === null ? null : thinkingEffort}
+                onSelectThinkingEffort={setThinkingEffort}
+              />
+            )}
           </div>
           {resourcesOpen && currentId !== null && (
             <AgentResourcesPanel

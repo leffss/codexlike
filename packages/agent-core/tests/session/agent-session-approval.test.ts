@@ -140,7 +140,7 @@ function makeSession(
   return { session, persistence };
 }
 
-/** 拉取事件流；收到 approval-request 时以给定决定响应（模拟用户点审批卡片三键） */
+/** 拉取事件流；收到 interaction-request 时以给定决定响应（模拟用户点审批卡片三键） */
 async function drive(
   session: ReturnType<typeof makeSession>["session"],
   text: string,
@@ -154,8 +154,8 @@ async function drive(
   while (!head.done) {
     const event = head.value;
     events.push(event);
-    if (event.type === "approval-request") {
-      session.respondApproval(event.request.id, decide);
+    if (event.type === "interaction-request") {
+      session.respondApproval(event.interaction.request.id, decide);
     }
     head = await iterator.next();
   }
@@ -191,17 +191,17 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
 
     // 两个工具调用都弹了审批卡（「始终询问」），批准后真实执行
     const requests = events.filter(
-      (e): e is Extract<SessionEvent, { type: "approval-request" }> =>
-        e.type === "approval-request"
+      (e): e is Extract<SessionEvent, { type: "interaction-request" }> =>
+        e.type === "interaction-request"
     );
     expect(requests).toHaveLength(2);
-    expect(requests[0]?.request).toMatchObject({
-      id: "c1",
+    expect(requests[0]?.interaction.request).toMatchObject({
+      toolCallId: "c1",
       toolName: "write_file",
       commandWord: "write_file",
     });
-    expect(requests[1]?.request).toMatchObject({
-      id: "c2",
+    expect(requests[1]?.interaction.request).toMatchObject({
+      toolCallId: "c2",
       toolName: "run_terminal_command",
       command: "echo ask > cmd.txt",
       commandWord: "echo",
@@ -281,8 +281,8 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
 
     const requests: Extract<
       SessionEvent,
-      { type: "approval-request" }
-    >["request"][] = [];
+      { type: "interaction-request" }
+    >["interaction"]["request"][] = [];
     const statusesAtRequest: string[] = [];
     const events: SessionEvent[] = [];
     const iterator = session
@@ -292,12 +292,14 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     while (!head.done) {
       const event = head.value;
       events.push(event);
-      if (event.type === "approval-request") {
-        requests.push(event.request);
-        // 等待审批期间：会话落库状态为 waiting-approval（侧栏可见），pendingApproval 可查
+      if (event.type === "interaction-request") {
+        requests.push(event.interaction.request);
+        // 等待审批期间：会话落库状态为 waiting-user（侧栏可见），pendingApproval 可查
         statusesAtRequest.push(persistence.listSessions()[0]!.status);
-        expect(session.pendingApproval?.id).toBe(event.request.id);
-        expect(session.respondApproval(event.request.id, "approve")).toBe(true);
+        expect(session.pendingApproval?.id).toBe(event.interaction.request.id);
+        expect(
+          session.respondApproval(event.interaction.request.id, "approve")
+        ).toBe(true);
       }
       head = await iterator.next();
     }
@@ -315,21 +317,21 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     // 审批请求恰好一次（只来自危险命令，文件编辑不弹卡）
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      id: "c2",
+      toolCallId: "c2",
       toolName: "run_terminal_command",
       command: "rm codexlike-nonexistent-target",
       commandWord: "rm",
     });
-    expect(statusesAtRequest).toEqual(["waiting-approval"]);
-    // 事件序列：文件编辑无审批，危险命令 approval-request → approval-resolved 夹在中间
+    expect(statusesAtRequest).toEqual(["waiting-user"]);
+    // 事件序列：文件编辑无审批，危险命令 interaction-request → interaction-resolved 夹在中间
     expect(events.map((e) => e.type)).toEqual([
       "user-message",
       "assistant-start",
       "tool-call",
       "tool-result",
       "tool-call",
-      "approval-request",
-      "approval-resolved",
+      "interaction-request",
+      "interaction-resolved",
       "tool-result",
       "assistant-delta",
       "assistant-done",
@@ -366,7 +368,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       events.push(event);
     }
 
-    expect(events.some((e) => e.type === "approval-request")).toBe(false);
+    expect(events.some((e) => e.type === "interaction-request")).toBe(false);
     expect(readFileSync(join(workspace, "mode.txt"), "utf8")).toBe("assist\n");
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
@@ -433,7 +435,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       events.push(event);
     }
 
-    expect(events.some((e) => e.type === "approval-request")).toBe(false);
+    expect(events.some((e) => e.type === "interaction-request")).toBe(false);
     expect(readFileSync(join(workspace, "mode.txt"), "utf8")).toBe(
       "full-access\n"
     );
@@ -463,7 +465,9 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       approvalMode: "full-access",
     });
     const fullEvents = await drive(fullSession, "写到工作区外", "approve");
-    expect(fullEvents.some((e) => e.type === "approval-request")).toBe(false);
+    expect(fullEvents.some((e) => e.type === "interaction-request")).toBe(
+      false
+    );
     expect(readFileSync(outsideFile, "utf8")).toBe("越界");
 
     // assist：同路径被 resolveInWorkspace 边界拒绝（isError 结果回填，文件不落盘）
@@ -532,7 +536,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     const events = await drive(session, "跑两条 echo", "always");
 
     // always 仅放行本次（「始终询问」）：两条命令各自弹一次审批卡
-    const requests = events.filter((e) => e.type === "approval-request");
+    const requests = events.filter((e) => e.type === "interaction-request");
     expect(requests).toHaveLength(2);
     expect(readFileSync(join(workspace, "first.txt"), "utf8")).toBe("one\n");
     expect(readFileSync(join(workspace, "second.txt"), "utf8")).toBe("two\n");
@@ -625,8 +629,8 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     let head = await iterator.next();
     while (!head.done) {
       events.push(head.value);
-      if (head.value.type === "approval-request") {
-        const request = head.value.request;
+      if (head.value.type === "interaction-request") {
+        const request = head.value.interaction.request;
         // id 不匹配
         expect(session.respondApproval("not-the-id", "approve")).toBe(false);
         // 第一次响应成功，重复响应失败
@@ -667,7 +671,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       .sendMessage({ text: "跑命令", profile, signal: controller.signal })
       [Symbol.asyncIterator]();
     let head = await iterator.next();
-    while (!head.done && head.value.type !== "approval-request") {
+    while (!head.done && head.value.type !== "interaction-request") {
       head = await iterator.next();
     }
     expect(head.done).toBe(false);

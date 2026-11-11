@@ -1,5 +1,5 @@
 import type {
-  ApprovalDecision,
+  InteractionRecord,
   MessageRole,
   SessionEvent,
   StoredMessage,
@@ -47,18 +47,11 @@ export interface UiToolCall {
   running?: boolean;
 }
 
-/** 消息流里一张审批卡片的 UI 状态（工单 04：批准 / 拒绝 / 本会话总是允许） */
-export interface UiApproval {
-  kind: "approval";
-  /** 审批 id（即对应 tool call id） */
+/** 消息流只读交互记录；操作只存在于底部 InteractionPanel。 */
+export interface UiInteraction {
+  kind: "interaction";
   id: string;
-  toolName: string;
-  /** 命令原文 */
-  command: string;
-  /** 命令首词（「本会话总是允许」的记忆键） */
-  commandWord: string;
-  /** null = 等待用户决定；响应后变为对应决定（卡片转结果态） */
-  decision: ApprovalDecision | null;
+  interaction: InteractionRecord;
 }
 
 /**
@@ -89,7 +82,7 @@ export interface UiSubagent {
 }
 
 /** 消息流条目：消息、工具卡片、审批卡片或子代理嵌套卡片 */
-export type UiItem = UiMessage | UiToolCall | UiApproval | UiSubagent;
+export type UiItem = UiMessage | UiToolCall | UiInteraction | UiSubagent;
 
 /** 会话切换 / 应用启动时，把持久化历史映射为消息流初始状态 */
 export function initialMessages(history: StoredMessage[]): UiMessage[] {
@@ -111,18 +104,24 @@ export function initialTranscript(items: TranscriptItem[]): UiItem[] {
           // 重启恢复：被中断的助手消息仍显示中断点标记
           interrupted: item.message.aborted === true || undefined,
         }
-      : item.call.toolName === "spawn_subagent"
-        ? subagentFromToolRecord(item.call)
-        : {
-            kind: "tool-call",
-            id: item.call.id,
-            sessionId: item.call.sessionId,
-            toolName: item.call.toolName,
-            arguments: item.call.arguments,
-            output: item.call.output,
-            isError: item.call.isError,
-            running: false,
+      : item.kind === "interaction"
+        ? {
+            kind: "interaction",
+            id: item.interaction.request.id,
+            interaction: item.interaction,
           }
+        : item.call.toolName === "spawn_subagent"
+          ? subagentFromToolRecord(item.call)
+          : {
+              kind: "tool-call",
+              id: item.call.id,
+              sessionId: item.call.sessionId,
+              toolName: item.call.toolName,
+              arguments: item.call.arguments,
+              output: item.call.output,
+              isError: item.call.isError,
+              running: false,
+            }
   );
 }
 
@@ -155,7 +154,7 @@ function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
 
 /**
  * 流式事件 → 消息流增量更新（纯函数，React state 的归并核心）。
- * 未知 messageId 的 delta/完成事件被忽略：事件流可能在会话切换后迟到。
+ * 调用方按 sessionId 隔离事件；切会话/设置可能错过 start，后续事件负责重建助手消息。
  */
 export function applySessionEvent(
   messages: UiItem[],
@@ -173,6 +172,12 @@ export function applySessionEvent(
       ];
 
     case "assistant-start":
+      if (
+        messages.some(
+          (item) => item.kind === undefined && item.id === event.messageId
+        )
+      )
+        return messages;
       return [
         ...messages,
         {
@@ -184,6 +189,21 @@ export function applySessionEvent(
       ];
 
     case "assistant-delta":
+      if (
+        !messages.some(
+          (item) => item.kind === undefined && item.id === event.messageId
+        )
+      ) {
+        return [
+          ...messages,
+          {
+            id: event.messageId,
+            role: "assistant",
+            content: event.delta,
+            streaming: true,
+          },
+        ];
+      }
       return messages.map((message) =>
         message.kind === undefined && message.id === event.messageId
           ? { ...message, content: message.content + event.delta }
@@ -191,7 +211,23 @@ export function applySessionEvent(
       );
 
     case "assistant-reasoning":
-      // 思考与正文分离累积；未知 messageId（会话切换后迟到）忽略
+      if (
+        !messages.some(
+          (item) => item.kind === undefined && item.id === event.messageId
+        )
+      ) {
+        return [
+          ...messages,
+          {
+            id: event.messageId,
+            role: "assistant",
+            content: "",
+            reasoning: event.delta,
+            streaming: true,
+          },
+        ];
+      }
+      // 思考与正文分离累积。
       return messages.map((message) =>
         message.kind === undefined && message.id === event.messageId
           ? { ...message, reasoning: (message.reasoning ?? "") + event.delta }
@@ -199,6 +235,20 @@ export function applySessionEvent(
       );
 
     case "assistant-done":
+      if (
+        !messages.some(
+          (item) => item.kind === undefined && item.id === event.message.id
+        )
+      ) {
+        return [
+          ...messages,
+          {
+            id: event.message.id,
+            role: "assistant",
+            content: event.message.content,
+          },
+        ];
+      }
       return messages.map((message) =>
         message.kind === undefined && message.id === event.message.id
           ? { ...message, content: event.message.content, streaming: undefined }
@@ -206,6 +256,21 @@ export function applySessionEvent(
       );
 
     case "assistant-aborted":
+      if (
+        !messages.some(
+          (item) => item.kind === undefined && item.id === event.message.id
+        )
+      ) {
+        return [
+          ...messages,
+          {
+            id: event.message.id,
+            role: "assistant",
+            content: event.message.content,
+            interrupted: true,
+          },
+        ];
+      }
       return messages.map((message) =>
         message.kind === undefined && message.id === event.message.id
           ? {
@@ -347,25 +412,14 @@ export function applySessionEvent(
           : item
       );
 
-    case "approval-request":
-      return [
-        ...messages,
-        {
-          kind: "approval",
-          id: event.request.id,
-          toolName: event.request.toolName,
-          command: event.request.command,
-          commandWord: event.request.commandWord,
-          decision: null,
-        },
-      ];
+    case "interaction-request":
+    case "interaction-resolved":
+      return mergeInteractions(messages, [event.interaction]);
 
+    // 旧事件只作兼容，不再创建第二套可操作审批卡片。
+    case "approval-request":
     case "approval-resolved":
-      return messages.map((item) =>
-        item.kind === "approval" && item.id === event.requestId
-          ? { ...item, decision: event.decision }
-          : item
-      );
+      return messages;
 
     case "error":
       return [
@@ -382,6 +436,63 @@ export function applySessionEvent(
         },
       ];
   }
+}
+
+/** 加载期间缓冲事件：快照已有的消息/工具不再重复回放。 */
+export function hydrateTranscript(
+  history: TranscriptItem[],
+  events: SessionEvent[]
+): UiItem[] {
+  const messageIds = new Set(
+    history.flatMap((item) =>
+      item.kind === "message" ? [item.message.id] : []
+    )
+  );
+  const toolIds = new Set(
+    history.flatMap((item) => (item.kind === "tool-call" ? [item.call.id] : []))
+  );
+  let items = initialTranscript(history);
+  for (const event of events) {
+    if ("messageId" in event && messageIds.has(event.messageId)) continue;
+    if ("message" in event && messageIds.has(event.message.id)) continue;
+    if (
+      (event.type === "tool-call" || event.type === "tool-result") &&
+      toolIds.has(event.call.id)
+    )
+      continue;
+    items = applySessionEvent(items, event);
+  }
+  return items;
+}
+
+/** 同一记录在实时事件、历史与 pending 快照之间幂等合并，终态不可回退。 */
+export function mergeInteractions(
+  items: UiItem[],
+  records: InteractionRecord[]
+): UiItem[] {
+  let next = items;
+  for (const interaction of records) {
+    const index = next.findIndex(
+      (item) =>
+        item.kind === "interaction" && item.id === interaction.request.id
+    );
+    const previous = next[index];
+    if (
+      previous?.kind === "interaction" &&
+      previous.interaction.status !== "pending"
+    )
+      continue;
+    const item: UiInteraction = {
+      kind: "interaction",
+      id: interaction.request.id,
+      interaction,
+    };
+    next =
+      index === -1
+        ? [...next, item]
+        : next.map((existing, i) => (i === index ? item : existing));
+  }
+  return next;
 }
 
 /** 子代理开跑时间的记录基准（嵌套卡片「已用时」的计算起点） */

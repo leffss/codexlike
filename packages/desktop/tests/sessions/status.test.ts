@@ -132,6 +132,46 @@ describe("buildSessionStatus（/status 数据组装）", () => {
     expect(status.lastResources?.estimatedTokens).toBe(900);
   });
 
+  it("已提交问答计入上下文用量，但不增加用户消息轮次", () => {
+    const input = {
+      record: record(),
+      messages,
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    };
+    const before = buildSessionStatus(input);
+    const after = buildSessionStatus({
+      ...input,
+      messages: messages.map((message) =>
+        message.role !== "user"
+          ? message
+          : {
+              ...message,
+              questionAnswers: [
+                {
+                  interactionId: "interaction-1",
+                  source: { kind: "main" },
+                  answers: [
+                    {
+                      questionId: "platform",
+                      question: "你希望优先支持哪个桌面平台？",
+                      status: "answered",
+                      selectedOptions: ["Windows"],
+                      text: "需要兼容中文输入法并保持键盘操作可用。",
+                    },
+                  ],
+                },
+              ],
+            }
+      ),
+    });
+    expect(after.estimatedContextTokens).toBeGreaterThan(
+      before.estimatedContextTokens
+    );
+    expect(after.messageCount).toBe(2);
+  });
+
   it("审批模式随会话记录透传（ask / full-access）", () => {
     for (const mode of ["ask", "full-access"] as const) {
       const status = buildSessionStatus({
@@ -229,8 +269,9 @@ describe("buildSessionStatus 已压缩标记（工单 08）", () => {
       },
     });
 
-    // 压缩后用量：摘要（4 CJK → 3）+ '继续'（2 CJK → 2）= 5；摘要按上下文消息计入
-    expect(status.estimatedContextTokens).toBe(5);
+    // 与实际上下文一致：摘要含 23 个 CJK 字符、38 个其它字符（标签及换行），
+    // ceil(23 / 1.5 + 38 / 4) = 25；加上“继续”的 2 tokens，共 27。
+    expect(status.estimatedContextTokens).toBe(27);
     expect(status.messageCount).toBe(2);
     expect(status.compacted).toEqual({
       at: "2026-11-11T09:00:00.000Z",

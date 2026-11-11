@@ -454,12 +454,10 @@ void app.whenReady().then(async () => {
     worktreesDir: join(dataDir(), "worktrees"),
   });
 
-  // 上次退出若在流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；
-  // 进程刚启动不可能有真实运行中的流，统一重置（manager.get 的恢复路径会落库 idle）
+  // manager 初始化已取消全部遗留交互；非空闲会话再恢复为 idle，不恢复工具执行。
+  // 同时兼容旧库的 waiting-approval 状态。
   for (const record of manager.list()) {
-    if (record.status === "streaming" || record.status === "waiting-approval") {
-      manager.get(record.id);
-    }
+    if (record.status !== "idle") manager.get(record.id);
   }
 
   // 启动时跑一次 LRU 清理：一切非运行中会话的托管 Worktree 按最近使用保留 15 个、
@@ -522,6 +520,7 @@ void app.whenReady().then(async () => {
   // 断开 MCP 子进程与浏览器收尾（尽力而为，不阻塞退出流程：
   // preventDefault + 二次 quit 在 Electron 45 上会让进程挂起不退）
   app.on("will-quit", () => {
+    manager.cancelInteractions("应用已退出");
     persistence.close();
     void mcpService.shutdown();
     void browserManager.close().catch(() => {});

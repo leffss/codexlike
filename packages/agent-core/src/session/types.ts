@@ -9,12 +9,17 @@ import type {
   ApprovalRequest,
 } from "./approval";
 import type { ToolCallRecord } from "../tools/types";
+import type {
+  InteractionRecord,
+  QuestionAnswerSnapshot,
+} from "../interaction/types";
 
 /**
  * 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
  * `waiting-approval` 工具执行暂停、等待用户审批（spec 用户故事 10，侧栏可见）
  */
-export type SessionStatus = "idle" | "streaming" | "waiting-approval";
+export type SessionStatus =
+  "idle" | "streaming" | "waiting-user" | "waiting-approval";
 
 /**
  * 审批模式（GLOSSARY「审批模式」）三档：`readonly` 只读 / `suggest` 协作 / `full` 自主。
@@ -88,6 +93,8 @@ export interface StoredMessage {
    * 非 user 消息与无引用的 user 消息为 undefined。
    */
   mentions?: MentionAttachment[];
+  /** 本轮已提交问答；子代理答案同样归属触发它的用户消息。 */
+  questionAnswers?: QuestionAnswerSnapshot[];
   /** 助手回复被用户中断：content 为已生成的部分文本（UI 中断点标记恢复用） */
   aborted?: boolean;
   /** ISO 8601 */
@@ -97,7 +104,8 @@ export interface StoredMessage {
 /** 会话时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
 export type TranscriptItem =
   | { kind: "message"; message: StoredMessage }
-  | { kind: "tool-call"; call: ToolCallRecord };
+  | { kind: "tool-call"; call: ToolCallRecord }
+  | { kind: "interaction"; interaction: InteractionRecord };
 
 /**
  * @文件引用（GLOSSARY「@ Mention」）：随消息附加的工作区文件。
@@ -137,6 +145,8 @@ export interface CompactResult {
  * `user-message → assistant-start → assistant-delta* → assistant-done`
  */
 export type SessionEvent =
+  | { type: "interaction-request"; interaction: InteractionRecord }
+  | { type: "interaction-resolved"; interaction: InteractionRecord }
   | { type: "user-message"; message: StoredMessage }
   | { type: "assistant-start"; messageId: string }
   | { type: "assistant-delta"; messageId: string; delta: string }

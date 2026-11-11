@@ -4,7 +4,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import type { UiItem } from "../lib/session-view";
-import { ApprovalCard } from "./ApprovalCard";
+import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
 
@@ -14,9 +14,6 @@ export function MessageStream(props: {
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
-  /** 审批响应（三键）：传 null 时等待中的审批卡片只读展示 */
-  onApprovalRespond?:
-    ((id: string, decision: "approve" | "reject" | "always") => void) | null;
 }) {
   return (
     <div
@@ -33,11 +30,10 @@ export function MessageStream(props: {
           {props.items.map((item) =>
             item.kind === "tool-call" ? (
               <ToolCallCard key={`tool-${item.id}`} call={item} />
-            ) : item.kind === "approval" ? (
-              <ApprovalCard
-                key={`approval-${item.id}`}
-                approval={item}
-                onRespond={props.onApprovalRespond ?? (() => {})}
+            ) : item.kind === "interaction" ? (
+              <InteractionHistory
+                key={`interaction-${item.id}`}
+                record={item.interaction}
               />
             ) : item.kind === "subagent" ? (
               <SubagentCard key={`subagent-${item.id}`} subagent={item} />
@@ -63,7 +59,7 @@ export function MessageStream(props: {
 function MessageBubble(props: {
   message: Exclude<
     UiItem,
-    { kind: "tool-call" } | { kind: "approval" } | { kind: "subagent" }
+    { kind: "tool-call" } | { kind: "interaction" } | { kind: "subagent" }
   >;
 }) {
   const { message } = props;

@@ -185,7 +185,7 @@ async function collect(
   return events;
 }
 
-/** 拉取事件流；approval-request 到达时自动响应（模拟审批卡片三键） */
+/** 拉取事件流；interaction-request 到达时自动响应（模拟审批卡片三键） */
 async function drive(
   session: ReturnType<typeof makeSession>["session"],
   text: string,
@@ -199,8 +199,8 @@ async function drive(
   while (!head.done) {
     const event = head.value;
     events.push(event);
-    if (event.type === "approval-request") {
-      session.respondApproval(event.request.id, decide);
+    if (event.type === "interaction-request") {
+      session.respondApproval(event.interaction.request.id, decide);
     }
     head = await iterator.next();
   }
@@ -246,8 +246,12 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     const events = await drive(session, "先加载技能再调用 MCP", "approve");
     expect(
       events
-        .filter((event) => event.type === "approval-request")
-        .map((event) => event.request.toolName)
+        .filter((event) => event.type === "interaction-request")
+        .map((event) =>
+          event.interaction.request.kind === "approval"
+            ? event.interaction.request.toolName
+            : ""
+        )
     ).toEqual(["mcp_fake_echo"]);
     expect(
       events.find(
@@ -295,13 +299,15 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     const events = await drive(session, "调用 MCP echo", "approve");
 
     const request = events.find(
-      (e): e is Extract<SessionEvent, { type: "approval-request" }> =>
-        e.type === "approval-request"
+      (e): e is Extract<SessionEvent, { type: "interaction-request" }> =>
+        e.type === "interaction-request"
     );
     // MCP 工具参数无 command 字段 → 审批卡以工具名呈现（04 预留的回退语义）
-    expect(request?.request.toolName).toBe("mcp_fake_echo");
-    expect(request?.request.command).toBe("mcp_fake_echo");
-    expect(request?.request.commandWord).toBe("mcp_fake_echo");
+    if (request?.interaction.request.kind !== "approval")
+      throw new Error("预期审批请求");
+    expect(request?.interaction.request.toolName).toBe("mcp_fake_echo");
+    expect(request?.interaction.request.command).toBe("mcp_fake_echo");
+    expect(request?.interaction.request.commandWord).toBe("mcp_fake_echo");
 
     const result = events.find(
       (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
@@ -357,7 +363,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     const events = await collect(
       session.sendMessage({ text: "连续两次 echo", profile })
     );
-    const requests = events.filter((e) => e.type === "approval-request");
+    const requests = events.filter((e) => e.type === "interaction-request");
     const results = events.filter((e) => e.type === "tool-result");
 
     // 非危险命令自动放行：两次都不弹卡、都真实执行
@@ -401,7 +407,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     );
 
     const events = await drive(session, "连续两次 echo", "always");
-    const requests = events.filter((e) => e.type === "approval-request");
+    const requests = events.filter((e) => e.type === "interaction-request");
     const results = events.filter((e) => e.type === "tool-result");
 
     // 「请求批准」始终询问：两次都弹卡；always 只放行本次，不写记忆
@@ -439,7 +445,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     );
     expect(result?.call.isError).toBe(true);
     expect(result?.call.output).toContain("拒绝");
-    expect(events.some((e) => e.type === "approval-request")).toBe(true);
+    expect(events.some((e) => e.type === "interaction-request")).toBe(true);
   });
 
   it("server 崩溃：错误作为工具结果返回模型，会话存活继续到最终回复", async () => {

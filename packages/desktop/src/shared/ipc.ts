@@ -2,6 +2,8 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   ApprovalRequest,
+  InteractionRecord,
+  InteractionResponse,
   ProviderProfile,
   ProviderProfileInput,
   SessionEvent,
@@ -75,12 +77,16 @@ export const IPC = {
     toolImage: "sessions:tool-image",
     /** 审批模式切换（三档）：落库并对下一次工具调用立即生效 */
     setApprovalMode: "sessions:set-approval-mode",
-    /** 审批响应（审批卡片三键）：唤醒等待中的工具循环 */
+    /** 旧审批响应兼容入口，转发统一交互；always 仅批准本次。 */
     respondApproval: "sessions:respond-approval",
     /** 当前等待审批的请求（切回会话时恢复审批卡片）；无等待返回 null */
     pendingApproval: "sessions:pending-approval",
     /** 全部等待审批的请求（工单 13：主会话与子代理可能并行等待）；按到达顺序 */
     pendingApprovals: "sessions:pending-approvals",
+    /** 当前会话全部待处理交互（审批和问答），按创建顺序返回。 */
+    pendingInteractions: "sessions:pending-interactions",
+    /** 响应一个待处理交互；类型与内容由 Core 对照请求校验。 */
+    respondInteraction: "sessions:respond-interaction",
   },
   /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
   searchSettings: {
@@ -209,14 +215,14 @@ export interface CodexLikeApi {
      * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
      */
     toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
-    /** 切换审批模式（readonly / suggest / full），对下一次工具调用立即生效；会话不存在返回 null */
+    /** 切换审批模式（ask / assist / full-access），对下一次工具调用立即生效；会话不存在返回 null */
     setApprovalMode(
       sessionId: string,
       mode: ApprovalMode
     ): Promise<SessionRecord | null>;
     /**
-     * 响应等待中的审批（批准 / 拒绝 / 本会话总是允许）；
-     * 没有等待中的请求或 id 不匹配时返回 false。
+     * 兼容旧审批响应（always 与 approve 同义，仅批准本次）；
+     * 转发统一交互，没有等待中的请求或 id 不匹配时返回 false。
      */
     respondApproval(
       sessionId: string,
@@ -227,6 +233,14 @@ export interface CodexLikeApi {
     pendingApproval(sessionId: string): Promise<ApprovalRequest | null>;
     /** 全部等待审批的请求（含子代理并行等待，工单 13）；无等待返回空数组 */
     pendingApprovals(sessionId: string): Promise<ApprovalRequest[]>;
+    /** 全部待处理交互；切回会话时与实时事件合并，已结束请求不重新激活。 */
+    pendingInteractions(sessionId: string): Promise<InteractionRecord[]>;
+    /** false 表示请求已结束或不存在；校验失败抛错且不消耗请求。 */
+    respondInteraction(
+      sessionId: string,
+      requestId: string,
+      response: InteractionResponse
+    ): Promise<boolean>;
   };
   searchSettings: {
     /** 当前搜索源设置（apiKey 已解密，仅存在于渲染进程内存；'' 表示未配置） */

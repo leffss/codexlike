@@ -188,7 +188,7 @@ async function main() {
       .filter({ hasText: "sumTo(5) = 15" })
       .waitFor({ timeout: 20_000 });
     assert(
-      (await window.getByTestId("approval-card").count()) === 0,
+      (await window.getByTestId("interaction-panel").count()) === 0,
       "普通命令不应弹审批卡"
     );
     console.log(

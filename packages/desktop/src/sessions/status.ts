@@ -1,4 +1,5 @@
 import {
+  composeStoredMessageContent,
   estimateTokens,
   type AgentsMdDiscovery,
   type ApprovalMode,
@@ -74,7 +75,8 @@ export function buildSessionStatus(input: {
   const estimated =
     (resources?.estimatedTokens ?? estimateTokens(agentsMd.combined)) +
     contextMessages.reduce(
-      (sum, message) => sum + estimateTokens(message.content),
+      (sum, message) =>
+        sum + estimateTokens(composeStoredMessageContent(message)),
       0
     );
 

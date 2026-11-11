@@ -16,12 +16,24 @@ _Avoid_: repo、folder
 同一工作区目录上所有会话（含在该目录上检出的托管 Worktree 会话）的聚合分组，由会话的工作区自动派生，随首个会话的创建而诞生，用户不手动创建或归类。
 _Avoid_: 文件夹、分组、folder
 
+**用户交互（User Interaction）**:
+agent 在会话中向用户发起、等待用户回应后才能继续的请求，包括执行审批和对话内交互问答。
+_Avoid_: 交互模式、审批（泛指所有用户交互时）
+
+**执行审批（Execution Approval）**:
+用户对某次待执行操作给予或拒绝授权的用户交互；与提供任务信息的问答不同，审批回答决定该操作是否允许执行。
+_Avoid_: 问答、确认问题
+
+**对话内交互问答（Interactive Questions）**:
+agent 在会话中发起的一组问题，用户通过单选、多选或自定义回答提供信息，供 agent 继续处理当前任务。
+_Avoid_: 问卷模式、交互模式、执行审批
+
 **审批模式（Approval Mode）**:
 会话级权限档位，可随时切换（ADR 0004）：`ask`（请求批准——编辑文件、执行命令与联网搜索前一律先询问）、`assist`（帮我批准——文件编辑与联网自动放行，仅危险命令（rm、强推等，见 `isRiskyCommand`）询问）、`full-access`（完全访问——全自动执行且不受限读写本地任意文件，工作区边界失效，切换前 UI 弹风险确认）。
 _Avoid_: 权限级别、mode、沙箱模式、readonly/suggest/full（旧三档名）
 
 **Agent Core**:
-纯 TypeScript 的 agent 运行时模块（对话循环、工具执行、审批状态机），不依赖 Electron；Electron 主进程只是它的宿主。
+纯 TypeScript 的 agent 运行时模块（对话循环、工具执行、用户交互），不依赖 Electron；Electron 主进程只是它的宿主。
 _Avoid_: 后端、server
 
 **工具注册表（Tool Registry）**:

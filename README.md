@@ -6,9 +6,10 @@
 
 - **任意 OpenAI 兼容端点**：多份 Provider Profile（`baseURL` / `apiKey` / `model`，GLM、DeepSeek、OpenAI、Ollama……），API key 经系统加密（Windows DPAPI）落盘，会话中随时切换。
 - **会话与工具**：会话绑定工作区目录；agent 自主使用 `read_file` / `write_file` / `apply_patch` / `glob` / `grep` / `run_terminal_command`；工具调用以可展开卡片呈现；随时打断。
-- **三档审批模式**：`readonly`（只读，写入与命令真实拦截）/ `suggest`（协作，文件编辑自动应用、终端命令逐条审批：批准 / 拒绝 / 本会话总是允许）/ `full`（自主）。文件操作限制在工作区内。
+- **三档审批模式**：`ask`（请求批准，写入、联网和命令执行前询问）/ `assist`（帮我批准，仅危险命令询问）/ `full-access`（完全访问，自动执行并允许访问工作区外文件）。审批在底部交互区选择“批准本次 / 拒绝”，不记忆授权。
+- **对话内交互问答**：agent 调用 `ask_user_question` 展示单选、多选或自定义回答，支持多题回看、单题忽略与整组提交；主代理和子代理请求与审批共用底部交互区，按会话排队并标明来源。
 - **git 集成**：改动面板 `git status` + Monaco 双栏 diff；一键创建 `codexlike/<会话名>` 分支、模型生成（可编辑）提交消息并 commit。
-- **会话持久化**：SQLite 落库，重启后消息、工具卡片、审批记忆完整恢复，继续对话。
+- **会话持久化**：SQLite 保存消息、工具卡片和交互历史；已提交问答进入后续对话上下文与压缩摘要。切换会话保留等待和输入草稿；停止或退出取消未完成交互，重启只恢复历史、不恢复执行。
 - **上下文管理**：全局与项目 `AGENTS.md` 每条消息自动刷新；全局/项目技能按需加载，输入框 `$` 显式选择技能、`@` 引用工作区文件；“规范与技能”查看来源和生效状态，`/compact` 压缩历史、`/status` 查看用量。
 - **托管 Worktree**：会话可选 worktree 模式在隔离副本上运行，同仓库多会话并行改动互不冲突（`.worktreeinclude` 声明需复制的被 ignore 文件，LRU 自动清理）。
 - **扩展能力**：`web_search`（默认 Tavily）+ Playwright headless Chromium 浏览器工具组；stdio MCP server 逐工具启停；`spawn_subagent` 委派调研（嵌套卡片进度）。
@@ -40,13 +41,24 @@
 4. （可选）设置页 **MCP** 区添加 stdio MCP server（命令 + 参数 + 环境变量），逐工具启停。
 5. 返回工作台 → **+ 新建会话** → 选择工作区目录 →（可选 worktree 模式）→ 开始对话。
 
+## 对话内交互问答与审批
+
+无需开启额外模式。agent 需要明确你的偏好或缺失信息时，可以通过 `ask_user_question` 在底部展示问题卡片；你也可以直接说“先问我几个问题”。
+
+- 每题可选预设选项或填写自定义答案，多选题可同时补充文字。
+- “继续”进入下一题，前后切换不会丢失答案；“忽略”只跳过当前题。所有题已回答或明确跳过后，点击“提交”一次性发送。
+- 待审批操作也在同一区域展示，点击“批准本次”或“拒绝”。问答不会赋予工具额外权限，完全访问模式也不会替你回答。
+- 同一会话的主代理与子代理请求按创建顺序排队，卡片标明来源。提交只恢复对应请求。
+- 切换会话、进入设置再返回时保留草稿；等待期间不能另发普通消息，但可随时停止任务。
+- 停止或关闭应用会取消未完成交互，未提交草稿不跨应用重启保存；已提交答案和交互历史仍可查看，后续对话可以继续使用答案。
+
 ## 数据目录
 
 应用数据默认位于 `~/.codexlike/`（即 `C:\Users\<你>\.codexlike\`），可由 `CODEXLIKE_HOME` 覆盖；兼容技能还可以来自 `~/.agents/skills/`：
 
 ```
 ~/.codexlike/
-├── codexlike.db            # 会话、消息、工具调用、审批记忆、compact 记录（SQLite）
+├── codexlike.db            # 会话、消息、工具调用、用户交互、compact 记录（SQLite）
 ├── provider-profiles.json  # Provider Profiles（apiKey 加密存储）
 ├── search-settings.json    # 搜索源设置（key 加密存储）
 ├── mcp-servers.json        # MCP server 配置（env 值加密存储）
@@ -103,11 +115,11 @@ description: 审查当前代码改动，检查行为回归与缺失的测试
 
 pnpm monorepo，三个包：
 
-| 包                    | 说明                                                                              |
-| --------------------- | --------------------------------------------------------------------------------- |
-| `packages/agent-core` | Agent Core：对话循环、工具注册表、审批状态机（纯 TS，零 Electron 依赖，ADR-0002） |
-| `packages/desktop`    | Electron 主进程、类型化 IPC 桥、本地配置存储                                      |
-| `packages/ui`         | React + Vite + Tailwind 渲染进程（全中文界面）                                    |
+| 包                    | 说明                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `packages/agent-core` | Agent Core：对话循环、工具注册表、统一用户交互（纯 TS，零 Electron 依赖，ADR-0002） |
+| `packages/desktop`    | Electron 主进程、类型化 IPC 桥、本地配置存储                                        |
+| `packages/ui`         | React + Vite + Tailwind 渲染进程（全中文界面）                                      |
 
 ```bash
 pnpm install          # 安装依赖（electron 二进制国内可加 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/）
@@ -116,6 +128,7 @@ pnpm typecheck        # 三包 tsc --noEmit
 pnpm test             # 三包 vitest 单测
 pnpm test:e2e         # Electron 基础冒烟（先全仓 build）
 pnpm test:e2e:skills  # 规范与按需技能专项（隔离目录 + 本地 mock 模型）
+pnpm test:e2e:interactions # 审批与问答专项（多题、草稿、子代理、停止与重启）
 pnpm test:e2e:all     # 全套 Electron E2E（详见 packages/desktop/e2e/）
 pnpm build            # 三包构建
 pnpm dist             # 打包发行：NSIS 安装包 + 便携 zip（见下）
