@@ -13,7 +13,10 @@ export type {
 } from "./provider/provider-profile";
 export { validateProviderProfile } from "./provider/provider-profile";
 
-export type { CreateLanguageModelOptions } from "./provider/language-model";
+export type {
+  CreateLanguageModelOptions,
+  ThinkingEffort,
+} from "./provider/language-model";
 export { createLanguageModelFromProfile } from "./provider/language-model";
 
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除

@@ -24,3 +24,16 @@
 ## Testing notes
 
 复用现有 provider 请求 spy、受控 SSE 与 desktop mock provider，验证网络边界和用户可见行为。此票只将档位映射能力在接入边界验证完成；由 02 负责把用户选择真正接入主会话。真实服务端支持范围不由 mock 测试担保。
+
+## Comments
+
+### 2026-11-11 · 票 01 实施验收证据
+
+- 统一工厂 `createLanguageModelFromProfile` 迁移至 `@ai-sdk/openai-compatible@3.0.87`（精确 pin；`^3.0.90` 触发 pnpm minimumReleaseAge 供应链策略，3.0.87 复用既有 `@ai-sdk/provider-utils@5.0.76`，无需 workspace 排除条目），`chatModel` 走 chat completions；baseURL、`Authorization: Bearer`、模型标识、可注入 fetch 由既有测试 + 新增断言回归。
+- 五档实际 HTTP body（fetch spy 断言序列化 JSON，非内部对象）：`auto` 无 `thinking`/`reasoning_effort`；低/中/高 = `thinking.type=enabled` + snake_case `reasoning_effort`；关 = 仅 `thinking.type=disabled`。
+- 受控 reasoning SSE：`reasoning_content` → 独立 reasoning-delta 流（与 text-delta、分片工具参数并存）；reasoning-only 流可随 AbortSignal 中断；400 拒绝原样抛出不降档不重试。
+- `response.messages` 回传风险已查证并阻断：compatible 会把 assistant reasoning part 序列化回 `reasoning_content`，工厂在 `transformParams` 边界剥离，工具往返 body 不含思考、正文与 tool-call 配对不变；未启用 Preserved Thinking。
+- compact 与 commit 草稿走同一工厂默认不附加控制字段（真实 HTTP body 断言）。
+- TDD 红→绿记录：旧 provider 丢 `reasoning_content`（红）→ 迁移（绿）；五档 body（红）→ providerOptions 透传（绿）；回传含 `reasoning_content`（红）→ 边界剥离（绿）；未知档位（红）→ 枚举拒绝（绿）。
+- 验证退出码：`pnpm test`=0（agent-core 322 / desktop 66 / ui 58），`pnpm typecheck`=0，`pnpm test:e2e:all`=0（12 场景全绿，含文本、工具、审批、中断、compact、worktree、MCP、子代理、项目侧栏），`pnpm check:adr`=0。
+- 兼容限制：真实远端对各档位的支持不由 mock 担保；GLM `thinking` 协议要求思考回传的场景未启用（本仓库明确剥离），若服务端强制要求将按 spec 报告为兼容性限制。

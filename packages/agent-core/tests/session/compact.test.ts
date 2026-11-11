@@ -4,6 +4,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
+import { createLanguageModelFromProfile } from "../../src/index";
 import { createSqliteSessionStore } from "../../src/session/persistence";
 import { createAgentSession } from "../../src/session/agent-session";
 import type { SessionEvent, SessionRecord } from "../../src/session/types";
@@ -154,6 +155,45 @@ async function talkRounds(
 }
 
 describe("AgentSession.compact（手动压缩）", () => {
+  it("兼容工厂的 compact HTTP 请求不附加思考控制字段", async () => {
+    const persistence = memoryStore();
+    persistence.insertSession(sessionRecord());
+    let body: Record<string, unknown> = {};
+    const session = createAgentSession({
+      record: sessionRecord(),
+      persistence,
+      history: Array.from({ length: 8 }, (_, index) => ({
+        id: `history-${index}`,
+        sessionId: "session-1",
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        content: `历史 ${index}`,
+        createdAt: `2026-11-11T08:00:0${index}.000Z`,
+      })),
+      languageModelFor: (selected) =>
+        createLanguageModelFromProfile(selected, {
+          fetch: async (_input, init) => {
+            body = JSON.parse(String(init?.body));
+            return new Response(
+              JSON.stringify({
+                choices: [
+                  {
+                    message: { role: "assistant", content: "旧历史摘要" },
+                    finish_reason: "stop",
+                  },
+                ],
+              }),
+              { headers: { "content-type": "application/json" } }
+            );
+          },
+        }),
+    });
+    await session.compact({ profile });
+    expect(body.model).toBe(profile.model);
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("tools");
+  });
+
   it("压缩成功：摘要替换旧历史，仅保留最近 3 轮原始对话，compact 记录入库", async () => {
     const persistence = memoryStore();
     persistence.insertSession(sessionRecord());

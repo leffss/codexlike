@@ -10,4 +10,5 @@
 ## Consequences
 
 - 全局 provider 库更换影响所有请求路径，落地时须全量回归（单测 + E2E）。
-- openai-compatible 下 `reasoningEffort` 到 body 的映射形态（camelCase 透传 vs 映射为 `reasoning_effort`）以实现时实际请求抓包为准。
+- ~~openai-compatible 下 `reasoningEffort` 到 body 的映射形态（camelCase 透传 vs 映射为 `reasoning_effort`）以实现时实际请求抓包为准。~~ 实施查证（票 01，`@ai-sdk/openai-compatible@3.0.87`）：SDK 的 `reasoningEffort` 映射为 body 的 snake_case `reasoning_effort`，非 camelCase 透传；本实现不经该顶层选项，而是由统一工厂在自有 providerOptions 命名空间下同时透传 `thinking` 与 snake_case `reasoning_effort`，最终 body 与 spec 契约一致。
+- 实施查证补充：compatible 的消息转换会把 assistant 消息中的 reasoning part 序列化回 `reasoning_content`（即 `response.messages` 回填工具轮次时思考会自动进入请求历史）。工厂已在 SDK `transformParams` 边界统一剥离 assistant reasoning part，正文与 tool-call 配对原样往返，思考保持仅运行期展示。

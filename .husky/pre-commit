@@ -1,3 +1,10 @@
+# worktree 会话中 git 会给 hook 注入 GIT_DIR / GIT_INDEX_FILE 等指向
+# gitdir 的绝对路径，hook 内测试与工具的子 git 调用（git init、commitAll）
+# 会被重定向到主仓库——2026-11-11 票 01 提交时曾竞态把主仓库 core.bare
+# 写成 true 并把测试提交落到本 worktree 分支。unset 后各命令从 cwd
+# 正常发现本 worktree 仓库。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
 pnpm check:adr
 pnpm lint-staged
 pnpm typecheck
