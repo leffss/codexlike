@@ -8,7 +8,7 @@
     "dev": "pnpm --filter @codexlike/agent-core run build && concurrently -n agent-core,ui,desktop -c yellow,cyan,green \"pnpm --filter @codexlike/agent-core run build:watch\" \"pnpm --filter @codexlike/ui run dev\" \"pnpm --filter @codexlike/desktop run dev\"",
     "build": "pnpm -r run build",
     "dist": "pnpm build && pnpm --filter @codexlike/desktop run dist",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm --filter @codexlike/agent-core run build && pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:e2e": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e",
     "test:e2e:acceptance": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:acceptance",
@@ -16,9 +16,13 @@
     "test:e2e:compact": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:compact",
     "test:e2e:changes": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:changes",
     "test:e2e:interrupt": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interrupt",
-    "test:e2e:worktree": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worktree"
+    "test:e2e:worktree": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worktree",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "concurrently": "^10.0.7"
+    "concurrently": "^10.0.7",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10"
   }
 }
