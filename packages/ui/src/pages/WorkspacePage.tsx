@@ -530,11 +530,32 @@ export function WorkspacePage(props: {
     }
   }
 
+  /** 重命名按钮及命令共享记录刷新，已展开搜索不得保留旧标题。 */
+  async function renameSession(id: string, title: string, announce = false) {
+    const generation = sessionRequestRef.current;
+    try {
+      await window.codexlike.sessions.rename(id, title);
+      setRecordsRevision((value) => value + 1);
+      await refreshSessions();
+      if (
+        announce &&
+        currentIdRef.current === id &&
+        sessionRequestRef.current === generation
+      )
+        pushLocalStatus(`会话已重命名为「${title}」`);
+    } catch (error) {
+      pushLocalStatus(
+        `重命名失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   /** 侧栏、主区及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
   async function archiveSession(id: string, archived: boolean) {
     const generation = sessionRequestRef.current;
     try {
       await window.codexlike.sessions.archive(id, archived);
+      setRecordsRevision((value) => value + 1);
       const list = await refreshSessions();
       if (
         currentIdRef.current !== id ||
@@ -611,8 +632,8 @@ export function WorkspacePage(props: {
         pushLocalStatus("该命令需要先选择一个会话");
         return;
       case "new-session": {
-        // /new：同工作区新会话（不走目录选择器与模式对话框，本目录直跑）
-        startCreateSession(current?.projectId ?? null);
+        // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
+        void startCreateSession(current?.projectId ?? draft?.projectId ?? null);
         return;
       }
       case "compact": {
@@ -669,15 +690,7 @@ export function WorkspacePage(props: {
         return;
       }
       case "rename": {
-        try {
-          await window.codexlike.sessions.rename(current!.id, action.title);
-          await refreshSessions();
-          pushLocalStatus(`会话已重命名为「${action.title}」`);
-        } catch (error) {
-          pushLocalStatus(
-            `重命名失败：${error instanceof Error ? error.message : String(error)}`
-          );
-        }
+        await renameSession(current!.id, action.title, true);
         return;
       }
       case "rename-missing-argument":
@@ -854,16 +867,7 @@ export function WorkspacePage(props: {
         onSelect={(id) => void openSession(id, true)}
         onCreate={() => void startCreateSession()}
         creating={creating}
-        onRename={(id, title) => {
-          void window.codexlike.sessions
-            .rename(id, title)
-            .then(() => refreshSessions())
-            .catch((error: unknown) =>
-              pushLocalStatus(
-                `重命名失败：${error instanceof Error ? error.message : String(error)}`
-              )
-            );
-        }}
+        onRename={(id, title) => void renameSession(id, title)}
         onArchive={(id, archived) => void archiveSession(id, archived)}
         onPin={(id, pinned) => {
           void window.codexlike.sessions
@@ -897,6 +901,16 @@ export function WorkspacePage(props: {
             recordsRevision={recordsRevision}
             onSelect={(id) => void openSession(id, true)}
           />
+          {current && (
+            <button
+              type="button"
+              data-testid="session-new"
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
+              onClick={() => void startCreateSession(current.projectId)}
+            >
+              {current.projectId === null ? "新建独立会话" : "在此项目新建"}
+            </button>
+          )}
           {current && (
             <button
               type="button"

@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 /** 五档 → 期望 body 字段（spec 接入契约表） */
 const EFFORT_BODIES = [
@@ -74,12 +80,7 @@ async function main() {
       .click();
     await window.getByText("Mock").first().waitFor();
     await window.getByRole("button", { name: "返回工作台" }).click();
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 10_000 });
+    await prepareDraft(window);
 
     const effortSelect = window.getByTestId("thinking-effort-select");
     // 胶囊默认自动（select 值 auto），无会话时已被禁用、建会话后可用

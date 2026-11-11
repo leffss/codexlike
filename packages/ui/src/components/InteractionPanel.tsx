@@ -55,7 +55,7 @@ export function InteractionPanel(props: {
       data-interaction-kind={request.kind}
       aria-label="等待用户交互"
       aria-busy={props.busy}
-      className="flex max-h-[65vh] min-h-0 min-w-0 shrink-0 flex-col border-t border-line bg-surface px-4 py-3 text-fg"
+      className="flex max-h-[65vh] min-h-0 min-w-0 flex-col border-t border-line bg-surface px-4 py-3 text-fg"
     >
       <header className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         <span

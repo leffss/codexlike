@@ -15,7 +15,13 @@ import { join } from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const SUBAGENT_SYSTEM_MARK = "CodexLike 的子代理";
 const QUESTION_CALL = "call-four-questions";
@@ -133,22 +139,6 @@ async function setupProfile(window, port) {
     .filter({ hasText: "已保存" })
     .waitFor();
   await window.getByTestId("settings-back").click();
-}
-
-async function newSession(window, title) {
-  const before = await window.getByTestId("session-item").count();
-  await window.getByTestId("new-session").click();
-  await window.getByTestId("create-session-confirm").click();
-  await window.waitForFunction(
-    (count) =>
-      document.querySelectorAll('[data-testid="session-item"]').length ===
-      count + 1,
-    before
-  );
-  await send(window, `/rename ${title}`);
-  const item = window.getByTestId("session-item").filter({ hasText: title });
-  await item.waitFor();
-  return item;
 }
 
 async function send(window, text) {
@@ -316,7 +306,10 @@ async function questionsScenario() {
       initialRequest = ctx;
     },
     async ({ app, window, seenBodies, launch, close }) => {
-      const sessionA = await newSession(window, "四题问答会话");
+      await prepareDraft(window);
+      const sessionA = window
+        .getByTestId("session-item")
+        .filter({ hasText: "开始四题混合问答" });
       await window
         .getByTestId("approval-mode-select")
         .selectOption("full-access");
@@ -426,7 +419,7 @@ async function questionsScenario() {
       );
 
       // 切到新会话并保留另一份草稿，再进入设置；返回后恢复同一题与回答。
-      const sessionB = await newSession(window, "普通草稿会话");
+      await window.getByTestId("new-session").click();
       const draftB = "普通会话独立草稿 B";
       await window.getByTestId("composer-input").fill(draftB);
       await window.getByTestId("settings-open").click();
@@ -544,7 +537,7 @@ async function questionsScenario() {
         "问答响应不应伪装成额外用户消息"
       );
       await assertReadOnlyHistory(window);
-      await sessionB.click();
+      await window.getByTestId("new-session").click();
       assert(
         (await window.getByTestId("composer-input").inputValue()) === draftB,
         "问答提交覆盖其他会话草稿"
@@ -558,7 +551,7 @@ async function questionsScenario() {
       window = restarted.window;
       await window
         .getByTestId("session-item")
-        .filter({ hasText: "四题问答会话" })
+        .filter({ hasText: "开始四题混合问答" })
         .click();
       await window
         .getByTestId("interaction-history")
@@ -844,8 +837,11 @@ async function cancellationScenario() {
       else ask(ctx, callId);
     },
     async ({ window, homeDir, seenBodies, launch, close }) => {
-      const session = await newSession(window, "取消恢复会话");
-      const sessionId = await session.getAttribute("data-session-id");
+      await prepareDraft(window);
+      const session = window
+        .getByTestId("session-item")
+        .filter({ hasText: "停止问答" });
+      let sessionId;
       await window.getByTestId("approval-mode-select").selectOption("ask");
       const cancelledIds = [];
       for (const [prompt, restart] of [
@@ -858,6 +854,7 @@ async function cancellationScenario() {
         await window
           .getByTestId("interaction-panel")
           .waitFor({ timeout: 20_000 });
+        sessionId ??= await session.getAttribute("data-session-id");
         const pending = await pendingCount(window, sessionId, 1);
         const record = pending[0];
         cancelledIds.push(record.request.id);
@@ -869,7 +866,7 @@ async function cancellationScenario() {
           window = next.window;
           await window
             .getByTestId("session-item")
-            .filter({ hasText: "取消恢复会话" })
+            .filter({ hasText: "停止问答" })
             .click();
         } else {
           await window

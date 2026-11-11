@@ -31,7 +31,29 @@ try {
     existsSync(join(homeDir, "session-workbench.db")),
     "SQLite 库文件未落盘"
   );
-  console.log("[packaged] 冷启动冒烟通过：窗口已开，数据目录自建，库文件落盘");
+  // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与草稿界面确认。
+  await window.getByTestId("add-project").waitFor();
+  await window.getByTestId("new-session").click();
+  await window.getByTestId("draft-select-workspace").waitFor();
+  assert(
+    (await window.getByTestId("workspace-path").textContent()).includes(
+      "专用持久目录"
+    ),
+    "产物独立草稿未显示默认工作区"
+  );
+  assert(
+    (await window.getByTestId("session-item").count()) === 0,
+    "冷启动新建不能产生空历史"
+  );
+  assert(
+    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    "产物新会话默认必须为 ask"
+  );
+  assert(!existsSync(join(homeDir, "sessions")), "未发送不得创建专用工作区");
+  assert(!existsSync(join(homeDir, "codexlike.db")), "新应用不能创建旧库");
+  console.log(
+    "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏与独立草稿/权限默认正常"
+  );
 } finally {
   await closeApp(app);
   rmSync(homeRoot, { recursive: true, force: true });

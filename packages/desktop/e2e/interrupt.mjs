@@ -10,7 +10,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 /**
  * 场景脚本（按请求序号）：
@@ -74,13 +80,7 @@ async function main() {
     await window.getByRole("button", { name: "返回工作台" }).click();
 
     // ① 流式输出中点停止：本轮立即中断，UI 标记中断点
-    await window.getByTestId("new-session").click();
-    // 新建会话对话框：选运行位置（默认本目录直跑）
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 10_000 });
+    await prepareDraft(window, { approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("慢慢写一篇长文");
     await window.getByTestId("composer-send").click();
     // 等流式文本真正开始（停止才有「部分内容保留」可断言）
@@ -120,7 +120,7 @@ async function main() {
       (await card.getAttribute("data-tool-name")) === "run_terminal_command",
       "工具卡片未显示 run_terminal_command"
     );
-    // 默认 assist 档普通命令自动放行（GLOSSARY「审批模式」新三档）：卡片出现即已开始执行，
+    // 显式选择的 assist 档普通命令自动放行（GLOSSARY「审批模式」新三档）：卡片出现即已开始执行，
     // 停止落在执行中（子进程被杀）
     const stopAt = Date.now();
     await window.getByTestId("composer-stop").click();

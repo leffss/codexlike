@@ -26,6 +26,11 @@
     "test:e2e:sidebar": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:sidebar",
     "test:e2e:search": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:search",
     "test:e2e:theme": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:theme",
+    "test:e2e:entries": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:entries",
+    "test:e2e:persistence": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:persistence",
+    "test:e2e:membership": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:membership",
+    "test:e2e:live-sessions": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:live-sessions",
+    "test:e2e:exit": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:exit",
     "check:adr": "node scripts/check-adr.mjs",
     "test:e2e:all": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:all"
   },

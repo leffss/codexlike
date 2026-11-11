@@ -325,7 +325,7 @@ export function SessionSidebar(props: {
           className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={props.onCreate}
         >
-          {props.creating ? "创建中…" : "+ 新建会话"}
+          {props.creating ? "创建中…" : "+ 新建独立会话"}
         </button>
       </div>
 
@@ -342,7 +342,7 @@ export function SessionSidebar(props: {
           <p className="text-center text-xs text-fg-subtle">
             暂无会话
             <br />
-            点击「+ 新建会话」选择工作区目录开始
+            点击「+ 新建独立会话」准备输入，首次发送才建立工作区
           </p>
         </div>
       ) : (

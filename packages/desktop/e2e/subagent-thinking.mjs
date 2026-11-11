@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const DELEGATE_TASK = "E2E子代理思考档位委派任务：读取 note.txt 并总结";
 const NOTE_CONTENT = "E2E子代理档位预置文件内容XYZ";
@@ -118,12 +124,7 @@ async function main() {
 
     // 3) 建会话 → 选 high 档 → 委派（触发子代理）
     await window.getByRole("button", { name: "返回工作台" }).click();
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 10_000 });
+    await prepareDraft(window, { approvalMode: "assist" });
 
     const effortSelect = window.getByTestId("thinking-effort-select");
     await effortSelect.selectOption("high");

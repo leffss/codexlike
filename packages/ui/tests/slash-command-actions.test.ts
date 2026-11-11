@@ -35,7 +35,7 @@ const profiles: ProviderProfile[] = [
 
 /** 斜杠命令 → UI 动作的纯函数分发（命令与等效 UI 操作走同一 IPC 通道，ui 只做编排） */
 describe("planSlashCommand", () => {
-  it("/new：同工作区新会话", () => {
+  it("/new：按管理归属打开新草稿，不依赖执行工作区", () => {
     expect(planSlashCommand({ name: "new", argument: "" }, true)).toEqual({
       type: "new-session",
     });
@@ -69,9 +69,11 @@ describe("planSlashCommand", () => {
     expect(planSlashCommand({ name: "rename", argument: "x" }, false)).toEqual({
       type: "needs-session",
     });
-    // /new 在无会话时也无法确定工作区
+  });
+
+  it("新草稿中的 /new 与新建按钮一样可用，不要求先产生空会话", () => {
     expect(planSlashCommand({ name: "new", argument: "" }, false)).toEqual({
-      type: "needs-session",
+      type: "new-session",
     });
   });
 });

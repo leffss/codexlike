@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const GLOBAL_RULE = "SKILLS_GLOBAL_RULE_91";
 const PROJECT_RULE = "SKILLS_PROJECT_RULE_73";
@@ -147,9 +153,7 @@ async function main() {
       .locator("header nav")
       .getByRole("button", { name: "返回工作台", exact: true })
       .click();
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window.getByTestId("session-item").first().waitFor();
+    await prepareDraft(window, { approvalMode: "assist" });
 
     async function send(text, nextStage) {
       stage = nextStage;
@@ -164,6 +168,7 @@ async function main() {
       return seenBodies.slice(start);
     }
 
+    const discovery = await send("只报告已就绪，不使用技能。", "discover");
     await window.getByTestId("resources-toggle").click();
     const panel = window.getByTestId("resources-panel");
     await panel.waitFor();
@@ -179,7 +184,6 @@ async function main() {
     );
     await window.getByTestId("resources-toggle").click();
 
-    const discovery = await send("只报告已就绪，不使用技能。", "discover");
     assert(discovery.length === 1, "未使用技能时应只有首次模型请求");
     assert(
       discovery[0].includes(GLOBAL_RULE) && discovery[0].includes(PROJECT_RULE),

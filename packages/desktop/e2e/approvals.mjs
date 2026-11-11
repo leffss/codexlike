@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const script = (homeDir) => [
   {
@@ -111,9 +117,7 @@ async function main() {
       .click();
     await profiles.getByText("Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window.getByTestId("session-item").waitFor();
+    await prepareDraft(window, { approvalMode: "assist" });
     const modeSelect = window.getByTestId("approval-mode-select");
     await waitMode(window, "assist");
 

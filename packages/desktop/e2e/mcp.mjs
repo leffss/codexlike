@@ -10,7 +10,13 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 
 import { DESKTOP_DIR } from "./launch-target.mjs";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const FIXTURE = resolve(
   DESKTOP_DIR,
@@ -94,15 +100,9 @@ async function main() {
     let window = first.window;
     await setupSettings(window, port);
 
-    // 2) 建会话（默认 assist）→ 模型调用 mcp_fake_echo → 自动放行（无审批卡）
+    // 2) 建会话（显式选择 assist）→ 模型调用 mcp_fake_echo → 自动放行（无审批卡）
     await window.getByRole("button", { name: "返回工作台" }).click();
-    await window.getByTestId("new-session").click();
-    // 新建会话对话框（工单 09）：确认默认本目录直跑
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 10_000 });
+    await prepareDraft(window, { approvalMode: "assist" });
 
     await window.getByTestId("composer-input").fill("调用 MCP echo 工具");
     await window.getByTestId("composer-send").click();

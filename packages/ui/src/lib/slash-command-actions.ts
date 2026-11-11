@@ -22,17 +22,16 @@ export type SlashCommandAction =
   | { type: "status" }
   | { type: "needs-session" };
 
-/** 所有命令都作用于「当前会话」（/new 也需要当前会话的工作区） */
+/** /new 可在草稿页使用；其余命令需要正式会话。归属由入口上下文决定。 */
 export function planSlashCommand(
   command: { name: SlashCommandName; argument: string },
   hasSession: boolean
 ): SlashCommandAction {
+  if (command.name === "new") return { type: "new-session" };
   if (!hasSession) {
     return { type: "needs-session" };
   }
   switch (command.name) {
-    case "new":
-      return { type: "new-session" };
     case "compact":
       return { type: "compact" };
     case "rename":

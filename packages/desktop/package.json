@@ -42,7 +42,8 @@
     "test:e2e:membership": "node e2e/membership.mjs",
     "test:e2e:theme": "node e2e/theme.mjs",
     "test:e2e:thinking": "node e2e/thinking.mjs",
-    "test:e2e:all": "node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/interactions.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/sidebar-archive.mjs && node e2e/membership.mjs && node e2e/session-search.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs && node e2e/live-sessions.mjs && node e2e/persistent-workbench.mjs && node e2e/exit-recovery.mjs"
+    "test:e2e:entries": "node e2e/entry-consistency.mjs",
+    "test:e2e:all": "node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/interactions.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/sidebar-archive.mjs && node e2e/membership.mjs && node e2e/session-search.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs && node e2e/live-sessions.mjs && node e2e/persistent-workbench.mjs && node e2e/exit-recovery.mjs && node e2e/entry-consistency.mjs"
   },
   "devDependencies": {
     "@codexlike/agent-core": "workspace:*",

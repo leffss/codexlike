@@ -2,6 +2,8 @@
 // OpenAI 兼容 mock 骨架与应用启动。各 E2E 脚本只保留自己的场景逻辑
 // （按请求序号/请求体特征脚本化的回复、UI 操作与断言）。
 import http from "node:http";
+import { execFile } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import process from "node:process";
 
@@ -14,20 +16,79 @@ export function assert(condition, message) {
   }
 }
 
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（工单 11 实证，功能断言已过后进程挂着），10 秒后强杀兜底 */
+/** 正常退出走票08确认/保存屏障；兜底只清理本次启动的进程树，不能误杀其他会话。 */
 export async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
+  if (!app) return;
+  const child = app.process();
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  let exited = false;
+  const done = new Promise((resolve) =>
+    child.once("exit", () => {
+      exited = true;
+      resolve();
+    })
+  );
   try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
+    const deadline = Date.now() + 10_000;
+    while (!exited && Date.now() < deadline) {
+      const window = app.windows()[0];
+      if (window) {
+        const confirm = window.getByTestId("exit-confirm");
+        if (await confirm.isVisible().catch(() => false))
+          await confirm.click({ timeout: 1000 }).catch(() => {});
+      }
+      await Promise.race([done, delay(50)]);
+    }
   } finally {
-    clearTimeout(forceKill);
+    if (!exited) {
+      console.warn(`[e2e] 正常退出未完成，仅清理本测试进程树 PID=${child.pid}`);
+      if (process.platform === "win32") {
+        await new Promise((resolve) =>
+          execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], resolve)
+        );
+      } else child.kill("SIGKILL");
+      await Promise.race([done, delay(5000)]);
+      assert(exited, `测试进程 ${child.pid} 未清理，不能删除其数据目录`);
+    }
   }
+}
+
+/** 仅准备新草稿；不预造空会话，也不发送额外模型请求。权限必须由场景显式选择。 */
+export async function prepareDraft(
+  window,
+  { project = false, worktree = false, approvalMode = "ask" } = {}
+) {
+  // 冷启动侧栏列表尚在异步加载，使用公开宿主列表计数避免把恢复记录误判成新建。
+  const before = await window.evaluate(
+    async () => (await window.codexlike.sessions.list()).length
+  );
+  if (project) {
+    if ((await window.getByTestId("project-group").count()) === 0) {
+      await window.getByTestId("add-project").click();
+      await window.getByTestId("project-group").waitFor();
+    }
+    await window.getByTestId("project-new-session").click();
+  } else {
+    await window.getByTestId("new-session").click();
+    await window.getByTestId("draft-select-workspace").click();
+  }
+  if (worktree)
+    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+  assert(
+    (await window.evaluate(
+      async () => (await window.codexlike.sessions.list()).length
+    )) === before,
+    "首次发送前不能增加空历史"
+  );
+  assert(
+    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    "新会话从 ask 开始"
+  );
+  if (approvalMode !== "ask")
+    await window.getByTestId("approval-mode-select").selectOption(approvalMode);
 }
 
 /** OpenAI 兼容 SSE 单帧（chat.completion.chunk 包装） */

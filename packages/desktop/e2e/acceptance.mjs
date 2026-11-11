@@ -19,7 +19,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  prepareDraft,
+  startMockProvider,
+} from "./helpers.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -147,13 +153,8 @@ async function main() {
     app = launched.app;
     let window = launched.window;
     await configureProfile(window, port);
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 10_000 });
-    // 默认 assist（帮我批准）：文件编辑与普通命令自动放行（GLOSSARY「审批模式」新三档）
+    await prepareDraft(window, { project: true, approvalMode: "assist" });
+    // 显式选择 assist（帮我批准）：文件编辑与普通命令自动放行（GLOSSARY「审批模式」新三档）
     await window
       .getByTestId("composer-input")
       .fill("修复 calc.js 里 sumTo 的 off-by-one bug 并验证");
@@ -248,12 +249,7 @@ async function main() {
     enterScenario5();
     // 会话 A：本目录直跑（同一 repo）
     await window.getByTestId("changes-toggle").click(); // 收起面板回到消息流
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .nth(1)
-      .waitFor({ timeout: 10_000 });
+    await prepareDraft(window, { project: true, approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("写入 a-local.txt");
     await window.getByTestId("composer-send").click();
     await window
@@ -264,13 +260,11 @@ async function main() {
     console.log("[e2e] 场景5：会话 A（本目录直跑）文件落主仓库");
 
     // 会话 B：worktree 模式（同一 repo，托管 Worktree 隔离副本）
-    await window.getByTestId("new-session").click();
-    await window.getByTestId("mode-worktree").click();
-    await window.getByTestId("create-session-confirm").click();
-    await window
-      .getByTestId("session-item")
-      .nth(2)
-      .waitFor({ timeout: 15_000 });
+    await prepareDraft(window, {
+      project: true,
+      worktree: true,
+      approvalMode: "assist",
+    });
     await window.getByTestId("composer-input").fill("写入 b-worktree.txt");
     await window.getByTestId("composer-send").click();
     await window
