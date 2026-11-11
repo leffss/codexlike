@@ -1,6 +1,6 @@
 # 01: 迁移兼容 provider，守住现有行为
 
-**What to build:** 按 ADR 0006 将统一模型工厂迁移至 `@ai-sdk/openai-compatible`，让既有主会话、子代理、compact 和 commit 草稿继续可用，并提供经过真实请求与响应测试的思考参数/流解析接入能力。本票是必要的前置改造，不新增思考 UI。
+**What to build:** 按 ADR 0008 将统一模型工厂迁移至 `@ai-sdk/openai-compatible`，让既有主会话、子代理、compact 和 commit 草稿继续可用，并提供经过真实请求与响应测试的思考参数/流解析接入能力。本票是必要的前置改造，不新增思考 UI。
 
 **Blocked by:** None (can start immediately).
 
@@ -8,7 +8,7 @@
 
 ## Parent
 
-[思考档位 spec](../spec.md) 是完整契约；实施前阅读其中的接入契约和测试边界。迁移理由见 [ADR 0006](../../../docs/adr/0006-openai-compatible-provider-for-thinking-params.md)。
+[思考档位 spec](../spec.md) 是完整契约；实施前阅读其中的接入契约和测试边界。迁移理由见 [ADR 0008](../../../docs/adr/0008-openai-compatible-provider-for-thinking-params.md)。
 
 ## Acceptance criteria
 

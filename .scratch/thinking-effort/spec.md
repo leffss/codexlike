@@ -48,7 +48,7 @@
 
 ### 接入契约
 
-- 遵循 ADR 0006，在统一模型工厂迁移至 `@ai-sdk/openai-compatible`，继续使用 chat completions 兼容协议，不引入 Responses API。
+- 遵循 ADR 0008，在统一模型工厂迁移至 `@ai-sdk/openai-compatible`，继续使用 chat completions 兼容协议，不引入 Responses API。
 - 最终 HTTP 请求 body 的契约如下；SDK 内部选项名和命名空间由实际安装版本与请求测试确定，不把内部 camelCase 名称当作网络协议。
 
 | 档位     | 本功能附加的请求字段                                   |
@@ -95,7 +95,7 @@
 ## Further Notes
 
 - 本 spec 与拆票边界已由用户确认；本次仅发布设计与实施任务，不表示功能已实现或测试已运行。
-- 领域术语参见 [GLOSSARY](../../GLOSSARY.md)，模型工厂迁移的权衡参见 [ADR 0006](../../docs/adr/0006-openai-compatible-provider-for-thinking-params.md)。ADR 中提及的 SDK camelCase 用法不作为兼容包的已验证契约，以本 spec 的最终 HTTP 字段与实施测试为准。
+- 领域术语参见 [GLOSSARY](../../GLOSSARY.md)，模型工厂迁移的权衡参见 [ADR 0008](../../docs/adr/0008-openai-compatible-provider-for-thinking-params.md)。ADR 中提及的 SDK camelCase 用法不作为兼容包的已验证契约，以本 spec 的最终 HTTP 字段与实施测试为准。
 - 实施时先查看当前工作树，保留不属于本功能的已有改动。
 - 依赖顺序为 **01 → 02 → 03**。三张票均为 `ready-for-agent`，该状态表示需求可执行，不表示阻塞依赖已完成。
 
