@@ -18,6 +18,7 @@ import type { ToolDefinition } from "../tools/types";
 import { createAgentSession, type AgentSession } from "./agent-session";
 import type { ApprovalMode } from "./approval";
 import type { SessionPersistence } from "./persistence";
+import type { SessionSearchResult } from "./search";
 import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
@@ -96,6 +97,7 @@ export interface SessionManager {
   }): AgentSession;
   /** 全部会话记录（含已归档），置顶优先、最近使用倒序。 */
   list(): SessionRecord[];
+  search(query: string, includeArchived?: boolean): SessionSearchResult[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
   messages(sessionId: string): StoredMessage[];
   /** 指定会话的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
@@ -292,6 +294,8 @@ export function createSessionManager(
     list() {
       return persistence.listSessions();
     },
+    search: (query, includeArchived) =>
+      persistence.searchSessions(query, includeArchived),
 
     messages(sessionId) {
       return persistence.listMessages(sessionId);

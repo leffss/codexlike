@@ -37,6 +37,7 @@ import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { SessionSidebar } from "../components/SessionSidebar";
+import { SessionSearch } from "../components/SessionSearch";
 import { mergeInteractions, type UiItem } from "../lib/session-view";
 import {
   formatSessionStatus,
@@ -775,6 +776,7 @@ export function WorkspacePage(props: {
                   : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
                 : "未选择会话")}
           </span>
+          <SessionSearch onSelect={(id) => void openSession(id, true)} />
           {current && (
             <button
               type="button"

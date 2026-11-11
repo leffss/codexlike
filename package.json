@@ -24,6 +24,7 @@
     "prepare": "husky",
     "test:e2e:projects": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:projects",
     "test:e2e:sidebar": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:sidebar",
+    "test:e2e:search": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:search",
     "test:e2e:theme": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:theme",
     "check:adr": "node scripts/check-adr.mjs",
     "test:e2e:all": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:all"

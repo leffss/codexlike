@@ -40,6 +40,8 @@ export type {
   WorkspaceMode,
 } from "./session/types";
 
+export type { SessionSearchResult } from "./session/search";
+
 // 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
 export type {
   ApprovalDecision,

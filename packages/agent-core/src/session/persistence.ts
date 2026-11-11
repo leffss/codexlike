@@ -8,6 +8,7 @@ import type {
   QuestionAnswerSnapshot,
 } from "../interaction/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
+import { createSessionSearch, type SessionSearchResult } from "./search";
 import type {
   CompactRecord,
   ProjectRecord,
@@ -56,6 +57,10 @@ export interface SessionPersistence {
   ): void;
   /** 全部会话，置顶优先、用户最近使用倒序；后台更新不重排。 */
   listSessions(): SessionRecord[];
+  searchSessions(
+    query: string,
+    includeArchived?: boolean
+  ): SessionSearchResult[];
   /** 指定会话的全部消息，按写入顺序；未知会话返回空数组 */
   listMessages(sessionId: string): StoredMessage[];
   /** 指定会话的 compact 记录，按时间正序（最后一条为当前生效摘要） */
@@ -356,6 +361,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   return {
+    searchSessions: createSessionSearch(db),
     insertProject(record) {
       db.prepare(
         "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"
