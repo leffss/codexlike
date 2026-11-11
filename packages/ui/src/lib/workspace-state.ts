@@ -17,6 +17,7 @@ export interface NewSessionDraft {
   projectId: string | null;
   text: string;
   workspacePath?: string;
+  workspaceMode?: "local" | "worktree";
   providerProfileId: string;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;

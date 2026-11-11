@@ -1,46 +1,33 @@
-import { randomUUID } from 'node:crypto';
-
 import type {
-  SessionManager,
-  SessionRecord,
   WorktreeService,
-} from '@codexlike/agent-core/node';
+  WorkspaceMode,
+} from "@codexlike/agent-core/node";
 
-/**
- * 新建会话的模式编排（工单 09 托管 Worktree）：
- * - `local`（默认）：本目录直跑，workspacePath 即用户所选目录；
- * - `worktree`：先检出托管 Worktree（目录名=会话 id、独立分支 codexlike/<会话 id>），
- *   再以同一会话 id 落库——worktree 检出失败（非 git 目录等）以中文异常抛回且
- *   会话不落库（渲染层提示后用户可改选本目录直跑）。
- *
- * 从 session-ipc 抽出为独立模块：编排逻辑可脱离 Electron IPC 单测。
- */
-export async function createSessionWithMode(options: {
-  manager: SessionManager;
-  worktreeService: WorktreeService;
+/** 仅由 sessions.start 使用：准备工作区事实，不另设创建正式会话的旁路。 */
+export async function prepareSessionWorkspace(options: {
+  id: string;
   workspacePath: string;
-  workspaceMode?: 'local' | 'worktree';
-  /** 会话 id 生成器（默认 randomUUID；测试可注入固定 id） */
-  generateId?: () => string;
-}): Promise<SessionRecord> {
-  const { manager, worktreeService, workspacePath } = options;
-  const mode = options.workspaceMode ?? 'local';
-  const generateId = options.generateId ?? randomUUID;
-
-  if (mode === 'local') {
-    return manager.create({ workspacePath }).record;
+  workspaceMode?: WorkspaceMode;
+  worktreeService: WorktreeService;
+}) {
+  const mode = options.workspaceMode ?? "local";
+  if (mode === "local") {
+    return {
+      workspacePath: options.workspacePath,
+      workspaceMode: mode,
+      workspaceOriginPath: undefined,
+      rollback: async () => true,
+    };
   }
-  // worktree 模式：先检出副本（失败即抛出、不落库），再以同一 id 创建会话
-  const sessionId = generateId();
-  const worktree = await worktreeService.createForSession({
-    sessionId,
-    workspacePath,
+  const worktree = await options.worktreeService.createForSession({
+    sessionId: options.id,
+    workspacePath: options.workspacePath,
   });
-  return manager.create({
-    id: sessionId,
+  return {
     workspacePath: worktree.path,
-    workspaceMode: 'worktree',
-    // 原始仓库路径随会话落库（ADR 0005）：侧栏项目按它聚合，而非不可读的副本路径
-    workspaceOriginPath: workspacePath,
-  }).record;
+    workspaceMode: mode,
+    // 来源是持久事实，与当前 projectId 无关（ADR 0010）。
+    workspaceOriginPath: options.workspacePath,
+    rollback: worktree.rollback,
+  };
 }

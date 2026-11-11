@@ -10,6 +10,7 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
+import { WorkspaceModeControl } from "../components/WorkspaceModeControl";
 
 import {
   evaluateContextWarning,
@@ -422,6 +423,7 @@ export function WorkspacePage(props: {
       requestId: draft.requestId,
       projectId,
       workspacePath: draft.workspacePath,
+      workspaceMode: draft.workspaceMode ?? "local",
       text,
       mentionPaths,
       providerProfileId: draft.providerProfileId || undefined,
@@ -831,17 +833,19 @@ export function WorkspacePage(props: {
               }
               className="break-all"
             >
-              工作区：
+              {draft?.workspaceMode === "worktree"
+                ? "来源目录（发送后使用隔离工作区）："
+                : "工作区："}
               {current?.workspacePath ??
                 draft?.workspacePath ??
                 projects.find((p) => p.id === draft?.projectId)
                   ?.workspacePath ??
                 "应用专用持久目录（首次发送时分配）"}
             </div>
-            {draft ? (
-              <span>首次发送才创建会话 · 本地模式</span>
-            ) : (
-              <span>工作区已固定</span>
+            {current?.workspaceOriginPath && (
+              <div data-testid="workspace-origin">
+                来源目录：{current.workspaceOriginPath}
+              </div>
             )}
             {draft?.projectId === null && (
               <button
@@ -904,6 +908,29 @@ export function WorkspacePage(props: {
               >
                 {contextWarning}
               </div>
+            )}
+            {(draft || current) && (
+              <WorkspaceModeControl
+                target={
+                  draft
+                    ? {
+                        projectId: draft.projectId,
+                        workspacePath: draft.workspacePath,
+                        workspaceMode: draft.workspaceMode ?? "local",
+                      }
+                    : { sessionId: current!.id }
+                }
+                mode={draft?.workspaceMode ?? current?.workspaceMode ?? "local"}
+                draft={draft !== null}
+                busy={creating}
+                onModeChange={(workspaceMode) => {
+                  if (draft && !draft.busy)
+                    workspaceState.editNewDraft(draft.projectId, {
+                      workspaceMode,
+                      error: null,
+                    });
+                }}
+              />
             )}
             {interaction ? (
               <InteractionPanel

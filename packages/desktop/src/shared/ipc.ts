@@ -62,6 +62,7 @@ export const IPC = {
     execution: "sessions:execution",
     setPinned: "sessions:set-pinned",
     markUsed: "sessions:mark-used",
+    workspaceSharing: "sessions:workspace-sharing",
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: "sessions:select-workspace",
     /** 指定会话的消息历史 */
@@ -164,6 +165,19 @@ export interface StartSessionInput {
   mentionPaths?: string[];
 }
 
+export type WorkspaceSharingTarget =
+  | { sessionId: string }
+  | {
+      projectId: string | null;
+      workspacePath?: string;
+      workspaceMode?: WorkspaceMode;
+    };
+
+export interface WorkspaceSharingView {
+  workspacePath: string | null;
+  runningSessions: { id: string; title: string }[];
+}
+
 /** 宿主权威运行信息；与当前页面无关，等待回应也视为执行中。 */
 export interface SessionExecutionState {
   sessionId: string;
@@ -204,6 +218,10 @@ export interface CodexLikeApi {
     ): Promise<SessionRecord | null>;
     /** 只在用户主动查看时调用；发送由宿主自动登记，后台刷新不调用。 */
     markUsed(sessionId: string): Promise<SessionRecord | null>;
+    /** 读取同实际目录的其他运行会话；不锁定并行，不创建工作区。 */
+    workspaceSharing(
+      target: WorkspaceSharingTarget
+    ): Promise<WorkspaceSharingView>;
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionRecord[]>;
     /** 原生目录选择器；取消返回 null */

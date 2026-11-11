@@ -2,18 +2,19 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
   readdirSync,
-  rmSync,
+  rmdirSync,
   statSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
+} from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
+import { createHash } from "node:crypto";
 
-import { simpleGit } from 'simple-git';
+import { simpleGit } from "simple-git";
 
-import { codexlikeBranchName } from '../git/branch-name';
-import type { SessionRecord } from '../session/types';
-import { resolveInWorkspace } from '../tools/workspace';
+import { codexlikeBranchName } from "../git/branch-name";
+import { resolveInWorkspace } from "../tools/workspace";
 
 /**
  * 托管 Worktree 管理（spec「git 集成与托管 Worktree」；GLOSSARY「托管 Worktree」）。
@@ -25,10 +26,7 @@ import { resolveInWorkspace } from '../tools/workspace';
  */
 
 /** `.worktreeinclude` 文件名（项目根，每行一个需复制进副本的被 ignore 文件路径） */
-export const WORKTREE_INCLUDE_FILE = '.worktreeinclude';
-
-/** LRU 清理默认保留的 worktree 数量（spec：只保留最近 15 个） */
-export const WORKTREE_KEEP_DEFAULT = 15;
+export const WORKTREE_INCLUDE_FILE = ".worktreeinclude";
 
 export interface ManagedWorktree {
   /** worktree 检出目录（会话的 workspacePath 指向这里） */
@@ -37,22 +35,9 @@ export interface ManagedWorktree {
   branch: string;
   /** 实际复制进副本的 `.worktreeinclude` 条目（相对工作区的 POSIX 路径） */
   copiedFiles: string[];
+  /** 仅撤销本次创建且尚无新增成果的副本；不可证明安全时保留并返回 false。 */
+  rollback(): Promise<boolean>;
 }
-
-export interface WorktreeCleanupResult {
-  /** 已删除的 worktree 对应的会话 id（含孤儿目录名） */
-  removed: string[];
-  /** 进入候选但按 LRU 保留的会话 id */
-  kept: string[];
-  /** 候选中因会话运行中而跳过的会话 id（永不清理） */
-  skippedRunning: string[];
-}
-
-/** cleanup 只依赖会话记录的 id / status / archivedAt / updatedAt（SessionRecord 的结构子集） */
-export type WorktreeCleanupSession = Pick<
-  SessionRecord,
-  'id' | 'status' | 'archivedAt' | 'updatedAt'
->;
 
 export interface WorktreeService {
   /**
@@ -63,16 +48,6 @@ export interface WorktreeService {
     sessionId: string;
     workspacePath: string;
   }): Promise<ManagedWorktree>;
-  /**
-   * LRU 清理：一切非运行中会话的 worktree（含活跃空闲、已归档、无会话记录的孤儿）
-   * 进入候选，按会话 updatedAt 保留最近 `keep` 个（默认 15），其余删除；
-   * 运行中（streaming / waiting-approval）会话的 worktree 永不清理。
-   * 删除只移除 worktree 检出目录，独立分支保留（改动不丢，可人工找回）。
-   */
-  cleanup(input: {
-    sessions: WorktreeCleanupSession[];
-    keep?: number;
-  }): Promise<WorktreeCleanupResult>;
 }
 
 export function createWorktreeService(options: {
@@ -87,130 +62,127 @@ export function createWorktreeService(options: {
     if (!existsSync(includePath)) {
       return [];
     }
-    return readFileSync(includePath, 'utf8')
+    return readFileSync(includePath, "utf8")
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line !== '');
-  }
-
-  /**
-   * 删除一个 worktree：解析其 `.git` 文件得到主仓库，在主仓库执行
-   * `git worktree remove --force` + `prune`（清理 git 元数据）；
-   * 目录已不是合法 worktree（.git 文件缺失等）时直接删目录。
-   */
-  async function removeWorktree(worktreePath: string): Promise<void> {
-    const dotGitPath = join(worktreePath, '.git');
-    let mainRepo: string | null = null;
-    try {
-      const gitdirLine = readFileSync(dotGitPath, 'utf8').split(/\r?\n/)[0] ?? '';
-      const match = /^gitdir:\s*(.+)$/.exec(gitdirLine.trim());
-      if (match !== null) {
-        // <主仓库>/.git/worktrees/<名> → 主仓库根
-        mainRepo = dirname(dirname(dirname(match[1]!.trim())));
-      }
-    } catch {
-      mainRepo = null;
-    }
-    if (mainRepo !== null && existsSync(mainRepo)) {
-      try {
-        await simpleGit({ baseDir: mainRepo }).raw([
-          'worktree',
-          'remove',
-          '--force',
-          worktreePath,
-        ]);
-        await simpleGit({ baseDir: mainRepo }).raw(['worktree', 'prune']);
-        return;
-      } catch {
-        // git 删除失败（元数据已损坏等）退回直接删目录
-      }
-    }
-    rmSync(worktreePath, { recursive: true, force: true });
+      .filter((line) => line !== "");
   }
 
   return {
     async createForSession({ sessionId, workspacePath }) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(sessionId))
+        throw new Error("会话 id 不能包含路径或特殊字符");
       const git = simpleGit({ baseDir: workspacePath });
       if (!(await git.checkIsRepo())) {
         throw new Error(
-          `当前工作区不是 git 仓库，无法使用 worktree 模式：${workspacePath}。请改用「本目录直跑」，或先在该目录执行 git init。`,
+          `当前工作区不是 git 仓库，无法使用 worktree 模式：${workspacePath}。请改用「本目录直跑」，或先在该目录执行 git init。`
         );
       }
       const worktreePath = join(worktreesDir, sessionId);
       if (existsSync(worktreePath)) {
         throw new Error(
-          `worktree 目录已存在：${worktreePath}（会话 id 冲突，请重试新建会话）`,
+          `worktree 目录已存在：${worktreePath}（会话 id 冲突，请重试新建会话）`
         );
       }
-      // 分支名 sanitize 沿用工单 05 的规则（codexlikeBranchName）
+      // 在创建前验证来源路径；目录以排他 mkdir 认领，失败不递归清理未知内容。
+      const includes = readIncludeList(workspacePath).map((line) => {
+        const parts = line.split(/[\\/]/);
+        if (
+          isAbsolute(line) ||
+          parts.some((part) => part === ".." || part.toLowerCase() === ".git")
+        )
+          throw new Error(
+            `.worktreeinclude 路径越界或涉及 Git 元数据：${line}`
+          );
+        return { line, source: resolveInWorkspace(workspacePath, line) };
+      });
       const branch = codexlikeBranchName(sessionId);
-      mkdirSync(worktreesDir, { recursive: true });
+      let head: string;
       try {
-        // 基于当前 HEAD 检出新分支到隔离目录
-        await git.raw(['worktree', 'add', '-b', branch, worktreePath]);
+        head = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim();
+      } catch {
+        throw new Error(
+          "创建托管 Worktree 失败：Git 仓库尚无提交，请先提交或改用本地模式"
+        );
+      }
+      mkdirSync(worktreesDir, { recursive: true });
+      mkdirSync(worktreePath);
+      try {
+        await git.raw(["worktree", "add", "-b", branch, worktreePath, head]);
       } catch (error) {
-        // 失败清理半成品目录，不残留
-        rmSync(worktreePath, { recursive: true, force: true });
+        // Git 失败时仅撤销空的认领目录，绝不递归删除竞争者或 hook 写入的成果。
+        try {
+          rmdirSync(worktreePath);
+        } catch {
+          /* 非空则保留 */
+        }
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`创建托管 Worktree 失败：${message}`);
       }
-
-      // `.worktreeinclude`：声明的被 ignore 文件复制进副本（副本检出 HEAD，ignore 文件不在其中）
       const copiedFiles: string[] = [];
-      for (const line of readIncludeList(workspacePath)) {
-        // 路径限制在工作区内（防 .. 与链接逃逸，与工具层同一套边界校验）
-        const source = resolveInWorkspace(workspacePath, line);
-        let isFile = false;
-        try {
-          isFile = statSync(source).isFile();
-        } catch {
-          isFile = false; // 声明的文件不存在：跳过（如本机没有的 .env）
-        }
-        if (!isFile) {
-          continue;
-        }
-        const target = join(worktreePath, ...line.split('/'));
-        mkdirSync(dirname(target), { recursive: true });
-        copyFileSync(source, target);
-        copiedFiles.push(line);
-      }
-      return { path: worktreePath, branch, copiedFiles };
-    },
-
-    async cleanup({ sessions, keep = WORKTREE_KEEP_DEFAULT }) {
-      if (!existsSync(worktreesDir)) {
-        return { removed: [], kept: [], skippedRunning: [] };
-      }
-      const byId = new Map(sessions.map((record) => [record.id, record]));
-      const skippedRunning: string[] = [];
-      // 候选 = 一切非运行中的 worktree（活跃空闲、已归档、孤儿都算——story 24「磁盘不被占满」，
-      // 运行中的永不清理）；按 updatedAt 倒序排（最近在前），孤儿视作最旧、优先清理
-      const candidates: { id: string; updatedAt: string }[] = [];
-      for (const name of readdirSync(worktreesDir)) {
-        const path = join(worktreesDir, name);
-        if (!statSync(path).isDirectory()) {
-          continue;
-        }
-        const record = byId.get(name);
-        if (record !== undefined) {
-          if (record.status !== 'idle') {
-            // 运行中会话的 worktree 永不清理
-            skippedRunning.push(name);
-            continue;
+      // 包含 ignored/untracked 文件；不能只看 git status（会漏掉用户成果）。
+      function fingerprint(path: string): string {
+        const hash = createHash("sha256");
+        function visit(dir: string) {
+          for (const name of readdirSync(dir).sort()) {
+            const child = join(dir, name);
+            const stat = lstatSync(child);
+            if (stat.isSymbolicLink()) throw new Error("符号链接不能自动回滚");
+            hash.update(child.slice(worktreePath.length));
+            if (stat.isDirectory()) visit(child);
+            else hash.update(readFileSync(child));
           }
-          candidates.push({ id: name, updatedAt: record.updatedAt });
-        } else {
-          candidates.push({ id: name, updatedAt: '' }); // 孤儿：会话已删除
+        }
+        visit(path);
+        return hash.digest("hex");
+      }
+      // checkout hooks 或外部进程已经写入的成果不属于本次可回收内容。
+      const pristine =
+        (
+          await simpleGit({ baseDir: worktreePath }).raw([
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored",
+          ])
+        ).trim() === "";
+      let baseline: string | undefined;
+      try {
+        if (pristine) baseline = fingerprint(worktreePath);
+      } catch {
+        /* 不可证明则保留 */
+      }
+      async function rollback() {
+        try {
+          if (baseline === undefined || fingerprint(worktreePath) !== baseline)
+            return false;
+          if ((await git.raw(["rev-parse", branch])).trim() !== head)
+            return false;
+          if (fingerprint(worktreePath) !== baseline) return false;
+          await git.raw(["worktree", "remove", "--force", worktreePath]);
+          await git.raw(["update-ref", "-d", `refs/heads/${branch}`, head]);
+          return true;
+        } catch {
+          return false;
         }
       }
-      candidates.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
-      const kept = candidates.slice(0, keep).map((candidate) => candidate.id);
-      const removed: string[] = [];
-      for (const candidate of candidates.slice(keep)) {
-        await removeWorktree(join(worktreesDir, candidate.id));
-        removed.push(candidate.id);
+      try {
+        for (const { line, source } of includes) {
+          if (!existsSync(source) || !statSync(source).isFile()) continue;
+          const target = resolveInWorkspace(worktreePath, line);
+          mkdirSync(dirname(target), { recursive: true });
+          copyFileSync(source, target);
+          copiedFiles.push(line);
+          // 同步复制期间无异步窗口；每次完成后记录仅本次写入的新基线。
+          if (pristine) baseline = fingerprint(worktreePath);
+        }
+      } catch (error) {
+        const removed = await rollback();
+        throw new Error(
+          `创建托管 Worktree 失败：${error instanceof Error ? error.message : String(error)}${removed ? "" : `；无法确认可安全回收，已保留目录：${worktreePath}`}`
+        );
       }
-      return { removed, kept, skippedRunning };
+      return { path: worktreePath, branch, copiedFiles, rollback };
     },
   };
 }

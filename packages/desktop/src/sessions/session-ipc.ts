@@ -1,12 +1,5 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  statSync,
-} from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmdirSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -35,6 +28,8 @@ import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
 import { listWorkspaceFiles } from "./workspace-files";
+import { prepareSessionWorkspace } from "./worktree-flow";
+import { canonicalWorkspacePath, workspaceSharing } from "./workspace-sharing";
 import {
   IPC,
   type SessionEventEnvelope,
@@ -50,7 +45,7 @@ export function registerSessionHandlers(options: {
   dataDir: string;
   /** 浏览器会话管理器（会话归档时释放其浏览器 context；工单 11） */
   browserManager?: BrowserSessionManager;
-  /** 托管 Worktree 服务（工单 09）：worktree 模式会话创建与 LRU 清理 */
+  /** 托管 Worktree 服务：首次发送创建隔离副本，不按数量清理。 */
   worktreeService: WorktreeService;
   /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
   resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
@@ -102,6 +97,13 @@ export function registerSessionHandlers(options: {
     return manager.markUsed(id);
   });
   ipcMain.handle(IPC.sessions.list, () => manager.list());
+  ipcMain.handle(IPC.sessions.workspaceSharing, (_e, target) =>
+    workspaceSharing(
+      target,
+      manager,
+      (id) => management.execution(id)?.running ?? false
+    )
+  );
   ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("execution：sessionId 必须是字符串");
@@ -136,9 +138,12 @@ export function registerSessionHandlers(options: {
         throw new Error("审批模式不合法");
       if (
         request.workspaceMode !== undefined &&
-        request.workspaceMode !== "local"
+        request.workspaceMode !== "local" &&
+        request.workspaceMode !== "worktree"
       )
-        throw new Error("当前新建入口仅支持本地工作区");
+        throw new Error("工作区模式必须是 local 或 worktree");
+      if (request.projectId === null && request.workspaceMode === "worktree")
+        throw new Error("独立会话入口不支持直接创建 Worktree，请在项目内新建");
       const available = await profiles.list();
       const profile =
         request.providerProfileId === undefined
@@ -156,14 +161,9 @@ export function registerSessionHandlers(options: {
       const id = randomUUID();
       let workspacePath = project?.workspacePath ?? request.workspacePath;
       if (workspacePath !== undefined) {
-        if (typeof workspacePath !== "string" || !isAbsolute(workspacePath))
-          throw new Error("工作区必须是已有目录的绝对路径");
-        try {
-          workspacePath = realpathSync.native(workspacePath);
-          if (!statSync(workspacePath).isDirectory()) throw new Error();
-        } catch {
-          throw new Error("工作区目录不存在或无法访问，请重新选择目录后重试");
-        }
+        if (typeof workspacePath !== "string")
+          throw new Error("工作区路径不合法");
+        workspacePath = canonicalWorkspacePath(workspacePath);
       } else {
         workspacePath = join(dataDir, "sessions", id, "workspace");
         try {
@@ -174,12 +174,22 @@ export function registerSessionHandlers(options: {
           );
         }
       }
+      let rollbackWorkspace: (() => Promise<boolean>) | undefined;
+      let preparedPath: string | undefined;
       try {
+        const { rollback, ...workspace } = await prepareSessionWorkspace({
+          id,
+          workspacePath,
+          workspaceMode: request.workspaceMode,
+          worktreeService,
+        });
+        rollbackWorkspace = rollback;
+        preparedPath = workspace.workspacePath;
         const session = manager.create({
           id,
           projectId: request.projectId,
           creationRequestId: request.requestId,
-          workspacePath,
+          ...workspace,
           title: request.text.trim().split(/\r?\n/)[0]!.slice(0, 60),
           approvalMode: approval,
         });
@@ -195,6 +205,11 @@ export function registerSessionHandlers(options: {
         // 只回滚无历史记录；绝不递归删除用户目录或失败期间可能出现的成果。
         if (!manager.messages(id).length) {
           manager.removeUnstarted(id);
+          if (rollbackWorkspace && !(await rollbackWorkspace())) {
+            throw new Error(
+              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式会话，可重试）`
+            );
+          }
           if (!project && request.workspacePath === undefined) {
             // 非递归 rmdir：只撤销本次分配且仍为空的目录，有任何成果就保留。
             try {

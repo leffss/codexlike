@@ -24,6 +24,8 @@ const api: CodexLikeApi = {
     setPinned: (id, pinned) =>
       ipcRenderer.invoke(IPC.sessions.setPinned, id, pinned),
     markUsed: (id) => ipcRenderer.invoke(IPC.sessions.markUsed, id),
+    workspaceSharing: (target) =>
+      ipcRenderer.invoke(IPC.sessions.workspaceSharing, target),
     list: () => ipcRenderer.invoke(IPC.sessions.list),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) =>
