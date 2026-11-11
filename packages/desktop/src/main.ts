@@ -427,5 +427,10 @@ void app.whenReady().then(async () => {
     persistence.close();
     void mcpService.shutdown();
     void browserManager.close().catch(() => {});
+    // 强退兜底（code review 修复 7，工单 11 实证 Electron 45 偶发收尾挂起）：
+    // will-quit 后正常退出应在毫秒级完成；2 秒后进程仍活着说明退出流程挂起，
+    // 以 app.exit(0) 强制退出（不再触发 will-quit，无递归）。unref 使该定时器
+    // 本身不成为保活进程的句柄——正常退出时进程先于定时器结束，兜底不生效。
+    setTimeout(() => app.exit(0), 2_000).unref();
   });
 });

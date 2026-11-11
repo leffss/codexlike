@@ -71,7 +71,12 @@ export type InstallerSpawn = (
 export interface CliChromiumInstallerOptions {
   /** 宿主环境变量（默认 process.env；PLAYWRIGHT_* 全透传，其余按白名单） */
   env?: Record<string, string | undefined>;
-  /** 在 Electron 宿主中运行 CLI 需以 node 模式启动自身可执行文件 */
+  /**
+   * 在 Electron 宿主中运行 CLI 需以 node 模式（ELECTRON_RUN_AS_NODE=1）启动自身可执行文件。
+   * 生产路径自动探测（process.versions.electron），但测试跑在纯 Node 进程里探测不到，
+   * 需经此参数显式注入「Electron 宿主」场景（见 chromium-installer.test 的
+   * 「Electron 宿主下以 ELECTRON_RUN_AS_NODE 运行 CLI」用例）——故保留，勿内联删除。
+   */
   isElectron?: boolean;
   /** spawn 注入（测试用；默认 node:child_process.spawn） */
   spawnOverride?: InstallerSpawn;
