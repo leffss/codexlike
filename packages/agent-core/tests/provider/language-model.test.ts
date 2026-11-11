@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createLanguageModelFromProfile,
+  parseThinkingEffort,
   type ProviderProfile,
 } from "../../src/index";
 
@@ -327,5 +328,29 @@ describe("createLanguageModelFromProfile（OpenAI 兼容 provider 构造）", ()
     const { text } = await generateText({ model, prompt: "你好" });
 
     expect(text).toBe("你好");
+  });
+});
+
+describe("parseThinkingEffort（五档校验统一入口）", () => {
+  it.each(["auto", "low", "medium", "high", "off"] as const)(
+    "合法档位 %s 原样返回",
+    (effort) => {
+      expect(parseThinkingEffort(effort)).toBe(effort);
+    }
+  );
+
+  it("undefined 等价 auto：未传档位的既有语义收进同一入口", () => {
+    expect(parseThinkingEffort(undefined)).toBe("auto");
+  });
+
+  it.each(["max", "", "HIGH", 1, null, {}, [], true])(
+    "非法值 %p 抛同文案错误",
+    (value) => {
+      expect(() => parseThinkingEffort(value)).toThrow("无效的思考档位");
+    }
+  );
+
+  it("非法值错误信息含原始值（可诊断）", () => {
+    expect(() => parseThinkingEffort("max")).toThrow("无效的思考档位：max");
   });
 });

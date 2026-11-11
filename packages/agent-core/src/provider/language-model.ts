@@ -15,6 +15,25 @@ export const THINKING_EFFORTS: readonly ThinkingEffort[] = [
   "off",
 ];
 
+/**
+ * 五档校验的统一入口（IPC 边界 / 发送入口 / provider 工厂共用）：
+ * 接受 unknown，undefined 等价 auto（未传档位的既有语义），
+ * 五档内的字符串原样返回；枚举外的值抛「无效的思考档位：<原始值>」——
+ * 拒绝把伪造控制值原样发给服务端（spec「边界接受值限于上述枚举」）。
+ */
+export function parseThinkingEffort(value: unknown): ThinkingEffort {
+  if (value === undefined) {
+    return "auto";
+  }
+  if (
+    typeof value === "string" &&
+    THINKING_EFFORTS.includes(value as ThinkingEffort)
+  ) {
+    return value as ThinkingEffort;
+  }
+  throw new Error(`无效的思考档位：${String(value)}`);
+}
+
 /** 构造语言模型时可注入的选项 */
 export interface CreateLanguageModelOptions {
   /**
@@ -39,12 +58,9 @@ export function createLanguageModelFromProfile(
   profile: ProviderProfile,
   options: CreateLanguageModelOptions = {}
 ): LanguageModel {
-  const effort = options.thinkingEffort ?? "auto";
-  if (!THINKING_EFFORTS.includes(effort)) {
-    // 未传字段的既有调用方走 auto；显式传入的值必须在五档枚举内，
-    // 拒绝把伪造控制值原样发给服务端（spec「边界接受值限于上述枚举」）
-    throw new Error(`无效的思考档位：${String(options.thinkingEffort)}`);
-  }
+  // 未传字段的既有调用方走 auto；显式传入的值必须在五档枚举内，
+  // 拒绝把伪造控制值原样发给服务端（spec「边界接受值限于上述枚举」）
+  const effort = parseThinkingEffort(options.thinkingEffort);
   const provider = createOpenAICompatible({
     name: "codexlike",
     baseURL: profile.baseURL,

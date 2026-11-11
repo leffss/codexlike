@@ -19,6 +19,7 @@ export type {
 } from "./provider/language-model";
 export {
   createLanguageModelFromProfile,
+  parseThinkingEffort,
   THINKING_EFFORTS,
 } from "./provider/language-model";
 

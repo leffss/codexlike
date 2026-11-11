@@ -11,7 +11,7 @@ import {
 
 import {
   createLanguageModelFromProfile,
-  THINKING_EFFORTS,
+  parseThinkingEffort,
   type CreateLanguageModelOptions,
   type ThinkingEffort,
 } from "../provider/language-model";
@@ -407,10 +407,7 @@ export function createAgentSession(
       }
       // 思考档位快照（spec「生效边界」）：发送入口一次性固定，未传等价 auto；
       // 枚举外的值在此拒绝——不把伪造控制值发往服务端（与 provider 工厂同一校验）
-      const effort: ThinkingEffort = thinkingEffort ?? "auto";
-      if (!THINKING_EFFORTS.includes(effort)) {
-        throw new Error(`无效的思考档位：${String(thinkingEffort)}`);
-      }
+      const effort = parseThinkingEffort(thinkingEffort);
       busy = true;
       // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
       activeSignal = signal;

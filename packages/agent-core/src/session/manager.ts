@@ -3,7 +3,10 @@ import { basename } from "node:path";
 
 import type { LanguageModel } from "ai";
 
-import { createLanguageModelFromProfile } from "../provider/language-model";
+import {
+  createLanguageModelFromProfile,
+  type ThinkingEffort,
+} from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
 import type { ToolDefinition } from "../tools/types";
 
@@ -30,8 +33,15 @@ export interface CreateSessionManagerOptions {
    * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
    */
   subagents?: SubagentsConfig;
-  /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造 */
-  languageModelFor?: (profile: ProviderProfile) => LanguageModel;
+  /**
+   * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
+   * options 携带本条消息的思考档位快照（与 agent-session / subagent 的同名
+   * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
+   */
+  languageModelFor?: (
+    profile: ProviderProfile,
+    options?: { thinkingEffort?: ThinkingEffort }
+  ) => LanguageModel;
   /**
    * 会话系统提示工厂（AGENTS.md 发现 → 组装由宿主注入，agent-core 不依赖 fs）。
    * create 与 get 恢复时各调用一次。

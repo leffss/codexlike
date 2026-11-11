@@ -20,12 +20,13 @@ const SUB_REASONING_1 = "子代理第一轮思考标记AAA";
 const SUB_REASONING_2 = "子代理第二轮思考标记BBB";
 const REPORT_TEXT = "E2E子代理思考档位报告标记CCC：内容已总结。";
 /** 主/子请求识别（mock 同一 server，按 body 的 model 字段分流） */
-const SUB_MODEL_MARK = '"model":"mock-sub"';
+const SUB_MODEL = "mock-sub";
 
 async function main() {
   const { server, port, seenBodies } = await startMockProvider(
     (ctx, { body }) => {
-      const isSub = body.includes(SUB_MODEL_MARK);
+      // JSON.parse 后按 model 字段判断（与他处一致）：子串匹配依赖序列化无空格，脆弱
+      const isSub = JSON.parse(body).model === SUB_MODEL;
       if (isSub && !body.includes(NOTE_CONTENT)) {
         // 子代理第一轮：延迟 800ms（给 E2E 留出「运行中切档」窗口），
         // 然后回思考 + read_file 工具调用

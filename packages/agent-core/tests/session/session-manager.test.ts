@@ -6,6 +6,7 @@ import { basename } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ThinkingEffort } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteSessionStore } from "../../src/session/persistence";
 import { createSessionManager } from "../../src/session/manager";
@@ -81,6 +82,33 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     expect(records).toHaveLength(1);
     expect(records[0]?.title).toBe(basename("C:\\work\\demo") || "demo");
     expect(records[0]?.status).toBe("idle");
+    persistence.close();
+  });
+
+  it("注入的模型工厂收到思考档位：sendMessage 带档位时 options 经 manager 透传到工厂", async () => {
+    const persistence = createSqliteSessionStore(":memory:");
+    const factoryOptions: ({ thinkingEffort?: ThinkingEffort } | undefined)[] =
+      [];
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: (_profile, options) => {
+        factoryOptions.push(options);
+        return okModel();
+      },
+    });
+
+    const session = manager.create({ workspacePath: "C:\\work\\demo" });
+    for await (const _event of session.sendMessage({
+      text: "你好",
+      profile,
+      thinkingEffort: "high",
+    })) {
+      // 只驱动流走完
+    }
+
+    // 双参工厂拿到档位快照：签名与 agent-session / subagent 的注入点对齐，
+    // 注入方不再因 TS 参数逆变静默丢弃 thinkingEffort
+    expect(factoryOptions).toEqual([{ thinkingEffort: "high" }]);
     persistence.close();
   });
 
