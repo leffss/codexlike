@@ -94,6 +94,7 @@ describe('formatSessionStatus（/status 展示文案）', () => {
         truncated: false,
       },
       approvalMode: 'suggest',
+      contextWindowTokens: null,
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).toContain('模型：GLM · glm-4.7');
@@ -116,6 +117,7 @@ describe('formatSessionStatus（/status 展示文案）', () => {
         messageCount: 0,
         agentsMd: null,
         approvalMode: mode,
+        contextWindowTokens: null,
         compacted: null,
       } satisfies SessionStatusInfo);
       expect(text).toContain(expected);
@@ -130,6 +132,7 @@ describe('formatSessionStatus（/status 展示文案）', () => {
       messageCount: 0,
       agentsMd: null,
       approvalMode: 'suggest',
+      contextWindowTokens: null,
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).toContain('未选择');
@@ -156,6 +159,7 @@ describe('/compact（手动压缩）ui 分发', () => {
       messageCount: 7,
       agentsMd: null,
       approvalMode: 'suggest',
+      contextWindowTokens: null,
       compacted: { at: '2026-11-11T09:00:00.000Z', messagesCompacted: 8 },
     } satisfies SessionStatusInfo);
     expect(text).toContain('已压缩');
@@ -171,6 +175,7 @@ describe('/compact（手动压缩）ui 分发', () => {
       messageCount: 0,
       agentsMd: null,
       approvalMode: 'suggest',
+      contextWindowTokens: null,
       compacted: null,
     } satisfies SessionStatusInfo);
     expect(text).not.toContain('已压缩');

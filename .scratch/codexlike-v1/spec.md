@@ -192,3 +192,17 @@ tracer-bullet：先打通「配置 → 会话 → 六件核心工具 → 审批 
 ### 用户侧前置
 
 - 注册 Tavily API key（https://tavily.com，免费 1000 次/月）用于验收场景 6。
+
+## Code Review 修复记录
+
+（v1.0 收尾，分支 `feature/review-fixes`，基于 `integration/codexlike-v1` 79b34c8，2026-11-11）
+
+1. 设置页补终端执行偏好（Git Bash 默认 / PowerShell / cmd）：`terminal-settings.json` 持久化 + IPC + 终端工具逐次解析注入，`CODEXLIKE_SHELL` 改为「设置项优先、env 兜底」（保持 E2E 兼容）。
+2. 上下文告警：`evaluateContextWarning` 纯逻辑（窗口 × 80% 阈值；Provider Profile 可配 `contextWindowTokens`，默认 128k），估算超标在输入区上方常驻中文告警「建议执行 /compact」，每轮回复结束/切会话/压缩后重估。
+3. worktree LRU 清理口径扩大：候选从「已归档或孤儿」改为「一切非运行中」（活跃空闲也进候选，按 updatedAt 保留最近 15；运行中的永不清理不变），对齐 story 24「磁盘不被占满」。
+4. JSON store 去重：抽取 `desktop/src/storage/json-file.ts`（readJsonFile：ENOENT→默认值；writeJsonFile：mkdir + 2 空格缩进），profiles / mcp / subagents / search 四个 store 改用之。
+5. E2E helpers 抽取：`e2e/helpers.mjs` 收拢 assert / closeApp（含 10 秒强杀兜底）/ startMockProvider 骨架（SSE 工具集 + seenBodies + 请求计数）/ launchApp，11 条 E2E 脚本改造引用（净删约 880 行重复）。
+6. `chromium.ts` 的 `isElectron` 参数：测试在用（纯 Node 进程验证 Electron 宿主路径），保留并加注释说明，不内联删除。
+7. `app.close()` 偶发不退（工单 11 实证）：排查结论为 Electron 45 Windows 退出收尾的偶发挂起（非本仓代码可控）；主进程 will-quit 增加 2 秒 `app.exit(0)` 强退兜底（unref 不保活），调查结论留档工单 11 Comments。
+
+验证：`pnpm typecheck` 三包全过；`pnpm test` agent-core 294 + desktop 66 + ui 51 = 411 用例全绿；E2E 11 条（smoke/commands/approvals/compact/changes/interrupt/worktree/mcp/subagents/browser/acceptance）全部实跑通过。
