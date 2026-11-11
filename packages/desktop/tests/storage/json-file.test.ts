@@ -51,7 +51,7 @@ describe('writeJsonFile', () => {
     const dir = makeTempDir();
     const path = join(dir, 'nested', 'deeper', 'data.json');
     writeJsonFile(path, { name: '值' });
-    expect(readJsonFile<{ name: string }>(path, {})).toEqual({ name: '值' });
+    expect(readJsonFile<{ name?: string }>(path, {})).toEqual({ name: '值' });
     expect(readFileSync(path, 'utf8')).toBe('{\n  "name": "值"\n}');
   });
 });

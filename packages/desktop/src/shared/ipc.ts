@@ -19,6 +19,7 @@ import type {
 import type { SessionStatusInfo } from '../sessions/status';
 import type { SearchSettings } from '../search/search-settings-store';
 import type { SubagentSettings } from '../subagents/subagent-settings-store';
+import type { TerminalShell } from '@codexlike/agent-core/node';
 import type { McpServerView } from '../mcp/mcp-service';
 import type { McpServerInput } from '../mcp/mcp-store';
 
@@ -26,6 +27,7 @@ import type { McpServerInput } from '../mcp/mcp-store';
 export type { SessionStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
+export type { TerminalShell };
 export type { McpServerView, McpServerInput };
 
 /**
@@ -83,6 +85,11 @@ export const IPC = {
   subagentSettings: {
     get: 'subagent-settings:get',
     set: 'subagent-settings:set',
+  },
+  /** 终端执行偏好（code review 修复 1）：run_terminal_command 的 shell 选择 */
+  terminalSettings: {
+    get: 'terminal-settings:get',
+    set: 'terminal-settings:set',
   },
   /** MCP servers（工单 12）：配置 + 连接状态 + 工具启停 */
   mcp: {
@@ -213,6 +220,12 @@ export interface CodexLikeApi {
      * 改动对后续会话/下一次委派生效。
      */
     set(input: SubagentSettings): Promise<SubagentSettings>;
+  };
+  terminalSettings: {
+    /** 已保存的终端 shell 偏好；未配置返回 null（此时 CODEXLIKE_SHELL 环境变量兜底） */
+    get(): Promise<TerminalShell | null>;
+    /** 保存 shell 偏好（git-bash / powershell / cmd），对下一次终端命令即时生效 */
+    set(shell: TerminalShell): Promise<TerminalShell>;
   };
   mcp: {
     /** 全部 MCP server：配置 + 连接状态 + 发现到的工具（含启停） */

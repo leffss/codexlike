@@ -34,6 +34,13 @@ import {
   createSearchSettingsStore,
   type SearchSettingsStore,
 } from './search/search-settings-store';
+import {
+  createTerminalSettingsStore,
+  isTerminalShell,
+  resolveTerminalShell,
+  type TerminalSettingsStore,
+} from './terminal/terminal-settings-store';
+import type { TerminalShell } from '@codexlike/agent-core/node';
 import { registerSessionHandlers } from './sessions/session-ipc';
 import { sessionScreenshotDir } from './sessions/screenshots';
 import {
@@ -179,8 +186,7 @@ function registerSearchSettingsHandlers(
  * 注册子代理全局设置的 IPC 指令（工单 13）。
  * 设置经内存缓存注入 SubagentsConfig（逐次解析），保存后对下一次委派即时生效；
  * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验）。
- */
-function registerSubagentSettingsHandlers(options: {
+ */function registerSubagentSettingsHandlers(options: {
   store: SubagentSettingsStore;
   profiles: ProfileStore;
   onSaved: (settings: SubagentSettings) => Promise<void>;
@@ -215,6 +221,36 @@ function registerSubagentSettingsHandlers(options: {
   });
 }
 
+/**
+ * 注册终端执行偏好的 IPC 指令（code review 修复 1）。
+ * 偏好经内存缓存注入终端工具（逐次解析），保存后对下一次 run_terminal_command 即时生效。
+ */
+function registerTerminalSettingsHandlers(options: {
+  store: TerminalSettingsStore;
+  onSaved: (shell: TerminalShell) => void;
+}): void {
+  const { store, onSaved } = options;
+  ipcMain.handle(IPC.terminalSettings.get, () => store.get());
+  ipcMain.handle(
+    IPC.terminalSettings.set,
+    (_e: IpcMainInvokeEvent, input: unknown) => {
+      // IPC 边界不信任渲染进程：只接受三档枚举
+      if (!isTerminalShell(input)) {
+        throw new Error('终端偏好必须是 git-bash / powershell / cmd 之一');
+      }
+      return store
+        .set(input)
+        .then((shell) => {
+          onSaved(shell);
+          return shell;
+        })
+        .catch((error: unknown) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        });
+    },
+  );
+}
+
 void app.whenReady().then(async () => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
@@ -239,9 +275,11 @@ void app.whenReady().then(async () => {
   };
   await refreshSearchSource();
 
-  // 内置工具（工单 03 六件 + 工单 10 web_search）：无状态实例，全部会话共享；
-  // 工作区经执行上下文逐会话注入。shell 偏好可用 CODEXLIKE_SHELL 环境变量切换（设置页 UI 在后续工单接入）。
-  const shellEnv = process.env['CODEXLIKE_SHELL'];
+  // 终端执行偏好（code review 修复 1，spec「设置页：… shell 偏好」）：
+  // 内存缓存逐次解析注入终端工具——设置页保存后无需重启即对下一次命令生效；
+  // 未配置时 CODEXLIKE_SHELL 环境变量兜底（E2E/自动化兼容），最终默认 Git Bash。
+  const terminalSettingsStore = createTerminalSettingsStore({ dir: dataDir() });
+  let shellPreference = await terminalSettingsStore.get();
   // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
   // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
   const browserManager = createBrowserSessionManager({
@@ -255,10 +293,8 @@ void app.whenReady().then(async () => {
 
   const builtinTools = createBuiltinTools({
     env: process.env,
-    shell:
-      shellEnv === 'powershell' || shellEnv === 'cmd' || shellEnv === 'git-bash'
-        ? shellEnv
-        : undefined,
+    // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 shellPreference 缓存）
+    shell: () => resolveTerminalShell(shellPreference, process.env['CODEXLIKE_SHELL']),
     webSearch: { searchSource: () => searchSource },
   });
 
@@ -349,6 +385,12 @@ void app.whenReady().then(async () => {
     store: subagentSettingsStore,
     profiles: profileStore,
     onSaved: refreshSubagentSettings,
+  });
+  registerTerminalSettingsHandlers({
+    store: terminalSettingsStore,
+    onSaved: (shell: TerminalShell) => {
+      shellPreference = shell;
+    },
   });
   registerMcpHandlers(mcpService);
   registerSessionHandlers({

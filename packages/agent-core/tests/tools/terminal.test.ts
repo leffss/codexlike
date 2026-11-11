@@ -172,6 +172,31 @@ describe('run_terminal_command 工具（默认 Git Bash）', () => {
   );
 
   it(
+    'shell 支持函数形态逐次解析：中途切换对后续命令生效（设置页保存后无需重启工具实例）',
+    async () => {
+      if (process.platform !== 'win32') return; // PowerShell/cmd 仅 Windows
+      const workspace = makeWorkspace();
+      let current: 'git-bash' | 'cmd' = 'git-bash';
+      const tool = createTerminalTool({ env: baseEnv, shell: () => current });
+
+      // Git Bash：POSIX 语法可用
+      const viaBash = await tool.execute(
+        { command: 'echo from-bash && cat /dev/null' },
+        context(workspace),
+      );
+      expect(viaBash.isError).toBe(false);
+      expect(viaBash.output).toContain('from-bash');
+
+      // 切到 cmd：同一工具实例的下一次执行立即用 cmd（POSIX 语法不可用，cmd 语法 echo 可用）
+      current = 'cmd';
+      const viaCmd = await tool.execute({ command: 'echo from-cmd' }, context(workspace));
+      expect(viaCmd.isError).toBe(false);
+      expect(viaCmd.output).toContain('from-cmd');
+    },
+    30_000,
+  );
+
+  it(
     'AbortSignal 中断：长命令执行中终止子进程，输出标记为用户中断（区别于超时）',
     async () => {
       const workspace = makeWorkspace();

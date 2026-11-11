@@ -6,11 +6,15 @@ import { defineTool } from './define-tool';
 import { windowsToPosixAbsolute } from './paths';
 import { resolveInWorkspace } from './workspace';
 
-/** 可配置 shell（spec：默认 Git Bash，可切换 PowerShell/cmd；设置页在后续工单接入） */
+/** 可配置 shell（spec：默认 Git Bash，可切换 PowerShell/cmd） */
 export type TerminalShell = 'git-bash' | 'powershell' | 'cmd';
 
 export interface TerminalToolOptions {
-  shell?: TerminalShell;
+  /**
+   * shell 偏好：静态值或逐次解析的函数（宿主可注入「设置项优先、环境变量兜底」的
+   * 合并逻辑，设置页保存后无需重启工具实例即对下一次命令生效）；缺省 git-bash。
+   */
+  shell?: TerminalShell | (() => TerminalShell);
   /** 宿主传入的完整环境变量；工具层按白名单过滤（不透传全部，spec 约定） */
   env?: Record<string, string | undefined>;
   /** 默认超时（毫秒） */
@@ -151,7 +155,9 @@ function killTree(child: ChildProcess): void {
 }
 
 export function createTerminalTool(options: TerminalToolOptions = {}) {
-  const shell: TerminalShell = options.shell ?? 'git-bash';
+  /** shell 在每次执行时解析（函数形态支持设置页保存后即时生效） */
+  const resolveShell = (): TerminalShell =>
+    typeof options.shell === 'function' ? options.shell() : (options.shell ?? 'git-bash');
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
   const maxTimeoutMs = options.maxTimeoutMs ?? 120_000;
   const maxOutputLength = options.maxOutputLength ?? 30_000;
@@ -188,6 +194,7 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
       }
 
       const cwd = resolveInWorkspace(context.workspacePath, cwdArg ?? '.');
+      const shell = resolveShell();
       const plan = buildSpawnPlan(shell, command, cwd, filterEnv(env));
 
       return await new Promise((resolve) => {
