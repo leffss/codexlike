@@ -11,13 +11,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
 import { _electron as electron } from 'playwright-core';
+import { launchTarget } from './launch-target.mjs';
 
-const require = createRequire(import.meta.url);
-const DESKTOP_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const ELECTRON_BIN = require('electron');
 
 function assert(condition, message) {
   if (!condition) {
@@ -150,7 +147,7 @@ async function launchApp(homeDir) {
     CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
     VITE_DEV_SERVER_URL: '',
   };
-  const app = await electron.launch({ executablePath: ELECTRON_BIN, args: [DESKTOP_DIR], env });
+  const app = await electron.launch(launchTarget(env));
   app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
   app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
   const window = await app.firstWindow();
