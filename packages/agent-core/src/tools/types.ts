@@ -5,6 +5,7 @@
  */
 import type { ApprovalMode } from "../session/approval";
 import type { ProviderProfile } from "../provider/provider-profile";
+import type { ThinkingEffort } from "../provider/language-model";
 
 /**
  * 权限类别（GLOSSARY「审批模式」三档的判定输入）：
@@ -30,6 +31,12 @@ export interface ToolExecutionContext {
    * spawn_subagent 在「子代理模型 = 同主模型」时以此回退；其余工具可忽略。
    */
   profile?: ProviderProfile;
+  /**
+   * 本次 sendMessage 固定的思考档位快照（GLOSSARY「思考档位」，思考档位 03）：
+   * 与 profile 同一通道由主会话工具执行入口转发；spawn_subagent 委派入队时
+   * 以此捕获快照（排队/运行/全部工具轮次均用它），其余工具可忽略。
+   */
+  thinkingEffort?: ThinkingEffort;
   /**
    * 模型给定的 tool call id：spawn_subagent 委派与报告回流的绑定键（工单 13）、
    * 截图文件命名（工单 11）；测试注入固定值

@@ -27,3 +27,32 @@
 ## Testing notes
 
 复用现有主/子模型分离注入、事件收集器、排队控制及 desktop 子代理 E2E 的本地 mock provider。使用受控屏障或明确事件推进验证排队和并发快照，避免用不稳定的固定延迟充当顺序保证。最终报告区分客户端请求契约验证与真实服务端支持验证。
+
+## Comments
+
+### 2026-11-11 implementer 验收证据（feat/thinking-effort-03）
+
+**实现**（commit 于本分支，基于 a32b80b）：
+
+- `packages/agent-core/src/tools/types.ts`：`ToolExecutionContext.thinkingEffort?`——档位随既有 profile 通道由主会话工具执行入口转发（agent-session.ts 两处 runTool 上下文均带发送时快照）。
+- `packages/agent-core/src/session/subagent.ts`：委派 `execute` **入队时**捕获 `context.thinkingEffort ?? "auto"` 存入 `SubagentEntry.thinkingEffort`；`runSubagent` 全部模型轮次 `modelFor(profile, { thinkingEffort: entry.thinkingEffort })` 复用快照；`SubagentsConfig.languageModelFor` 签名对齐主会话工厂 `(profile, options)`；fullStream 新增 `reasoning-delta` → emit `subagent-reasoning`。
+- `packages/agent-core/src/session/types.ts`：新事件 `subagent-reasoning { subagentId, delta }`（穿过既有 emit/buffer/pump 与通用 IPC envelope，desktop 无需改动）。
+- UI：`UiSubagent.reasoning` + `applySessionEvent` 归并（按 subagentId 累积）；`SubagentCard` 流式折叠思考块（`subagent-thinking-block` / `-toggle` / `-content` / 运行中 `-indicator`，默认收起，完成态保留可回看，历史恢复不重建）。
+- E2E：新增 `packages/desktop/e2e/subagent-thinking.mjs`（双 Profile 按 model 分流 mock：独立 Profile 使用、主/子 body 档位字段、运行中切 off 不影响已触发子代理且下一条消息生效、子代理思考不回传第二轮请求、SubagentCard 折叠交互与报告互不混入）；挂进 desktop `test:e2e:all` 与 root `test:e2e:subagent-thinking`。
+
+**单测**（`packages/agent-core/tests/session/subagent-thinking.test.ts`，9 用例；UI `subagent-view.test.ts` +4 用例）：
+
+- 独立 Profile 与 null 回退主模型两条路径均继承触发消息档位（工厂记录 (profile, options) 断言）。
+- 并发上限 1 下第二个委派出队启动仍用快照；未传档位等价 auto；排队/运行/工具轮次全部轮次同档。
+- `subagent-reasoning` 带正确 subagentId、与主会话 `assistant-reasoning` 及并发子代理互不串流；思考不进报告/正文/落库（messages+toolCalls JSON 断言）。
+- 真实工厂 + fetch 替身全链路：子代理第一轮 reasoning_content + tool_call → 第二轮请求 body 不含思考、不含 reasoning_content 字段、含工具结果（钉住 provider transformParams 剥离不回传）；子代理请求 body 为 `thinking.type=enabled` + `reasoning_effort=high`。
+- 主会话中断联动取消：只有思考尚无正文的子代理正确终止，已流出 reasoning 保留，`subagent-report` ok=false 收敛，`assistant-aborted` 收尾。
+- UI 归并：增量累积到所属卡片、report 后 reasoning 保留且与报告分离、未知 subagentId 忽略、历史加载不重建。
+
+**验证退出码**（工作树 C:/Users/leffss/Desktop/ai-agent-thinking-03）：
+
+- `pnpm test` → 0（desktop 43 + agent-core 13 + ui 9 测试文件全绿）
+- `pnpm typecheck` → 0
+- `pnpm test:e2e:all` → 0（14 个场景含既有回归与新增 subagent-thinking；日志尾部 "database is not open" 为 closeApp 后收尾噪音，既有 thinking.mjs 亦出现且断言全过）
+
+**限制说明**：mock provider 验证的是客户端请求契约（客户端确实发送 spec 规定字段并消费 reasoning_content SSE），不宣称真实远端服务端支持全部五档；五档 `auto`/`off` 的子代理 body 字段由 01/02 票的工厂表驱动测试与 E2E 覆盖，本票 E2E 覆盖 high（enabled+effort）与下一条消息 off（disabled、无 effort）。

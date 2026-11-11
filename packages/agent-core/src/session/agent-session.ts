@@ -607,6 +607,8 @@ export function createAgentSession(
                       toolCallId: call.toolCallId,
                       signal,
                       profile,
+                      // 档位快照随 profile 同一通道转发（spawn_subagent 入队捕获）
+                      thinkingEffort: effort,
                     });
                     output = executed.output;
                     isError = executed.isError;
@@ -619,6 +621,7 @@ export function createAgentSession(
                     toolCallId: call.toolCallId,
                     signal,
                     profile,
+                    thinkingEffort: effort,
                   });
                   output = executed.output;
                   isError = executed.isError;

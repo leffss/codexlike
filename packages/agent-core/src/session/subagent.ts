@@ -22,6 +22,10 @@ import {
 } from "ai";
 
 import { createLanguageModelFromProfile } from "../provider/language-model";
+import type {
+  CreateLanguageModelOptions,
+  ThinkingEffort,
+} from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
 import type {
@@ -62,8 +66,15 @@ export interface SubagentRuntimeSettings {
 export interface SubagentsConfig {
   /** 子代理可用工具（完整工具集，剔除 spawn_subagent 由编排器保证；支持工厂逐次解析） */
   tools: ToolDefinition[] | (() => ToolDefinition[]);
-  /** Provider Profile → 语言模型 工厂；缺省 OpenAI 兼容构造 */
-  languageModelFor?: (profile: ProviderProfile) => LanguageModel;
+  /**
+   * Provider Profile → 语言模型 工厂；缺省 OpenAI 兼容构造。
+   * options 携带触发消息的思考档位快照（委派入队时捕获，全部轮次复用）；
+   * 签名与主会话 languageModelFor 一致（思考档位 03）。
+   */
+  languageModelFor?: (
+    profile: ProviderProfile,
+    options: CreateLanguageModelOptions
+  ) => LanguageModel;
   /** 逐次解析的运行时设置（并发上限）；改动对下一次委派生效 */
   settings(): SubagentRuntimeSettings;
   /**
@@ -108,6 +119,12 @@ interface SubagentEntry {
   toolCallId: string;
   task: string;
   state: "queued" | "running" | "done";
+  /**
+   * 触发消息的思考档位快照（spec「子代理继承触发消息的档位」）：
+   * 委派入队时从工具执行上下文捕获，排队等待、出队启动与全部
+   * 模型/工具轮次均用它，不读 UI 当前值；缺省 auto。
+   */
+  thinkingEffort: ThinkingEffort;
   /** 最终报告（成功）或中文失败/中断原因 */
   output: string;
   isError: boolean;
@@ -302,7 +319,8 @@ export function createSubagentOrchestrator(
       let settled = false;
       while (!settled) {
         const result = streamText({
-          model: modelFor(profile),
+          // 全部轮次复用入队时捕获的档位快照（运行中主会话切档不影响本任务）
+          model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
           system: SUBAGENT_SYSTEM_PROMPT,
           messages,
           tools: modelTools,
@@ -315,7 +333,15 @@ export function createSubagentOrchestrator(
           input: unknown;
         }[] = [];
         for await (const part of result.fullStream) {
-          if (part.type === "text-delta") {
+          if (part.type === "reasoning-delta") {
+            // 思考与报告分离：只作为事件流出（嵌套卡片流式展示），
+            // 不累积进报告文本、不进入子代理消息上下文
+            emit({
+              type: "subagent-reasoning",
+              subagentId: entry.subagentId,
+              delta: part.text,
+            });
+          } else if (part.type === "text-delta") {
             output += part.text;
           } else if (part.type === "tool-call") {
             toolCalls.push({
@@ -464,6 +490,8 @@ export function createSubagentOrchestrator(
         toolCallId: context.toolCallId ?? subagentId,
         task,
         state: "queued",
+        // 档位快照在入队时捕获（spec：排队任务不读出队时的新值）
+        thinkingEffort: context.thinkingEffort ?? "auto",
         output: "",
         isError: false,
       };

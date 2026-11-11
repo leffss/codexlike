@@ -190,6 +190,13 @@ export type SessionEvent =
       call: ToolCallRecord;
     }
   /**
+   * 子代理思考过程的流式增量（GLOSSARY「思考档位」，思考档位 03）：
+   * 与报告文本分离，按 subagentId 归属各自的嵌套卡片（并发不串流）；
+   * 仅运行期展示，不写入持久化、不回传请求历史（provider 层剥离），
+   * 终态由 subagent-report 一并收敛。
+   */
+  | { type: "subagent-reasoning"; subagentId: string; delta: string }
+  /**
    * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
    * ok=false 表示失败或被中断（report 为中文原因）。
    */

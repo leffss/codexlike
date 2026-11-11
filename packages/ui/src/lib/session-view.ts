@@ -76,6 +76,11 @@ export interface UiSubagent {
   state: "queued" | "running" | "done";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
+  /**
+   * 子代理思考过程（GLOSSARY「思考档位」，思考档位 03）：与报告文本分开累积，
+   * 仅运行期展示（历史加载不重建）；终态由 subagent-report 收敛。
+   */
+  reasoning?: string;
   report: string | null;
   /** null = 未结束；false = 失败或被中断 */
   ok: boolean | null;
@@ -321,6 +326,14 @@ export function applySessionEvent(
           ),
         };
       });
+
+    case "subagent-reasoning":
+      // 子代理思考：与报告分离累积到所属卡片；未知 subagentId（会话切换后迟到）忽略
+      return messages.map((item) =>
+        item.kind === "subagent" && item.id === event.subagentId
+          ? { ...item, reasoning: (item.reasoning ?? "") + event.delta }
+          : item
+      );
 
     case "subagent-report":
       return messages.map((item) =>
