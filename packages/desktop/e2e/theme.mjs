@@ -27,6 +27,10 @@ async function main() {
     // 1) 首次启动：未配置偏好 → 默认浅色
     const first = await launchApp({ homeDir });
     const window = first.window;
+    // E2E 的 Electron userData（localStorage 所在）未随 homeDir 隔离：清掉此前
+    // 运行残留的主题镜像并 reload，还原真实「未配置」首启（json 偏好已由 homeDir 隔离）
+    await window.evaluate(() => localStorage.clear());
+    await window.reload();
     assert(
       (await themeOf(window)) === "light",
       "未配置时应默认浅色（html[data-theme=light]）"
