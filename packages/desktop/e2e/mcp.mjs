@@ -4,15 +4,13 @@
 // → fake server 经 stdio 真实往返、结果回填模型 → 最终回复
 // → 重启应用 → server 自动重连（startup）。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:mcp（先全仓 build）。
-import http from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { DESKTOP_DIR, launchTarget } from './launch-target.mjs';
+import { DESKTOP_DIR } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
 const FIXTURE = resolve(
   DESKTOP_DIR,
@@ -24,111 +22,13 @@ const FIXTURE = resolve(
   'fake-mcp-server.mjs',
 );
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
-/** 本地 OpenAI 兼容 mock：消息 1 请求 MCP 工具调用，消息 2（重启后）再调一次验证恢复 */
+/** 场景脚本：消息 1 请求 MCP 工具调用，消息 2（重启后）再调一次验证恢复 */
 const SCRIPT = [
   { tool: { name: 'mcp_fake_echo', arguments: { text: '来自 E2E 的问候' } } },
   { text: 'MCP 工具已执行并返回结果' },
   { tool: { name: 'mcp_fake_echo', arguments: { text: '重启后再次调用' } } },
   { text: '重启后 MCP 仍可用' },
 ];
-
-function startMockProvider() {
-  let requestCount = 0;
-  const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-      const step = SCRIPT[Math.min(requestCount++, SCRIPT.length - 1)];
-      res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      });
-      const send = (payload) =>
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-e2e',
-            object: 'chat.completion.chunk',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, ...payload }],
-          })}\n\n`,
-        );
-      const finishWith = (reason) => {
-        send({ delta: {}, finish_reason: reason });
-        res.write('data: [DONE]\n\n');
-        res.end();
-      };
-      if (step.tool !== undefined) {
-        send({
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: `call-${requestCount}`,
-                type: 'function',
-                function: {
-                  name: step.tool.name,
-                  arguments: JSON.stringify(step.tool.arguments),
-                },
-              },
-            ],
-          },
-          finish_reason: null,
-        });
-        setTimeout(() => finishWith('tool_calls'), 30);
-        return;
-      }
-      send({ delta: { content: step.text }, finish_reason: null });
-      setTimeout(() => finishWith('stop'), 30);
-      return;
-    }
-    res.writeHead(404);
-    res.end('not found');
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
-}
 
 /** 在设置页配置 Provider Profile + 添加 MCP server 并等待连接 */
 async function setupSettings(window, port) {
@@ -170,14 +70,21 @@ async function setupSettings(window, port) {
 }
 
 async function main() {
-  const { server, port } = await startMockProvider();
+  const { server, port } = await startMockProvider((ctx, { index }) => {
+    const step = SCRIPT[Math.min(index - 1, SCRIPT.length - 1)];
+    if (step.tool !== undefined) {
+      ctx.toolCallRound(`call-${index}`, step.tool.name, step.tool.arguments);
+      return;
+    }
+    ctx.textRound(step.text);
+  });
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-mcp-'));
   mkdirSync(join(homeDir, 'workspace'));
 
   let app;
   try {
     // 1) 首次启动：设置页配置 Profile + MCP server
-    const first = await launchApp(homeDir);
+    const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
     await setupSettings(window, port);
@@ -222,7 +129,7 @@ async function main() {
 
     // 4) 重启应用：MCP server 自动重连（startup），会话中再次调用仍走通
     await closeApp(app);
-    const second = await launchApp(homeDir);
+    const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
     await window.getByTestId('session-item').first().waitFor({ timeout: 15_000 });

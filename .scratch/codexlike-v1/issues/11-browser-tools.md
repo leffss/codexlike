@@ -47,3 +47,12 @@
 
 - `pnpm typecheck` 三包全过；`pnpm test`：agent-core 283 + desktop 52 + ui 51 = 386 用例全绿（本工单新增 23：安装器 9、manager 4、工具 8、附图 2；并行工单用例随合并纳入）。
 - E2E 10 条全部通过：smoke、commands、approvals、compact、changes、interrupt、mcp、subagents、worktree、**browser（本工单新增：Electron 主进程内真实 navigate/screenshot，截图落盘+卡片内嵌图片+降级回填断言）**。
+
+### `app.close()` 偶发不退——调查结论与主进程兜底（code review 修复 7，2026-11-11 补记）
+
+- **现象**：全部功能断言通过后，Playwright `_electron` 的 `app.close()` 偶发不 resolve（进程挂着），集成分支 10 号合并后即存在，非浏览器工单引入；E2E 以 `closeApp`（10 秒后 `app.process().kill()` 强杀）兜底。
+- **排查**：
+  1. 主进程 will-quit 收尾**没有** `preventDefault`（早期版本有过 preventDefault + 二次 quit，那才是确定的挂起路径，已改掉）；收尾全部尽力而为（`persistence.close()` 同步 + `mcpService.shutdown()` / `browserManager.close()` fire-and-forget），JS 层没有能阻塞 quit 序列的代码。
+  2. `mcpService`（stdio 子进程）与 `browserManager`（Playwright Chromium 子进程）的子进程句柄不阻止 Electron 在 quit 后退出；挂起发生在 Electron/Chromium 自身的退出收尾（疑因：窗口销毁与 WebContents teardown 竞态、GPU/utility 子进程收尾——Electron 45 Windows 上偶发，非本仓代码可控，无法确定性复现）。
+- **处置**（可靠的强制退出兜底进主进程而非仅 E2E）：main.ts 的 will-quit 里追加 `setTimeout(() => app.exit(0), 2_000).unref()`——正常退出在毫秒级完成、进程先于定时器结束（unref 也不保活）；一旦收尾挂起，2 秒后 `app.exit(0)` 强制退出（`app.exit` 不再触发 will-quit，无递归风险）。E2E 侧 `closeApp` 的 10 秒强杀保留作第二道保险。
+- **验证**：修复后 11 条 E2E 全部实跑通过（见 spec.md「Code Review 修复记录」）。

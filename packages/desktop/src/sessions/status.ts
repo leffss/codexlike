@@ -18,6 +18,11 @@ export interface SessionStatusInfo {
    * 压缩后为压缩后用量（compact-summary 摘要按上下文消息计入）。
    */
   estimatedContextTokens: number;
+  /**
+   * 最近一次发送消息所用模型的上下文窗口（tokens，来自 Provider Profile 的可选配置）；
+   * Profile 未配置或已删除时为 null——UI 按 agent-core 默认值（128k）计算告警阈值。
+   */
+  contextWindowTokens: number | null;
   /** 进入上下文估算的消息条数（user + assistant + compact-summary） */
   messageCount: number;
   /** AGENTS.md 来源摘要；未发现任何文件为 null */
@@ -36,6 +41,8 @@ export function buildSessionStatus(input: {
   messages: StoredMessage[];
   agentsMd: AgentsMdDiscovery;
   providerProfileName: string | null;
+  /** 最近一次发送消息所用 Profile 的上下文窗口（未配置/无 Profile 传 null） */
+  contextWindowTokens?: number | null;
   /** 最近一次 compact 记录（listCompacts 末条）；未压缩传 null */
   latestCompact: CompactRecord | null;
 }): SessionStatusInfo {
@@ -54,6 +61,7 @@ export function buildSessionStatus(input: {
     model: record.model,
     providerProfileName: input.providerProfileName,
     estimatedContextTokens: estimated,
+    contextWindowTokens: input.contextWindowTokens ?? null,
     messageCount: contextMessages.length,
     agentsMd:
       agentsMd.sections.length === 0

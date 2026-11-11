@@ -3,38 +3,13 @@
 // → 最终文本。断言：工具卡片渲染、截图真实落盘到会话数据目录、截图卡片内嵌图片
 // （IPC 读回 dataURL）回填给模型的 tool result 为文本降级（未设附图开关）。
 // 运行：pnpm test:e2e:browser（先全仓 build；本机需已有 Chromium 缓存或首次自动下载）。
-import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
 /** 浏览器工具要抓取的 fixture 页（标题与正文唯一，便于断言） */
 const FIXTURE_HTML = `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>E2E 浏览器页</title></head>
@@ -44,109 +19,39 @@ const FIXTURE_HTML = `<!doctype html>
  * 一个端口同时提供：
  * - GET /page：浏览器 fixture 页
  * - POST /v1/chat/completions：OpenAI 兼容 mock——第 1 轮 browser_navigate、
- *   第 2 轮 browser_screenshot、之后流式文本；记录每轮请求体供断言。
+ *   第 2 轮 browser_screenshot、之后流式文本；请求体由骨架记录供断言。
  */
-async function startServers() {
-  const receivedBodies = [];
-  const server = http.createServer((req, res) => {
-    if (req.method === 'GET' && req.url === '/page') {
+async function main() {
+  const { server, port, seenBodies: receivedBodies } = await startMockProvider(
+    (ctx, { index }) => {
+      if (index === 1) {
+        ctx.toolCallRound('call-e2e-nav', 'browser_navigate', {
+          url: `http://127.0.0.1:${ctx.port}/page`,
+        });
+        return;
+      }
+      if (index === 2) {
+        ctx.toolCallRound('call-e2e-shot', 'browser_screenshot', {});
+        return;
+      }
+      ctx.textChunksRound(['截图已收到，', '浏览器工具链路 OK']);
+    },
+    (req, res) => {
+      if (req.method !== 'GET' || req.url !== '/page') {
+        return false;
+      }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(FIXTURE_HTML);
-      return;
-    }
-    if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-      });
-      req.on('end', () => {
-        receivedBodies.push(body);
-        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-        const send = (payload) =>
-          res.write(
-            `data: ${JSON.stringify({
-              id: 'chatcmpl-e2e-browser',
-              object: 'chat.completion.chunk',
-              created: 0,
-              model: 'mock-model',
-              choices: [{ index: 0, ...payload }],
-            })}\n\n`,
-          );
-        const finishWith = (reason) => {
-          send({ delta: {}, finish_reason: reason });
-          res.write('data: [DONE]\n\n');
-          res.end();
-        };
-
-        const toolCall = (id, name, args) => {
-          send({
-            delta: {
-              tool_calls: [
-                { index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(args) } },
-              ],
-            },
-            finish_reason: null,
-          });
-          setTimeout(() => finishWith('tool_calls'), 30);
-        };
-
-        const round = receivedBodies.length;
-        if (round === 1) {
-          toolCall('call-e2e-nav', 'browser_navigate', { url: `http://127.0.0.1:${server.address().port}/page` });
-          return;
-        }
-        if (round === 2) {
-          toolCall('call-e2e-shot', 'browser_screenshot', {});
-          return;
-        }
-        const chunks = ['截图已收到，', '浏览器工具链路 OK'];
-        let index = 0;
-        const timer = setInterval(() => {
-          if (index < chunks.length) {
-            send({ delta: { content: chunks[index++] }, finish_reason: null });
-            return;
-          }
-          clearInterval(timer);
-          finishWith('stop');
-        }, 30);
-      });
-      return;
-    }
-    res.writeHead(404);
-    res.end('not found');
-  });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  return { server, port: server.address().port, receivedBodies };
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
-}
-
-async function main() {
-  const { server, port, receivedBodies } = await startServers();
+      return true;
+    },
+  );
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-browser-'));
   mkdirSync(join(homeDir, 'workspace'));
 
   let app;
   try {
     // 1) 预置 Profile + 建会话
-    const launched = await launchApp(homeDir);
+    const launched = await launchApp({ homeDir });
     app = launched.app;
     const window = launched.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();

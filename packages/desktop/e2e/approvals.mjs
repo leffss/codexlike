@@ -3,40 +3,15 @@
 // → 命令真实执行 + 同首词命令后续不再询问 → 重启后审批记忆仍生效
 // → 切 readonly 后写入被真实拦截 → /status 显示审批模式真实值。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:approvals（先全仓 build）。
-import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
 /**
- * 本地 OpenAI 兼容 mock：按请求序号脚本化（03 踩坑：tool_call 走
+ * 场景脚本：按请求序号脚本化（03 踩坑：tool_call 走
  * delta.tool_calls + finish_reason 'tool_calls'；arguments 是 JSON 字符串）。
  * 轮次 = 每次发送消息一轮工具调用 + 一轮收尾文本。
  */
@@ -55,92 +30,22 @@ const SCRIPT = [
   { text: '写入被拒绝，我只读' },
 ];
 
-function startMockProvider() {
-  let requestCount = 0;
-  const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-      const step = SCRIPT[Math.min(requestCount++, SCRIPT.length - 1)];
-      res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      });
-      const send = (payload) =>
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-e2e',
-            object: 'chat.completion.chunk',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, ...payload }],
-          })}\n\n`,
-        );
-      const finishWith = (reason) => {
-        send({ delta: {}, finish_reason: reason });
-        res.write('data: [DONE]\n\n');
-        res.end();
-      };
-      if (step.tool !== undefined) {
-        send({
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: `call-${requestCount}`,
-                type: 'function',
-                function: {
-                  name: step.tool.name,
-                  arguments: JSON.stringify(step.tool.arguments),
-                },
-              },
-            ],
-          },
-          finish_reason: null,
-        });
-        setTimeout(() => finishWith('tool_calls'), 30);
-        return;
-      }
-      send({ delta: { content: step.text }, finish_reason: null });
-      setTimeout(() => finishWith('stop'), 30);
+async function main() {
+  const { server, port } = await startMockProvider((ctx, { index }) => {
+    const step = SCRIPT[Math.min(index - 1, SCRIPT.length - 1)];
+    if (step.tool !== undefined) {
+      ctx.toolCallRound(`call-${index}`, step.tool.name, step.tool.arguments);
       return;
     }
-    res.writeHead(404);
-    res.end('not found');
+    ctx.textRound(step.text);
   });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
-}
-
-async function main() {
-  const { server, port } = await startMockProvider();
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-approval-'));
   mkdirSync(join(homeDir, 'workspace'));
 
   let app;
   try {
     // 1) 启动 → 设置页创建 Profile → 新建会话（默认 suggest）
-    const first = await launchApp(homeDir);
+    const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -211,7 +116,7 @@ async function main() {
 
     // 6) 重启（等价应用重启）→ 审批记忆随会话恢复仍生效
     await closeApp(app);
-    const second = await launchApp(homeDir);
+    const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
     await window.getByTestId('session-item').first().waitFor({ timeout: 15_000 });

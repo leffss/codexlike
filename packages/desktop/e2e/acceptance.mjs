@@ -5,37 +5,13 @@
 //   两会话各写一个文件，断言落盘互不干扰（主仓库/副本各得其所，git status 不串）。
 // 与其余九条既有 E2E（smoke/commands/approvals/compact/changes/interrupt/worktree/mcp/subagents/browser）
 // 一起构成九条场景的打包产物走查；设 CODEXLIKE_PACKAGED_EXE 指向安装版/便携版 exe。
-import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（11 号实证），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
@@ -62,128 +38,6 @@ const FIX_PATCH = `*** Begin Patch
      total += i;
 *** End Patch`;
 
-/**
- * 本地 OpenAI 兼容 mock：场景 2 五轮（read → grep → apply_patch → 审批命令 → 收尾）
- * 与场景 5 四轮（会话 A 写文件/收尾、会话 B 写文件/收尾）合用一个 server，
- * 以「当前阶段 + 请求序号」驱动；非流式请求（提交消息生成）返回固定中文消息。
- */
-function startMockProvider() {
-  let phase = 'scenario2';
-  let count = 0;
-  const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url === undefined || !req.url.endsWith('/chat/completions')) {
-      res.writeHead(404);
-      res.end('not found');
-      return;
-    }
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (!body.includes('"stream":true')) {
-        // 非流式：generateCommitMessage（改动面板「生成提交消息」）
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            id: 'chatcmpl-commit',
-            object: 'chat.completion',
-            created: 0,
-            model: 'mock-model',
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '修复 sumTo 的 off-by-one 边界错误' },
-                finish_reason: 'stop',
-              },
-            ],
-          }),
-        );
-        return;
-      }
-      count += 1;
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-      const send = (payload) =>
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-acceptance',
-            object: 'chat.completion.chunk',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, ...payload }],
-          })}\n\n`,
-        );
-      const finishWith = (reason) => {
-        send({ delta: {}, finish_reason: reason });
-        res.write('data: [DONE]\n\n');
-        res.end();
-      };
-      const toolCallRound = (callId, name, args) => {
-        send({
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: callId,
-                type: 'function',
-                function: { name, arguments: JSON.stringify(args) },
-              },
-            ],
-          },
-          finish_reason: null,
-        });
-        setTimeout(() => finishWith('tool_calls'), 30);
-      };
-      const textRound = (text) => {
-        send({ delta: { content: text }, finish_reason: null });
-        setTimeout(() => finishWith('stop'), 30);
-      };
-
-      if (phase === 'scenario2') {
-        if (count === 1) return toolCallRound('call-a2-read', 'read_file', { path: 'calc.js' });
-        if (count === 2) return toolCallRound('call-a2-grep', 'grep', { pattern: 'sumTo' });
-        if (count === 3) return toolCallRound('call-a2-patch', 'apply_patch', { patch: FIX_PATCH });
-        if (count === 4)
-          return toolCallRound('call-a2-run', 'run_terminal_command', { command: 'node calc.js' });
-        return textRound('已修复 sumTo 的边界错误：验证输出 sumTo(5) = 15。');
-      }
-      // scenario5：A 会话两轮（1 偏移 = 场景 2 已耗 5 次）→ B 会话两轮
-      if (count === 6) return toolCallRound('call-a5-a', 'write_file', { path: 'a-local.txt', content: '会话 A（本目录直跑）' });
-      if (count === 7) return textRound('A 会话文件已写入。');
-      if (count === 8) return toolCallRound('call-a5-b', 'write_file', { path: 'b-worktree.txt', content: '会话 B（worktree 模式）' });
-      return textRound('B 会话文件已写入隔离副本。');
-    });
-  });
-  return {
-    server: new Promise((resolveServer) => {
-      server.listen(0, '127.0.0.1', () => resolveServer(server));
-    }),
-    /** 切到场景 5 分支（在场景 2 的 5 次请求全部完成后调用） */
-    enterScenario5() {
-      phase = 'scenario5';
-    },
-  };
-}
-
-async function launchApp(homeDir, workspaceDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: workspaceDir,
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
-}
-
 /** 配置 Provider Profile（全新数据目录首次使用的第一步） */
 async function configureProfile(window, port) {
   await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -202,9 +56,51 @@ async function configureProfile(window, port) {
 }
 
 async function main() {
-  const { server: serverReady, enterScenario5 } = startMockProvider();
-  const server = await serverReady;
-  const port = server.address().port;
+  /**
+   * 场景脚本：场景 2 五轮（read → grep → apply_patch → 审批命令 → 收尾）
+   * 与场景 5 四轮（会话 A 写文件/收尾、会话 B 写文件/收尾）合用一个 server，
+   * 以「当前阶段 + 请求序号」驱动；非流式请求（提交消息生成）返回固定中文消息。
+   */
+  let phase = 'scenario2';
+  // 只对流式请求计数（与原实现一致）：非流式的提交消息生成不打断轮次序号
+  let streamCount = 0;
+  const { server, port } = await startMockProvider((ctx, { body }) => {
+    if (!body.includes('"stream":true')) {
+      // 非流式：generateCommitMessage（改动面板「生成提交消息」）
+      ctx.respondJson({
+        id: 'chatcmpl-commit',
+        object: 'chat.completion',
+        created: 0,
+        model: 'mock-model',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: '修复 sumTo 的 off-by-one 边界错误' },
+            finish_reason: 'stop',
+          },
+        ],
+      });
+      return;
+    }
+    streamCount += 1;
+    if (phase === 'scenario2') {
+      if (streamCount === 1) return ctx.toolCallRound('call-a2-read', 'read_file', { path: 'calc.js' });
+      if (streamCount === 2) return ctx.toolCallRound('call-a2-grep', 'grep', { pattern: 'sumTo' });
+      if (streamCount === 3) return ctx.toolCallRound('call-a2-patch', 'apply_patch', { patch: FIX_PATCH });
+      if (streamCount === 4)
+        return ctx.toolCallRound('call-a2-run', 'run_terminal_command', { command: 'node calc.js' });
+      return ctx.textRound('已修复 sumTo 的边界错误：验证输出 sumTo(5) = 15。');
+    }
+    // scenario5：A 会话两轮（1 偏移 = 场景 2 已耗 5 次）→ B 会话两轮
+    if (streamCount === 6) return ctx.toolCallRound('call-a5-a', 'write_file', { path: 'a-local.txt', content: '会话 A（本目录直跑）' });
+    if (streamCount === 7) return ctx.textRound('A 会话文件已写入。');
+    if (streamCount === 8) return ctx.toolCallRound('call-a5-b', 'write_file', { path: 'b-worktree.txt', content: '会话 B（worktree 模式）' });
+    return ctx.textRound('B 会话文件已写入隔离副本。');
+  });
+  /** 切到场景 5 分支（在场景 2 的 5 次请求全部完成后调用） */
+  const enterScenario5 = () => {
+    phase = 'scenario5';
+  };
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-acceptance-'));
   const repo = join(homeDir, 'repo');
   let app;
@@ -219,7 +115,7 @@ async function main() {
     git(repo, 'commit', '-m', '基线提交（含 bug）');
 
     // ===== 场景 2：修 bug 全流程（read → grep → apply_patch → 审批命令 → diff → commit）=====
-    const launched = await launchApp(homeDir, repo);
+    const launched = await launchApp({ homeDir, workspaceDir: repo });
     app = launched.app;
     let window = launched.window;
     await configureProfile(window, port);

@@ -64,8 +64,8 @@ export interface WorktreeService {
     workspacePath: string;
   }): Promise<ManagedWorktree>;
   /**
-   * LRU 清理：已删除（无会话记录）或已归档会话的 worktree 进入候选，
-   * 按会话 updatedAt 保留最近 `keep` 个（默认 15），其余删除；
+   * LRU 清理：一切非运行中会话的 worktree（含活跃空闲、已归档、无会话记录的孤儿）
+   * 进入候选，按会话 updatedAt 保留最近 `keep` 个（默认 15），其余删除；
    * 运行中（streaming / waiting-approval）会话的 worktree 永不清理。
    * 删除只移除 worktree 检出目录，独立分支保留（改动不丢，可人工找回）。
    */
@@ -183,7 +183,8 @@ export function createWorktreeService(options: {
       }
       const byId = new Map(sessions.map((record) => [record.id, record]));
       const skippedRunning: string[] = [];
-      // 候选按 updatedAt 倒序排（最近在前）；无会话记录的孤儿视作最旧、优先清理
+      // 候选 = 一切非运行中的 worktree（活跃空闲、已归档、孤儿都算——story 24「磁盘不被占满」，
+      // 运行中的永不清理）；按 updatedAt 倒序排（最近在前），孤儿视作最旧、优先清理
       const candidates: { id: string; updatedAt: string }[] = [];
       for (const name of readdirSync(worktreesDir)) {
         const path = join(worktreesDir, name);
@@ -196,9 +197,6 @@ export function createWorktreeService(options: {
             // 运行中会话的 worktree 永不清理
             skippedRunning.push(name);
             continue;
-          }
-          if (record.archivedAt === null) {
-            continue; // 活跃会话不在清理候选
           }
           candidates.push({ id: name, updatedAt: record.updatedAt });
         } else {

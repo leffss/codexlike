@@ -147,9 +147,108 @@ export function SettingsPage() {
 
       <SearchSettingsSection />
       <SubagentSettingsSection />
+      <TerminalSettingsSection />
 
       <McpSettingsSection />
     </div>
+  );
+}
+
+/**
+ * 终端执行偏好区（code review 修复 1，spec「设置页：… shell 偏好」）：
+ * run_terminal_command 的 shell（Git Bash 默认 / PowerShell / cmd）。
+ * 保存后经主进程内存缓存逐次解析，对下一次终端命令即时生效（无需重启会话）。
+ */
+function TerminalSettingsSection() {
+  const [shell, setShell] = useState<'git-bash' | 'powershell' | 'cmd'>('git-bash');
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
+
+  async function refresh() {
+    try {
+      const saved = await window.codexlike.terminalSettings.get();
+      // 未配置时默认展示 Git Bash（保存前 CODEXLIKE_SHELL 环境变量兜底）
+      setShell(saved ?? 'git-bash');
+      setConfigured(saved !== null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setMessage('');
+    try {
+      await window.codexlike.terminalSettings.set(shell);
+      setConfigured(true);
+      setMessage('终端偏好已保存（对下一次终端命令生效）');
+      setMessageError(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-medium text-slate-200">终端执行</h2>
+        <p className="text-xs text-slate-500">
+          run_terminal_command 工具使用的 shell（默认 Git Bash，POSIX 命令可用）。
+          {configured === false && ' 尚未配置时环境变量 CODEXLIKE_SHELL 可兜底指定。'}
+        </p>
+      </div>
+
+      {configured !== null && (
+        <div
+          data-testid="terminal-settings"
+          className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+        >
+          <label className="flex flex-col gap-1 text-sm text-slate-300">
+            Shell
+            <select
+              data-testid="terminal-shell-select"
+              className="rounded border border-slate-700 bg-slate-950/70 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-sky-600"
+              value={shell}
+              onChange={(e) => setShell(e.target.value as typeof shell)}
+            >
+              <option value="git-bash">Git Bash（默认）</option>
+              <option value="powershell">PowerShell</option>
+              <option value="cmd">cmd</option>
+            </select>
+          </label>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              data-testid="terminal-settings-save"
+              disabled={saving}
+              className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
+              onClick={() => void save()}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+            {message !== '' && (
+              <p
+                data-testid="terminal-settings-message"
+                className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+              >
+                {message}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

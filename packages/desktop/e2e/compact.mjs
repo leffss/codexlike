@@ -4,105 +4,14 @@
 // /status 显示已压缩 → 继续对话断言真实请求体含摘要与最近 3 轮（不含被压缩轮次）
 // → 重启应用断言摘要卡片仍可见（持久化恢复）。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:compact（先 pnpm build）。
-import http from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
-
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
 const SUMMARY_MARKER = 'E2E压缩摘要标记ABC';
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
-/**
- * 本地 OpenAI 兼容 mock：
- * - 对话（stream:true）→ SSE 回复「收到。」；
- * - 压缩（非流式，system 含压缩指令标记）→ JSON 返回摘要全文。
- * 全部请求体落盘供断言（注入上下文的真实证据）。
- */
-function startMockProvider() {
-  const seenBodies = [];
-  const server = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-        seenBodies.push(body);
-        const isStream = body.includes('"stream":true') || body.includes('"stream": true');
-        if (isStream) {
-          res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-          res.write(
-            `data: ${JSON.stringify({
-              id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-              choices: [{ index: 0, delta: { content: '收到。' }, finish_reason: 'stop' }],
-            })}\n\n`,
-          );
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
-        }
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            id: 'chatcmpl-e2e-compact',
-            object: 'chat.completion',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, message: { role: 'assistant', content: SUMMARY_MARKER }, finish_reason: 'stop' }],
-          }),
-        );
-        return;
-      }
-      res.writeHead(404);
-      res.end('not found');
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port, seenBodies });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  return { app, window };
-}
 
 /** 发送一条普通消息并等回复完成（assistant 消息数增至 target） */
 async function sendAndAwait(window, composer, text, targetAssistantCount) {
@@ -115,14 +24,39 @@ async function sendAndAwait(window, composer, text, targetAssistantCount) {
   );
 }
 
+/**
+ * 场景脚本（mock 分流）：
+ * - 对话（stream:true）→ SSE 回复「收到。」；
+ * - 压缩（非流式，system 含压缩指令标记）→ JSON 返回摘要全文。
+ * 全部请求体由骨架记录（seenBodies，注入上下文的真实证据）。
+ */
 async function main() {
-  const { server, port, seenBodies } = await startMockProvider();
+  const { server, port, seenBodies } = await startMockProvider((ctx, { body }) => {
+    const isStream = body.includes('"stream":true') || body.includes('"stream": true');
+    if (isStream) {
+      ctx.textRound('收到。');
+      return;
+    }
+    ctx.respondJson({
+      id: 'chatcmpl-e2e-compact',
+      object: 'chat.completion',
+      created: 0,
+      model: 'mock-model',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: SUMMARY_MARKER },
+          finish_reason: 'stop',
+        },
+      ],
+    });
+  });
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-compact-'));
   mkdirSync(join(homeDir, 'workspace'), { recursive: true });
 
   let app;
   try {
-    const { app: launchedApp, window } = await launchApp(homeDir);
+    const { app: launchedApp, window } = await launchApp({ homeDir });
     app = launchedApp;
 
     // 1) 设置页创建 Profile
@@ -208,7 +142,7 @@ async function main() {
 
     // 6) 重启应用：摘要卡片仍可见（持久化恢复）
     await closeApp(app);
-    const { app: relaunchedApp, window: relaunchedWindow } = await launchApp(homeDir);
+    const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({ homeDir });
     app = relaunchedApp;
     await relaunchedWindow.getByTestId('message-compact-summary').waitFor({ timeout: 15_000 });
     // 摘要 + 第 2-4 轮 + 压缩后新发的 1 条 = 4 条用户消息

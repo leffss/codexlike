@@ -192,12 +192,31 @@ describe('worktree LRU 清理', () => {
     expect(git(repo, 'branch', '--list', 'codexlike/s0').trim()).toBe('codexlike/s0');
   });
 
-  it('未归档（活跃）会话的 worktree 不清理', async () => {
+  it('未归档（活跃空闲）会话同样进入候选：超量时按 LRU 清理', async () => {
     const repo = makeRepo();
     const home = makeWorktreesDir();
     const service = createWorktreeService({ worktreesDir: join(home, 'worktrees') });
     await seedWorktrees(service, repo, ['s0', 's1', 's2']);
-    // 三个 worktree，两个已归档一个活跃：只有归档的进入候选，且数量未超 15 → 都保留
+    // 候选 = 一切非运行中（含活跃空闲与已归档）；keep=1 → 只留最近（s2），最旧的 s0/s1 被清
+    const sessions = [
+      sessionRecord('s0'),
+      sessionRecord('s1', { archivedAt: '2026-02-01T00:00:00Z' }),
+      sessionRecord('s2'),
+    ];
+
+    const result = await service.cleanup({ sessions, keep: 1 });
+
+    expect(result.removed.sort()).toEqual(['s0', 's1']);
+    expect(result.kept).toEqual(['s2']);
+    expect(existsSync(join(home, 'worktrees', 's2'))).toBe(true);
+  });
+
+  it('未超保留数时活跃与已归档会话的 worktree 都保留', async () => {
+    const repo = makeRepo();
+    const home = makeWorktreesDir();
+    const service = createWorktreeService({ worktreesDir: join(home, 'worktrees') });
+    await seedWorktrees(service, repo, ['s0', 's1', 's2']);
+    // 三个 worktree（两个已归档一个活跃）：全部进入候选但未超 15 → 都保留
     const sessions = [
       sessionRecord('s0', { archivedAt: '2026-02-01T00:00:00Z' }),
       sessionRecord('s1', { archivedAt: '2026-02-01T00:00:00Z' }),
@@ -215,39 +234,35 @@ describe('worktree LRU 清理', () => {
     const home = makeWorktreesDir();
     const service = createWorktreeService({ worktreesDir: join(home, 'worktrees') });
     await seedWorktrees(service, repo, ['s0', 's1', 's2']);
-    // s0 已归档且最旧（会被清），s1 已归档且运行中（永不清理），s2 活跃
+    // s0 已归档且最旧（会被清），s1 已归档且运行中（永不清理），s2 活跃空闲（进入候选）
     const sessions = [
       sessionRecord('s0', { archivedAt: '2026-02-01T00:00:00Z' }),
       sessionRecord('s1', { archivedAt: '2026-02-01T00:00:00Z', status: 'streaming' }),
       sessionRecord('s2'),
     ];
-    // keep=0：全部候选都该删，但运行中的除外
+    // keep=0：一切非运行中的候选都该删，运行中的除外
     const result = await service.cleanup({ sessions, keep: 0 });
 
-    expect(result.removed).toEqual(['s0']);
+    expect(result.removed.sort()).toEqual(['s0', 's2']);
     expect(result.skippedRunning).toEqual(['s1']);
     expect(existsSync(join(home, 'worktrees', 's1'))).toBe(true);
   });
 
-  it('孤儿 worktree（会话记录已不存在）比已归档候选更旧、超量时优先清理', async () => {
+  it('孤儿 worktree（会话记录已不存在）视作最旧、超量时优先清理', async () => {
     const repo = makeRepo();
     const home = makeWorktreesDir();
     const service = createWorktreeService({ worktreesDir: join(home, 'worktrees') });
-    await seedWorktrees(service, repo, ['orphan', 'archived', 'alive']);
-    // keep=1：候选 = 孤儿（无记录，视作最旧）+ 已归档 s1；孤儿更旧被删，归档的留在窗口内
+    await seedWorktrees(service, repo, ['orphan', 'recent']);
+    // keep=1：候选 = 孤儿（无记录，视作最旧）+ 空闲会话 recent；孤儿被删，recent 留在窗口内
     const result = await service.cleanup({
-      sessions: [
-        sessionRecord('archived', { archivedAt: '2026-02-01T00:00:00Z' }),
-        sessionRecord('alive'),
-      ],
+      sessions: [sessionRecord('recent', { updatedAt: '2026-03-01T00:00:00Z' })],
       keep: 1,
     });
 
     expect(result.removed).toEqual(['orphan']);
-    expect(result.kept).toEqual(['archived']);
+    expect(result.kept).toEqual(['recent']);
     expect(existsSync(join(home, 'worktrees', 'orphan'))).toBe(false);
-    expect(existsSync(join(home, 'worktrees', 'archived'))).toBe(true);
-    expect(existsSync(join(home, 'worktrees', 'alive'))).toBe(true);
+    expect(existsSync(join(home, 'worktrees', 'recent'))).toBe(true);
   });
 
   it('worktrees 目录不存在时清理安全返回', async () => {

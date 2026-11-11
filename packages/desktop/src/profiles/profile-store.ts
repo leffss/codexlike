@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ProviderProfile, ProviderProfileInput } from '@codexlike/agent-core/node';
+
+import { readJsonFile, writeJsonFile } from '../storage/json-file';
 
 /**
  * Electron safeStorage 的最小接口（async 形态，Electron 45 起同步 API 已弃用）。
@@ -21,6 +22,8 @@ interface StoredProfile {
   baseURL: string;
   model: string;
   encryptedApiKey: string;
+  /** 模型上下文窗口（tokens，可选；上下文告警阈值用），旧文件无此字段 */
+  contextWindowTokens?: number;
 }
 
 interface StoredFile {
@@ -55,21 +58,11 @@ export function createProfileStore(options: {
   const filePath = join(dir, FILE_NAME);
 
   function loadFile(): StoredFile {
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      return JSON.parse(raw) as StoredFile;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        return { profiles: [] };
-      }
-      throw error;
-    }
+    return readJsonFile<StoredFile>(filePath, { profiles: [] });
   }
 
   function saveFile(file: StoredFile): void {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, JSON.stringify(file, null, 2), 'utf8');
+    writeJsonFile(filePath, file);
   }
 
   async function toStored(
@@ -83,6 +76,9 @@ export function createProfileStore(options: {
       baseURL: input.baseURL,
       model: input.model,
       encryptedApiKey: encrypted.toString('base64'),
+      ...(input.contextWindowTokens !== undefined
+        ? { contextWindowTokens: input.contextWindowTokens }
+        : {}),
     };
   }
 
@@ -94,6 +90,9 @@ export function createProfileStore(options: {
       baseURL: stored.baseURL,
       apiKey: await safeStorage.decryptString(encrypted),
       model: stored.model,
+      ...(stored.contextWindowTokens !== undefined
+        ? { contextWindowTokens: stored.contextWindowTokens }
+        : {}),
     };
   }
 

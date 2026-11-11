@@ -212,7 +212,8 @@ export function registerSessionHandlers(options: {
         void browserManager?.closeSession(sessionId).catch(() => {});
       }
       const result = manager.setArchived(sessionId, archived);
-      // 归档后其托管 Worktree 进入 LRU 清理候选（运行中的永不清理；后台执行不阻塞归档反馈）
+      // 归档后触发一次 LRU 清理（一切非运行中的托管 Worktree 按量回收；
+      // 运行中的永不清理；后台执行不阻塞归档反馈）
       void worktreeService
         .cleanup({ sessions: manager.list() })
         .catch((error: unknown) => {
@@ -246,20 +247,22 @@ export function registerSessionHandlers(options: {
     if (record === undefined) {
       return null;
     }
-    const providerProfileName =
+    const profile =
       record.providerProfileId === null
-        ? null
-        : ((await profiles.list()).find(
+        ? undefined
+        : (await profiles.list()).find(
             (candidate: ProviderProfile) =>
               candidate.id === record.providerProfileId,
-          )?.name ?? null);
+          );
     return buildSessionStatus({
       record,
       messages: manager.messages(sessionId),
       agentsMd: discoverAgentsInstructions({
         workspacePath: record.workspacePath,
       }),
-      providerProfileName,
+      providerProfileName: profile?.name ?? null,
+      // 上下文告警阈值 = Profile 可配的上下文窗口 × 80%（未配置走 agent-core 默认 128k）
+      contextWindowTokens: profile?.contextWindowTokens ?? null,
       latestCompact: manager.latestCompact(sessionId),
     });
   });

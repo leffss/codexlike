@@ -3,87 +3,18 @@
 // → 建会话 → /status 展示 AGENTS.md 来源 → @引用 发消息并断言真实请求体
 // 含 AGENTS.md 与被引用文件内容 → /rename /model /new /archive 逐一验证。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:commands（先 pnpm build）。
-import http from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
-
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
-/** 本地 OpenAI 兼容 mock：记录请求体（断言 AGENTS.md / @引用 内容真实进入模型请求） */
-function startMockProvider() {
-  const seenBodies = [];
-  const server = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-        seenBodies.push(body);
-        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: { content: '收到。' }, finish_reason: 'stop' }],
-          })}\n\n`,
-        );
-        res.write('data: [DONE]\n\n');
-        res.end();
-        return;
-      }
-      res.writeHead(404);
-      res.end('not found');
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port, seenBodies });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  return { app, window };
-}
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
 async function main() {
-  const { server, port, seenBodies } = await startMockProvider();
+  // mock：记录请求体（断言 AGENTS.md / @引用 内容真实进入模型请求），固定回复「收到。」
+  const { server, port, seenBodies } = await startMockProvider((ctx) => {
+    ctx.textRound('收到。');
+  });
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-cmd-'));
 
   // 预置：全局 + 项目 AGENTS.md（/status 与请求体断言用）、@引用 目标文件
@@ -95,7 +26,7 @@ async function main() {
 
   let app;
   try {
-    const { app: launchedApp, window } = await launchApp(homeDir);
+    const { app: launchedApp, window } = await launchApp({ homeDir });
     app = launchedApp;
 
     // 1) 设置页创建 Profile（本地 mock）

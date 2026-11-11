@@ -73,6 +73,13 @@ export { fuzzyMatch } from './composer/fuzzy';
 
 // 上下文用量估算（/status 与 compact 共用的稳定接口）
 export { estimateTokens } from './context/tokens';
+// 上下文告警（code review 修复 2）：估算 → 阈值触发的纯逻辑（spec 验收场景 4）
+export {
+  CONTEXT_WARNING_THRESHOLD_RATIO,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  evaluateContextWarning,
+} from './context/context-warning';
+export type { ContextUsageWarning } from './context/context-warning';
 export type {
   SlashCommandDef,
   SlashCommandName,

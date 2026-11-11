@@ -10,8 +10,8 @@ import { createWriteFileTool } from './write-file';
 export interface BuiltinToolsOptions {
   /** 宿主环境变量（终端工具按白名单过滤后透传） */
   env?: Record<string, string | undefined>;
-  /** 终端 shell 偏好（默认 git-bash；设置页在后续工单接入） */
-  shell?: TerminalShell;
+  /** 终端 shell 偏好（静态值或逐次解析函数；默认 git-bash） */
+  shell?: TerminalShell | (() => TerminalShell);
   /** 显式 bash.exe 路径 */
   gitBashPath?: string;
   /**

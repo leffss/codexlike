@@ -4,7 +4,6 @@
 // → 消息驱动 write_file 落在副本（主仓库不受影响）→ 非 git 目录选 worktree 中文报错
 // 且会话不创建（改选本目录直跑可成功）→ 重启恢复仍指向原副本、续跑改动仍在副本内。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:worktree（先全仓 build）。
-import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -16,130 +15,33 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
 }
 
-/** 本地 OpenAI 兼容 mock：第 1 次 tool_call（write_file，真实写盘）→ 之后流式文本 */
-function startMockProvider() {
+/** 场景脚本：第 1 次 tool_call（write_file，真实写盘）→ 之后流式文本；非流式请求 404 */
+async function main() {
   let streamCount = 0;
-  const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url === undefined || !req.url.endsWith('/chat/completions')) {
-      res.writeHead(404);
-      res.end('not found');
+  const { server, port } = await startMockProvider((ctx, { body }) => {
+    if (!body.includes('"stream":true')) {
+      ctx.notFound();
       return;
     }
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (!body.includes('"stream":true')) {
-        res.writeHead(404);
-        res.end('not found');
-        return;
-      }
-      streamCount += 1;
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-      const send = (payload) =>
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-worktree-e2e',
-            object: 'chat.completion.chunk',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, ...payload }],
-          })}\n\n`,
-        );
-      const finishWith = (reason) => {
-        send({ delta: {}, finish_reason: reason });
-        res.write('data: [DONE]\n\n');
-        res.end();
-      };
-      if (streamCount === 1) {
-        send({
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: 'call-worktree-e2e',
-                type: 'function',
-                function: {
-                  name: 'write_file',
-                  arguments: JSON.stringify({
-                    path: 'wt-e2e.txt',
-                    content: 'worktree E2E 内容',
-                  }),
-                },
-              },
-            ],
-          },
-          finish_reason: null,
-        });
-        setTimeout(() => finishWith('tool_calls'), 30);
-        return;
-      }
-      send({ delta: { content: '已在隔离副本中创建文件。' }, finish_reason: null });
-      setTimeout(() => finishWith('stop'), 30);
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port });
-    });
-  });
-}
-
-async function launchApp(homeDir, workspaceDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: workspaceDir,
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
+    streamCount += 1;
+    if (streamCount === 1) {
+      ctx.toolCallRound('call-worktree-e2e', 'write_file', {
+        path: 'wt-e2e.txt',
+        content: 'worktree E2E 内容',
+      });
+      return;
     }
+    ctx.textRound('已在隔离副本中创建文件。');
   });
-  return { app, window };
-}
-
-async function main() {
-  const { server, port } = await startMockProvider();
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-worktree-'));
   const repo = join(homeDir, 'workspace');
   const plain = join(homeDir, 'plain-workspace');
@@ -159,7 +61,7 @@ async function main() {
     mkdirSync(plain);
 
     // 1) 启动 → 配置 Profile → 新建会话选 worktree 模式
-    const first = await launchApp(homeDir, repo);
+    const first = await launchApp({ homeDir, workspaceDir: repo });
     app = first.app;
     let window = first.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -210,7 +112,7 @@ async function main() {
 
     // 4) 重启恢复：会话仍指向原副本，续跑改动仍在副本内
     await closeApp(app);
-    const second = await launchApp(homeDir, repo);
+    const second = await launchApp({ homeDir, workspaceDir: repo });
     app = second.app;
     window = second.window;
     await window.getByTestId('worktree-badge').waitFor({ timeout: 15_000 });
@@ -228,7 +130,7 @@ async function main() {
 
     // 5) 非 git 目录选 worktree：中文报错、会话不创建；改选本目录直跑可成功
     await closeApp(app);
-    const third = await launchApp(homeDir, plain);
+    const third = await launchApp({ homeDir, workspaceDir: plain });
     app = third.app;
     window = third.window;
     await window.getByTestId('new-session').click();

@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { SafeStorageLike } from '../profiles/profile-store';
+import { readJsonFile, writeJsonFile } from '../storage/json-file';
 
 /** 搜索源设置（工单 10）：当前默认且仅有 Tavily，provider 字段留扩展口 */
 export interface SearchSettings {
@@ -37,25 +38,15 @@ export function createSearchSettingsStore(options: {
   const filePath = join(dir, FILE_NAME);
 
   function loadFile(): StoredFile | null {
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      const parsed = JSON.parse(raw) as StoredFile;
-      if (parsed.provider !== 'tavily' || typeof parsed.encryptedApiKey !== 'string') {
-        return null;
-      }
-      return parsed;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        return null;
-      }
-      throw error;
+    const parsed = readJsonFile<StoredFile | null>(filePath, null);
+    if (parsed === null || parsed.provider !== 'tavily' || typeof parsed.encryptedApiKey !== 'string') {
+      return null;
     }
+    return parsed;
   }
 
   function saveFile(file: StoredFile): void {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, JSON.stringify(file, null, 2), 'utf8');
+    writeJsonFile(filePath, file);
   }
 
   async function toSettings(stored: StoredFile | null): Promise<SearchSettings> {
