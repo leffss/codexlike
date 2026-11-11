@@ -85,8 +85,12 @@ function createMainWindow(): BrowserWindow {
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
     void win.loadURL(devServerUrl);
+  } else if (app.isPackaged) {
+    // 打包产物（工单 14）：ui 静态产物由 electron-builder 放在 resources/ui-dist
+    // （asar 外的 extraResources，Monaco worker 等以 file:// 直读）
+    void win.loadFile(join(process.resourcesPath, 'ui-dist', 'index.html'));
   } else {
-    // 生产构建：ui 包产物位于平级目录 packages/ui/dist
+    // 生产构建（开发目录运行，如 E2E）：ui 包产物位于平级目录 packages/ui/dist
     void win.loadFile(join(__dirname, '..', '..', 'ui', 'dist', 'index.html'));
   }
 
