@@ -1,0 +1,42 @@
+{
+  "name": "@codexlike/agent-core",
+  "version": "1.0.0",
+  "description": "CodexLike Agent Core：agent 运行时（Provider Profile、对话循环、工具注册表、审批状态机）。纯 TypeScript，零 Electron 依赖（ADR-0002）。",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/provider": "^4.0.37",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "ai": "^7.0.0",
+    "playwright-core": "^1.65.0",
+    "simple-git": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0"
+  }
+}

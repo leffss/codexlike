@@ -12,3 +12,6 @@ Thumbs.db
 # 本地环境
 .env
 .env.*
+
+# 打包组装中间目录（工单 14）
+.dist-vendor/
