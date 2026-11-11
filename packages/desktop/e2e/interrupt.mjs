@@ -5,169 +5,53 @@
 // ③ 工具执行中（sleep 30 长命令）点停止 → 子进程被杀、结果标记用户中断、无后续模型请求
 // ④ 重启应用 → 中断标记与工具卡片完整恢复。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:interrupt（先 pnpm build）。
-import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
 /**
- * 本地 OpenAI 兼容 mock（按请求序号脚本化）：
+ * 场景脚本（按请求序号）：
  * ① 慢速流式（长文分段，供流式中途点停止）；
  * ② 中断后的新消息 → 快速完整回复；
  * ③ run_terminal_command 长命令（sleep 30）tool_call → 工具执行中点停止。
  * ④ 不应存在（中断后模型不再被请求）——requestCount 断言。
  */
-function startMockProvider() {
-  let requestCount = 0;
-  const server = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
-        requestCount += 1;
-        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-        const send = (payload) =>
-          res.write(
-            `data: ${JSON.stringify({
-              id: 'chatcmpl-e2e',
-              object: 'chat.completion.chunk',
-              created: 0,
-              model: 'mock-model',
-              choices: [{ index: 0, ...payload }],
-            })}\n\n`,
-          );
-        const finishWith = (reason) => {
-          send({ delta: {}, finish_reason: reason });
-          res.write('data: [DONE]\n\n');
-          res.end();
-        };
-
-        // 客户端中断（abort）后 res.write 会失败：监听 close 停止慢速发送
-        let timer = null;
-        res.on('close', () => {
-          if (timer !== null) clearInterval(timer);
-        });
-
-        if (requestCount === 1) {
-          // ① 慢速流式：20 段、每段 300ms（共 6 秒），保证点击停止时仍在输出
-          let index = 0;
-          timer = setInterval(() => {
-            try {
-              send({ delta: { content: `第${index}段长文。` }, finish_reason: null });
-              index += 1;
-              if (index >= 20) {
-                clearInterval(timer);
-                finishWith('stop');
-              }
-            } catch {
-              clearInterval(timer);
-            }
-          }, 300);
-          return;
-        }
-
-        if (requestCount === 2) {
-          // ② 中断后的新消息：快速完整回复
-          send({ delta: { content: '中断后的新回答。' }, finish_reason: null });
-          finishWith('stop');
-          return;
-        }
-
-        if (requestCount === 3) {
-          // ③ 工具调用：长命令（sleep 30），供执行中点停止
-          send({
-            delta: {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: 'call-sleep',
-                  type: 'function',
-                  function: {
-                    name: 'run_terminal_command',
-                    arguments: JSON.stringify({ command: 'echo started; sleep 30', timeoutMs: 120000 }),
-                  },
-                },
-              ],
-            },
-            finish_reason: null,
-          });
-          setTimeout(() => finishWith('tool_calls'), 30);
-          return;
-        }
-
-        // ④ 中断后模型不应再被请求
-        send({ delta: { content: '（不应被请求）' }, finish_reason: null });
-        finishWith('stop');
-        return;
-      }
-      res.writeHead(404);
-      res.end('not found');
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port, getRequestCount: () => requestCount });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
-}
-
 async function main() {
-  const { server, port, getRequestCount } = await startMockProvider();
+  const { server, port, requestCount: getRequestCount } = await startMockProvider((ctx, { index }) => {
+    if (index === 1) {
+      // ① 慢速流式：20 段、每段 300ms（共 6 秒），保证点击停止时仍在输出
+      ctx.textChunksRound(
+        Array.from({ length: 20 }, (_, i) => `第${i}段长文。`),
+        300,
+      );
+      return;
+    }
+    if (index === 2) {
+      // ② 中断后的新消息：快速完整回复
+      ctx.textRound('中断后的新回答。');
+      return;
+    }
+    if (index === 3) {
+      // ③ 工具调用：长命令（sleep 30），供执行中点停止
+      ctx.toolCallRound('call-sleep', 'run_terminal_command', {
+        command: 'echo started; sleep 30',
+        timeoutMs: 120000,
+      });
+      return;
+    }
+    // ④ 中断后模型不应再被请求
+    ctx.textRound('（不应被请求）');
+  });
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-stop-'));
   mkdirSync(join(homeDir, 'workspace'));
 
   let app;
   try {
     // 0) 启动 → 设置页创建 Profile（指向本地 mock）
-    const first = await launchApp(homeDir);
+    const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -242,7 +126,7 @@ async function main() {
 
     // ④ 重启应用：中断标记与工具卡片完整恢复
     await closeApp(app);
-    const second = await launchApp(homeDir);
+    const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
     await window.getByTestId('session-item').first().waitFor({ timeout: 15_000 });

@@ -4,154 +4,53 @@
 // → 模型生成提交消息（可编辑）→ 一键提交 → 面板刷新干净 + git 命令行侧验证落库
 // → 再开非 git 工作区会话，断言面板降级提示不报错。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:changes（先全仓 build）。
-import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
 }
 
 /**
- * 本地 OpenAI 兼容 mock：
+ * 场景脚本（mock 分流）：
  * - 流式请求（streamText）：第 1 次 tool_call（write_file，真实写盘）→ 第 2 次流式收尾文本；
  * - 非流式请求（generateText，生成提交消息）：返回 JSON 文本「添加 e2e-change.txt 示例文件」。
  */
-function startMockProvider() {
+async function main() {
   let streamCount = 0;
-  const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url === undefined || !req.url.endsWith('/chat/completions')) {
-      res.writeHead(404);
-      res.end('not found');
+  const { server, port } = await startMockProvider((ctx, { body }) => {
+    if (!body.includes('"stream":true')) {
+      // 生成提交消息：非流式 JSON（generateCommitMessage 走一次不发工具的请求）
+      ctx.respondJson({
+        id: 'chatcmpl-commit',
+        object: 'chat.completion',
+        created: 0,
+        model: 'mock-model',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: '添加 e2e-change.txt 示例文件' },
+            finish_reason: 'stop',
+          },
+        ],
+      });
       return;
     }
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      const isStream = body.includes('"stream":true');
-      if (!isStream) {
-        // 生成提交消息：非流式 JSON（generateCommitMessage 走一次不发工具的请求）
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            id: 'chatcmpl-commit',
-            object: 'chat.completion',
-            created: 0,
-            model: 'mock-model',
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '添加 e2e-change.txt 示例文件' },
-                finish_reason: 'stop',
-              },
-            ],
-          }),
-        );
-        return;
-      }
-      streamCount += 1;
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-      const send = (payload) =>
-        res.write(
-          `data: ${JSON.stringify({
-            id: 'chatcmpl-changes-e2e',
-            object: 'chat.completion.chunk',
-            created: 0,
-            model: 'mock-model',
-            choices: [{ index: 0, ...payload }],
-          })}\n\n`,
-        );
-      const finishWith = (reason) => {
-        send({ delta: {}, finish_reason: reason });
-        res.write('data: [DONE]\n\n');
-        res.end();
-      };
-      if (streamCount === 1) {
-        send({
-          delta: {
-            tool_calls: [
-              {
-                index: 0,
-                id: 'call-changes-e2e',
-                type: 'function',
-                function: {
-                  name: 'write_file',
-                  arguments: JSON.stringify({
-                    path: 'e2e-change.txt',
-                    content: '改动面板 E2E 内容',
-                  }),
-                },
-              },
-            ],
-          },
-          finish_reason: null,
-        });
-        setTimeout(() => finishWith('tool_calls'), 30);
-        return;
-      }
-      send({ delta: { content: '文件已创建。' }, finish_reason: null });
-      setTimeout(() => finishWith('stop'), 30);
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
+    streamCount += 1;
+    if (streamCount === 1) {
+      ctx.toolCallRound('call-changes-e2e', 'write_file', {
+        path: 'e2e-change.txt',
+        content: '改动面板 E2E 内容',
+      });
+      return;
     }
+    ctx.textRound('文件已创建。');
   });
-  return { app, window };
-}
-
-async function main() {
-  const { server, port } = await startMockProvider();
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-changes-'));
   const repo = join(homeDir, 'workspace');
   const plain = join(homeDir, 'plain-workspace');
@@ -168,7 +67,7 @@ async function main() {
     mkdirSync(plain);
 
     // 1) 启动 → 配置 Profile → 建会话 → 消息驱动 write_file（真实写盘）
-    const first = await launchApp(homeDir);
+    const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
     await window.getByRole('button', { name: '设置', exact: true }).click();
@@ -267,7 +166,7 @@ async function main() {
     // 6) 非 git 工作区：降级提示、不报错
     await closeApp(app);
     const homeSecond = homeDir; // 复用同一数据目录：Profile 已配置
-    const second = await launchAppPlain(homeSecond, plain);
+    const second = await launchApp({ homeDir: homeSecond, workspaceDir: plain });
     app = second.app;
     window = second.window;
     await window.getByTestId('new-session').click();
@@ -296,26 +195,6 @@ async function main() {
     server.close();
     rmSync(homeDir, { recursive: true, force: true });
   }
-}
-
-/** 非 git 工作区场景的启动（workspace 指向 plain 目录） */
-async function launchAppPlain(homeDir, workspaceDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: workspaceDir,
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
-      console.log(`[renderer console.error] ${message.text()}`);
-    }
-  });
-  return { app, window };
 }
 
 await main();

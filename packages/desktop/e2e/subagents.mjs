@@ -4,157 +4,50 @@
 // 断言子代理请求独立上下文（含 task 不含主会话原文）且工具表无 spawn_subagent（防递归）
 // → 主模型第二轮收到报告（回流）→ 重启后嵌套卡片恢复（报告持久化）。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:subagents（先 pnpm build）。
-import http from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
-import { _electron as electron } from 'playwright-core';
-import { launchTarget } from './launch-target.mjs';
-
+import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
 
 const DELEGATE_TASK = 'E2E委派调研任务标记';
 const REPORT_MARKER = 'E2E子代理报告标记XYZ';
 const SUBAGENT_SYSTEM_MARK = 'CodexLike 的子代理';
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`断言失败：${message}`);
-  }
-}
-
-/** 关闭应用：优雅关闭优先；Electron 45 上偶发不退（功能断言已过后进程挂着），10 秒后强杀兜底 */
-async function closeApp(app) {
-  const forceKill = setTimeout(() => {
-    try {
-      app.process().kill();
-    } catch {}
-  }, 10_000);
-  try {
-    await app.close();
-  } catch {
-    // 优雅关闭失败（可能已被强杀）：断言已全部完成，继续收尾
-  } finally {
-    clearTimeout(forceKill);
-  }
-}
-function sse(res, payload) {
-  res.write(`data: ${JSON.stringify(payload)}\n\n`);
-}
-
 /**
- * 本地 OpenAI 兼容 mock（按请求特征分流三级）：
+ * 场景脚本（按请求特征分流三级）：
  * - 子代理请求（system 含子代理标记）→ SSE 回文本报告；
  * - 主会话请求且消息含委派指令 → SSE 回 spawn_subagent tool_call；
  * - 主会话请求且消息含报告（工具结果回填后）→ SSE 回汇总文本。
- * 全部请求体落盘供断言（主/子两级上下文隔离的真实证据）。
+ * 全部请求体由骨架记录（seenBodies，主/子两级上下文隔离的真实证据）。
  */
-function startMockProvider() {
-  const seenBodies = [];
-  const server = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += String(chunk);
-    });
-    req.on('end', () => {
-      if (req.method === 'POST' && req.url?.endsWith('/chat/completions')) {
-        seenBodies.push(body);
-        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-
-        // 子代理请求：独立上下文（system 为子代理固定指令）
-        if (body.includes(SUBAGENT_SYSTEM_MARK)) {
-          sse(res, {
-            id: 'chatcmpl-sub', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: { content: `${REPORT_MARKER}：调研完成，共 3 个入口。` }, finish_reason: null }],
-          });
-          sse(res, {
-            id: 'chatcmpl-sub', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          });
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
-        }
-
-        // 主会话第二轮：报告已作为工具结果回填（优先判断——第二轮请求含全部历史原文）
-        if (body.includes(REPORT_MARKER)) {
-          sse(res, {
-            id: 'chatcmpl-main', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: { content: '子代理的报告已汇总。' }, finish_reason: null }],
-          });
-          sse(res, {
-            id: 'chatcmpl-main', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          });
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
-        }
-
-        // 主会话第一轮：发起 spawn_subagent 委派
-        if (body.includes('委派调研一下测试入口')) {
-          sse(res, {
-            id: 'chatcmpl-main', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: 0,
-                  id: 'call-delegate-1',
-                  type: 'function',
-                  function: { name: 'spawn_subagent', arguments: JSON.stringify({ task: DELEGATE_TASK }) },
-                }],
-              },
-              finish_reason: null,
-            }],
-          });
-          sse(res, {
-            id: 'chatcmpl-main', object: 'chat.completion.chunk', created: 0, model: 'mock-model',
-            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-          });
-          res.write('data: [DONE]\n\n');
-          res.end();
-          return;
-        }
-
-        res.writeHead(422);
-        res.end('unexpected request');
-      }
-      res.writeHead(404);
-      res.end('not found');
-    });
-  });
-  return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolveServer({ server, port: server.address().port, seenBodies });
-    });
-  });
-}
-
-async function launchApp(homeDir) {
-  const env = {
-    ...process.env,
-    CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: join(homeDir, 'workspace'),
-    VITE_DEV_SERVER_URL: '',
-  };
-  const app = await electron.launch(launchTarget(env));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
-  const window = await app.firstWindow();
-  return { app, window };
-}
-
 async function main() {
-  const { server, port, seenBodies } = await startMockProvider();
+  const { server, port, seenBodies } = await startMockProvider((ctx, { body }) => {
+    // 子代理请求：独立上下文（system 为子代理固定指令）
+    if (body.includes(SUBAGENT_SYSTEM_MARK)) {
+      ctx.textRound(`${REPORT_MARKER}：调研完成，共 3 个入口。`);
+      return;
+    }
+    // 主会话第二轮：报告已作为工具结果回填（优先判断——第二轮请求含全部历史原文）
+    if (body.includes(REPORT_MARKER)) {
+      ctx.textRound('子代理的报告已汇总。');
+      return;
+    }
+    // 主会话第一轮：发起 spawn_subagent 委派
+    if (body.includes('委派调研一下测试入口')) {
+      ctx.toolCallRound('call-delegate-1', 'spawn_subagent', { task: DELEGATE_TASK });
+      return;
+    }
+    ctx.res.writeHead(422);
+    ctx.res.end('unexpected request');
+  });
   const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-subagents-'));
   mkdirSync(join(homeDir, 'workspace'), { recursive: true });
 
   let app;
   try {
-    const { app: launchedApp, window } = await launchApp(homeDir);
+    const { app: launchedApp, window } = await launchApp({ homeDir });
     app = launchedApp;
 
     // 1) 设置页创建 Profile
@@ -229,7 +122,7 @@ async function main() {
 
     // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）
     await closeApp(app);
-    const { app: relaunchedApp, window: relaunchedWindow } = await launchApp(homeDir);
+    const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({ homeDir });
     app = relaunchedApp;
     await relaunchedWindow
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
