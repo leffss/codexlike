@@ -61,7 +61,7 @@
 
 ### 未测与已知边界
 
-- 未执行全量 `pnpm test`、`test:e2e:all`、`dist`、打包冷启动；留票09汇合发布验收。
+- 正常提交 hooks 实际执行 `check:adr`、Prettier、`pnpm typecheck` 和全量 `pnpm test`，均通过；全量为80文件 / 633项（Core416、Desktop115、UI102）。未跳过 hooks。未执行 `test:e2e:all`、`dist`、打包冷启动；留票09汇合发布验收。
 - 尝试既有 `test:e2e:compact` 在旧 `create-session-confirm` 创建入口超时，尚未进入压缩验证，不记为通过；已告知协调者由09适配01新建入口。本票宿主真实HTTP摘要及共享占位测试通过，compact中断/退出排空由08实施。
 - desktop既有 `mentions.test.ts` 文件符号链接测试在本机因 `EPERM` 内部打印跳过（runner统计为通过），不声称该分支实测；本票目录 junction 路径语义测试实际执行通过。没有改权限或绕过限制。
 - 所有文件删除仅发生在测试创建的临时环境清理或04既有安全创建失败回滚；项目移除业务没有磁盘删除入口。
