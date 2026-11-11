@@ -1,0 +1,52 @@
+# electron-builder 配置（工单 14）：Windows NSIS 安装包 + 便携 zip 双产物。
+# 由 scripts/dist.mjs 拷入 .dist-vendor/ 作为 projectDir 配置自动发现。
+# 注意：该目录的 package.json 无 dependencies——业务依赖已全部 bundle 进
+# app-dist/main.cjs（esbuild，仅 external electron 与 playwright-core）。
+
+appId: com.codexlike.app
+productName: CodexLike
+copyright: Copyright (c) 2026 CodexLike
+# vendor 目录无 node_modules（依赖已 bundle），electron 版本由 dist.mjs
+# 从本机安装的 electron 注入（占位符 __ELECTRON_VERSION__）
+electronVersion: __ELECTRON_VERSION__
+# 顶层 artifactName 作用于 zip（便携版）；NSIS 在 nsis.artifactName 覆盖为 Setup 命名
+# （26.x 的 win.target 数组项只接受 target/arch，不支持每 target 的 artifactName）
+artifactName: CodexLike-${version}-portable.${ext}
+
+directories:
+  output: ../release
+  buildResources: build
+
+# asar 内容极简：主进程 + preload + package.json
+files:
+  - app-dist/**
+  - build/icon.ico
+
+# asar 外资源：ui 静态产物（file:// 直读）与 playwright-core
+# （工单 11 external 化；放 resources/node_modules 使模块解析从 app.asar
+# 向上出 asar 后命中；chromium 安装器 spawn cli.js 需要真实文件路径）
+extraResources:
+  - from: ui-dist
+    to: ui-dist
+  - from: node_modules/playwright-core
+    to: node_modules/playwright-core
+
+# 二进制下载镜像（国内网络；eudi 不做代码签名，SmartScreen 首次运行提示属预期）
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+    - zip
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: CodexLike
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: CodexLike-Setup-${version}.${ext}
+  uninstallDisplayName: CodexLike
