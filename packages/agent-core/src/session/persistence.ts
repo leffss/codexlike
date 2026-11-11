@@ -25,6 +25,7 @@ import type {
 export interface SessionPersistence {
   insertProject(record: ProjectRecord): void;
   listProjects(): ProjectRecord[];
+  setProjectCollapsed(projectId: string, collapsed: boolean): void;
   insertSession(record: SessionRecord): void;
   /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
   removeUnstartedSession(id: string): void;
@@ -53,7 +54,7 @@ export interface SessionPersistence {
     compact: CompactRecord,
     pruneToolCallsBefore?: string
   ): void;
-  /** 全部会话，按 updatedAt 倒序（最近使用的排最前） */
+  /** 全部会话，置顶优先、用户最近使用倒序；后台更新不重排。 */
   listSessions(): SessionRecord[];
   /** 指定会话的全部消息，按写入顺序；未知会话返回空数组 */
   listMessages(sessionId: string): StoredMessage[];
@@ -151,6 +152,8 @@ interface SessionRow {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  pinned: number;
+  last_used_at: string | null;
 }
 
 interface MessageRow {
@@ -249,17 +252,28 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_creation_request ON sessions(creation_request_id)"
   );
+  const projectColumns = db.prepare("PRAGMA table_info(projects)").all();
+  if (!projectColumns.some((column) => column.name === "collapsed"))
+    db.exec(
+      "ALTER TABLE projects ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0"
+    );
+  if (!sessionColumns.some((column) => column.name === "pinned"))
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+    );
+  if (!sessionColumns.some((column) => column.name === "last_used_at"))
+    db.exec("ALTER TABLE sessions ADD COLUMN last_used_at TEXT");
   const insertSession = db.prepare(
-    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
-    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ? WHERE id = ?"
+    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
     "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listSessionsStmt = db.prepare(
-    "SELECT * FROM sessions ORDER BY updated_at DESC, rowid DESC"
+    "SELECT * FROM sessions ORDER BY pinned DESC, COALESCE(last_used_at, created_at) DESC, created_at DESC, id DESC"
   );
   const listMessagesStmt = db.prepare(
     "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at, rowid"
@@ -318,6 +332,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      pinned: row.pinned === 1,
+      lastUsedAt: row.last_used_at ?? row.created_at,
     };
   }
 
@@ -345,6 +361,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"
       ).run(record.id, record.name, record.workspacePath, record.createdAt);
     },
+    setProjectCollapsed(projectId, collapsed) {
+      db.prepare("UPDATE projects SET collapsed = ? WHERE id = ?").run(
+        collapsed ? 1 : 0,
+        projectId
+      );
+    },
     listProjects() {
       return db
         .prepare("SELECT * FROM projects ORDER BY created_at, rowid")
@@ -353,6 +375,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           id: String(row.id),
           name: String(row.name),
           workspacePath: String(row.workspace_path),
+          collapsed: row.collapsed === 1,
           createdAt: String(row.created_at),
         }));
     },
@@ -371,7 +394,9 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.createdAt,
         record.updatedAt,
         record.projectId ?? null,
-        record.creationRequestId ?? null
+        record.creationRequestId ?? null,
+        record.pinned ? 1 : 0,
+        record.lastUsedAt ?? record.createdAt
       );
     },
     removeUnstartedSession(id) {
@@ -399,6 +424,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.workspaceOriginPath,
         next.archivedAt,
         next.updatedAt,
+        next.pinned ? 1 : 0,
+        next.lastUsedAt ?? next.createdAt,
         id
       );
     },

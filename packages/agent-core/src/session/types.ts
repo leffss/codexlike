@@ -39,6 +39,8 @@ export interface ProjectRecord {
   id: string;
   name: string;
   workspacePath: string;
+  /** 未设置时展开；宿主持久保存。 */
+  collapsed?: boolean;
   createdAt: string;
 }
 
@@ -68,7 +70,11 @@ export interface SessionRecord {
   archivedAt: string | null;
   /** ISO 8601 */
   createdAt: string;
-  /** ISO 8601；listSessions 按此倒序 */
+  /** 用户查看/发送时更新；缺省以 createdAt 排序，不由后台事件驱动。 */
+  lastUsedAt?: string;
+  /** 置顶优先于最近使用；未设置等价 false。 */
+  pinned?: boolean;
+  /** 记录更新时间；不作为侧栏排序依据。 */
   updatedAt: string;
 }
 

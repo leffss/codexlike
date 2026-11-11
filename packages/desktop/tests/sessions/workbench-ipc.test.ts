@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -41,7 +42,7 @@ function invoke(name: string, ...args: unknown[]): any {
   if (!handler) throw new Error(`未注册通道 ${name}`);
   return handler({}, ...args);
 }
-function setup() {
+function setup(now?: () => string, beforeResources?: () => void) {
   const root = mkdtempSync(join(tmpdir(), "workbench-ipc-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "nested", "home");
@@ -57,23 +58,27 @@ function setup() {
       decryptString: async (bytes) => bytes.toString(),
     },
   });
+  const worktrees = createWorktreeService({
+    worktreesDir: join(home, "worktrees"),
+  });
+  let manager: ReturnType<typeof createSessionManager>;
   function register() {
-    const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
-      createAgentResourceSnapshot({
+    const resourcesFor = ({ workspacePath }: { workspacePath: string }) => {
+      beforeResources?.();
+      return createAgentResourceSnapshot({
         workspacePath,
         globalDir: home,
         compatibleGlobalDir: join(root, "compatible"),
         findGitRoot: () => null,
       });
-    const manager = createSessionManager({ persistence: store, resourcesFor });
+    };
+    manager = createSessionManager({ persistence: store, resourcesFor, now });
     registerSessionHandlers({
       manager,
       profiles,
       getWindow: () => null,
       dataDir: home,
-      worktreeService: createWorktreeService({
-        worktreesDir: join(home, "worktrees"),
-      }),
+      worktreeService: worktrees,
       resourcesFor,
     });
   }
@@ -83,6 +88,10 @@ function setup() {
     home,
     workspace,
     profiles,
+    worktrees,
+    get manager() {
+      return manager;
+    },
     reopen() {
       store.close();
       store = createSqliteSessionStore(join(home, "session-workbench.db"));
@@ -91,13 +100,23 @@ function setup() {
   };
 }
 
-async function provider(app: ReturnType<typeof setup>, ask = false) {
+async function provider(
+  app: ReturnType<typeof setup>,
+  ask = false,
+  finishGate?: Promise<void>
+) {
   let requests = 0;
   const server = createServer((req, res) => {
     req.resume();
-    req.on("end", () => {
+    req.on("end", async () => {
       requests += 1;
       res.writeHead(200, { "content-type": "text/event-stream" });
+      if (finishGate && requests === 3) {
+        res.write(
+          `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, delta: { content: "后台增量" }, finish_reason: null }] })}\n\n`
+        );
+        await finishGate;
+      }
       const asking = ask && requests === 1;
       const delta = asking
         ? {
@@ -281,6 +300,12 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
     waitingForUser: true,
   });
   expect(state.pendingInteractionIds).toHaveLength(1);
+  expect(() => invoke("sessions:archive", session.id, true)).toThrow("先停止");
+  expect(
+    (await invoke("sessions:list")).find((s: any) => s.id === session.id)
+      .archivedAt
+  ).toBeNull();
+  expect(await invoke("sessions:execution", session.id)).toEqual(state);
   await expect(
     invoke("sessions:send", session.id, "重复发送", model.profile.id)
   ).rejects.toThrow("执行或等待");
@@ -318,6 +343,240 @@ it("拒绝伪造项目、目录覆盖和非法设置，不创建会话或目录"
   }
   expect(await invoke("sessions:list")).toEqual([]);
   expect(existsSync(join(app.home, "sessions"))).toBe(false);
+});
+
+it("执行已占位但Core尚未更新状态时，过时的idle列表也不能绕过归档保护", async () => {
+  let sessionId: string | undefined;
+  let checked = false;
+  const app = setup(undefined, () => {
+    if (!sessionId) return;
+    expect(
+      invoke("sessions:list").find((s: any) => s.id === sessionId).status
+    ).toBe("idle");
+    expect(invoke("sessions:execution", sessionId)).toMatchObject({
+      running: true,
+      executionId: expect.any(String),
+    });
+    expect(() => invoke("sessions:archive", sessionId, true)).toThrow("先停止");
+    checked = true;
+  });
+  const model = await provider(app);
+  const record = await invoke("sessions:start", {
+    requestId: "reserved",
+    projectId: null,
+    text: "初始",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  sessionId = record.id;
+  await invoke("sessions:send", sessionId, "开始另一轮", model.profile.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", sessionId).running).toBe(false)
+  );
+  expect(checked).toBe(true);
+  expect(invoke("sessions:list")[0].archivedAt).toBeNull();
+});
+
+it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍可继续", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const session = await invoke("sessions:start", {
+    requestId: "race",
+    projectId: null,
+    text: "初始任务",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", session.id).running).toBe(false)
+  );
+  const history = invoke("sessions:messages", session.id);
+  const available = await app.profiles.list();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const lookup = vi
+    .spyOn(app.profiles, "list")
+    .mockImplementationOnce(async () => {
+      await gate;
+      return available;
+    });
+  const sending = invoke(
+    "sessions:send",
+    session.id,
+    "不得在归档后启动",
+    model.profile.id
+  );
+  const rejected = expect(sending).rejects.toThrow("归档");
+  expect(
+    invoke("sessions:archive", session.id, true).archivedAt
+  ).not.toBeNull();
+  release();
+  await rejected;
+  lookup.mockRestore();
+  expect(invoke("sessions:messages", session.id)).toEqual(history);
+  expect(model.requests()).toBe(1);
+  expect(invoke("sessions:archive", session.id, false).archivedAt).toBeNull();
+  await invoke("sessions:send", session.id, "恢复后继续", model.profile.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", session.id).running).toBe(false)
+  );
+  expect(model.requests()).toBe(2);
+});
+
+it("独立与项目会话按用户使用排序、置顶优先，重开保留整理与归档历史", async () => {
+  let clock = "2026-11-11T01:00:00.000Z";
+  const app = setup(() => clock);
+  await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const a = await invoke("sessions:start", {
+    requestId: "sort-a",
+    projectId: project.id,
+    text: "项目历史",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", a.id).running).toBe(false)
+  );
+  clock = "2026-11-11T02:00:00.000Z";
+  const b = await invoke("sessions:start", {
+    requestId: "sort-b",
+    projectId: null,
+    workspacePath: app.workspace,
+    text: "同目录独立历史",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", b.id).running).toBe(false)
+  );
+  const ids = () => invoke("sessions:list").map((s: any) => s.id);
+  expect(ids()).toEqual([b.id, a.id]);
+  clock = "2026-11-11T03:00:00.000Z";
+  invoke("sessions:mark-used", a.id);
+  expect(ids()).toEqual([a.id, b.id]);
+  clock = "2026-11-11T04:00:00.000Z";
+  invoke("sessions:rename", b.id, "独立标题已改");
+  expect(ids()).toEqual([a.id, b.id]);
+  invoke("sessions:set-pinned", b.id, true);
+  expect(ids()).toEqual([b.id, a.id]);
+  invoke("projects:set-collapsed", project.id, true);
+  const marker = join(app.workspace, "成果.txt");
+  writeFileSync(marker, "不因归档删除");
+  const history = invoke("sessions:messages", b.id);
+  invoke("sessions:archive", b.id, true);
+  app.reopen();
+  expect(invoke("projects:list")[0]).toMatchObject({
+    id: project.id,
+    collapsed: true,
+  });
+  expect(invoke("sessions:list")[0]).toMatchObject({
+    id: b.id,
+    pinned: true,
+    projectId: null,
+    title: "独立标题已改",
+    lastUsedAt: "2026-11-11T02:00:00.000Z",
+    archivedAt: clock,
+  });
+  expect(invoke("sessions:messages", b.id)).toEqual(history);
+  expect(invoke("sessions:archive", b.id, false)).toMatchObject({
+    projectId: null,
+    workspacePath: app.workspace,
+    archivedAt: null,
+  });
+  expect(readFileSync(marker, "utf8")).toBe("不因归档删除");
+  invoke("sessions:set-pinned", b.id, false);
+  expect(ids()).toEqual([a.id, b.id]);
+});
+
+it("发送登记最近使用，后台增量与完成不抢走后来查看的会话位置", async () => {
+  let clock = "2026-11-11T01:00:00.000Z";
+  const app = setup(() => clock);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const model = await provider(app, false, gate);
+  const a = await invoke("sessions:start", {
+    requestId: "stream-a",
+    projectId: null,
+    text: "A",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", a.id).running).toBe(false)
+  );
+  clock = "2026-11-11T02:00:00.000Z";
+  const b = await invoke("sessions:start", {
+    requestId: "stream-b",
+    projectId: null,
+    text: "B",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", b.id).running).toBe(false)
+  );
+  clock = "2026-11-11T03:00:00.000Z";
+  await invoke("sessions:send", a.id, "后台工作", model.profile.id);
+  try {
+    expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([a.id, b.id]);
+    await vi.waitFor(() => expect(model.requests()).toBe(3));
+    expect(() => invoke("sessions:archive", a.id, true)).toThrow("先停止");
+    clock = "2026-11-11T04:00:00.000Z";
+    invoke("sessions:mark-used", b.id);
+    expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
+  } finally {
+    clock = "2026-11-11T05:00:00.000Z";
+    finish();
+    await vi.waitFor(() =>
+      expect(invoke("sessions:execution", a.id).running).toBe(false)
+    );
+  }
+  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
+});
+
+it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文件原样保留", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", app.workspace, ...args], { encoding: "utf8" });
+  git("init", "-b", "main");
+  git("config", "user.email", "sidebar@test.local");
+  git("config", "user.name", "Sidebar Test");
+  writeFileSync(join(app.workspace, "source.txt"), "来源成果");
+  git("add", "source.txt");
+  git("commit", "-m", "fixture");
+  const project = invoke("projects:add", app.workspace);
+  // 04尚未合入时用公开创建接口准备真实Worktree，不断言其创建实现。
+  const worktree = await app.worktrees.createForSession({
+    sessionId: "archive-worktree",
+    workspacePath: app.workspace,
+  });
+  const session = app.manager.create({
+    id: "archive-worktree",
+    projectId: project.id,
+    workspacePath: worktree.path,
+    workspaceMode: "worktree",
+    workspaceOriginPath: app.workspace,
+  }).record;
+  await invoke("sessions:send", session.id, "保留隔离成果", model.profile.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", session.id).running).toBe(false)
+  );
+  const marker = join(worktree.path, "keep.txt");
+  writeFileSync(marker, "未提交成果");
+  const before = git("worktree", "list", "--porcelain");
+  const history = invoke("sessions:messages", session.id);
+  invoke("sessions:archive", session.id, true);
+  expect(readFileSync(marker, "utf8")).toBe("未提交成果");
+  expect(readFileSync(join(app.workspace, "source.txt"), "utf8")).toBe(
+    "来源成果"
+  );
+  app.reopen();
+  expect(invoke("sessions:messages", session.id)).toEqual(history);
+  expect(invoke("sessions:archive", session.id, false)).toMatchObject({
+    projectId: project.id,
+    workspaceMode: "worktree",
+    workspaceOriginPath: app.workspace,
+    workspacePath: worktree.path,
+  });
+  expect(git("worktree", "list", "--porcelain")).toBe(before);
+  expect(readFileSync(marker, "utf8")).toBe("未提交成果");
 });
 
 it("空的非 Git 项目显式持久存在；规范路径重复添加不创建另一个项目", async () => {
