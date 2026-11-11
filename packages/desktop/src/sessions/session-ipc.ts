@@ -31,6 +31,7 @@ import {
 import type { ProfileStore } from "../profiles/profile-store";
 import { createInterruptRegistry } from "./interrupt-registry";
 import { createLiveSessions } from "./live-sessions";
+import { createSessionManagement } from "./session-management";
 import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
@@ -68,6 +69,7 @@ export function registerSessionHandlers(options: {
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
+  const management = createSessionManagement(manager, executions);
   const starts = new Map<string, Promise<SessionRecord>>();
   const liveSessions = createLiveSessions(manager);
 
@@ -111,22 +113,27 @@ export function registerSessionHandlers(options: {
       liveSessions.markViewed(sessionId, sequence);
     }
   );
+  ipcMain.handle(
+    IPC.projects.setCollapsed,
+    (_e, id: unknown, collapsed: unknown) => {
+      if (typeof id !== "string" || typeof collapsed !== "boolean")
+        throw new Error("setCollapsed：参数不合法");
+      return manager.setProjectCollapsed(id, collapsed);
+    }
+  );
+  ipcMain.handle(IPC.sessions.setPinned, (_e, id: unknown, pinned: unknown) => {
+    if (typeof id !== "string" || typeof pinned !== "boolean")
+      throw new Error("setPinned：参数不合法");
+    return manager.setPinned(id, pinned);
+  });
+  ipcMain.handle(IPC.sessions.markUsed, (_e, id: unknown) => {
+    if (typeof id !== "string") throw new Error("markUsed：参数不合法");
+    return manager.markUsed(id);
+  });
   ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("execution：sessionId 必须是字符串");
-    const record = manager.list().find((session) => session.id === sessionId);
-    if (!record) return null;
-    const pending = manager.get(sessionId)?.pendingInteractions ?? [];
-    return {
-      sessionId,
-      executionId: executions.get(sessionId) ?? null,
-      running:
-        executions.has(sessionId) ||
-        record.status !== "idle" ||
-        pending.length > 0,
-      waitingForUser: pending.length > 0,
-      pendingInteractionIds: pending.map((item) => item.request.id),
-    };
+    return management.execution(sessionId);
   });
 
   ipcMain.handle(IPC.sessions.start, (_e, input: unknown) => {
@@ -302,8 +309,7 @@ export function registerSessionHandlers(options: {
     );
 
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
-    if (executions.has(sessionId))
-      throw new Error("会话正在执行或等待用户回应");
+    management.assertCanExecute(sessionId);
     const executionId = randomUUID();
     executions.set(sessionId, executionId);
     const rollbackLive = liveSessions.begin(sessionId, executionId);
@@ -323,6 +329,7 @@ export function registerSessionHandlers(options: {
         [Symbol.asyncIterator]();
       const first = await iterator.next();
       if (first.done !== true) {
+        manager.markUsed(sessionId);
         emit({ sessionId, executionId, event: first.value });
       }
       void (async () => {
@@ -386,11 +393,11 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== "string" || typeof archived !== "boolean") {
         throw new Error("archive：参数不合法");
       }
-      // 会话结束（归档）：释放其浏览器 context（Cookie 等随之清理；工单 11）
-      if (archived) {
+      // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
+      const result = management.archive(sessionId, archived);
+      if (archived && result) {
         void browserManager?.closeSession(sessionId).catch(() => {});
       }
-      const result = manager.setArchived(sessionId, archived);
       // 归档只整理记录，不触发磁盘回收（包括新模型隔离保留的旧 Worktree）。
       return result;
     }

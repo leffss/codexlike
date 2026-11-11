@@ -187,7 +187,7 @@ export function WorkspacePage(props: {
   }, []);
 
   const openSession = useCallback(
-    async (id: string) => {
+    async (id: string, userInitiated = false) => {
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
       setCurrentId(id);
@@ -213,6 +213,7 @@ export function WorkspacePage(props: {
       loadingRef.current = buffer;
       const snapshotVersion = workspaceState.version();
       try {
+        if (userInitiated) await window.codexlike.sessions.markUsed(id);
         const view = await window.codexlike.sessions.view(id);
         if (!isCurrent()) return;
         if (!view) throw new Error("会话不存在或已损坏");
@@ -488,6 +489,29 @@ export function WorkspacePage(props: {
     }
   }
 
+  /** 侧栏、主区及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
+  async function archiveSession(id: string, archived: boolean) {
+    const generation = sessionRequestRef.current;
+    try {
+      await window.codexlike.sessions.archive(id, archived);
+      const list = await refreshSessions();
+      if (
+        currentIdRef.current !== id ||
+        sessionRequestRef.current !== generation
+      )
+        return;
+      if (archived) {
+        const next = list.find((session) => session.archivedAt === null);
+        if (next) await openSession(next.id);
+        else startCreateSession();
+      }
+    } catch (error) {
+      pushLocalStatus(
+        `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
   async function runCommand(name: string, argument: string) {
     const action = planSlashCommand(
@@ -572,32 +596,7 @@ export function WorkspacePage(props: {
         pushLocalStatus("用法：/rename 新名称");
         return;
       case "archive": {
-        const archivedId = current!.id;
-        try {
-          await window.codexlike.sessions.archive(archivedId, true);
-          const list = await refreshSessions();
-          pushLocalStatus("会话已归档（侧栏「已归档」中可恢复）");
-          // 当前会话被归档：切到最近的未归档会话，没有则清空视图
-          const next = list.find((session) => session.archivedAt === null);
-          if (next !== undefined && next.id !== archivedId) {
-            await openSession(next.id);
-          } else if (next === undefined) {
-            setCurrentId(null);
-            currentIdRef.current = null;
-            sessionRequestRef.current += 1;
-            resourceRequestRef.current += 1;
-            setResources(null);
-            setResourcesLoading(false);
-            setResourcesError(null);
-            setMessages([]);
-            setWorkspaceFiles([]);
-            setContextWarning(null);
-          }
-        } catch (error) {
-          pushLocalStatus(
-            `归档失败：${error instanceof Error ? error.message : String(error)}`
-          );
-        }
+        await archiveSession(current!.id, true);
         return;
       }
       case "select-model": {
@@ -705,13 +704,15 @@ export function WorkspacePage(props: {
   }
 
   const composerHint =
-    profiles.length === 0
-      ? "尚未配置模型，请先前往设置页添加 Provider Profile"
-      : compacting
-        ? "正在压缩历史，请稍候…"
-        : currentId === null && !draft
-          ? "新建或选择一个会话后开始对话"
-          : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
+    current?.archivedAt != null
+      ? "已归档 · 历史只读，恢复会话后可继续发送"
+      : profiles.length === 0
+        ? "尚未配置模型，请先前往设置页添加 Provider Profile"
+        : compacting
+          ? "正在压缩历史，请稍候…"
+          : currentId === null && !draft
+            ? "新建或选择一个会话后开始对话"
+            : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
   return (
     <div className="flex h-full">
@@ -730,7 +731,7 @@ export function WorkspacePage(props: {
         onCreateInProject={startCreateSession}
         sessions={sessions}
         currentId={currentId}
-        onSelect={(id) => void openSession(id)}
+        onSelect={(id) => void openSession(id, true)}
         onCreate={() => void startCreateSession()}
         creating={creating}
         onRename={(id, title) => {
@@ -743,14 +744,22 @@ export function WorkspacePage(props: {
               )
             );
         }}
-        onArchive={(id, archived) => {
+        onArchive={(id, archived) => void archiveSession(id, archived)}
+        onPin={(id, pinned) => {
           void window.codexlike.sessions
-            .archive(id, archived)
-            .then(() => refreshSessions())
+            .setPinned(id, pinned)
+            .then(refreshSessions)
             .catch((error: unknown) =>
-              pushLocalStatus(
-                `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
-              )
+              pushLocalStatus(`置顶失败：${String(error)}`)
+            );
+        }}
+        onCollapseProject={(id, collapsed) => {
+          void window.codexlike.projects
+            .setCollapsed(id, collapsed)
+            .then(() => window.codexlike.projects.list())
+            .then(setProjects)
+            .catch((error: unknown) =>
+              pushLocalStatus(`折叠失败：${String(error)}`)
             );
         }}
       />
@@ -764,6 +773,22 @@ export function WorkspacePage(props: {
                   : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
                 : "未选择会话")}
           </span>
+          {current && (
+            <button
+              type="button"
+              data-testid={
+                current.archivedAt === null
+                  ? "session-archive"
+                  : "session-restore"
+              }
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
+              onClick={() =>
+                void archiveSession(current.id, current.archivedAt === null)
+              }
+            >
+              {current.archivedAt === null ? "归档会话" : "恢复会话"}
+            </button>
+          )}
           <button
             type="button"
             data-testid="resources-toggle"
@@ -938,6 +963,7 @@ export function WorkspacePage(props: {
                 onOpenSkills={refreshCurrentResources}
                 disabled={
                   (currentId === null && !draft) ||
+                  current?.archivedAt != null ||
                   creating ||
                   profiles.length === 0 ||
                   streaming ||

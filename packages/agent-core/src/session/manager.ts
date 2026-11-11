@@ -71,6 +71,12 @@ export interface CreateSessionManagerOptions {
 export interface SessionManager {
   addProject(workspacePath: string): ProjectRecord;
   projects(): ProjectRecord[];
+  setProjectCollapsed(
+    projectId: string,
+    collapsed: boolean
+  ): ProjectRecord | null;
+  setPinned(sessionId: string, pinned: boolean): SessionRecord | null;
+  markUsed(sessionId: string): SessionRecord | null;
   removeUnstarted(sessionId: string): void;
   create(options: {
     projectId?: string | null;
@@ -88,7 +94,7 @@ export interface SessionManager {
     /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
     id?: string;
   }): AgentSession;
-  /** 全部会话记录（含已归档），按 updatedAt 倒序 */
+  /** 全部会话记录（含已归档），置顶优先、最近使用倒序。 */
   list(): SessionRecord[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
   messages(sessionId: string): StoredMessage[];
@@ -220,12 +226,25 @@ export function createSessionManager(
         id: generateId(),
         name: basename(path) || path,
         workspacePath: path,
+        collapsed: false,
         createdAt: now(),
       };
       persistence.insertProject(project);
       return project;
     },
     projects: () => persistence.listProjects(),
+    setProjectCollapsed(projectId, collapsed) {
+      persistence.setProjectCollapsed(projectId, collapsed);
+      return (
+        persistence.listProjects().find((item) => item.id === projectId) ?? null
+      );
+    },
+    setPinned(sessionId, pinned) {
+      return patchRecord(sessionId, { pinned });
+    },
+    markUsed(sessionId) {
+      return patchRecord(sessionId, { lastUsedAt: now() });
+    },
     cancelInteractions(reason) {
       for (const session of cache.values()) session.cancelInteractions(reason);
     },
@@ -261,6 +280,8 @@ export function createSessionManager(
         // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
         approvalMode,
         archivedAt: null,
+        pinned: false,
+        lastUsedAt: timestamp,
         createdAt: timestamp,
         updatedAt: timestamp,
       };

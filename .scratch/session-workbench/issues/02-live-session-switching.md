@@ -35,7 +35,7 @@
 
 ## 交付记录（2026-11-11）
 
-- 分支 `feat/session-workbench-02`；专属工作树基线 `da9cb26`。提交前 `git merge feat/session-workbench`（tip `da9cb26`）返回 `Already up to date`；最终提交 hash 由交付消息给出。
+- 分支 `feat/session-workbench-02`；专属工作树基线 `da9cb26`。功能提交 `02e60de` 前已 merge 当时集成 tip；交付前再次合入集成 `2074525`（票05），保留其排序、同步管理保护、置顶/折叠与用户导航，仅叠加现场和徽标。最终整合提交 hash 由交付消息给出。
 - `sessions.view(id)` 原子返回 `{ sessionId, executionId, sequence, history, events, pendingInteractions, activity }`：`history` 固定为当前执行起点，`events` 是宿主内存保存的该执行完整日志。沿用原 `sessions.start/send` 和 executionId，不另建首次发送入口。先订阅、再读取现场，仅应用大于快照 sequence 的信封；水位跨执行递增，旧执行/其他会话/重复/终态后的事件被隔离。启动前失败恢复前一现场与水位，compact 后刷新历史底座。
 - `SessionEventEnvelope` 新增 `sequence`、`activity`；`sessions.list()` 返回 `SessionListItem`（原记录附可选 `activity`）。activity 将 running/waitingForUser 与 outcome（completed/failed/interrupted）、unread 分开；`sessions.markViewed(id, sequence)` 仅确认看见的水位，不消费更晚完成提醒，不改 updatedAt/lastUsedAt，也不调用票05的 markUsed。后台正文不刷新列表或写最近使用；置顶/最近使用排序仍由票05负责。
 - 运行日志与思考仅驻内存、限定最后一次执行，不扩大 SQLite 历史范围。切出会话、草稿或设置不停止执行。停止仍走原中断通道，停止后只收清理终态；工具结果可补齐错过开始的普通/子代理卡片。审批、问答和子代理请求仍由 Core 按 sessionId/requestId 校验。
@@ -54,4 +54,6 @@
 - `pnpm --filter @codexlike/desktop test:e2e:live-sessions`：先真实复现未完成 A→B→A 缺正文的红测，接入后通过。真实点击项目A/独立B切换、后台正文与工具起止/输出、审批和问答、错会话响应拒绝、完成未查看、失败、中断。新增脚本已纳入 desktop 的 test:e2e:all，但本票未运行全集。
 - `CODEXLIKE_E2E_INTERACTION_CASE=queue pnpm --filter @codexlike/desktop test:e2e:interactions`：通过。只适配 queue 首次发送前置，并验证切出/切回恢复两张子代理卡与主/子代理三项 FIFO 问答审批、正确响应和报告回流。
 - `pnpm --filter @codexlike/desktop test:e2e:projects`：通过，首次发送及显式归属必要回归。
+- 整合票05后再次通过 `pnpm typecheck`、`pnpm build`、UI 98 测试、Desktop `live-session-ipc` + `workbench-ipc` 15 测试，以及真实 Electron `test:e2e:live-sessions`、`test:e2e:sidebar`、interactions(queue)。`sidebar` 验证最近使用/置顶/折叠、归档查看恢复、三入口导航、等待保护；`markViewed` 不影响票05排序。
+- 正常提交 hooks 自动运行 `check:adr`、`lint-staged`、`typecheck`、`pnpm test`：功能提交阶段 Core 416 + Desktop 90 + UI 98，共604测试通过；Windows 符号链接用例命中既有 EPERM 跳过分支，不声称该分支已验证。
 - **未验边界**：未运行 `pnpm dist`、打包冷启动、全量 E2E 或 interactions 的 questions/cancel 场景；后两场景旧新建前置仍由相应后续票适配。跨重启执行终态归08，草稿/偏好持久化归03，侧栏完整排序归05；本票不声称这些票已完成。

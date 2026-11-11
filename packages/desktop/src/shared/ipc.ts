@@ -43,7 +43,11 @@ export type { ThemeName };
  * 主→渲染：会话事件流（`session:events` channel，按会话 ID 多路复用）。
  */
 export const IPC = {
-  projects: { list: "projects:list", add: "projects:add" },
+  projects: {
+    list: "projects:list",
+    add: "projects:add",
+    setCollapsed: "projects:set-collapsed",
+  },
   providerProfiles: {
     list: "provider-profiles:list",
     create: "provider-profiles:create",
@@ -51,7 +55,7 @@ export const IPC = {
     remove: "provider-profiles:remove",
   },
   sessions: {
-    /** 全部会话（含已归档，侧栏列表自行过滤；updatedAt 倒序） */
+    /** 全部会话（含已归档；置顶优先、最近使用倒序，侧栏按归属分区）。 */
     list: "sessions:list",
     /** 首次发送：幂等创建正式会话并启动正常发送。 */
     start: "sessions:start",
@@ -59,6 +63,8 @@ export const IPC = {
     /** 执行起点历史与截至 sequence 的完整运行现场；先订阅再读取。 */
     view: "sessions:view",
     markViewed: "sessions:mark-viewed",
+    setPinned: "sessions:set-pinned",
+    markUsed: "sessions:mark-used",
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: "sessions:select-workspace",
     /** 指定会话的消息历史 */
@@ -197,6 +203,10 @@ export interface CodexLikeApi {
   projects: {
     list(): Promise<ProjectRecord[]>;
     add(workspacePath: string): Promise<ProjectRecord>;
+    setCollapsed(
+      projectId: string,
+      collapsed: boolean
+    ): Promise<ProjectRecord | null>;
   };
   providerProfiles: {
     /** 全部 Provider Profile（apiKey 已解密，仅存在于渲染进程内存） */
@@ -216,6 +226,12 @@ export interface CodexLikeApi {
     view(sessionId: string): Promise<SessionView | null>;
     /** 只确认用户已经看到的水位，不消费更新之后产生的完成提醒。 */
     markViewed(sessionId: string, sequence: number): Promise<void>;
+    setPinned(
+      sessionId: string,
+      pinned: boolean
+    ): Promise<SessionRecord | null>;
+    /** 只在用户主动查看时调用；发送由宿主自动登记，后台刷新不调用。 */
+    markUsed(sessionId: string): Promise<SessionRecord | null>;
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionListItem[]>;
     /** 原生目录选择器；取消返回 null */
