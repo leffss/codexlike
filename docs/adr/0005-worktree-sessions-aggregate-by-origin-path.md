@@ -1,5 +1,7 @@
 # Worktree 会话按原始仓库路径聚合进项目
 
+> 本文保留旧实现的决策背景；目标设计由 [ADR 0010](0010-session-workbench-project-membership-and-workspace.md) 替代：项目改为独立实体、会话归属可选，Worktree 来源仍保留。新设计尚未实施。
+
 侧边栏的「项目」分组按工作区目录聚合会话（见 GLOSSARY「项目」），但 worktree 模式落库的 `workspacePath` 是 `~/.codexlike/worktrees/<会话id>`，原仓库路径无处可查（worktree 服务自己的记录会随「只保留最近 15 个」的自动清理消失，而 session 记录是永久的）。因此 sessions 表增加 `workspace_origin_path` 列：worktree 会话创建时写入原仓库路径，项目聚合键取 `origin ?? workspacePath`。
 
 ## Considered Options
