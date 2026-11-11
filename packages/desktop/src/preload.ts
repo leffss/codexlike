@@ -21,6 +21,9 @@ const api: CodexLikeApi = {
   sessions: {
     start: (input) => ipcRenderer.invoke(IPC.sessions.start, input),
     execution: (id) => ipcRenderer.invoke(IPC.sessions.execution, id),
+    view: (id) => ipcRenderer.invoke(IPC.sessions.view, id),
+    markViewed: (id, sequence) =>
+      ipcRenderer.invoke(IPC.sessions.markViewed, id, sequence),
     setPinned: (id, pinned) =>
       ipcRenderer.invoke(IPC.sessions.setPinned, id, pinned),
     markUsed: (id) => ipcRenderer.invoke(IPC.sessions.markUsed, id),
