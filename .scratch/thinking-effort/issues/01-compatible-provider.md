@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Parent
 
@@ -12,14 +12,14 @@
 
 ## Acceptance criteria
 
-- [ ] 统一工厂使用兼容 provider，保留 chat completions 协议；Provider Profile 的 baseURL、鉴权、模型标识与可注入 fetch 行为保持可用。
-- [ ] 根据当前 SDK 及锁文件选择兼容依赖，更新依赖声明和锁文件；不从历史调研报告直接推断安装版本。
-- [ ] 在模型工厂公开入口通过 fetch spy 或本地 HTTP 服务验证最终请求 body：`auto` 不带控制字段；低/中/高分别带 `thinking.type = enabled` 和相应 snake_case `reasoning_effort`；关只带 `thinking.type = disabled`。不得以内部 providerOptions 的对象断言代替此验证。
-- [ ] 受控 reasoning SSE 能转为独立 reasoning 流片段，普通正文仍按原有语义输出；覆盖同一流包含思考、正文和工具调用的场景。
-- [ ] 工具调用参数、工具结果往返、非流式文本生成、错误及中断保持可用；不自行增加 fetch/SSE 改写补丁。
-- [ ] 默认既有调用方不附加思考控制参数；compact 和 commit 草稿保持该默认行为。
-- [ ] 明确检查兼容 provider 的消息转换行为，保证后续展示用 reasoning 不会被无意加入请求历史；如服务端必须接收思考回传，记录限制，不主动启用 Preserved Thinking。
-- [ ] 执行全量单测与项目全套 E2E，直接记录退出码和结果；检查既有文本、工具、子代理、审批及取消行为。环境阻塞或失败如实记录，不用历史测试数量代替本次结果。
+- [x] 统一工厂使用兼容 provider，保留 chat completions 协议；Provider Profile 的 baseURL、鉴权、模型标识与可注入 fetch 行为保持可用。
+- [x] 根据当前 SDK 及锁文件选择兼容依赖，更新依赖声明和锁文件；不从历史调研报告直接推断安装版本。
+- [x] 在模型工厂公开入口通过 fetch spy 或本地 HTTP 服务验证最终请求 body：`auto` 不带控制字段；低/中/高分别带 `thinking.type = enabled` 和相应 snake_case `reasoning_effort`；关只带 `thinking.type = disabled`。不得以内部 providerOptions 的对象断言代替此验证。
+- [x] 受控 reasoning SSE 能转为独立 reasoning 流片段，普通正文仍按原有语义输出；覆盖同一流包含思考、正文和工具调用的场景。
+- [x] 工具调用参数、工具结果往返、非流式文本生成、错误及中断保持可用；不自行增加 fetch/SSE 改写补丁。
+- [x] 默认既有调用方不附加思考控制参数；compact 和 commit 草稿保持该默认行为。
+- [x] 明确检查兼容 provider 的消息转换行为，保证后续展示用 reasoning 不会被无意加入请求历史；如服务端必须接收思考回传，记录限制，不主动启用 Preserved Thinking。
+- [x] 执行全量单测与项目全套 E2E，直接记录退出码和结果；检查既有文本、工具、子代理、审批及取消行为。环境阻塞或失败如实记录，不用历史测试数量代替本次结果。
 
 ## Testing notes
 
@@ -37,3 +37,7 @@
 - TDD 红→绿记录：旧 provider 丢 `reasoning_content`（红）→ 迁移（绿）；五档 body（红）→ providerOptions 透传（绿）；回传含 `reasoning_content`（红）→ 边界剥离（绿）；未知档位（红）→ 枚举拒绝（绿）。
 - 验证退出码：`pnpm test`=0（agent-core 322 / desktop 66 / ui 58），`pnpm typecheck`=0，`pnpm test:e2e:all`=0（12 场景全绿，含文本、工具、审批、中断、compact、worktree、MCP、子代理、项目侧栏），`pnpm check:adr`=0。
 - 兼容限制：真实远端对各档位的支持不由 mock 担保；GLM `thinking` 协议要求思考回传的场景未启用（本仓库明确剥离），若服务端强制要求将按 spec 报告为兼容性限制。
+
+### 2026-11-11 · 关闭（终验）
+
+集成分支 `feat/thinking-effort` 终态 `9b42536`。最终回归（集成 worktree）：`pnpm build` / `pnpm test` / `pnpm typecheck` / `pnpm test:e2e:all` 退出码全 0。两轴 code-review 无硬违规、spec 逐项无相悖；review 后续修复（`9b42536`）中与本票相关的是五档校验提取为 `parseThinkingEffort`（行为不变）。AC 全部勾选，Status → done。

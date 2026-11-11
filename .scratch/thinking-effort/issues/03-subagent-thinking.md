@@ -4,7 +4,7 @@
 
 **Blocked by:** [02: 主会话思考档位与折叠展示全链路](02-main-session-thinking.md)。02 提供真实用户选择、发送快照与已验收的主会话展示路径；01 的 provider 能力由该依赖传递保证。
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Parent
 
@@ -12,17 +12,17 @@
 
 ## Acceptance criteria
 
-- [ ] 子代理捕获触发它的主会话消息的档位快照，所有模型/工具轮次保持不变；不增加子代理独立档位设置，不实时读取 UI 当前值。
-- [ ] 使用独立 Provider Profile 和回退主模型两条路径都继承同一档位；不改变现有子代理模型选择规则。
-- [ ] 排队任务在触发时就确定档位，不在出队时读取新值；运行中主会话切档不会改变已有子代理或排队任务的请求。
-- [ ] 五档最终请求字段符合 spec，特别验证 `auto` 省略控制字段、`off` 不带 effort；独立 Profile 不触发静默档位映射或降级。
-- [ ] reasoning 事件穿过子代理事件链与 IPC，在所属 SubagentCard 内流式展示、独立展开/收起；主会话及并发子代理之间内容不串流。
-- [ ] 思考不混入子代理最终报告或主会话 assistant 正文；无 reasoning 时原有卡片与报告路径保持正常。
-- [ ] 正常完成、失败、子代理中断及主会话联动取消均正确结束思考显示；只有思考尚无正文时也能终止，不遗留加载状态。
-- [ ] 思考只供运行期展示，不写入持久化消息、不在历史恢复时重建、不回传历史，不启用 Preserved Thinking。
-- [ ] 复用子代理公开入口测试验证独立 Profile、回退、排队、并发隔离、报告回流及快照语义，并覆盖 UI 事件归并。
-- [ ] Desktop E2E 实际触发子代理，断言主/子请求 body、独立 Profile 使用、运行中改档不影响已触发任务，以及 SubagentCard 思考流与折叠交互。
-- [ ] 执行全量单测和项目全套 E2E，回归主会话、工具调用、审批、取消、compact 与 commit 草稿；从当前 scripts 获取命令，直接记录退出码。失败或环境阻塞如实报告。
+- [x] 子代理捕获触发它的主会话消息的档位快照，所有模型/工具轮次保持不变；不增加子代理独立档位设置，不实时读取 UI 当前值。
+- [x] 使用独立 Provider Profile 和回退主模型两条路径都继承同一档位；不改变现有子代理模型选择规则。
+- [x] 排队任务在触发时就确定档位，不在出队时读取新值；运行中主会话切档不会改变已有子代理或排队任务的请求。
+- [x] 五档最终请求字段符合 spec，特别验证 `auto` 省略控制字段、`off` 不带 effort；独立 Profile 不触发静默档位映射或降级。
+- [x] reasoning 事件穿过子代理事件链与 IPC，在所属 SubagentCard 内流式展示、独立展开/收起；主会话及并发子代理之间内容不串流。
+- [x] 思考不混入子代理最终报告或主会话 assistant 正文；无 reasoning 时原有卡片与报告路径保持正常。
+- [x] 正常完成、失败、子代理中断及主会话联动取消均正确结束思考显示；只有思考尚无正文时也能终止，不遗留加载状态。
+- [x] 思考只供运行期展示，不写入持久化消息、不在历史恢复时重建、不回传历史，不启用 Preserved Thinking。
+- [x] 复用子代理公开入口测试验证独立 Profile、回退、排队、并发隔离、报告回流及快照语义，并覆盖 UI 事件归并。
+- [x] Desktop E2E 实际触发子代理，断言主/子请求 body、独立 Profile 使用、运行中改档不影响已触发任务，以及 SubagentCard 思考流与折叠交互。
+- [x] 执行全量单测和项目全套 E2E，回归主会话、工具调用、审批、取消、compact 与 commit 草稿；从当前 scripts 获取命令，直接记录退出码。失败或环境阻塞如实报告。
 
 ## Testing notes
 
@@ -56,3 +56,7 @@
 - `pnpm test:e2e:all` → 0（14 个场景含既有回归与新增 subagent-thinking；日志尾部 "database is not open" 为 closeApp 后收尾噪音，既有 thinking.mjs 亦出现且断言全过）
 
 **限制说明**：mock provider 验证的是客户端请求契约（客户端确实发送 spec 规定字段并消费 reasoning_content SSE），不宣称真实远端服务端支持全部五档；五档 `auto`/`off` 的子代理 body 字段由 01/02 票的工厂表驱动测试与 E2E 覆盖，本票 E2E 覆盖 high（enabled+effort）与下一条消息 off（disabled、无 effort）。
+
+### 2026-11-11 · 关闭（终验）
+
+集成分支 `feat/thinking-effort` 终态 `9b42536`。最终回归（集成 worktree）：`pnpm build` / `pnpm test` / `pnpm typecheck` / `pnpm test:e2e:all` 退出码全 0（14 场景含本票新增 subagent-thinking E2E）。两轴 code-review 无硬违规、spec 逐项无相悖；review 后续修复（`9b42536`）涉及本票的是 E2E 主/子分流断言由字符串子串改为 `JSON.parse` 后按 `model` 字段判断（可靠性提升，断言语义不变）。AC 全部勾选，Status → done。
