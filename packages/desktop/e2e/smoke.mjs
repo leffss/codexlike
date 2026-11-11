@@ -9,14 +9,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
 import { _electron as electron } from 'playwright-core';
+import { launchTarget } from './launch-target.mjs';
 
-const require = createRequire(import.meta.url);
-const DESKTOP_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 // pnpm 隔离下 playwright-core 自解析 electron 不可靠，显式指定本包依赖的 Electron 二进制
-const ELECTRON_BIN = require('electron');
 
 /** 极简断言 */
 function assert(condition, message) {
@@ -160,11 +157,7 @@ async function launchApp(homeDir, tavilyUrl) {
     // 生产模式：不带 VITE_DEV_SERVER_URL，主进程以 file:// 加载 ui/dist
     VITE_DEV_SERVER_URL: '',
   };
-  const app = await electron.launch({
-    executablePath: ELECTRON_BIN,
-    args: [DESKTOP_DIR],
-    env,
-  });
+  const app = await electron.launch(launchTarget(env));
   app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
   app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
   const window = await app.firstWindow();

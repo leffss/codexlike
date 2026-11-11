@@ -1,6 +1,6 @@
 {
   "name": "@codexlike/desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CodexLike 桌面宿主：Electron 主进程、类型化 IPC 桥与本地配置存储（safeStorage 加密）。",
   "type": "module",
   "private": true,
@@ -13,9 +13,13 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "pnpm run predist && electron-builder --win --projectDir .dist-vendor",
+    "predist": "node scripts/dist.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "node e2e/smoke.mjs",
+    "test:e2e:acceptance": "node e2e/acceptance.mjs",
     "test:e2e:commands": "node e2e/commands.mjs",
     "test:e2e:browser": "node e2e/browser.mjs",
     "test:e2e:approvals": "node e2e/approvals.mjs",
@@ -26,12 +30,11 @@
     "test:e2e:mcp": "node e2e/mcp.mjs",
     "test:e2e:subagents": "node e2e/subagents.mjs"
   },
-  "dependencies": {
-    "@codexlike/agent-core": "workspace:*"
-  },
   "devDependencies": {
+    "@codexlike/agent-core": "workspace:*",
     "@types/node": "^24.0.0",
     "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "playwright-core": "^1.65.0",
     "typescript": "^5.9.0",
