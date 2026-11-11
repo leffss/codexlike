@@ -28,17 +28,17 @@ export function ApprovalCard(props: {
       data-approval-command={approval.command}
       className={`rounded-lg border px-3 py-2 text-sm ${
         waiting
-          ? 'border-amber-700/60 bg-amber-950/30'
-          : 'border-slate-700/60 bg-slate-900/70'
+          ? 'border-warn-fg/40 bg-warn-bg'
+          : 'border-line bg-surface'
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className="rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-300">
+        <span className="rounded bg-warn-bg px-1.5 py-0.5 text-xs text-warn-fg">
           等待审批
         </span>
-        <span className="text-slate-300">agent 请求执行终端命令：</span>
+        <span className="text-fg-muted">agent 请求执行终端命令：</span>
       </div>
-      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-slate-950/70 p-2 font-mono text-xs text-slate-200">
+      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-code-bg p-2 font-mono text-xs text-code-fg">
         {approval.command}
       </pre>
       {waiting ? (
@@ -46,7 +46,7 @@ export function ApprovalCard(props: {
           <button
             type="button"
             data-testid="approval-approve"
-            className="rounded bg-emerald-700 px-3 py-1.5 text-xs text-white hover:bg-emerald-600"
+            className="rounded bg-ok-solid px-3 py-1.5 text-xs text-on-accent hover:bg-ok-solid-hover"
             onClick={() => props.onRespond(approval.id, 'approve')}
           >
             批准
@@ -54,7 +54,7 @@ export function ApprovalCard(props: {
           <button
             type="button"
             data-testid="approval-reject"
-            className="rounded bg-red-800 px-3 py-1.5 text-xs text-white hover:bg-red-700"
+            className="rounded bg-danger-solid px-3 py-1.5 text-xs text-on-accent hover:bg-danger-solid-hover"
             onClick={() => props.onRespond(approval.id, 'reject')}
           >
             拒绝
@@ -62,21 +62,21 @@ export function ApprovalCard(props: {
           <button
             type="button"
             data-testid="approval-always"
-            className="rounded bg-sky-700 px-3 py-1.5 text-xs text-white hover:bg-sky-600"
+            className="rounded bg-accent px-3 py-1.5 text-xs text-on-accent hover:bg-accent-hover"
             title={`本会话内首词为 ${approval.commandWord} 的命令不再询问`}
             onClick={() => props.onRespond(approval.id, 'always')}
           >
             本会话总是允许
           </button>
-          <span className="ml-auto text-xs text-slate-500">
-            命令首词：<code className="text-slate-400">{approval.commandWord}</code>
+          <span className="ml-auto text-xs text-fg-subtle">
+            命令首词：<code className="text-fg-muted">{approval.commandWord}</code>
           </span>
         </div>
       ) : (
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-fg-muted">
           {DECISION_LABELS[decision]}
           {decision === 'always' && (
-            <span className="text-slate-500">
+            <span className="text-fg-subtle">
               （本会话内首词为 {approval.commandWord} 的命令不再询问）
             </span>
           )}

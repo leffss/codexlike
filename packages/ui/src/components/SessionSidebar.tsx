@@ -1,8 +1,9 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 
 import type { SessionRecord } from '@codexlike/agent-core';
 
 import { groupSessionsByProject } from '../lib/project-groups';
+import { formatRelativeTime } from '../lib/relative-time';
 
 function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   const next = new Set(set);
@@ -14,12 +15,38 @@ function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   return next;
 }
 
+/** 项目组头的文件夹图标（内联 SVG——UI 不引入图标库；开合两态） */
+function FolderIcon(props: { open: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path
+        d={
+          props.open
+            ? 'M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 6v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12V4.25z'
+            : 'M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z'
+        }
+      />
+    </svg>
+  );
+}
+
 /**
  * 左栏：单一项目树（GLOSSARY「项目」，ADR 0005）。
  * 项目组 = 同一工作区目录（worktree 会话按原始仓库路径）自动聚合的会话分组，
- * 组头常驻、项目永不消失；组内活跃会话在上、「已归档」子折叠在下（工单 07
- * 的底部独立归档区已并入各组）。分组与排序见 lib/project-groups（纯派生，无持久实体）。
- * 会话项提供重命名 / 归档操作，与 /rename /archive 走同一 IPC 通道。
+ * 组头常驻、项目永不消失；组内活跃会话在上、「已归档」子折叠在下。
+ * 分组与排序见 lib/project-groups（纯派生，无持久实体）。
+ * 会话行右侧显示相对更新时间（updatedAt「最近更新」口径，lib/relative-time），
+ * 状态徽标弱化为小徽标，操作按钮 hover / 键盘聚焦时浮现；
+ * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
 export function SessionSidebar(props: {
   sessions: SessionRecord[];
@@ -39,6 +66,13 @@ export function SessionSidebar(props: {
   );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+
+  // 全列表共享的分钟级时钟：相对时间文案随时间推移刷新（非每行一个定时器）
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const groups = groupSessionsByProject(props.sessions);
 
@@ -61,8 +95,11 @@ export function SessionSidebar(props: {
   }
 
   function renderSessionItem(session: SessionRecord) {
+    const relative = formatRelativeTime(session.updatedAt, now);
+    const absoluteTime = new Date(session.updatedAt).toLocaleString('zh-CN');
+
     return (
-      <li key={session.id} className="group relative mt-1">
+      <li key={session.id} className="group relative mt-0.5">
         {editingId === session.id ? (
           <input
             data-testid="rename-input"
@@ -71,51 +108,60 @@ export function SessionSidebar(props: {
             onChange={(event) => setEditingTitle(event.target.value)}
             onKeyDown={(event) => onRenameKeyDown(event, session.id)}
             onBlur={() => submitRename(session.id)}
-            className="w-full rounded border border-sky-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+            className="w-full rounded border border-accent bg-code-bg px-2 py-1.5 text-sm text-fg outline-none"
           />
         ) : (
           <button
             type="button"
             data-testid="session-item"
-            className={`flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-sm ${
+            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm ${
               session.id === props.currentId
-                ? 'bg-sky-800/40 text-slate-100'
-                : 'text-slate-300 hover:bg-slate-800/70'
+                ? 'bg-selected text-fg'
+                : 'text-fg-muted hover:bg-hover hover:text-fg'
             }`}
             onClick={() => props.onSelect(session.id)}
           >
             <span className="truncate" title={session.workspacePath}>
               {session.title}
             </span>
-            <span className="flex shrink-0 items-center gap-1">
+            <span className="ml-auto flex shrink-0 items-center gap-1">
               {session.workspaceMode === 'worktree' && (
                 <span
                   data-testid="worktree-badge"
                   title={`托管 Worktree：${session.workspacePath}`}
-                  className="rounded bg-violet-900/60 px-1.5 py-0.5 text-[10px] text-violet-300"
+                  className="rounded bg-worktree-bg px-1 py-px text-[10px] text-worktree-fg"
                 >
                   worktree
                 </span>
               )}
               {session.status === 'streaming' ? (
-                <span className="shrink-0 rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                <span
+                  title="会话正在运行中"
+                  className="flex items-center gap-1 rounded bg-ok-bg px-1 py-px text-[10px] text-ok-fg"
+                >
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ok-fg" />
                   运行中
                 </span>
               ) : session.status === 'waiting-approval' ? (
-                <span className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] text-amber-300">
+                <span className="rounded bg-warn-bg px-1 py-px text-[10px] text-warn-fg">
                   等待审批
                 </span>
               ) : null}
+              {relative !== '' && (
+                <span className="text-[10px] text-fg-subtle" title={absoluteTime}>
+                  {relative}
+                </span>
+              )}
             </span>
           </button>
         )}
         {editingId !== session.id && (
-          <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 gap-1 group-hover:flex">
+          <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 gap-1 group-hover:flex group-focus-within:flex">
             <button
               type="button"
               data-testid="rename-button"
               title="重命名（/rename）"
-              className="rounded bg-slate-800/90 px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-sky-300"
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
               onClick={() => {
                 setEditingId(session.id);
                 setEditingTitle(session.title);
@@ -127,7 +173,7 @@ export function SessionSidebar(props: {
               type="button"
               data-testid="archive-button"
               title="归档（/archive）：收进本项目「已归档」"
-              className="rounded bg-slate-800/90 px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-amber-300"
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-warn-fg"
               onClick={() => props.onArchive(session.id, true)}
             >
               归档
@@ -156,31 +202,33 @@ export function SessionSidebar(props: {
           type="button"
           data-testid="project-group"
           title={group.path}
-          className="mt-2 flex w-full items-center gap-1 rounded px-1 py-1 text-left text-xs font-medium text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+          aria-expanded={expanded}
+          className="mt-2 flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium text-fg-muted hover:bg-hover hover:text-fg"
           onClick={() =>
             setCollapsedProjects((prev) => toggleKey(prev, group.key))
           }
         >
-          <span className="w-3 shrink-0 text-center text-slate-500">
+          <span className="w-3 shrink-0 text-center text-fg-subtle">
             {expanded ? '▾' : '▸'}
           </span>
+          <FolderIcon open={expanded} />
           <span className="truncate">{group.name}</span>
-          <span className="ml-auto shrink-0 text-[10px] text-slate-600">
+          <span className="ml-auto shrink-0 text-[10px] text-fg-subtle">
             {group.active.length}
             {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
           </span>
         </button>
         {expanded && (
-          <ul className="pl-2">
+          <ul className="pl-3">
             {group.active.map((session) => renderSessionItem(session))}
           </ul>
         )}
         {expanded && group.archived.length > 0 && (
-          <div className="pl-3">
+          <div className="pl-4">
             <button
               type="button"
               data-testid="toggle-archived"
-              className="w-full rounded px-2 py-1 text-left text-xs text-slate-500 hover:text-slate-300"
+              className="w-full rounded px-2 py-1 text-left text-[11px] text-fg-subtle hover:text-fg-muted"
               onClick={() =>
                 setExpandedArchived((prev) => toggleKey(prev, group.key))
               }
@@ -188,11 +236,11 @@ export function SessionSidebar(props: {
               {archivedOpen ? '收起' : '展开'}已归档（{group.archived.length}）
             </button>
             {archivedOpen && (
-              <ul className="mt-1" data-testid="archived-list">
+              <ul className="mt-0.5" data-testid="archived-list">
                 {group.archived.map((session) => (
                   <li
                     key={session.id}
-                    className="mt-1 flex items-center justify-between gap-2 rounded px-2 py-1.5 text-sm text-slate-500"
+                    className="mt-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-fg-subtle hover:bg-hover"
                   >
                     <span className="truncate" title={session.workspacePath}>
                       {session.title}
@@ -201,7 +249,7 @@ export function SessionSidebar(props: {
                       type="button"
                       data-testid="unarchive-button"
                       title="取消归档，回到项目活跃列表"
-                      className="shrink-0 rounded bg-slate-800/90 px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-sky-300"
+                      className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
                       onClick={() => props.onArchive(session.id, false)}
                     >
                       恢复
@@ -217,15 +265,15 @@ export function SessionSidebar(props: {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900/50">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface-muted">
       <div className="flex items-center justify-between px-3 py-3">
-        <h2 className="text-sm font-medium text-slate-200">会话</h2>
+        <h2 className="text-sm font-medium text-fg">会话</h2>
         <button
           type="button"
           data-testid="new-session"
           disabled={props.creating}
           title="选择工作区目录，新建会话"
-          className="rounded bg-sky-700 px-2 py-1 text-xs text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={props.onCreate}
         >
           {props.creating ? '创建中…' : '+ 新建会话'}
@@ -234,7 +282,7 @@ export function SessionSidebar(props: {
 
       {groups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4">
-          <p className="text-center text-xs text-slate-600">
+          <p className="text-center text-xs text-fg-subtle">
             暂无会话
             <br />
             点击「+ 新建会话」选择工作区目录开始

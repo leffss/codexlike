@@ -21,6 +21,7 @@ import {
   type ToolModelMessage,
 } from "ai";
 
+import type { AgentResourceSnapshot } from "../context/resource-types";
 import { createLanguageModelFromProfile } from "../provider/language-model";
 import type {
   CreateLanguageModelOptions,
@@ -94,6 +95,8 @@ export interface SubagentHostPort {
   workspacePath: string;
   /** 实时读取当前审批模式（切换对子代理的下一次工具调用立即生效） */
   approvalMode(): ApprovalMode;
+  /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主会话正文。 */
+  resources?(): AgentResourceSnapshot | undefined;
   /**
    * 子代理的命令审批：注册等待（主会话 waiter 表）并以 approval-request 事件
    * 推给 UI（request.subagentId 标注来源）；resolve 由 respondApproval 触发。
@@ -103,7 +106,7 @@ export interface SubagentHostPort {
   generateId(): string;
 }
 
-/** 子代理系统提示：独立上下文的固定指令（不注入 AGENTS.md，与主会话提示无关） */
+/** 子代理固定角色指令；运行时追加本轮共享资源规范与目录，不复制主会话正文。 */
 const SUBAGENT_SYSTEM_PROMPT = [
   "你是 CodexLike 的子代理：主会话把一项独立任务委派给你执行。",
   "- 你拥有独立上下文，看不到主会话历史，只会收到本条任务描述；",
@@ -301,6 +304,14 @@ export function createSubagentOrchestrator(
     let isError = false;
     let aborted = false;
     try {
+      const snapshot = port.resources?.();
+      const execution = snapshot?.createExecution(entry.subagentId);
+      const systemPrompt = [
+        SUBAGENT_SYSTEM_PROMPT,
+        snapshot?.systemPrompt ?? "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       // 模型解析：设置页的子代理 Profile；null = 同主模型（spawn 时暂存的会话 profile）
       const fallback = fallbackProfiles.get(entry.subagentId);
       const profile = (await config.resolveProfile()) ?? fallback;
@@ -312,6 +323,13 @@ export function createSubagentOrchestrator(
       const toolsByName = new Map(
         subagentTools.map((tool) => [tool.name, tool])
       );
+      for (const tool of execution?.tools ?? []) {
+        if (toolsByName.has(tool.name) || tool.name === SUBAGENT_TOOL_NAME) {
+          throw new Error(`工具名称冲突：${tool.name}`);
+        }
+        toolsByName.set(tool.name, tool);
+        subagentTools.push(tool);
+      }
       const modelTools =
         subagentTools.length > 0 ? toModelTools(subagentTools) : undefined;
       let round = 0;
@@ -321,7 +339,7 @@ export function createSubagentOrchestrator(
         const result = streamText({
           // 全部轮次复用入队时捕获的档位快照（运行中主会话切档不影响本任务）
           model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
-          system: SUBAGENT_SYSTEM_PROMPT,
+          system: systemPrompt,
           messages,
           tools: modelTools,
           abortSignal: signal,

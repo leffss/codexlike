@@ -52,6 +52,18 @@ _Avoid_: 快捷命令
 在输入框中以 `@` 引用工作区文件、将其内容附加到消息的输入方式。
 _Avoid_: 附件、文件上传
 
+**规范（Agent Instructions）**:
+用户针对全局或特定项目制定的持续行为约定，适用于该范围内的主会话与子代理；与按任务选用的技能不同。
+_Avoid_: 技能、系统配置
+
+**技能（Skill）**:
+面向特定任务的可复用操作说明及配套材料；用户显式选择或 agent 按需选用，只对当前这条消息所发起的任务生效。
+_Avoid_: 插件、工具、命令
+
+**资源快照（Resource Snapshot）**:
+一条消息执行期间确定采用的规范与可用技能目录；与可能已被外部编辑、将在下条消息生效的磁盘预览区分。
+_Avoid_: 缓存、配置副本
+
 **Provider Profile**:
 一份 LLM 接入配置（`baseURL` / `apiKey` / `model`），全部走 OpenAI 兼容协议，可在界面中配置多份并切换。
 _Avoid_: api config、model config、账号
@@ -59,3 +71,7 @@ _Avoid_: api config、model config、账号
 **思考档位（Thinking Effort）**:
 逐条消息生效的模型思考强度档位，共五档：`auto`（自动——不传参，用服务端默认）、`low`（低）、`medium`（中）、`high`（高）、`off`（关）。切换只对下一条消息生效，历史不受影响；与 Provider Profile 选择一样属于「下一条消息怎么发」的参数，不做会话级记忆。子代理不设独立档位，以快照方式继承触发它的那次请求的档位。
 _Avoid_: 思考模式、thinking mode、推理等级、推理开关
+
+**主题（Theme）**:
+应用级外观偏好（`light` / `dark`），默认浅色；持久化到主进程设置文件，窗口底色与界面配色随之整体切换（ADR 0006）。
+_Avoid_: 皮肤、skin、暗黑模式（dark mode）

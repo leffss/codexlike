@@ -87,6 +87,51 @@ describe("buildSessionStatus（/status 数据组装）", () => {
     expect(status.approvalMode).toBe("assist");
   });
 
+  it("运行快照优先于磁盘规范，并将技能索引与已加载文本计入估算", () => {
+    const resources = {
+      catalog: {
+        capturedAt: "2026-11-11T09:00:00Z",
+        agents: {
+          sources: [
+            {
+              path: "running/AGENTS.md",
+              scope: "project" as const,
+              bytes: 12,
+              includedBytes: 12,
+            },
+          ],
+          truncated: false,
+        },
+        skills: [],
+        diagnostics: [],
+        indexBytes: 16,
+      },
+      loaded: [],
+      estimatedTokens: 50,
+    };
+    const status = buildSessionStatus({
+      record: record(),
+      messages,
+      agentsMd: {
+        sections: [
+          { source: "global", path: "disk/AGENTS.md", content: "新版" },
+        ],
+        combined: "新版",
+        truncated: false,
+      },
+      resources,
+      resourcePhase: "active",
+      lastResources: { ...resources, estimatedTokens: 900 },
+      providerProfileName: null,
+      latestCompact: null,
+    });
+    expect(status.estimatedContextTokens).toBe(60);
+    expect(status.agentsMd?.sources).toEqual(["running/AGENTS.md"]);
+    expect(status.resources).toEqual(resources);
+    expect(status.resourcePhase).toBe("active");
+    expect(status.lastResources?.estimatedTokens).toBe(900);
+  });
+
   it("审批模式随会话记录透传（ask / full-access）", () => {
     for (const mode of ["ask", "full-access"] as const) {
       const status = buildSessionStatus({

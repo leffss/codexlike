@@ -42,9 +42,9 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
   const statusClass =
     subagent.state === "done"
       ? subagent.ok === false
-        ? "text-red-400"
-        : "text-emerald-400"
-      : "text-amber-400";
+        ? "text-danger-fg"
+        : "text-ok-fg"
+      : "text-warn-fg";
 
   // 当前活动工具：最后一个 running 的子代理工具调用
   const activeTool = [...subagent.tools]
@@ -58,25 +58,25 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
     <li
       data-testid="subagent-card"
       data-subagent-state={subagent.state}
-      className="max-w-full rounded-lg border border-violet-950 bg-violet-950/20 text-sm"
+      className="max-w-full rounded-lg border border-subagent-fg/30 bg-subagent-bg text-sm"
     >
       <button
         type="button"
         data-testid="subagent-toggle"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-violet-950/40"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-hover"
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
       >
-        <span className="rounded bg-violet-900/70 px-1.5 py-0.5 font-mono text-xs text-violet-300">
+        <span className="rounded bg-subagent-bg px-1.5 py-0.5 font-mono text-xs text-subagent-fg">
           子代理
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-400">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">
           {subagent.task === "" ? "（任务描述缺失）" : subagent.task}
         </span>
         {subagent.state === "running" && (
           <span
             data-testid="subagent-elapsed"
-            className="shrink-0 font-mono text-xs text-amber-300/80"
+            className="shrink-0 font-mono text-xs text-warn-fg"
           >
             {elapsed}
           </span>
@@ -86,25 +86,25 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
           className={`shrink-0 text-xs ${statusClass}`}
         >
           {subagent.state === "running" && (
-            <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 align-middle" />
+            <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-warn-fg align-middle" />
           )}
           {statusLabel}
         </span>
-        <span className="shrink-0 text-slate-500">{expanded ? "▾" : "▸"}</span>
+        <span className="shrink-0 text-fg-subtle">{expanded ? "▾" : "▸"}</span>
       </button>
 
       {subagent.state === "running" && (
-        <div className="border-t border-violet-950 px-3 py-2 text-xs text-slate-400">
+        <div className="border-t border-line px-3 py-2 text-xs text-fg-muted">
           {hasReasoning && (
             <SubagentThinking reasoning={subagent.reasoning!} streaming />
           )}
           {activeTool !== undefined ? (
             <p>
               当前工具：
-              <span className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 font-mono text-xs text-sky-300">
+              <span className="ml-1 rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
                 {activeTool.toolName}
               </span>
-              <span className="ml-2 font-mono text-slate-500">
+              <span className="ml-2 font-mono text-fg-subtle">
                 {summarizeToolCall(activeTool.toolName, activeTool.arguments)}
               </span>
             </p>
@@ -112,7 +112,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
             <p>正在思考…</p>
           )}
           {subagent.tools.length > 0 && (
-            <p className="mt-1 text-slate-500">
+            <p className="mt-1 text-fg-subtle">
               已执行 {subagent.tools.length} 次工具调用
             </p>
           )}
@@ -120,12 +120,12 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
       )}
 
       {expanded && subagent.state === "done" && (
-        <div className="border-t border-violet-950 px-3 py-2">
+        <div className="border-t border-line px-3 py-2">
           {hasReasoning && <SubagentThinking reasoning={subagent.reasoning!} />}
-          <div className="text-xs text-slate-500">最终报告</div>
+          <div className="text-xs text-fg-subtle">最终报告</div>
           <div
             data-testid="subagent-report"
-            className="markdown mt-1 max-h-72 overflow-y-auto rounded border border-violet-950/60 bg-slate-900/60 px-3 py-2 text-sm text-slate-200"
+            className="markdown mt-1 max-h-72 overflow-y-auto rounded border border-line bg-surface px-3 py-2 text-sm text-fg"
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -136,23 +136,21 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
           </div>
           {subagent.tools.length > 0 && (
             <details className="mt-2">
-              <summary className="cursor-pointer text-xs text-slate-500">
+              <summary className="cursor-pointer text-xs text-fg-subtle">
                 子代理的工具调用（{subagent.tools.length} 次）
               </summary>
               <ul className="mt-1 flex flex-col gap-1">
                 {subagent.tools.map((tool) => (
                   <li
                     key={tool.id}
-                    className="flex items-center gap-2 rounded bg-slate-950/50 px-2 py-1 font-mono text-xs"
+                    className="flex items-center gap-2 rounded bg-code-bg px-2 py-1 font-mono text-xs"
                   >
-                    <span className="text-sky-300">{tool.toolName}</span>
-                    <span className="min-w-0 flex-1 truncate text-slate-500">
+                    <span className="text-accent">{tool.toolName}</span>
+                    <span className="min-w-0 flex-1 truncate text-fg-subtle">
                       {summarizeToolCall(tool.toolName, tool.arguments)}
                     </span>
                     <span
-                      className={
-                        tool.isError ? "text-red-400" : "text-emerald-400"
-                      }
+                      className={tool.isError ? "text-danger-fg" : "text-ok-fg"}
                     >
                       {tool.isError ? "失败" : "完成"}
                     </span>
@@ -165,7 +163,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
       )}
 
       {expanded && subagent.state === "queued" && (
-        <div className="border-t border-violet-950 px-3 py-2 text-xs text-amber-300/80">
+        <div className="border-t border-line px-3 py-2 text-xs text-warn-fg">
           并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
         </div>
       )}
@@ -197,7 +195,7 @@ function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
   return (
     <details
       data-testid="subagent-thinking-block"
-      className="mb-2 rounded-lg border border-violet-900/60 bg-violet-950/30 px-3 py-2 text-xs text-violet-300"
+      className="mb-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
     >
       <summary
         data-testid="subagent-thinking-toggle"
@@ -206,7 +204,7 @@ function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
         {streaming === true && (
           <span
             data-testid="subagent-thinking-indicator"
-            className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-400"
+            className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
             aria-label="思考中"
           />
         )}
@@ -214,7 +212,7 @@ function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
       </summary>
       <div
         data-testid="subagent-thinking-content"
-        className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-violet-900/40 pt-2 text-slate-300"
+        className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 text-fg"
       >
         {reasoning}
       </div>

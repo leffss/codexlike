@@ -3,6 +3,10 @@ import { basename } from "node:path";
 
 import type { LanguageModel } from "ai";
 
+import type {
+  AgentResourceSnapshot,
+  SessionResourceState,
+} from "../context/resource-types";
 import {
   createLanguageModelFromProfile,
   type ThinkingEffort,
@@ -47,6 +51,8 @@ export interface CreateSessionManagerOptions {
    * create 与 get 恢复时各调用一次。
    */
   systemPromptFor?: (record: SessionRecord) => string;
+  /** 每条消息开始时刷新规范与技能目录；不会因读取状态而构建。 */
+  resourcesFor?: (record: SessionRecord) => AgentResourceSnapshot;
   /** 工具截图是否作为图片附给模型（默认 true；纯文本端点在装配层关掉走降级路径） */
   attachToolImages?: boolean;
   now?: () => string;
@@ -82,6 +88,8 @@ export interface SessionManager {
   transcript(sessionId: string): TranscriptItem[];
   /** 惰性恢复会话对象；不存在返回 null；同 id 返回缓存实例 */
   get(sessionId: string): AgentSession | null;
+  /** 只读缓存实例的运行/最近一轮摘要；未实例化会话返回空状态。 */
+  resourceState(sessionId: string): SessionResourceState;
   /** /rename：更新标题并落库；不存在返回 null */
   rename(sessionId: string, title: string): SessionRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
@@ -135,6 +143,10 @@ export function createSessionManager(
       tools: options.tools,
       subagents: options.subagents,
       systemPrompt: systemPromptFor?.(record) ?? "",
+      resources:
+        options.resourcesFor === undefined
+          ? undefined
+          : () => options.resourcesFor!(record),
       attachToolImages: options.attachToolImages,
       languageModelFor,
       approvalMode: record.approvalMode,
@@ -234,6 +246,12 @@ export function createSessionManager(
         return null;
       }
       return restore(record);
+    },
+
+    resourceState(sessionId) {
+      return (
+        cache.get(sessionId)?.resourceState ?? { active: null, last: null }
+      );
     },
 
     rename(sessionId, title) {

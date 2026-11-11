@@ -14,6 +14,8 @@ import type { ApprovalMode } from "../../src/session/approval";
 import type { SessionEvent, SessionRecord } from "../../src/session/types";
 import type { ToolDefinition } from "../../src/tools/types";
 import { createMcpManager, type McpManager } from "../../src/mcp/manager";
+import type { AgentResourceSnapshot } from "../../src/context/resource-types";
+import { fakeResourceSnapshot } from "../session/resource-fixture";
 
 const FIXTURE = join(__dirname, "fixtures", "fake-mcp-server.mjs");
 
@@ -155,7 +157,8 @@ function makeSession(
   model: MockLanguageModelV4,
   workspacePath: string,
   tools: ToolDefinition[] | (() => ToolDefinition[]),
-  approvalMode: ApprovalMode = "assist"
+  approvalMode: ApprovalMode = "assist",
+  resources?: () => AgentResourceSnapshot
 ) {
   const persistence = createSqliteSessionStore(":memory:");
   const base = sessionRecord(workspacePath, approvalMode);
@@ -166,6 +169,7 @@ function makeSession(
     history: persistence.listMessages(base.id),
     languageModelFor: () => model,
     tools,
+    resources,
     now: fakeClock(),
   });
   return { session, persistence, model };
@@ -204,6 +208,67 @@ async function drive(
 }
 
 describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
+  it("资源工具与 MCP 共存，加载技能不绕过 ask 审批且 MCP 下轮启停仍即时生效", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-resources-"));
+    const manager = await connectedFakeManager();
+    let enabled = true;
+    const model = scriptedModel([
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "load",
+            toolName: "load_skill",
+            input: { name: "alpha" },
+          },
+        ],
+      },
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "mcp",
+            toolName: "mcp_fake_echo",
+            input: { text: "资源与 MCP" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["完成"] },
+      { kind: "text", deltas: ["下一轮"] },
+    ]);
+    const { session, persistence } = makeSession(
+      model,
+      workspace,
+      () => (enabled ? manager.tools() : []),
+      "ask",
+      () => fakeResourceSnapshot()
+    );
+    const events = await drive(session, "先加载技能再调用 MCP", "approve");
+    expect(
+      events
+        .filter((event) => event.type === "approval-request")
+        .map((event) => event.request.toolName)
+    ).toEqual(["mcp_fake_echo"]);
+    expect(
+      events.find(
+        (event) => event.type === "tool-result" && event.call.id === "mcp"
+      )
+    ).toMatchObject({ call: { isError: false, output: "echo: 资源与 MCP" } });
+    expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    enabled = false;
+    await collect(session.sendMessage({ text: "下一轮", profile }));
+    const toolNames = model.doStreamCalls[3]?.tools?.map((tool) => tool.name);
+    expect(toolNames).toContain("load_skill");
+    expect(toolNames).not.toContain("mcp_fake_echo");
+    expect(JSON.stringify(model.doStreamCalls[3]?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    persistence.close();
+  });
+
   it("ask 模式：MCP 工具调用弹审批（工具名兜底 command）→ 批准 → 执行 → 结果回填下一轮", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-"));
     const manager = await connectedFakeManager();

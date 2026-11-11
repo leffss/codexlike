@@ -35,6 +35,8 @@ const api: CodexLikeApi = {
     archive: (sessionId, archived) =>
       ipcRenderer.invoke(IPC.sessions.archive, sessionId, archived),
     status: (sessionId) => ipcRenderer.invoke(IPC.sessions.status, sessionId),
+    resources: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.resources, sessionId),
     compact: (sessionId, providerProfileId) =>
       ipcRenderer.invoke(IPC.sessions.compact, sessionId, providerProfileId),
     workspaceFiles: (sessionId) =>
@@ -66,6 +68,10 @@ const api: CodexLikeApi = {
   terminalSettings: {
     get: () => ipcRenderer.invoke(IPC.terminalSettings.get),
     set: (shell) => ipcRenderer.invoke(IPC.terminalSettings.set, shell),
+  },
+  themeSettings: {
+    get: () => ipcRenderer.invoke(IPC.themeSettings.get),
+    set: (theme) => ipcRenderer.invoke(IPC.themeSettings.set, theme),
   },
   mcp: {
     overview: () => ipcRenderer.invoke(IPC.mcp.overview),

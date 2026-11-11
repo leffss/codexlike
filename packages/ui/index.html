@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CodexLike</title>
+    <script>
+      // 防首帧闪烁（ADR 0006）：渲染前同步应用主题。localStorage 是主进程
+      // JSON 偏好的镜像（ThemeProvider 写入时双写）；未设置时默认浅色。
+      // 始终设置 data-theme：主题 CSS 变量以 [data-theme] 属性选择器为键。
+      document.documentElement.dataset.theme =
+        localStorage.getItem('codexlike.theme') === 'dark' ? 'dark' : 'light';
+    </script>
   </head>
   <body>
     <div id="root"></div>
