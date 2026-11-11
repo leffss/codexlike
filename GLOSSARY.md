@@ -55,3 +55,7 @@ _Avoid_: 附件、文件上传
 **Provider Profile**:
 一份 LLM 接入配置（`baseURL` / `apiKey` / `model`），全部走 OpenAI 兼容协议，可在界面中配置多份并切换。
 _Avoid_: api config、model config、账号
+
+**思考档位（Thinking Effort）**:
+逐条消息生效的模型思考强度档位，共五档：`auto`（自动——不传参，用服务端默认）、`low`（低）、`medium`（中）、`high`（高）、`off`（关）。切换只对下一条消息生效，历史不受影响；与 Provider Profile 选择一样属于「下一条消息怎么发」的参数，不做会话级记忆。子代理不设独立档位，以快照方式继承触发它的那次请求的档位。
+_Avoid_: 思考模式、thinking mode、推理等级、推理开关
