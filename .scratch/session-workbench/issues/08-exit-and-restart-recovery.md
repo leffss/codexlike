@@ -52,7 +52,7 @@
 
 - 宿主 `pnpm --filter @codexlike/desktop test tests/sessions/exit-recovery.test.ts` 依次真实红灯：缺退出模块；重开outcome为null；Compact跳过确认进入flushing；退出提示提前拒绝准备中的start。逐片实现后6测试通过。覆盖项目慢任务+独立审批、取消继续、flush前不停止、失败和旧回执、迟到启动竞态、Compact取消保留历史、真实文件SQLite关闭重开与异常残留幂等恢复。
 - `exit-recovery` + `workbench-ipc` 整合31测试通过，保留07归属/移除/首次发送/Compact原子保护。全量初测仅旧交互恢复用例断言“仍只有1条消息”与新增中断标记冲突；调整为保留原消息且追加aborted记录，原零模型、pending取消及拒绝旧响应断言保留。
-- `pnpm typecheck`、`pnpm build` 通过；整合全量 `pnpm test` 初次638通过（Core416/Desktop120/UI102），随后增加准备阶段取消退出用例，最终提交钩子再次运行完整检查，最终数量以提交结果为准。既有Windows符号链接EPERM分支不声称通过；构建仍有既有CJS/import.meta、第三方PURE及包体积警告。
+- `pnpm typecheck`、`pnpm build` 通过；整合全量 `pnpm test` 初次638通过（Core416/Desktop120/UI102），随后增加准备阶段取消退出用例，功能提交 `1cd8d78` 的正常钩子再次运行 `check:adr`、lint-staged、typecheck、全量test，最终81文件639测试通过（Core416/Desktop121/UI102）。既有Windows符号链接EPERM分支不声称通过；构建仍有既有CJS/import.meta、第三方PURE及包体积警告。
 - 新 `pnpm --filter @codexlike/desktop test:e2e:exit` 已纳入 `test:e2e:all`。真实Electron首先复现关闭窗口立即销毁、无确认的红灯；接线后完整通过。3次真实进程启动，真实点击新入口/发送/审批等待/问答草稿/退出、真实鼠标滚动及同目录重开；后台项目折叠及搜索中关闭仍提示；取消后模型继续增量且子代理连接未断，确认后主/子代理中断。
 - 退出E2E本地模型请求计数+真实terminal追加文件，证明受控退出和Windows `taskkill /PID <测试pid> /T /F` 强制终止后重开都无请求、无工具重放。旧问答/审批经公开IPC均拒绝，旧always不形成永久授权；只有显式后续发送才产生新模型请求。持久的普通/项目新建/独立新建/问答草稿、思考设置、项目与独立历史及实际阅读位置均恢复。
 - 退出E2E在真实workbench IPC边界注入一次写失败和延迟应答（仍由真实SQLite写入）：保存失败显示错误且任务不停止；延迟应答时编辑已inert、窗口保留、子代理继续，释放后才退出；最后输入重开完整。测试早期清理只杀调试包装进程导致残留Electron文件锁，已改异常场景为本测试进程树强杀、失败清理走app.exit；不更改权限。
