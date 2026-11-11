@@ -51,7 +51,11 @@ export function WorkspacePage(props: {
   onOpenSettings: () => void;
   state?: WorkspaceState;
 }) {
-  const [localState] = useState(createWorkspaceState);
+  const [localState] = useState(() =>
+    createWorkspaceState(
+      typeof window === "undefined" ? undefined : window.codexlike.workbench
+    )
+  );
   const workspaceState = props.state ?? localState;
   useSyncExternalStore(
     workspaceState.subscribe,
@@ -80,13 +84,18 @@ export function WorkspacePage(props: {
       ? null
       : workspaceState.newDraft(draftProjectId, profiles[0]?.id ?? "");
   const creating = draft?.busy ?? false;
-  const [selectedProfileId, setSelectedProfileId] = useState("");
-  /**
-   * 思考档位（GLOSSARY「思考档位」）：前端临时发送设置，默认 auto，不做会话级记忆。
-   * 发送时随消息传 IPC（快照由 agent-core 发送入口固定）；
-   * 运行中可改选，只影响下一条消息。
-   */
-  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("auto");
+  const preferences =
+    currentId === null ? null : workspaceState.preferences(currentId);
+  const selectedProfileId = preferences?.providerProfileId ?? "";
+  const thinkingEffort = preferences?.thinkingEffort ?? "auto";
+  function setSelectedProfileId(providerProfileId: string) {
+    if (currentId !== null)
+      workspaceState.setPreferences(currentId, { providerProfileId });
+  }
+  function setThinkingEffort(thinkingEffort: ThinkingEffort) {
+    if (currentId !== null)
+      workspaceState.setPreferences(currentId, { thinkingEffort });
+  }
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
@@ -215,6 +224,7 @@ export function WorkspacePage(props: {
           window.codexlike.sessions.messages(id),
           window.codexlike.sessions.pendingInteractions(id),
           window.codexlike.sessions.list(),
+          workspaceState.loadSession(id),
         ]);
         if (!isCurrent()) return;
         workspaceState.reconcile(
@@ -291,9 +301,6 @@ export function WorkspacePage(props: {
       if (!active) return;
       setSessions(list);
       setProfiles(profileList);
-      if (profileList.length > 0) {
-        setSelectedProfileId((prev) => prev || profileList[0]!.id);
-      }
       // 启动时自动打开最近的未归档会话（若有）
       const latest =
         list.find((session) => session.id === workspaceState.activeSessionId) ??
@@ -373,9 +380,23 @@ export function WorkspacePage(props: {
     []
   );
 
-  /** 入口只打开每项目/独立入口唯一的内存草稿，不调用创建 IPC。 */
-  function startCreateSession(projectId: string | null = null) {
-    workspaceState.newDraft(projectId, profiles[0]?.id ?? "");
+  /** 入口只恢复该项目/独立入口草稿，不调用创建 IPC。 */
+  async function startCreateSession(projectId: string | null = null) {
+    const request = ++sessionRequestRef.current;
+    setLoading(true);
+    try {
+      await workspaceState.flush();
+      await workspaceState.loadNewDraft(projectId, profiles[0]?.id ?? "");
+    } catch (error) {
+      if (sessionRequestRef.current === request) {
+        setLoading(false);
+        pushLocalStatus(
+          `恢复草稿失败：${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      return;
+    }
+    if (sessionRequestRef.current !== request) return;
     workspaceState.activeDraftProjectId = projectId;
     workspaceState.activeSessionId = null;
     setDraftProjectId(projectId);
@@ -421,6 +442,7 @@ export function WorkspacePage(props: {
       requestId: draft.requestId,
       projectId,
       workspacePath: draft.workspacePath,
+      workspaceMode: draft.workspaceMode,
       text,
       mentionPaths,
       providerProfileId: draft.providerProfileId || undefined,
@@ -429,14 +451,11 @@ export function WorkspacePage(props: {
     };
     workspaceState.editNewDraft(projectId, { busy: true, error: null });
     try {
+      await workspaceState.flush();
       const record = await window.codexlike.sessions.start(request);
-      workspaceState.completeNewDraft(projectId);
+      await workspaceState.completeNewDraft(projectId);
       await refreshSessions();
       if (workspaceState.activeDraftProjectId === projectId) {
-        setSelectedProfileId(
-          request.providerProfileId ?? profiles[0]?.id ?? ""
-        );
-        setThinkingEffort(request.thinkingEffort);
         await openSession(record.id);
       }
     } catch (error) {
@@ -459,7 +478,9 @@ export function WorkspacePage(props: {
       return;
     }
     setStreaming(true);
+    const composerSnapshot = workspaceState.composer(currentId);
     try {
+      await workspaceState.flush();
       await window.codexlike.sessions.send(
         currentId,
         text,
@@ -467,6 +488,8 @@ export function WorkspacePage(props: {
         mentionPaths.length === 0 ? undefined : mentionPaths,
         thinkingEffort
       );
+      if (workspaceState.composer(currentId) === composerSnapshot)
+        workspaceState.setComposer(currentId, "");
     } catch (error) {
       // 启动失败（含显式技能解析/加载错误）：只在发起会话仍打开时提示。
       if (currentIdRef.current !== currentId) return;
@@ -672,6 +695,9 @@ export function WorkspacePage(props: {
     }
     if (submission.kind === "slash-command") {
       void runCommand(submission.name, submission.argument);
+      if (currentId !== null) workspaceState.setComposer(currentId, "");
+      else if (draft)
+        workspaceState.editNewDraft(draft.projectId, { text: "" });
       return;
     }
     if (draft) void sendFirst(submission.text, submission.mentionPaths);
@@ -679,14 +705,15 @@ export function WorkspacePage(props: {
   }
 
   /**
-   * 审批模式切换：随时可切，对下一次工具调用立即生效。
+   * 审批模式切换：随时可切，只对下一次发送生效。
    * 切到「完全访问」先弹风险确认（ADR 0004：该档放开工作区文件边界）；
    * 取消不发起 IPC，选择器受控值自然回显原档位。
    */
   function selectApprovalMode(mode: ApprovalMode) {
     if (mode === "full-access") {
-      const current = sessions.find((session) => session.id === currentId);
-      if (current?.approvalMode !== "full-access") {
+      if (
+        (draft?.approvalMode ?? preferences?.approvalMode) !== "full-access"
+      ) {
         setFullAccessPending(true);
         return;
       }
@@ -703,8 +730,8 @@ export function WorkspacePage(props: {
       return;
     }
     try {
-      await window.codexlike.sessions.setApprovalMode(currentId, mode);
-      await refreshSessions();
+      workspaceState.setPreferences(currentId, { approvalMode: mode });
+      await workspaceState.flush();
     } catch (error) {
       pushLocalStatus(
         `切换审批模式失败：${error instanceof Error ? error.message : String(error)}`
@@ -855,9 +882,47 @@ export function WorkspacePage(props: {
             )}
           </div>
         )}
+        {workspaceState.persistenceError() && (
+          <p
+            role="alert"
+            data-testid="workbench-save-error"
+            className="px-4 text-danger-fg"
+          >
+            工作现场保存失败：{workspaceState.persistenceError()}
+          </p>
+        )}
+        {(draft?.providerProfileId ?? selectedProfileId) &&
+          !profiles.some(
+            (p) => p.id === (draft?.providerProfileId ?? selectedProfileId)
+          ) && (
+            <p
+              role="alert"
+              data-testid="unavailable-profile"
+              className="px-4 text-danger-fg"
+            >
+              已保存的模型配置不可用，请重新选择模型；不会自动替换。
+            </p>
+          )}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <MessageStream
+              key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+              sessionId={currentId}
+              questionDraft={(requestId) =>
+                currentId === null
+                  ? undefined
+                  : workspaceState.draft(currentId, requestId)
+              }
+              loading={loading}
+              readingPosition={
+                currentId === null
+                  ? null
+                  : workspaceState.readingPosition(currentId)
+              }
+              onReadingPosition={(position) => {
+                if (currentId !== null)
+                  workspaceState.setReadingPosition(currentId, position);
+              }}
               items={displayMessages}
               compacting={compacting}
               emptyHint={
@@ -928,7 +993,7 @@ export function WorkspacePage(props: {
                   else if (currentId !== null)
                     workspaceState.setComposer(currentId, text);
                 }}
-                clearOnSend={!draft}
+                clearOnSend={false}
                 profiles={profiles}
                 selectedProfileId={
                   draft?.providerProfileId ?? selectedProfileId
@@ -944,6 +1009,7 @@ export function WorkspacePage(props: {
                 workspaceFiles={workspaceFiles}
                 skills={resources?.preview.catalog.skills}
                 onOpenSkills={refreshCurrentResources}
+                readOnly={loading || creating}
                 disabled={
                   (currentId === null && !draft) ||
                   creating ||
@@ -957,7 +1023,7 @@ export function WorkspacePage(props: {
                 onStop={() => void stop()}
                 hint={composerHint}
                 approvalMode={
-                  draft?.approvalMode ?? current?.approvalMode ?? null
+                  draft?.approvalMode ?? preferences?.approvalMode ?? null
                 }
                 onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
                 thinkingEffort={

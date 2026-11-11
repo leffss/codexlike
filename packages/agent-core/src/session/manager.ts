@@ -69,6 +69,11 @@ export interface CreateSessionManagerOptions {
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
 export interface SessionManager {
+  readWorkbench(key: string): import("./workbench-state").WorkbenchEntry | null;
+  writeWorkbench(
+    key: string,
+    entry: import("./workbench-state").WorkbenchEntry
+  ): boolean;
   addProject(workspacePath: string): ProjectRecord;
   projects(): ProjectRecord[];
   removeUnstarted(sessionId: string): void;
@@ -103,8 +108,8 @@ export interface SessionManager {
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
   setArchived(sessionId: string, archived: boolean): SessionRecord | null;
   /**
-   * 审批模式切换（三档）：落库（随会话记录跨重启恢复）并对已实例化会话立即
-   * 生效（下一次工具调用）；拦截语义由工单 04 的审批状态机实现。不存在返回 null。
+   * 审批模式切换（三档）：落库并更新下次发送偏好；当前执行及子代理不受影响。
+   * 不改变最近使用时间；不存在返回 null。
    */
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
@@ -203,6 +208,8 @@ export function createSessionManager(
   }
 
   return {
+    readWorkbench: (key) => persistence.readWorkbench(key),
+    writeWorkbench: (key, entry) => persistence.writeWorkbench(key, entry),
     addProject(workspacePath) {
       if (!isAbsolute(workspacePath)) throw new Error("项目目录必须是绝对路径");
       let path: string;
@@ -340,11 +347,10 @@ export function createSessionManager(
       });
     },
 
-    /** 审批模式切换（输入区选择器）：落库 + 对缓存实例立即生效（下一次工具调用） */
+    /** 审批模式切换：落库并更新缓存的下次发送偏好，不更改正在执行的快照。 */
     setApprovalMode(sessionId, mode) {
       const next = patchRecord(sessionId, {
         approvalMode: mode,
-        updatedAt: now(),
       });
       if (next !== null) {
         cache.get(sessionId)?.setApprovalMode(mode);

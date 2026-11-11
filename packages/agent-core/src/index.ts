@@ -23,6 +23,16 @@ export {
   THINKING_EFFORTS,
 } from "./provider/language-model";
 
+export type {
+  WorkbenchTarget,
+  WorkbenchValue,
+  WorkbenchEntry,
+  SessionPreferences,
+  ReadingPosition,
+  SavedQuestionDraft,
+} from "./session/workbench-state";
+export { workbenchKey } from "./session/workbench-state";
+
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
 // （ApprovalMode 定义在 ./session/approval，经下方审批域出口统一导出）
 export type {

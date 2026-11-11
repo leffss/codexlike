@@ -71,6 +71,8 @@ export interface SendMessageOptions {
    * 复用同一档位；缺省按 auto 处理（未传该字段的既有调用方不受影响）。
    */
   thinkingEffort?: ThinkingEffort;
+  /** 宿主在接收发送时固定；缺省取会话的下次发送偏好。 */
+  approvalMode?: ApprovalMode;
   /** 中断信号：中断后已生成的部分文本保留为助手消息 */
   signal?: AbortSignal;
 }
@@ -137,7 +139,7 @@ export interface AgentSession {
   /** 第一个等待中的审批请求；无等待时为 null（向后兼容的单值视图） */
   readonly pendingApproval: ApprovalRequest | null;
   /**
-   * 切换审批模式（三档，随时可调）：对下一次工具调用立即生效。
+   * 切换审批模式（三档，随时可调）：只对下一次发送生效。
    * 持久化由调用方（SessionManager）负责。
    */
   setApprovalMode(mode: ApprovalMode): void;
@@ -270,10 +272,12 @@ export function createAgentSession(
   const generateId = options.generateId ?? randomUUID;
   const attachToolImages = options.attachToolImages ?? true;
 
-  // 审批状态（GLOSSARY「审批模式」）：模式随时可切（对下一次工具调用立即生效）。
+  // 审批状态（GLOSSARY「审批模式」）：模式随时可切（只对下一次发送生效）。
   // 「本会话总是允许」记忆已随三档重构移除（ADR 0004）：审批卡 always 键仅放行本次。
   // waiter 表（工单 13）：主会话与多个子代理可能并行等待审批，按 requestId 路由。
-  let approvalMode = options.approvalMode ?? record.approvalMode ?? "assist";
+  let nextApprovalMode =
+    options.approvalMode ?? record.approvalMode ?? "assist";
+  let approvalMode = nextApprovalMode;
   // 主会话流的中断信号（子代理审批等待与之贯通；每次 sendMessage 更新）
   let activeSignal: AbortSignal | undefined;
   let currentResources: AgentResourceSnapshot | undefined;
@@ -411,7 +415,7 @@ export function createAgentSession(
     },
 
     setApprovalMode(mode) {
-      approvalMode = mode;
+      nextApprovalMode = mode;
       record.approvalMode = mode;
     },
 
@@ -440,13 +444,23 @@ export function createAgentSession(
       });
     },
 
-    async *sendMessage({ text, profile, mentions, thinkingEffort, signal }) {
+    async *sendMessage({
+      text,
+      profile,
+      mentions,
+      thinkingEffort,
+      approvalMode: requestedApprovalMode,
+      signal,
+    }) {
       if (busy) {
         throw new Error("上一条消息仍在回复中，请等待完成后再发送");
       }
       // 思考档位快照（spec「生效边界」）：发送入口一次性固定，未传等价 auto；
       // 枚举外的值在此拒绝——不把伪造控制值发往服务端（与 provider 工厂同一校验）
       const effort = parseThinkingEffort(thinkingEffort);
+      // 每次发送冻结主执行及其子代理的权限与模型，偏好修改只用于下次发送。
+      approvalMode = requestedApprovalMode ?? nextApprovalMode;
+      profile = { ...profile };
       busy = true;
       // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
       terminated = false;

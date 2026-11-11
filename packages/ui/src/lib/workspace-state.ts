@@ -3,6 +3,8 @@ import type {
   InteractionResponse,
   ApprovalMode,
   ThinkingEffort,
+  SessionPreferences,
+  ReadingPosition,
 } from "@codexlike/agent-core";
 
 import {
@@ -12,11 +14,17 @@ import {
   type QuestionDraft,
 } from "./interaction-draft";
 
+import {
+  createPersistentWorkbench,
+  type WorkbenchPort,
+} from "./persistent-workbench";
+
 export interface NewSessionDraft {
   requestId: string;
   projectId: string | null;
   text: string;
   workspacePath?: string;
+  workspaceMode?: "local" | "worktree";
   providerProfileId: string;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;
@@ -30,8 +38,21 @@ export interface SubmissionState {
 }
 const idleSubmission: SubmissionState = { busy: false, error: null };
 
-/** App 生命周期内的状态；不写磁盘，退出后未提交草稿自然丢弃。 */
-export function createWorkspaceState() {
+/** 运行交互只在内存；草稿与下次发送设置经宿主持久保存。 */
+export function createWorkspaceState(port?: WorkbenchPort) {
+  const persisted = createPersistentWorkbench(port, notify);
+  const preferences = new Map<string, SessionPreferences>();
+  const positions = new Map<string, ReadingPosition | null>();
+  const loaded = new Set<string>();
+  const defaultPreferences: SessionPreferences = {
+    providerProfileId: "",
+    thinkingEffort: "auto",
+    approvalMode: "ask",
+  };
+  const sessionTarget = (sessionId: string) => ({
+    kind: "session" as const,
+    sessionId,
+  });
   const records = new Map<string, InteractionRecord>();
   const hidden = new Set<string>();
   const observedAt = new Map<string, number>();
@@ -73,12 +94,79 @@ export function createWorkspaceState() {
     if (previous?.status !== undefined && previous.status !== "pending") return;
     records.set(id, record);
     observedAt.set(id, revision + 1);
-    if (record.status !== "pending") drafts.delete(id);
-    else if (record.request.kind === "questions" && !drafts.has(id))
+    if (record.status === "resolved") {
+      drafts.delete(id);
+      persisted.patch(sessionTarget(record.request.sessionId), (value) => {
+        const questionDrafts = { ...value.questionDrafts };
+        delete questionDrafts[record.request.id];
+        return { ...value, questionDrafts };
+      });
+    } else if (
+      record.status === "pending" &&
+      record.request.kind === "questions" &&
+      !drafts.has(id)
+    )
       drafts.set(id, createQuestionDraft(record.request));
     notify();
   }
   return {
+    flush: persisted.flush,
+    persistenceError: persisted.error,
+    async loadSession(sessionId: string) {
+      if (loaded.has(sessionId)) return;
+      const entry = await persisted.load(sessionTarget(sessionId));
+      if (entry && !loaded.has(sessionId)) {
+        if (!composers.has(sessionId))
+          composers.set(sessionId, entry.value.text);
+        if (!preferences.has(sessionId))
+          preferences.set(sessionId, entry.value.preferences);
+        if (!positions.has(sessionId))
+          positions.set(sessionId, entry.value.readingPosition);
+        for (const [requestId, draft] of Object.entries(
+          entry.value.questionDrafts
+        ))
+          drafts.set(key(sessionId, requestId), draft);
+      }
+      loaded.add(sessionId);
+      notify();
+    },
+    async loadNewDraft(projectId: string | null, defaultProfile = "") {
+      const entry = await persisted.load({ kind: "new", projectId });
+      if (entry && !newDrafts.has(projectId))
+        newDrafts.set(projectId, {
+          requestId: entry.value.requestId,
+          projectId,
+          text: entry.value.text,
+          workspacePath: entry.value.workspacePath,
+          workspaceMode: entry.value.workspaceMode,
+          ...entry.value.preferences,
+          busy: false,
+          error: null,
+        });
+      newDraft(projectId, defaultProfile);
+      notify();
+    },
+    preferences: (sessionId: string) =>
+      preferences.get(sessionId) ?? defaultPreferences,
+    setPreferences(sessionId: string, patch: Partial<SessionPreferences>) {
+      preferences.set(sessionId, {
+        ...(preferences.get(sessionId) ?? defaultPreferences),
+        ...patch,
+      });
+      persisted.patch(sessionTarget(sessionId), (value) => ({
+        ...value,
+        preferences: { ...value.preferences, ...patch },
+      }));
+      notify();
+    },
+    readingPosition: (sessionId: string) => positions.get(sessionId) ?? null,
+    setReadingPosition(sessionId: string, position: ReadingPosition) {
+      positions.set(sessionId, position);
+      persisted.patch(sessionTarget(sessionId), (value) => ({
+        ...value,
+        readingPosition: position,
+      }));
+    },
     activeSessionId: null as string | null,
     activeDraftProjectId: undefined as string | null | undefined,
     newDraft,
@@ -86,11 +174,40 @@ export function createWorkspaceState() {
       projectId: string | null,
       patch: Partial<Omit<NewSessionDraft, "requestId" | "projectId">>
     ) {
-      Object.assign(newDraft(projectId), patch);
+      const draft = newDraft(projectId);
+      Object.assign(draft, patch);
+      if (Object.keys(patch).some((key) => key !== "busy" && key !== "error")) {
+        const snapshot = structuredClone(draft);
+        persisted.patch({ kind: "new", projectId }, (value) => ({
+          ...value,
+          requestId: snapshot.requestId,
+          text: snapshot.text,
+          workspacePath: snapshot.workspacePath,
+          workspaceMode: snapshot.workspaceMode,
+          preferences: {
+            providerProfileId: snapshot.providerProfileId,
+            thinkingEffort: snapshot.thinkingEffort,
+            approvalMode: snapshot.approvalMode,
+          },
+        }));
+      }
       notify();
     },
-    completeNewDraft(projectId: string | null) {
+    async completeNewDraft(projectId: string | null) {
+      persisted.forget({ kind: "new", projectId });
+      const entry = await persisted.load({ kind: "new", projectId });
       newDrafts.delete(projectId);
+      if (entry)
+        newDrafts.set(projectId, {
+          requestId: entry.value.requestId,
+          projectId,
+          text: entry.value.text,
+          workspacePath: entry.value.workspacePath,
+          workspaceMode: entry.value.workspaceMode,
+          ...entry.value.preferences,
+          busy: false,
+          error: null,
+        });
       notify();
     },
     subscribe(listener: () => void) {
@@ -171,6 +288,10 @@ export function createWorkspaceState() {
     composer: (sessionId: string) => composers.get(sessionId) ?? "",
     setComposer(sessionId: string, text: string) {
       composers.set(sessionId, text);
+      persisted.patch(sessionTarget(sessionId), (value) => ({
+        ...value,
+        text,
+      }));
       notify();
     },
     draft: (sessionId: string, requestId: string) =>
@@ -186,7 +307,12 @@ export function createWorkspaceState() {
         submissions.get(id)?.busy
       )
         return;
-      drafts.set(id, updateQuestionDraft(record.request, draft, action));
+      const next = updateQuestionDraft(record.request, draft, action);
+      drafts.set(id, next);
+      persisted.patch(sessionTarget(sessionId), (value) => ({
+        ...value,
+        questionDrafts: { ...value.questionDrafts, [requestId]: next },
+      }));
       notify();
     },
     records(sessionId: string) {

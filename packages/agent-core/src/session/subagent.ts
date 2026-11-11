@@ -93,7 +93,7 @@ export interface SubagentsConfig {
 export interface SubagentHostPort {
   sessionId: string;
   workspacePath: string;
-  /** 实时读取当前审批模式（切换对子代理的下一次工具调用立即生效） */
+  /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
   /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主会话正文。 */
   resources?(): AgentResourceSnapshot | undefined;

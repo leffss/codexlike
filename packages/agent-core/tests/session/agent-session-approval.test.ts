@@ -545,7 +545,56 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     expect(persistence.listApprovals("session-1")).toEqual([]);
   });
 
-  it("中途切换模式：ask 下被拒绝的工具，切到 full-access 后下一次调用立即放行", async () => {
+  it("执行设置在发送时冻结，中途改为完全访问不能放行本轮工具，下一次发送才生效", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-frozen-"));
+    const model = scriptedModel([
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "frozen",
+            toolName: "write_file",
+            input: { path: "frozen.txt", content: "不应写入" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["完成"] },
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "next",
+            toolName: "write_file",
+            input: { path: "next.txt", content: "下一轮" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["完成"] },
+    ]);
+    const { session } = makeSession(model, workspace, { approvalMode: "ask" });
+    const requests: SessionEvent[] = [];
+    for await (const event of session.sendMessage({
+      text: "第一次",
+      profile,
+    })) {
+      if (event.type === "user-message") session.setApprovalMode("full-access");
+      if (event.type === "interaction-request") {
+        requests.push(event);
+        session.respondApproval(event.interaction.request.id, "reject");
+      }
+    }
+    expect(requests).toHaveLength(1);
+    expect(existsSync(join(workspace, "frozen.txt"))).toBe(false);
+    for await (const event of session.sendMessage({
+      text: "第二次",
+      profile,
+    })) {
+      expect(event.type).not.toBe("interaction-request");
+    }
+    expect(readFileSync(join(workspace, "next.txt"), "utf8")).toBe("下一轮");
+  });
+
+  it("两次发送之间切换模式：ask 下被拒绝的工具，下次 full-access 发送放行", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {

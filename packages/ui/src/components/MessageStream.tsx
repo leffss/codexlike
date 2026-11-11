@@ -1,4 +1,8 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import type {
+  ReadingPosition,
+  SavedQuestionDraft,
+} from "@codexlike/agent-core";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -14,9 +18,38 @@ export function MessageStream(props: {
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
+  sessionId?: string | null;
+  loading?: boolean;
+  readingPosition?: ReadingPosition | null;
+  onReadingPosition?: (position: ReadingPosition) => void;
+  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
 }) {
+  const container = useRef<HTMLDivElement>(null);
+  const restored = useRef<string | null | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (
+      props.loading ||
+      !container.current ||
+      restored.current === props.sessionId
+    )
+      return;
+    const element = container.current;
+    element.scrollTop = props.readingPosition?.scrollTop ?? 0;
+    restored.current = props.sessionId;
+  }, [props.sessionId, props.loading, props.items, props.readingPosition]);
   return (
     <div
+      ref={container}
+      onScroll={(event) => {
+        if (
+          !props.loading &&
+          restored.current === props.sessionId &&
+          props.sessionId
+        )
+          props.onReadingPosition?.({
+            scrollTop: event.currentTarget.scrollTop,
+          });
+      }}
       className="min-h-0 flex-1 overflow-y-auto bg-canvas px-4 py-4"
       data-testid="message-stream"
     >
@@ -34,6 +67,7 @@ export function MessageStream(props: {
               <InteractionHistory
                 key={`interaction-${item.id}`}
                 record={item.interaction}
+                draft={props.questionDraft?.(item.id)}
               />
             ) : item.kind === "subagent" ? (
               <SubagentCard key={`subagent-${item.id}`} subagent={item} />

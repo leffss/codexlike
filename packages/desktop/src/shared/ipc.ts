@@ -13,6 +13,8 @@ import type {
   ThinkingEffort,
   TranscriptItem,
   WorkspaceMode,
+  WorkbenchTarget,
+  WorkbenchEntry,
 } from "@codexlike/agent-core";
 import type {
   GitBranchResult,
@@ -43,6 +45,7 @@ export type { ThemeName };
  * 主→渲染：会话事件流（`session:events` channel，按会话 ID 多路复用）。
  */
 export const IPC = {
+  workbench: { read: "workbench:read", write: "workbench:write" },
   projects: { list: "projects:list", add: "projects:add" },
   providerProfiles: {
     list: "provider-profiles:list",
@@ -78,7 +81,7 @@ export const IPC = {
     workspaceFiles: "sessions:workspace-files",
     /** 工具截图数据（dataURL）；文件不存在（如已清理）返回 null */
     toolImage: "sessions:tool-image",
-    /** 审批模式切换（三档）：落库并对下一次工具调用立即生效 */
+    /** 审批模式切换（三档）：落库并只对下一次发送生效 */
     setApprovalMode: "sessions:set-approval-mode",
     /** 旧审批响应兼容入口，转发统一交互；always 仅批准本次。 */
     respondApproval: "sessions:respond-approval",
@@ -169,6 +172,13 @@ export interface SessionExecutionState {
 
 /** `window.codexlike` 的完整 API 形状 */
 export interface CodexLikeApi {
+  workbench: {
+    read(target: WorkbenchTarget): Promise<WorkbenchEntry>;
+    write(
+      target: WorkbenchTarget,
+      entry: WorkbenchEntry
+    ): Promise<{ accepted: boolean; entry: WorkbenchEntry }>;
+  };
   projects: {
     list(): Promise<ProjectRecord[]>;
     add(workspacePath: string): Promise<ProjectRecord>;
@@ -204,7 +214,7 @@ export interface CodexLikeApi {
     send(
       sessionId: string,
       text: string,
-      providerProfileId: string,
+      providerProfileId?: string,
       mentionPaths?: string[],
       thinkingEffort?: ThinkingEffort
     ): Promise<void>;
@@ -240,7 +250,7 @@ export interface CodexLikeApi {
      * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
      */
     toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
-    /** 切换审批模式（ask / assist / full-access），对下一次工具调用立即生效；会话不存在返回 null */
+    /** 切换审批模式（ask / assist / full-access），只对下一次发送生效；会话不存在返回 null */
     setApprovalMode(
       sessionId: string,
       mode: ApprovalMode

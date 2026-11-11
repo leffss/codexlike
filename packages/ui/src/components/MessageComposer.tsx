@@ -134,7 +134,7 @@ const THINKING_PILL_STYLES: Record<
  * 中栏底部：消息输入区（卡片式 composer：上行输入、下行工具栏）。
  * - `/` 开头的单行草稿弹出命令菜单，`@` 触发工作区文件模糊搜索菜单（键盘可选）；
  * - 模型选择器（Provider Profile）对下一条发送的消息生效；
- * - 审批模式选择器随时可切，对下一次工具调用立即生效；
+ * - 审批模式选择器随时可切，只对下一次发送生效；
  * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发；
  * - 本轮回复进行中（流式输出或工具执行）时发送按钮切换为「停止」，打断当前轮。
  */
@@ -155,6 +155,8 @@ export function MessageComposer(props: {
   onOpenSkills?: () => void;
   /** 无会话 / 未选模型 / 流式回复中时禁用发送 */
   disabled: boolean;
+  /** 恢复中或首次发送消费草稿期间不允许编辑；运行中仍可准备下一条。 */
+  readOnly?: boolean;
   /** 本轮回复进行中（流式输出 / 工具执行）：按钮切换为「停止」 */
   streaming?: boolean;
   /** 停止按钮：打断运行中的本轮（立即中断流式输出、终止工具子进程） */
@@ -410,6 +412,7 @@ export function MessageComposer(props: {
           )}
           <textarea
             ref={textareaRef}
+            readOnly={props.readOnly}
             data-testid="composer-input"
             value={value}
             onChange={(event) => {
@@ -438,7 +441,7 @@ export function MessageComposer(props: {
                   ? "cursor-not-allowed opacity-50"
                   : ""
               }`}
-              title="审批模式：随时切换，对下一次工具调用立即生效"
+              title="审批模式：随时切换，只对下一次发送生效"
             >
               <ShieldIcon
                 className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${approvalPill.icon}`}
@@ -446,7 +449,7 @@ export function MessageComposer(props: {
               <select
                 data-testid="approval-mode-select"
                 value={props.approvalMode ?? "assist"}
-                disabled={props.approvalMode === null}
+                disabled={props.readOnly || props.approvalMode === null}
                 onChange={(event) =>
                   props.onSelectApprovalMode(event.target.value as ApprovalMode)
                 }
@@ -481,7 +484,7 @@ export function MessageComposer(props: {
                 data-testid="thinking-effort-select"
                 aria-label="思考档位"
                 value={props.thinkingEffort ?? "auto"}
-                disabled={props.thinkingEffort === null}
+                disabled={props.readOnly || props.thinkingEffort === null}
                 onChange={(event) =>
                   props.onSelectThinkingEffort(
                     event.target.value as ThinkingEffort
@@ -506,7 +509,7 @@ export function MessageComposer(props: {
             <button
               type="button"
               data-testid="composer-skills"
-              disabled={props.approvalMode === null}
+              disabled={props.readOnly || props.approvalMode === null}
               onClick={openSkills}
               className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
               title="插入 $技能引用（仅写回输入框，不发送）"
@@ -519,6 +522,7 @@ export function MessageComposer(props: {
             >
               <select
                 data-testid="profile-select"
+                disabled={props.readOnly}
                 value={props.selectedProfileId}
                 onChange={(event) => props.onSelectProfile(event.target.value)}
                 className="w-full max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-fg-muted focus:outline-none"
@@ -526,6 +530,14 @@ export function MessageComposer(props: {
                 {props.profiles.length === 0 && (
                   <option value="">未配置模型</option>
                 )}
+                {props.selectedProfileId &&
+                  !props.profiles.some(
+                    (p) => p.id === props.selectedProfileId
+                  ) && (
+                    <option value={props.selectedProfileId}>
+                      已保存的模型不可用
+                    </option>
+                  )}
                 {props.profiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
                     {profile.name} · {profile.model}

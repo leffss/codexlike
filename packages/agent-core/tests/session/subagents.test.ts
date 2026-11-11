@@ -743,6 +743,9 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       head = await iterator.next()
     ) {
       events.push(head.value);
+      // 委派前修改偏好也不能提升本轮子代理的 ask 权限。
+      if (head.value.type === "user-message")
+        session.setApprovalMode("full-access");
       if (head.value.type === "interaction-request") {
         approvalRequest = head.value;
         break;

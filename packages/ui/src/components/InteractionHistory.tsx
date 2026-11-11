@@ -1,7 +1,16 @@
-import type { InteractionRecord } from "@codexlike/agent-core";
+import type {
+  InteractionRecord,
+  SavedQuestionDraft,
+} from "@codexlike/agent-core";
 
 /** 只读历史摘要：请求、响应与取消均可展开，永远没有执行按钮。 */
-export function InteractionHistory({ record }: { record: InteractionRecord }) {
+export function InteractionHistory({
+  record,
+  draft,
+}: {
+  record: InteractionRecord;
+  draft?: SavedQuestionDraft;
+}) {
   const { request, response } = record;
   const status =
     record.status === "cancelled"
@@ -79,6 +88,35 @@ export function InteractionHistory({ record }: { record: InteractionRecord }) {
           {record.cancelReason && <p>{record.cancelReason}</p>}
         </div>
       </details>
+      {record.status === "cancelled" &&
+        request.kind === "questions" &&
+        draft && (
+          <div
+            data-testid="saved-question-draft"
+            className="mt-2 whitespace-pre-wrap break-words"
+          >
+            <p>已保存的未提交草稿（原请求已失效，仅供查看，不会继续执行）</p>
+            {request.questions.map((question) => {
+              const answer = draft.answers[question.id];
+              return answer ? (
+                <p key={question.id}>
+                  {question.question}：
+                  {[
+                    ...answer.selectedOptionIds.map(
+                      (id) =>
+                        question.options.find((option) => option.id === id)
+                          ?.label ?? id
+                    ),
+                    answer.text,
+                    answer.skipped ? "已选择忽略" : "",
+                  ]
+                    .filter(Boolean)
+                    .join("；")}
+                </p>
+              ) : null;
+            })}
+          </div>
+        )}
     </li>
   );
 }

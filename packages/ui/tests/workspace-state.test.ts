@@ -27,7 +27,134 @@ function pending(
   };
 }
 
-describe("工作台页面之上的内存状态", () => {
+describe("工作台页面之上的状态", () => {
+  it("保存按目标串行，flush 等待最新编辑；重建状态从宿主恢复而不复活旧问答", async () => {
+    const disk = new Map<string, any>();
+    let release!: () => void;
+    let hold = true;
+    const port = {
+      async read(target: unknown) {
+        return (
+          disk.get(JSON.stringify(target)) ?? {
+            revision: 0,
+            value: {
+              requestId: "intent",
+              text: "",
+              questionDrafts: {},
+              readingPosition: null,
+              preferences: {
+                providerProfileId: "default",
+                thinkingEffort: "auto",
+                approvalMode: "ask",
+              },
+            },
+          }
+        );
+      },
+      async write(target: unknown, entry: any) {
+        if (hold) {
+          hold = false;
+          await new Promise<void>((done) => {
+            release = done;
+          });
+        }
+        disk.set(JSON.stringify(target), structuredClone(entry));
+        return { accepted: true, entry };
+      },
+    };
+    const state = createWorkspaceState(port);
+    await state.loadSession("s1");
+    await state.loadSession("s2");
+    state.setComposer("s1", "旧输入");
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    state.setComposer("s1", "最新输入");
+    state.setComposer("s2", "另一个会话");
+    state.setPreferences("s1", {
+      thinkingEffort: "high",
+      approvalMode: "full-access",
+    });
+    state.setReadingPosition("s1", { scrollTop: 321 });
+    let flushed = false;
+    const flush = state.flush().then(() => {
+      flushed = true;
+    });
+    await Promise.resolve();
+    expect(flushed).toBe(false);
+    release();
+    await flush;
+    const restored = createWorkspaceState(port);
+    await restored.loadSession("s1");
+    await restored.loadSession("s2");
+    expect(restored.composer("s1")).toBe("最新输入");
+    expect(restored.composer("s2")).toBe("另一个会话");
+    expect(restored.preferences("s1").thinkingEffort).toBe("high");
+    expect(restored.readingPosition("s1")).toEqual({ scrollTop: 321 });
+    expect(restored.pending("s1")).toEqual([]);
+  });
+  it("慢速恢复不能覆盖加载期间的新输入，快速切换不会串会话", async () => {
+    let release!: (value: any) => void;
+    const state = createWorkspaceState({
+      read: () =>
+        new Promise((done) => {
+          release = done;
+        }),
+      write: async (_target, entry) => ({ accepted: true, entry }),
+    });
+    const loading = state.loadSession("slow");
+    state.setComposer("slow", "加载期间新输入");
+    release({
+      revision: 5,
+      value: {
+        text: "旧持久输入",
+        requestId: "intent",
+        questionDrafts: {},
+        readingPosition: null,
+        preferences: {
+          providerProfileId: "old",
+          thinkingEffort: "auto",
+          approvalMode: "ask",
+        },
+      },
+    });
+    await loading;
+    await state.flush();
+    expect(state.composer("slow")).toBe("加载期间新输入");
+  });
+  it("保存暂时失败后重试不会被其他偏好编辑覆盖未保存输入", async () => {
+    let saved: any = {
+      revision: 0,
+      value: {
+        text: "",
+        requestId: "retry",
+        questionDrafts: {},
+        readingPosition: null,
+        preferences: {
+          providerProfileId: "default",
+          thinkingEffort: "auto",
+          approvalMode: "ask",
+        },
+      },
+    };
+    let fail = true;
+    const state = createWorkspaceState({
+      read: async () => structuredClone(saved),
+      write: async (_target, entry) => {
+        if (fail) {
+          fail = false;
+          throw new Error("磁盘暂时不可写");
+        }
+        saved = structuredClone(entry);
+        return { accepted: true, entry };
+      },
+    });
+    await state.loadSession("s");
+    state.setComposer("s", "失败也不能丢");
+    await expect(state.flush()).rejects.toThrow("磁盘");
+    state.setPreferences("s", { thinkingEffort: "high" });
+    await state.flush();
+    expect(saved.value.text).toBe("失败也不能丢");
+    expect(saved.value.preferences.thinkingEffort).toBe("high");
+  });
   it("Compact权威快照清理已折叠历史，保留终态墓碑和真实pending草稿，快照期间新终态不丢", () => {
     const store = createWorkspaceState();
     const old = {

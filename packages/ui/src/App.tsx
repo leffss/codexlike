@@ -84,7 +84,9 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
 
 function AppShell() {
   const [view, setView] = useState<View>("workspace");
-  const [workspaceState] = useState(createWorkspaceState);
+  const [workspaceState] = useState(() =>
+    createWorkspaceState(window.codexlike.workbench)
+  );
   // 设置页期间仍接收交互终态；后台会话切回不会复活已完成请求。
   useEffect(
     () =>

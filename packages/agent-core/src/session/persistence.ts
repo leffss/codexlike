@@ -23,6 +23,11 @@ import type {
  * compact（工单 08）与审批记忆（工单 04）均已落地，各自在此接口上扩展方法。
  */
 export interface SessionPersistence {
+  readWorkbench(key: string): import("./workbench-state").WorkbenchEntry | null;
+  writeWorkbench(
+    key: string,
+    entry: import("./workbench-state").WorkbenchEntry
+  ): boolean;
   insertProject(record: ProjectRecord): void;
   listProjects(): ProjectRecord[];
   insertSession(record: SessionRecord): void;
@@ -72,6 +77,11 @@ export interface SessionPersistence {
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS workbench_state (
+  key TEXT PRIMARY KEY,
+  revision INTEGER NOT NULL,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -340,6 +350,28 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   return {
+    readWorkbench(key) {
+      const row = db
+        .prepare("SELECT revision, value FROM workbench_state WHERE key = ?")
+        .get(key);
+      return row
+        ? {
+            revision: Number(row.revision),
+            value: JSON.parse(String(row.value)),
+          }
+        : null;
+    },
+    writeWorkbench(key, entry) {
+      return (
+        db
+          .prepare(
+            `INSERT INTO workbench_state (key, revision, value) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, value = excluded.value
+        WHERE excluded.revision > workbench_state.revision`
+          )
+          .run(key, entry.revision, JSON.stringify(entry.value)).changes > 0
+      );
+    },
     insertProject(record) {
       db.prepare(
         "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"

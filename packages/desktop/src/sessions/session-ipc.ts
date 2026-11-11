@@ -19,6 +19,7 @@ import {
 import {
   APPROVAL_MODES,
   parseThinkingEffort,
+  workbenchKey,
   type AgentResourceSnapshot,
   type ApprovalMode,
   type BrowserSessionManager,
@@ -30,6 +31,7 @@ import {
 
 import type { ProfileStore } from "../profiles/profile-store";
 import { createInterruptRegistry } from "./interrupt-registry";
+import { registerWorkbenchHandlers } from "./workbench-ipc";
 import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
@@ -68,6 +70,7 @@ export function registerSessionHandlers(options: {
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
   const starts = new Map<string, Promise<SessionRecord>>();
+  const workbench = registerWorkbenchHandlers(manager, profiles);
 
   function emit(envelope: SessionEventEnvelope): void {
     const win = getWindow();
@@ -183,6 +186,16 @@ export function registerSessionHandlers(options: {
           request.mentionPaths,
           effort
         );
+        await workbench.started(
+          request.projectId,
+          request.requestId,
+          session.id,
+          {
+            providerProfileId: profile.id,
+            thinkingEffort: effort,
+            approvalMode: approval,
+          }
+        );
         return manager.list().find((item) => item.id === session.id)!;
       } catch (error) {
         // 只回滚无历史记录；绝不递归删除用户目录或失败期间可能出现的成果。
@@ -232,9 +245,9 @@ export function registerSessionHandlers(options: {
   async function send(
     sessionId: unknown,
     text: unknown,
-    profileId: unknown,
-    mentionPaths: unknown,
-    thinkingEffort: unknown
+    profileId?: unknown,
+    mentionPaths?: unknown,
+    thinkingEffort?: unknown
   ) {
     if (typeof sessionId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
@@ -242,6 +255,11 @@ export function registerSessionHandlers(options: {
     if (text.trim() === "") {
       throw new Error("消息内容不能为空");
     }
+    const saved = manager.readWorkbench(
+      workbenchKey({ kind: "session", sessionId })
+    );
+    profileId ??= saved?.value.preferences.providerProfileId;
+    thinkingEffort ??= saved?.value.preferences.thinkingEffort;
     if (typeof profileId !== "string" || profileId === "") {
       throw new Error("请先选择模型（Provider Profile）");
     }
@@ -260,6 +278,8 @@ export function registerSessionHandlers(options: {
     if (session === null) {
       throw new Error("会话不存在或已损坏");
     }
+    const approvalSnapshot =
+      saved?.value.preferences.approvalMode ?? session.record.approvalMode;
     const profile = (await profiles.list()).find(
       (candidate: ProviderProfile) => candidate.id === profileId
     );
@@ -289,6 +309,7 @@ export function registerSessionHandlers(options: {
           profile,
           mentions,
           thinkingEffort: effortSnapshot,
+          approvalMode: approvalSnapshot,
           signal: controller.signal,
         })
         [Symbol.asyncIterator]();
@@ -487,6 +508,19 @@ export function registerSessionHandlers(options: {
           "setApprovalMode：mode 必须是 ask / assist / full-access"
         );
       }
+      const key = workbenchKey({ kind: "session", sessionId });
+      const saved = manager.readWorkbench(key);
+      if (saved)
+        manager.writeWorkbench(key, {
+          revision: saved.revision + 1,
+          value: {
+            ...saved.value,
+            preferences: {
+              ...saved.value.preferences,
+              approvalMode: mode as ApprovalMode,
+            },
+          },
+        });
       return manager.setApprovalMode(sessionId, mode as ApprovalMode);
     }
   );
