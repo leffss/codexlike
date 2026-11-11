@@ -30,7 +30,8 @@
     "test:e2e:mcp": "node e2e/mcp.mjs",
     "test:e2e:subagents": "node e2e/subagents.mjs",
     "test:e2e:packaged": "node e2e/packaged.mjs",
-    "test:e2e:projects": "node e2e/projects-sidebar.mjs"
+    "test:e2e:projects": "node e2e/projects-sidebar.mjs",
+    "test:e2e:all": "node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs"
   },
   "devDependencies": {
     "@codexlike/agent-core": "workspace:*",

@@ -16,3 +16,7 @@ E2E（`packages/desktop/e2e/*.mjs`）中的元素定位一律二选一：
 落盘到用户数据目录（`dataDir()` / 会话 workspace / 临时目录）的组件，打开或写文件前自己 `mkdirSync(dirname(path), { recursive: true })`，不假设调用方已建目录（先例：`json-file.ts`、`write-file.ts`、`apply-patch.ts`、`worktree-service.ts`）。
 
 测试必须覆盖「父目录不存在」分支：E2E 以 `mkdtempSync` 预建 `CODEXLIKE_HOME` 的习惯会掩盖该分支——2026-11-11 打包黑屏事故中 `createSqliteSessionStore` 未建 `~/.codexlike`，11 条 E2E 全绿仍黑屏，靠 `test:e2e:packaged` 冷启动冒烟兜底。
+
+## 拆分提交（partial-staged）
+
+同一文件混两批改动、只提交其中一批时，lint-staged 在「恢复未暂存改动」一步失败并整体 revert——工具边界，不是格式问题。流程：对 staged 内容先跑 `prettier --check` 确认格式，再 `git commit --no-verify`；能整文件提交就拆开两批先后提交，避免 partial-staged（2026-11-11 项目侧栏拆分提交踩此坑）。
