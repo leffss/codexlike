@@ -17,8 +17,10 @@ export function createPersistentWorkbench(
   const loads = new Map<string, Promise<WorkbenchEntry | undefined>>();
   const writes = new Map<string, Promise<void>>();
   const errors = new Map<string, string>();
+  const removed = new Set<string>();
   function load(target: WorkbenchTarget): Promise<WorkbenchEntry | undefined> {
     const key = workbenchKey(target);
+    if (removed.has(key)) return Promise.resolve(undefined);
     if (entries.has(key)) return Promise.resolve(entries.get(key));
     if (!port) return Promise.resolve(undefined);
     let task = loads.get(key);
@@ -26,8 +28,13 @@ export function createPersistentWorkbench(
       task = port
         .read(target)
         .then((entry) => {
+          if (removed.has(key)) return undefined;
           entries.set(key, entry);
           return entry;
+        })
+        .catch((error: unknown) => {
+          if (removed.has(key)) return undefined;
+          throw error;
         })
         .finally(() => loads.delete(key));
       loads.set(key, task);
@@ -40,11 +47,12 @@ export function createPersistentWorkbench(
   ) {
     if (!port) return;
     const key = workbenchKey(target);
+    if (removed.has(key)) return;
     const task = (writes.get(key) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
         const current = await load(target);
-        if (!current) return;
+        if (!current || removed.has(key)) return;
         const entry = {
           revision: current.revision + 1,
           value: update(current.value),
@@ -52,6 +60,7 @@ export function createPersistentWorkbench(
         // 失败也保留本地待写快照；后续字段编辑必须在它之上合并。
         entries.set(key, entry);
         const result = await port.write(target, entry);
+        if (removed.has(key)) return;
         entries.set(key, result.entry);
         if (!result.accepted)
           throw new Error("持久工作现场已更新，请重新打开该入口后再编辑");
@@ -59,6 +68,7 @@ export function createPersistentWorkbench(
         changed();
       })
       .catch((error: unknown) => {
+        if (removed.has(key)) return;
         errors.set(key, error instanceof Error ? error.message : String(error));
         changed();
       });
@@ -70,6 +80,15 @@ export function createPersistentWorkbench(
   return {
     load,
     patch,
+    /** 记录已由宿主移除：丢弃排队写入及迟到响应，不能污染其他会话的flush。 */
+    remove(target: WorkbenchTarget) {
+      const key = workbenchKey(target);
+      removed.add(key);
+      entries.delete(key);
+      errors.delete(key);
+      loads.delete(key);
+      writes.delete(key);
+    },
     forget(target: WorkbenchTarget) {
       entries.delete(workbenchKey(target));
     },

@@ -50,6 +50,7 @@ export const IPC = {
   projects: {
     list: "projects:list",
     add: "projects:add",
+    remove: "projects:remove",
     setCollapsed: "projects:set-collapsed",
   },
   providerProfiles: {
@@ -71,6 +72,7 @@ export const IPC = {
     setPinned: "sessions:set-pinned",
     markUsed: "sessions:mark-used",
     workspaceSharing: "sessions:workspace-sharing",
+    setProject: "sessions:set-project",
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: "sessions:select-workspace",
     /** 指定会话的消息历史 */
@@ -181,6 +183,11 @@ export interface SessionView {
   activity: SessionActivity;
 }
 
+export interface ProjectRemoval {
+  projectId: string;
+  sessionIds: string[];
+}
+
 /** 一个草稿意图沿用同一个 requestId 重试；成功后重试仅返回原会话，不重放消息。 */
 export interface StartSessionInput {
   requestId: string;
@@ -229,6 +236,11 @@ export interface CodexLikeApi {
   projects: {
     list(): Promise<ProjectRecord[]>;
     add(workspacePath: string): Promise<ProjectRecord>;
+    /** 仅确认后移除应用记录；false 无副作用，目录及无归属同目录会话保留。 */
+    remove(
+      projectId: string,
+      confirmed: boolean
+    ): Promise<ProjectRemoval | null>;
     setCollapsed(
       projectId: string,
       collapsed: boolean
@@ -248,6 +260,11 @@ export interface CodexLikeApi {
   };
   sessions: {
     start(input: StartSessionInput): Promise<SessionRecord>;
+    /** 仅调整归属；null 移出项目，移入由宿主校验实际目录及活动状态。 */
+    setProject(
+      sessionId: string,
+      projectId: string | null
+    ): Promise<SessionRecord | null>;
     execution(sessionId: string): Promise<SessionExecutionState | null>;
     view(sessionId: string): Promise<SessionView | null>;
     /** 只确认用户已经看到的水位，不消费更新之后产生的完成提醒。 */

@@ -12,6 +12,8 @@ const api: CodexLikeApi = {
   },
   projects: {
     list: () => ipcRenderer.invoke(IPC.projects.list),
+    remove: (id, confirmed) =>
+      ipcRenderer.invoke(IPC.projects.remove, id, confirmed),
     add: (workspacePath) => ipcRenderer.invoke(IPC.projects.add, workspacePath),
     setCollapsed: (id, collapsed) =>
       ipcRenderer.invoke(IPC.projects.setCollapsed, id, collapsed),
@@ -25,6 +27,8 @@ const api: CodexLikeApi = {
   },
   sessions: {
     start: (input) => ipcRenderer.invoke(IPC.sessions.start, input),
+    setProject: (id, projectId) =>
+      ipcRenderer.invoke(IPC.sessions.setProject, id, projectId),
     execution: (id) => ipcRenderer.invoke(IPC.sessions.execution, id),
     view: (id) => ipcRenderer.invoke(IPC.sessions.view, id),
     markViewed: (id, sequence) =>

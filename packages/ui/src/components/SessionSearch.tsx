@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import type { SessionSearchResult } from "@codexlike/agent-core";
 
 /** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的会话历史。 */
-export function SessionSearch(props: { onSelect: (id: string) => void }) {
+export function SessionSearch(props: {
+  onSelect: (id: string) => void;
+  recordsRevision?: number;
+}) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -36,7 +39,7 @@ export function SessionSearch(props: { onSelect: (id: string) => void }) {
     return () => {
       active = false;
     };
-  }, [open, query, includeArchived, revision]);
+  }, [open, query, includeArchived, revision, props.recordsRevision]);
 
   return (
     <div className="relative">

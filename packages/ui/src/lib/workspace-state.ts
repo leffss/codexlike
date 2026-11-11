@@ -44,6 +44,8 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   const preferences = new Map<string, SessionPreferences>();
   const positions = new Map<string, ReadingPosition | null>();
   const loaded = new Set<string>();
+  const removedSessions = new Set<string>();
+  const removedProjects = new Set<string>();
   const defaultPreferences: SessionPreferences = {
     providerProfileId: "",
     thinkingEffort: "auto",
@@ -88,6 +90,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     for (const listener of listeners) listener();
   }
   function observe(record: InteractionRecord) {
+    if (removedSessions.has(record.request.sessionId)) return;
     const id = key(record.request.sessionId, record.request.id);
     const previous = records.get(id);
     // 终态是墓碑，旧 pending 快照/请求事件永远不能把它复活。
@@ -115,6 +118,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     async loadSession(sessionId: string) {
       if (loaded.has(sessionId)) return;
       const entry = await persisted.load(sessionTarget(sessionId));
+      if (removedSessions.has(sessionId)) return;
       if (entry && !loaded.has(sessionId)) {
         if (!composers.has(sessionId))
           composers.set(sessionId, entry.value.text);
@@ -132,6 +136,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     async loadNewDraft(projectId: string | null, defaultProfile = "") {
       const entry = await persisted.load({ kind: "new", projectId });
+      if (projectId !== null && removedProjects.has(projectId)) return;
       if (entry && !newDrafts.has(projectId))
         newDrafts.set(projectId, {
           requestId: entry.value.requestId,
@@ -149,6 +154,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     preferences: (sessionId: string) =>
       preferences.get(sessionId) ?? defaultPreferences,
     setPreferences(sessionId: string, patch: Partial<SessionPreferences>) {
+      if (removedSessions.has(sessionId)) return;
       preferences.set(sessionId, {
         ...(preferences.get(sessionId) ?? defaultPreferences),
         ...patch,
@@ -161,6 +167,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     readingPosition: (sessionId: string) => positions.get(sessionId) ?? null,
     setReadingPosition(sessionId: string, position: ReadingPosition) {
+      if (removedSessions.has(sessionId)) return;
       positions.set(sessionId, position);
       persisted.patch(sessionTarget(sessionId), (value) => ({
         ...value,
@@ -174,6 +181,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       projectId: string | null,
       patch: Partial<Omit<NewSessionDraft, "requestId" | "projectId">>
     ) {
+      if (projectId !== null && removedProjects.has(projectId)) return;
       const draft = newDraft(projectId);
       Object.assign(draft, patch);
       if (Object.keys(patch).some((key) => key !== "busy" && key !== "error")) {
@@ -193,9 +201,34 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       }
       notify();
     },
+    /** 仅清除宿主返回的明确归属集合，不比较工作区路径。 */
+    removeProject(projectId: string, sessionIds: string[]) {
+      removedProjects.add(projectId);
+      persisted.remove({ kind: "new", projectId });
+      newDrafts.delete(projectId);
+      const removed = new Set(sessionIds);
+      for (const sessionId of removed) {
+        removedSessions.add(sessionId);
+        persisted.remove(sessionTarget(sessionId));
+        composers.delete(sessionId);
+        preferences.delete(sessionId);
+        positions.delete(sessionId);
+        loaded.delete(sessionId);
+      }
+      for (const [id, record] of records) {
+        if (!removed.has(record.request.sessionId)) continue;
+        records.delete(id);
+        drafts.delete(id);
+        submissions.delete(id);
+        hidden.delete(id);
+        observedAt.delete(id);
+      }
+      notify();
+    },
     async completeNewDraft(projectId: string | null) {
       persisted.forget({ kind: "new", projectId });
       const entry = await persisted.load({ kind: "new", projectId });
+      if (projectId !== null && removedProjects.has(projectId)) return;
       newDrafts.delete(projectId);
       if (entry)
         newDrafts.set(projectId, {
@@ -287,6 +320,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     composer: (sessionId: string) => composers.get(sessionId) ?? "",
     setComposer(sessionId: string, text: string) {
+      if (removedSessions.has(sessionId)) return;
       composers.set(sessionId, text);
       persisted.patch(sessionTarget(sessionId), (value) => ({
         ...value,

@@ -6,11 +6,13 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -18,6 +20,8 @@ import {
   createSessionManager,
   createSqliteSessionStore,
   createWorktreeService,
+  workbenchKey,
+  type WorkbenchEntry,
 } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
@@ -103,7 +107,8 @@ function setup(now?: () => string, beforeResources?: () => void) {
 async function provider(
   app: ReturnType<typeof setup>,
   ask = false,
-  finishGate?: Promise<void>
+  finishGate?: Promise<void>,
+  compactGate?: { entered: () => void; release: Promise<void> }
 ) {
   let requests = 0;
   const bodies: any[] = [];
@@ -115,6 +120,27 @@ async function provider(
     req.on("end", async () => {
       bodies.push(JSON.parse(body));
       requests += 1;
+      if (!JSON.parse(body).stream) {
+        compactGate?.entered();
+        await compactGate?.release;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "summary",
+            object: "chat.completion",
+            created: 0,
+            model: "mock",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "任务摘要" },
+                finish_reason: "stop",
+              },
+            ],
+          })
+        );
+        return;
+      }
       res.writeHead(200, { "content-type": "text/event-stream" });
       if (finishGate && requests === 3) {
         res.write(
@@ -819,6 +845,577 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
   });
   expect(git("worktree", "list", "--porcelain")).toBe(before);
   expect(readFileSync(marker, "utf8")).toBe("未提交成果");
+});
+
+it("会话移入与移出只改变显式归属，SQLite重开后目录历史与偏好保持", async () => {
+  const app = setup();
+  await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const record = await invoke("sessions:start", {
+    requestId: "membership-local",
+    projectId: null,
+    workspacePath: app.workspace,
+    text: "独立历史",
+    approvalMode: "assist",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  invoke("sessions:set-pinned", record.id, true);
+  const { activity: _activity, ...before } = invoke("sessions:list")[0];
+  const history = invoke("sessions:messages", record.id);
+  expect(invoke("sessions:set-project", record.id, project.id)).toMatchObject({
+    ...before,
+    projectId: project.id,
+  });
+  app.reopen();
+  expect(invoke("sessions:list")[0]).toMatchObject({
+    ...before,
+    projectId: project.id,
+  });
+  expect(invoke("sessions:set-project", record.id, null)).toMatchObject(before);
+  app.reopen();
+  expect(invoke("sessions:list")[0]).toMatchObject(before);
+  expect(invoke("sessions:messages", record.id)).toEqual(history);
+});
+
+it("确认移除仅删除显式所属含归档记录，清除现场与首次发送重试而保留同目录独立会话", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const marker = join(app.workspace, "keep.txt");
+  writeFileSync(marker, "不删除磁盘成果");
+  const request = {
+    requestId: "moved-in-removed",
+    projectId: null,
+    workspacePath: app.workspace,
+    text: "移入后删除",
+  };
+  const member = await invoke("sessions:start", request);
+  const standalone = await invoke("sessions:start", {
+    ...request,
+    requestId: "keep-independent",
+    text: "保留独立",
+  });
+  const archived = await invoke("sessions:start", {
+    requestId: "removed-archive",
+    projectId: project.id,
+    text: "归档历史",
+  });
+  await vi.waitFor(() =>
+    expect(
+      invoke("sessions:list").every(
+        (s: any) => !invoke("sessions:execution", s.id).running
+      )
+    ).toBe(true)
+  );
+  invoke("sessions:set-project", member.id, project.id);
+  invoke("sessions:archive", archived.id, true);
+  const before = invoke("sessions:list");
+  const survivorView = invoke("sessions:view", standalone.id);
+  expect(invoke("projects:remove", project.id, false)).toBeNull();
+  expect(invoke("sessions:list")).toEqual(before);
+  expect(invoke("projects:list")).toEqual([project]);
+  expect(invoke("projects:remove", project.id, true)).toEqual({
+    projectId: project.id,
+    sessionIds: expect.arrayContaining([member.id, archived.id]),
+  });
+  expect(invoke("projects:list")).toEqual([]);
+  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([
+    standalone.id,
+  ]);
+  expect(invoke("sessions:view", standalone.id)).toEqual(survivorView);
+  for (const id of [member.id, archived.id]) {
+    expect(invoke("sessions:view", id)).toBeNull();
+    expect(invoke("sessions:messages", id)).toEqual([]);
+    expect(invoke("sessions:resources", id)).toBeNull();
+    await expect(
+      invoke("sessions:send", id, "不应执行", model.profile.id)
+    ).rejects.toThrow(/不存在|移除|损坏/);
+  }
+  await expect(invoke("sessions:start", request)).rejects.toThrow("已移除");
+  app.reopen();
+  await expect(invoke("sessions:start", request)).rejects.toThrow("已移除");
+  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([
+    standalone.id,
+  ]);
+  expect(readFileSync(marker, "utf8")).toBe("不删除磁盘成果");
+  await invoke(
+    "sessions:send",
+    standalone.id,
+    "独立仍可执行",
+    model.profile.id
+  );
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", standalone.id).running).toBe(false)
+  );
+  expect(model.requests()).toBe(4);
+});
+
+it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删独立副本", async () => {
+  const app = setup();
+  await provider(app);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", app.workspace, ...args], { encoding: "utf8" });
+  git("init", "-b", "main");
+  git("config", "user.email", "membership@test.local");
+  git("config", "user.name", "Membership Test");
+  writeFileSync(join(app.workspace, "source.txt"), "来源");
+  git("add", "source.txt");
+  git("commit", "-m", "fixture");
+  const project = invoke("projects:add", app.workspace);
+  const alias = join(app.root, "alias");
+  symlinkSync(
+    app.workspace,
+    alias,
+    process.platform === "win32" ? "junction" : "dir"
+  );
+  const local = await invoke("sessions:start", {
+    requestId: "alias",
+    projectId: null,
+    workspacePath: alias,
+    text: "别名目录",
+  });
+  const sibling = `${app.workspace}-other`;
+  mkdirSync(sibling);
+  const wrong = invoke("projects:add", sibling);
+  const worktree = await invoke("sessions:start", {
+    requestId: "origin-only",
+    projectId: project.id,
+    workspaceMode: "worktree",
+    text: "隔离成果",
+  });
+  const owned = await invoke("sessions:start", {
+    requestId: "owned-tree",
+    projectId: project.id,
+    workspaceMode: "worktree",
+    text: "所属隔离成果",
+  });
+  await vi.waitFor(() =>
+    expect(
+      invoke("sessions:list").every(
+        (s: any) => !invoke("sessions:execution", s.id).running
+      )
+    ).toBe(true)
+  );
+  expect(() => invoke("sessions:set-project", local.id, wrong.id)).toThrow(
+    "目录不匹配"
+  );
+  expect(invoke("sessions:set-project", local.id, project.id).projectId).toBe(
+    project.id
+  );
+  invoke("sessions:set-project", local.id, null);
+  invoke("sessions:set-project", worktree.id, null);
+  const copyProject = invoke("projects:add", worktree.workspacePath);
+  expect(() =>
+    invoke("sessions:set-project", worktree.id, copyProject.id)
+  ).toThrow("来源项目");
+  expect(() => invoke("sessions:set-project", worktree.id, wrong.id)).toThrow(
+    "来源项目"
+  );
+  expect(invoke("sessions:set-project", worktree.id, project.id)).toMatchObject(
+    {
+      workspacePath: worktree.workspacePath,
+      workspaceOriginPath: app.workspace,
+    }
+  );
+  invoke("sessions:set-project", worktree.id, null);
+  const history = invoke("sessions:messages", worktree.id);
+  for (const record of [worktree, owned])
+    writeFileSync(join(record.workspacePath, "keep.txt"), "隔离成果不能删");
+  const branches = git("worktree", "list", "--porcelain");
+  invoke("projects:remove", project.id, true);
+  expect(invoke("sessions:view", owned.id)).toBeNull();
+  app.reopen();
+  expect(invoke("sessions:messages", worktree.id)).toEqual(history);
+  expect(
+    invoke("sessions:list").find((s: any) => s.id === worktree.id)
+  ).toMatchObject({
+    projectId: null,
+    workspaceOriginPath: app.workspace,
+    workspacePath: worktree.workspacePath,
+  });
+  expect(git("worktree", "list", "--porcelain")).toBe(branches);
+  for (const record of [worktree, owned])
+    expect(readFileSync(join(record.workspacePath, "keep.txt"), "utf8")).toBe(
+      "隔离成果不能删"
+    );
+  const readded = invoke("projects:add", app.workspace);
+  expect(
+    invoke("sessions:set-project", worktree.id, readded.id).projectId
+  ).toBe(readded.id);
+});
+
+it("准备Worktree期间项目被移除，首次发送必须重查且不留悬挂记录", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", app.workspace, ...args], { encoding: "utf8" });
+  git("init", "-b", "main");
+  git("config", "user.email", "membership@test.local");
+  git("config", "user.name", "Membership Test");
+  writeFileSync(join(app.workspace, "source.txt"), "保留来源");
+  git("add", "source.txt");
+  git("commit", "-m", "fixture");
+  const original = app.worktrees.createForSession;
+  let release!: () => void;
+  let entered!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // 闸门只控制外部Git返回时机，实际创建与安全回滚仍走真实实现。
+  vi.spyOn(app.worktrees, "createForSession").mockImplementationOnce(
+    async (input) => {
+      const result = await original(input);
+      entered();
+      await gate;
+      return result;
+    }
+  );
+  const sending = invoke("sessions:start", {
+    requestId: "project-removed-during-prepare",
+    projectId: project.id,
+    workspaceMode: "worktree",
+    text: "不能启动",
+  });
+  const rejected = expect(sending).rejects.toThrow("项目不存在或已移除");
+  await ready;
+  invoke("projects:remove", project.id, true);
+  release();
+  await rejected;
+  expect(invoke("sessions:list")).toEqual([]);
+  expect(model.requests()).toBe(0);
+});
+
+it("等待问答或宿主执行占位时不能移出移除，停止后才可整理且独立等待不阻塞原项目", async () => {
+  let target: { id: string; projectId: string } | undefined;
+  let reservedChecked = false;
+  const app = setup(undefined, () => {
+    const active = target;
+    if (!active) return;
+    expect(invoke("sessions:execution", active.id).running).toBe(true);
+    expect(() => invoke("sessions:set-project", active.id, null)).toThrow(
+      "先停止"
+    );
+    expect(() => invoke("projects:remove", active.projectId, true)).toThrow(
+      "先停止"
+    );
+    reservedChecked = true;
+  });
+  const model = await provider(app, true);
+  const project = invoke("projects:add", app.workspace);
+  const record = await invoke("sessions:start", {
+    requestId: "protected-member",
+    projectId: project.id,
+    text: "等待问题",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
+  );
+  const view = invoke("sessions:view", record.id);
+  expect(() => invoke("sessions:set-project", record.id, null)).toThrow(
+    "先停止"
+  );
+  expect(() => invoke("projects:remove", project.id, true)).toThrow("先停止");
+  expect(invoke("sessions:view", record.id)).toEqual(view);
+  invoke("sessions:interrupt", record.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  target = { id: record.id, projectId: project.id };
+  await invoke("sessions:send", record.id, "再次运行", model.profile.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  expect(reservedChecked).toBe(true);
+  target = undefined;
+  invoke("sessions:set-project", record.id, null);
+  invoke("projects:remove", project.id, true);
+  expect(invoke("sessions:view", record.id)).not.toBeNull();
+});
+
+it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已删除会话", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const record = await invoke("sessions:start", {
+    requestId: "remove-vs-send",
+    projectId: project.id,
+    text: "首轮",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  const available = await app.profiles.list();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(app.profiles, "list").mockImplementationOnce(async () => {
+    await gate;
+    return available;
+  });
+  const sending = invoke(
+    "sessions:send",
+    record.id,
+    "不应执行",
+    model.profile.id
+  );
+  const rejected = expect(sending).rejects.toThrow("已移除");
+  invoke("projects:remove", project.id, true);
+  release();
+  await rejected;
+  expect(invoke("sessions:list")).toEqual([]);
+  expect(invoke("sessions:messages", record.id)).toEqual([]);
+  expect(model.requests()).toBe(1);
+});
+
+it("压缩执行也复用宿主占位，不能在异步生成摘要期间移除项目", async () => {
+  const app = setup();
+  let entered!: () => void;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const model = await provider(app, false, undefined, {
+    entered,
+    release: gate,
+  });
+  const project = invoke("projects:add", app.workspace);
+  const record = await invoke("sessions:start", {
+    requestId: "compact-protected",
+    projectId: project.id,
+    text: "首轮",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  for (let i = 0; i < 3; i++) {
+    await invoke("sessions:send", record.id, `后续${i}`, model.profile.id);
+    await vi.waitFor(() =>
+      expect(invoke("sessions:execution", record.id).running).toBe(false)
+    );
+  }
+  const compacting = invoke("sessions:compact", record.id, model.profile.id);
+  await ready;
+  try {
+    expect(invoke("sessions:execution", record.id).running).toBe(true);
+    expect(() => invoke("sessions:set-project", record.id, null)).toThrow(
+      "先停止"
+    );
+    expect(() => invoke("projects:remove", project.id, true)).toThrow("先停止");
+  } finally {
+    release();
+    await compacting;
+  }
+  expect(invoke("sessions:execution", record.id).running).toBe(false);
+});
+
+it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现半删除", async () => {
+  const app = setup();
+  await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const request = {
+    requestId: "atomic-remove",
+    projectId: project.id,
+    text: "原始历史",
+  };
+  const record = await invoke("sessions:start", request);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+  const before = invoke("sessions:view", record.id);
+  // 仅在临时测试库注入存储故障；断言仍经宿主公开接口，不查询私有表布局。
+  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  try {
+    fault.exec(
+      "CREATE TRIGGER fail_project_removal BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'injected disk failure'); END"
+    );
+    expect(() => invoke("projects:remove", project.id, true)).toThrow(
+      "injected disk failure"
+    );
+    expect(invoke("projects:list")).toEqual([project]);
+    expect(invoke("sessions:view", record.id)).toEqual(before);
+    expect((await invoke("sessions:start", request)).id).toBe(record.id);
+    fault.exec("DROP TRIGGER fail_project_removal");
+  } finally {
+    fault.close();
+  }
+  invoke("projects:remove", project.id, true);
+  expect(invoke("sessions:view", record.id)).toBeNull();
+});
+
+it("同目录独立会话等待中仍可移除空项目，不能按目录误判运行保护范围", async () => {
+  const app = setup();
+  await provider(app, true);
+  const project = invoke("projects:add", app.workspace);
+  const record = await invoke("sessions:start", {
+    requestId: "standalone-waiting",
+    projectId: null,
+    workspacePath: app.workspace,
+    text: "独立等待",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
+  );
+  const before = invoke("sessions:view", record.id);
+  expect(invoke("projects:remove", project.id, true)).toEqual({
+    projectId: project.id,
+    sessionIds: [],
+  });
+  expect(invoke("sessions:view", record.id)).toEqual(before);
+  invoke("sessions:interrupt", record.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", record.id).running).toBe(false)
+  );
+});
+
+it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟到读写不复活", async () => {
+  const app = setup();
+  await provider(app);
+  const project = invoke("projects:add", app.workspace);
+  const member = await invoke("sessions:start", {
+    requestId: "combined-member",
+    projectId: project.id,
+    text: "组合成员",
+  });
+  const independent = await invoke("sessions:start", {
+    requestId: "combined-independent",
+    projectId: null,
+    workspacePath: app.workspace,
+    text: "组合独立",
+  });
+  await vi.waitFor(() =>
+    expect(
+      invoke("sessions:list").every(
+        (s: any) => !invoke("sessions:execution", s.id).running
+      )
+    ).toBe(true)
+  );
+  const ownedTargets = [
+    { kind: "new", projectId: project.id },
+    { kind: "session", sessionId: member.id },
+  ] as const;
+  const keptTargets = [
+    { kind: "new", projectId: null },
+    { kind: "session", sessionId: independent.id },
+  ] as const;
+  const saved: WorkbenchEntry[] = [];
+  for (const target of [...ownedTargets, ...keptTargets]) {
+    const entry = await invoke("workbench:read", target);
+    const next = {
+      revision: entry.revision + 1,
+      value: { ...entry.value, text: "保留准确归属草稿" },
+    };
+    invoke("workbench:write", target, next);
+    saved.push(next);
+  }
+  expect(invoke("sessions:search", "组合", true)).toHaveLength(2);
+  invoke("sessions:set-project", independent.id, project.id);
+  expect(invoke("sessions:search", "组合独立")[0].projectId).toBe(project.id);
+  invoke("sessions:set-project", independent.id, null);
+  invoke("projects:remove", project.id, true);
+  for (const target of ownedTargets) {
+    expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
+    expect(() => invoke("workbench:read", target)).toThrow("不存在");
+    expect(() =>
+      invoke("workbench:write", target, { ...saved[0], revision: 999 })
+    ).toThrow("不存在");
+  }
+  for (let i = 0; i < keptTargets.length; i++)
+    expect(await invoke("workbench:read", keptTargets[i])).toEqual(
+      saved[i + 2]
+    );
+  expect(invoke("sessions:search", "组合", true)).toMatchObject([
+    { id: independent.id, projectId: null },
+  ]);
+  app.reopen();
+  for (const target of ownedTargets)
+    expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
+  expect(invoke("sessions:search", "组合成员", true)).toEqual([]);
+  const another = invoke("projects:add", app.workspace);
+  const available = await app.profiles.list();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(app.profiles, "list").mockImplementationOnce(async () => {
+    await gate;
+    return available;
+  });
+  const target = { kind: "new", projectId: another.id } as const;
+  const reading = invoke("workbench:read", target);
+  const rejected = expect(reading).rejects.toThrow("不存在");
+  invoke("projects:remove", another.id, true);
+  release();
+  await rejected;
+  expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
+});
+
+it("首次发送成功后的03草稿消费仍在等待时移除项目，旧requestId不得返回删除记录或回滚磁盘", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", app.workspace, ...args], { encoding: "utf8" });
+  git("init", "-b", "main");
+  git("config", "user.email", "membership@test.local");
+  git("config", "user.name", "Membership Test");
+  writeFileSync(join(app.workspace, "source.txt"), "保留源文件");
+  git("add", "source.txt");
+  git("commit", "-m", "fixture");
+  const project = invoke("projects:add", app.workspace);
+  const available = await app.profiles.list();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(app.profiles, "list")
+    .mockResolvedValueOnce(available)
+    .mockResolvedValueOnce(available)
+    .mockImplementationOnce(async () => {
+      await gate;
+      return available;
+    });
+  const request = {
+    requestId: "consume-removed",
+    projectId: project.id,
+    workspaceMode: "worktree",
+    text: "已执行过不能回滚",
+  };
+  const sending = invoke("sessions:start", request);
+  const duplicate = invoke("sessions:start", request);
+  const rejected = expect(sending).rejects.toThrow("已移除");
+  const duplicateRejected = expect(duplicate).rejects.toThrow("已移除");
+  await vi.waitFor(() =>
+    expect(invoke("sessions:list")[0]?.status).toBe("idle")
+  );
+  await vi.waitFor(() => expect(model.requests()).toBe(1));
+  await vi.waitFor(() =>
+    expect(
+      invoke("sessions:execution", invoke("sessions:list")[0].id).running
+    ).toBe(false)
+  );
+  const record = invoke("sessions:list")[0];
+  invoke("projects:remove", project.id, true);
+  release();
+  await Promise.all([rejected, duplicateRejected]);
+  expect(existsSync(record.workspacePath)).toBe(true);
+  expect(readFileSync(join(record.workspacePath, "source.txt"), "utf8")).toBe(
+    "保留源文件"
+  );
+  expect(
+    app.manager.readWorkbench(
+      workbenchKey({ kind: "session", sessionId: record.id })
+    )
+  ).toBeNull();
+  expect(invoke("sessions:list")).toEqual([]);
 });
 
 it("空的非 Git 项目显式持久存在；规范路径重复添加不创建另一个项目", async () => {

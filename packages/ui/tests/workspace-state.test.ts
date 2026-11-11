@@ -28,6 +28,56 @@ function pending(
 }
 
 describe("工作台页面之上的状态", () => {
+  it("项目移除清理03缓存及迟到响应，不复活删除草稿且不阻塞幸存会话保存", async () => {
+    const entry = {
+      revision: 0,
+      value: {
+        text: "旧草稿",
+        requestId: "old",
+        questionDrafts: {},
+        readingPosition: null,
+        preferences: {
+          providerProfileId: "default",
+          thinkingEffort: "auto" as const,
+          approvalMode: "ask" as const,
+        },
+      },
+    };
+    let release!: (value: typeof entry) => void;
+    let rejectWrite!: (error: Error) => void;
+    const state = createWorkspaceState({
+      read: async (target) =>
+        target.kind === "session" && target.sessionId === "loading"
+          ? new Promise((resolve) => {
+              release = resolve;
+            })
+          : structuredClone(entry),
+      write: async (target, value) => {
+        if (target.kind === "session" && target.sessionId === "writing")
+          return new Promise((_resolve, reject) => {
+            rejectWrite = reject;
+          });
+        return { accepted: true, entry: value };
+      },
+    });
+    await state.loadSession("writing");
+    await state.loadSession("kept");
+    state.setComposer("writing", "已删除目标写入中");
+    await vi.waitFor(() => expect(rejectWrite).toBeTypeOf("function"));
+    const loading = state.loadSession("loading");
+    state.removeProject("p", ["loading", "writing"]);
+    release(entry);
+    rejectWrite(new Error("会话不存在"));
+    await loading;
+    state.observe(pending("late", "loading"));
+    state.setComposer("kept", "幸存独立输入");
+    await expect(state.flush()).resolves.toBeUndefined();
+    expect(state.composer("loading")).toBe("");
+    expect(state.composer("writing")).toBe("");
+    expect(state.records("loading")).toEqual([]);
+    expect(state.composer("kept")).toBe("幸存独立输入");
+    expect(state.persistenceError()).toBeNull();
+  });
   it("保存按目标串行，flush 等待最新编辑；重建状态从宿主恢复而不复活旧问答", async () => {
     const disk = new Map<string, any>();
     let release!: () => void;

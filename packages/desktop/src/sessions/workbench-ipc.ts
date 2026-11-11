@@ -196,6 +196,8 @@ export function registerWorkbenchHandlers(
       sessionId: string,
       preferences: WorkbenchValue["preferences"]
     ) {
+      // 首次发送可能已完成且记录刚被用户移除；不能初始化悬挂工作现场。
+      if (!manager.list().some((session) => session.id === sessionId)) return;
       const target: WorkbenchTarget = { kind: "new", projectId };
       const key = workbenchKey(target);
       const sessionKey = workbenchKey({ kind: "session", sessionId });

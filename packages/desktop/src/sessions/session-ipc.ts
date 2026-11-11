@@ -27,6 +27,7 @@ import { createInterruptRegistry } from "./interrupt-registry";
 import { registerWorkbenchHandlers } from "./workbench-ipc";
 import { createLiveSessions } from "./live-sessions";
 import { createSessionManagement } from "./session-management";
+import { createSessionMembership } from "./session-membership";
 import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
@@ -67,6 +68,7 @@ export function registerSessionHandlers(options: {
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
   const management = createSessionManagement(manager, executions);
+  const membership = createSessionMembership(manager, management);
   const starts = new Map<string, Promise<SessionRecord>>();
   const workbench = registerWorkbenchHandlers(manager, profiles);
   const liveSessions = createLiveSessions(manager);
@@ -92,6 +94,27 @@ export function registerSessionHandlers(options: {
       throw new Error("请选择项目目录");
     return manager.addProject(path);
   });
+  ipcMain.handle(IPC.projects.remove, (_e, id: unknown, confirmed: unknown) => {
+    if (typeof id !== "string" || typeof confirmed !== "boolean")
+      throw new Error("移除项目：需要项目标识和明确确认");
+    const result = membership.removeProject(id, confirmed);
+    for (const sessionId of result?.sessionIds ?? []) {
+      liveSessions.forget(sessionId);
+      void browserManager?.closeSession(sessionId).catch(() => {});
+    }
+    return result;
+  });
+  ipcMain.handle(
+    IPC.sessions.setProject,
+    (_e, id: unknown, projectId: unknown) => {
+      if (
+        typeof id !== "string" ||
+        (projectId !== null && typeof projectId !== "string")
+      )
+        throw new Error("调整归属：参数不合法");
+      return membership.setProject(id, projectId);
+    }
+  );
   ipcMain.handle(IPC.sessions.list, () =>
     manager.list().map((record) => ({
       ...record,
@@ -163,8 +186,15 @@ export function registerSessionHandlers(options: {
       !request.text.trim()
     )
       throw new Error("首次发送需要草稿标识、项目归属和消息内容");
+    if (manager.isRemovedCreationRequest(request.requestId))
+      return Promise.reject(new Error("原会话已移除，请新建会话后发送"));
     const pending = starts.get(request.requestId);
-    if (pending) return pending;
+    if (pending)
+      return pending.then((record) => {
+        const current = manager.list().find((item) => item.id === record.id);
+        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        return current;
+      });
     const previous = manager
       .list()
       .find((session) => session.creationRequestId === request.requestId);
@@ -224,6 +254,12 @@ export function registerSessionHandlers(options: {
         });
         rollbackWorkspace = rollback;
         preparedPath = workspace.workspacePath;
+        // 异步准备期间项目可能已被移除；复查与创建之间不得 await。
+        if (
+          project &&
+          !manager.projects().some((item) => item.id === project.id)
+        )
+          throw new Error("项目不存在或已移除，请重新选择");
         const session = manager.create({
           id,
           projectId: request.projectId,
@@ -249,10 +285,15 @@ export function registerSessionHandlers(options: {
             approvalMode: approval,
           }
         );
-        return manager.list().find((item) => item.id === session.id)!;
+        const current = manager.list().find((item) => item.id === session.id);
+        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        return current;
       } catch (error) {
-        // 只回滚无历史记录；绝不递归删除用户目录或失败期间可能出现的成果。
-        if (!manager.messages(id).length) {
+        // 删除记录也会让历史为空；已成功的意图墓碑绝不能误当成创建失败并回收磁盘。
+        if (
+          !manager.isRemovedCreationRequest(request.requestId) &&
+          !manager.messages(id).length
+        ) {
           manager.removeUnstarted(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
@@ -538,10 +579,18 @@ export function registerSessionHandlers(options: {
       if (profile === undefined) {
         throw new Error("所选 Provider Profile 不存在，请重新选择模型");
       }
-      // 失败（模型错误/历史过短/会话正忙）以中文异常抛回渲染层；原历史不受损，可重试
-      const result = await session.compact({ profile });
-      liveSessions.invalidate(sessionId);
-      return { compactedMessages: result.compactedMessages };
+      // 压缩同样会异步写历史，复用唯一执行占位，不能让移除在期间清掉记录。
+      management.assertCanExecute(sessionId);
+      const executionId = randomUUID();
+      executions.set(sessionId, executionId);
+      try {
+        const result = await session.compact({ profile });
+        liveSessions.invalidate(sessionId);
+        return { compactedMessages: result.compactedMessages };
+      } finally {
+        if (executions.get(sessionId) === executionId)
+          executions.delete(sessionId);
+      }
     }
   );
 

@@ -9,6 +9,7 @@ import type {
 } from "../interaction/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
 import { createSessionSearch, type SessionSearchResult } from "./search";
+import { workbenchKey } from "./workbench-state";
 import type {
   CompactRecord,
   ProjectRecord,
@@ -31,6 +32,9 @@ export interface SessionPersistence {
   ): boolean;
   insertProject(record: ProjectRecord): void;
   listProjects(): ProjectRecord[];
+  /** 单事务删除显式所属会话及关联记录；返回准确影响集合，不访问文件系统。 */
+  removeProject(projectId: string): string[];
+  isRemovedCreationRequest(requestId: string): boolean;
   setProjectCollapsed(projectId: string, collapsed: boolean): void;
   insertSession(record: SessionRecord): void;
   /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
@@ -87,6 +91,9 @@ CREATE TABLE IF NOT EXISTS workbench_state (
   key TEXT PRIMARY KEY,
   revision INTEGER NOT NULL,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS removed_creation_requests (
+  request_id TEXT PRIMARY KEY
 );
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -282,7 +289,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
-    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ? WHERE id = ?"
+    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
     "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -399,6 +406,54 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"
       ).run(record.id, record.name, record.workspacePath, record.createdAt);
     },
+    isRemovedCreationRequest(requestId) {
+      return (
+        db
+          .prepare(
+            "SELECT 1 FROM removed_creation_requests WHERE request_id = ?"
+          )
+          .get(requestId) !== undefined
+      );
+    },
+    removeProject(projectId) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const members = db
+          .prepare("SELECT id FROM sessions WHERE project_id = ?")
+          .all(projectId);
+        const deleteWorkbench = db.prepare(
+          "DELETE FROM workbench_state WHERE key = ?"
+        );
+        deleteWorkbench.run(workbenchKey({ kind: "new", projectId }));
+        for (const member of members)
+          deleteWorkbench.run(
+            workbenchKey({ kind: "session", sessionId: String(member.id) })
+          );
+        // 成功创建意图保留墓碑，避免移入后移除的独立草稿因重试重建会话。
+        db.prepare(
+          "INSERT OR IGNORE INTO removed_creation_requests SELECT creation_request_id FROM sessions WHERE project_id = ? AND creation_request_id IS NOT NULL"
+        ).run(projectId);
+        // 显式关联清理，不依赖各运行时 foreign_keys 默认值，不按目录推导集合。
+        for (const table of [
+          "messages",
+          "compact_records",
+          "tool_calls",
+          "interactions",
+          "approvals",
+        ]) {
+          db.prepare(
+            `DELETE FROM ${table} WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)`
+          ).run(projectId);
+        }
+        db.prepare("DELETE FROM sessions WHERE project_id = ?").run(projectId);
+        db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+        db.exec("COMMIT");
+        return members.map((row) => String(row.id));
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     setProjectCollapsed(projectId, collapsed) {
       db.prepare("UPDATE projects SET collapsed = ? WHERE id = ?").run(
         collapsed ? 1 : 0,
@@ -464,6 +519,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.updatedAt,
         next.pinned ? 1 : 0,
         next.lastUsedAt ?? next.createdAt,
+        next.projectId ?? null,
         id
       );
     },

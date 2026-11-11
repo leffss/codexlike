@@ -159,5 +159,16 @@ export function createLiveSessions(manager: SessionManager) {
     live.history = manager.transcript(id);
     live.events = [];
   }
-  return { begin, accept, view, activity, markViewed, stop, invalidate };
+  return {
+    begin,
+    accept,
+    view,
+    activity,
+    markViewed,
+    stop,
+    invalidate,
+    forget(id: string) {
+      sessions.delete(id);
+    },
+  };
 }

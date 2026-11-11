@@ -77,6 +77,8 @@ export interface SessionManager {
   ): boolean;
   addProject(workspacePath: string): ProjectRecord;
   projects(): ProjectRecord[];
+  removeProject(projectId: string): string[];
+  isRemovedCreationRequest(requestId: string): boolean;
   setProjectCollapsed(
     projectId: string,
     collapsed: boolean
@@ -84,6 +86,8 @@ export interface SessionManager {
   setPinned(sessionId: string, pinned: boolean): SessionRecord | null;
   markUsed(sessionId: string): SessionRecord | null;
   removeUnstarted(sessionId: string): void;
+  /** 宿主完成目录与活动检查后，仅同步更改归属。 */
+  setProject(sessionId: string, projectId: string | null): SessionRecord | null;
   create(options: {
     projectId?: string | null;
     creationRequestId?: string;
@@ -242,11 +246,20 @@ export function createSessionManager(
       return project;
     },
     projects: () => persistence.listProjects(),
+    isRemovedCreationRequest: (id) => persistence.isRemovedCreationRequest(id),
+    removeProject(projectId) {
+      const removed = persistence.removeProject(projectId);
+      for (const id of removed) cache.delete(id);
+      return removed;
+    },
     setProjectCollapsed(projectId, collapsed) {
       persistence.setProjectCollapsed(projectId, collapsed);
       return (
         persistence.listProjects().find((item) => item.id === projectId) ?? null
       );
+    },
+    setProject(sessionId, projectId) {
+      return patchRecord(sessionId, { projectId });
     },
     setPinned(sessionId, pinned) {
       return patchRecord(sessionId, { pinned });

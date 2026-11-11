@@ -62,6 +62,7 @@ export function SessionSidebar(props: {
   onArchive: (id: string, archived: boolean) => void;
   onPin: (id: string, pinned: boolean) => void;
   onCollapseProject: (id: string, collapsed: boolean) => void;
+  onRemoveProject?: (id: string) => void;
 }) {
   const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
@@ -244,6 +245,16 @@ export function SessionSidebar(props: {
             onClick={() => props.onCreateInProject(group.projectId!)}
           >
             + 新建会话
+          </button>
+        )}
+        {group.projectId !== null && props.onRemoveProject && (
+          <button
+            type="button"
+            data-testid="project-remove"
+            className="rounded px-2 py-1 text-xs text-fg-muted hover:text-warn-fg"
+            onClick={() => props.onRemoveProject!(group.projectId!)}
+          >
+            移除项目
           </button>
         )}
         {expanded && (

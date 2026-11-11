@@ -14,6 +14,7 @@ import { WorkspaceModeControl } from "../components/WorkspaceModeControl";
 import type {
   SessionEventEnvelope,
   SessionListItem,
+  ProjectRemoval,
 } from "@codexlike/desktop/ipc";
 import {
   hydrateLiveSession,
@@ -38,6 +39,10 @@ import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { SessionSidebar } from "../components/SessionSidebar";
 import { SessionSearch } from "../components/SessionSearch";
+import {
+  MembershipDialog,
+  ProjectRemovalDialog,
+} from "../components/MembershipDialogs";
 import { mergeInteractions, type UiItem } from "../lib/session-view";
 import {
   formatSessionStatus,
@@ -79,6 +84,12 @@ export function WorkspacePage(props: {
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [recordsRevision, setRecordsRevision] = useState(0);
+  const [membershipSession, setMembershipSession] =
+    useState<SessionListItem | null>(null);
+  const [removingProject, setRemovingProject] = useState<ProjectRecord | null>(
+    null
+  );
   const [draftProjectId, setDraftProjectId] = useState<
     string | null | undefined
   >(workspaceState.activeDraftProjectId);
@@ -124,9 +135,11 @@ export function WorkspacePage(props: {
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
 
+  const listRequestRef = useRef(0);
   const refreshSessions = useCallback(async () => {
+    const request = ++listRequestRef.current;
     const list = await window.codexlike.sessions.list();
-    setSessions(list);
+    if (listRequestRef.current === request) setSessions(list);
     return list;
   }, []);
 
@@ -540,6 +553,53 @@ export function WorkspacePage(props: {
     }
   }
 
+  async function projectRemoved(result: ProjectRemoval) {
+    // 宿主已提交后立即清掉可发送目标与加载代数；迟到view不能恢复删除记录。
+    const affected =
+      result.sessionIds.includes(currentIdRef.current ?? "") ||
+      workspaceState.activeDraftProjectId === result.projectId;
+    workspaceState.removeProject(result.projectId, result.sessionIds);
+    setProjects((previous) =>
+      previous.filter((item) => item.id !== result.projectId)
+    );
+    setSessions((previous) =>
+      previous.filter((item) => !result.sessionIds.includes(item.id))
+    );
+    setRecordsRevision((value) => value + 1);
+    if (affected) {
+      // 03恢复草稿是异步的：先同步断开删除目标，不能留着旧composer等待flush。
+      sessionRequestRef.current += 1;
+      resourceRequestRef.current += 1;
+      currentIdRef.current = null;
+      workspaceState.activeSessionId = null;
+      workspaceState.activeDraftProjectId = undefined;
+      setCurrentId(null);
+      setDraftProjectId(undefined);
+      loadingRef.current = null;
+      liveRef.current = null;
+      setMessages([]);
+      setWorkspaceFiles([]);
+      setResources(null);
+      setStreaming(false);
+      setLoading(false);
+      setCompacting(false);
+      setContextWarning(null);
+      setFullAccessPending(false);
+    }
+    const generation = sessionRequestRef.current;
+    try {
+      const list = await refreshSessions();
+      if (affected && sessionRequestRef.current === generation) {
+        const next = list.find((session) => session.archivedAt === null);
+        if (next) await openSession(next.id);
+        else await startCreateSession();
+      }
+    } catch (error) {
+      // 删除已提交，不能将后续列表读取失败误报成删除失败并让用户重复确认。
+      pushLocalStatus(`项目记录已移除，刷新列表失败：${String(error)}`);
+    }
+  }
+
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
   async function runCommand(name: string, argument: string) {
     const action = planSlashCommand(
@@ -757,8 +817,36 @@ export function WorkspacePage(props: {
           onCancel={() => setFullAccessPending(false)}
         />
       )}
+      {membershipSession && (
+        <MembershipDialog
+          key={membershipSession.id}
+          session={membershipSession}
+          projects={projects}
+          onClose={() => setMembershipSession(null)}
+          onChanged={async () => {
+            setRecordsRevision((value) => value + 1);
+            await refreshSessions();
+          }}
+        />
+      )}
+      {removingProject && (
+        <ProjectRemovalDialog
+          key={removingProject.id}
+          project={removingProject}
+          memberCount={
+            sessions.filter(
+              (session) => session.projectId === removingProject.id
+            ).length
+          }
+          onClose={() => setRemovingProject(null)}
+          onRemoved={projectRemoved}
+        />
+      )}
       <SessionSidebar
         projects={projects}
+        onRemoveProject={(id) =>
+          setRemovingProject(projects.find((item) => item.id === id) ?? null)
+        }
         onAddProject={() => void addProject()}
         onCreateInProject={startCreateSession}
         sessions={sessions}
@@ -805,7 +893,20 @@ export function WorkspacePage(props: {
                   : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
                 : "未选择会话")}
           </span>
-          <SessionSearch onSelect={(id) => void openSession(id, true)} />
+          <SessionSearch
+            recordsRevision={recordsRevision}
+            onSelect={(id) => void openSession(id, true)}
+          />
+          {current && (
+            <button
+              type="button"
+              data-testid="session-membership"
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
+              onClick={() => setMembershipSession(current)}
+            >
+              {current.projectId === null ? "移入项目" : "移出项目"}
+            </button>
+          )}
           {current && (
             <button
               type="button"
