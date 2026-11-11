@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ProviderProfile, ProviderProfileInput } from '@codexlike/agent-core/node';
+
+import { readJsonFile, writeJsonFile } from '../storage/json-file';
 
 /**
  * Electron safeStorage 的最小接口（async 形态，Electron 45 起同步 API 已弃用）。
@@ -55,21 +56,11 @@ export function createProfileStore(options: {
   const filePath = join(dir, FILE_NAME);
 
   function loadFile(): StoredFile {
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      return JSON.parse(raw) as StoredFile;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        return { profiles: [] };
-      }
-      throw error;
-    }
+    return readJsonFile<StoredFile>(filePath, { profiles: [] });
   }
 
   function saveFile(file: StoredFile): void {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, JSON.stringify(file, null, 2), 'utf8');
+    writeJsonFile(filePath, file);
   }
 
   async function toStored(

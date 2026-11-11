@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { McpServerConfig } from '@codexlike/agent-core';
 
 import type { SafeStorageLike } from '../profiles/profile-store';
+import { readJsonFile, writeJsonFile } from '../storage/json-file';
 
 /** 新增/编辑 server 的输入（IPC 边界校验后进入存储层） */
 export interface McpServerInput {
@@ -91,21 +91,11 @@ export function createMcpStore(options: {
   const filePath = join(dir, FILE_NAME);
 
   function loadFile(): StoredFile {
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      return JSON.parse(raw) as StoredFile;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        return { servers: [], disabledTools: [] };
-      }
-      throw error;
-    }
+    return readJsonFile<StoredFile>(filePath, { servers: [], disabledTools: [] });
   }
 
   function saveFile(file: StoredFile): void {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, JSON.stringify(file, null, 2), 'utf8');
+    writeJsonFile(filePath, file);
   }
 
   async function toStored(input: McpServerInput, id: string): Promise<StoredServer> {
