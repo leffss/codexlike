@@ -66,6 +66,8 @@ describe('createSessionWithMode（新建会话模式编排）', () => {
     expect(record.workspaceMode).toBe('worktree');
     // 副本目录名 = 会话 id；会话工作区指向副本
     expect(record.workspacePath).toBe(join(home, 'worktrees', record.id));
+    // 原始仓库路径随会话落库（ADR 0005：侧栏项目按它聚合）
+    expect(record.workspaceOriginPath).toBe(repo);
     expect(existsSync(join(record.workspacePath, 'README.md'))).toBe(true);
     expect(git(repo, 'branch', '--list', `codexlike/${record.id}`).trim()).not.toBe('');
     persistence.close();
@@ -107,6 +109,8 @@ describe('createSessionWithMode（新建会话模式编排）', () => {
 
     expect(record.workspaceMode).toBe('local');
     expect(record.workspacePath).toBe(repo);
+    // local 模式工作区即原始目录，origin 恒为 null
+    expect(record.workspaceOriginPath).toBeNull();
     expect(existsSync(join(home, 'worktrees'))).toBe(false);
     persistence.close();
   });

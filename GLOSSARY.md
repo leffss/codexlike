@@ -10,7 +10,11 @@ _Avoid_: chat、conversation、task、聊天
 
 **工作区（Workspace）**:
 一个会话所绑定的本机目录，agent 的所有文件与终端操作都被限制在其中。
-_Avoid_: project、repo、folder
+_Avoid_: repo、folder
+
+**项目（Project）**:
+同一工作区目录上所有会话（含在该目录上检出的托管 Worktree 会话）的聚合分组，由会话的工作区自动派生，随首个会话的创建而诞生，用户不手动创建或归类。
+_Avoid_: 文件夹、分组、folder
 
 **审批模式（Approval Mode）**:
 会话级权限档位，可随时切换：`readonly`（只读——禁止一切写入与命令）、`suggest`（协作——文件编辑自动应用、终端命令逐条审批）、`full`（自主——全自动执行）。

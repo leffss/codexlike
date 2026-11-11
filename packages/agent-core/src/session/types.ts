@@ -34,6 +34,8 @@ export interface SessionRecord {
   workspacePath: string;
   /** 运行位置（本目录直跑 / 托管 Worktree）；旧库无此列恢复为 local */
   workspaceMode: WorkspaceMode;
+  /** worktree 模式：用户所选的原始仓库路径（侧栏项目聚合键，ADR 0005）；local 恒为 null，旧库恢复为 null */
+  workspaceOriginPath: string | null;
   /** 最近一次发送消息所用的 Provider Profile（模型选择器「对下一条生效」的落点） */
   providerProfileId: string | null;
   /** 最近一次发送消息所用的模型标识 */

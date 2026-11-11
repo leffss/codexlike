@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL,
   approval_mode TEXT NOT NULL DEFAULT 'suggest',
   workspace_mode TEXT NOT NULL DEFAULT 'local',
+  workspace_origin_path TEXT,
   archived_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -110,6 +111,7 @@ interface SessionRow {
   status: string;
   approval_mode: string;
   workspace_mode: string;
+  workspace_origin_path: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -177,6 +179,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   } catch {
     // 列已存在（新库或已迁移）
   }
+  // 旧库迁移：ADR 0005（项目侧栏按原始仓库聚合）之前的表没有 workspace_origin_path
+  try {
+    db.exec("ALTER TABLE sessions ADD COLUMN workspace_origin_path TEXT");
+  } catch {
+    // 列已存在（新库或已迁移）
+  }
   // 旧库迁移：工单 03 时代的 messages 表没有 mentions / aborted（工单 06 恢复等价性需要）
   try {
     db.exec("ALTER TABLE messages ADD COLUMN mentions TEXT");
@@ -190,10 +198,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   const insertSession = db.prepare(
-    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
-    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, archived_at = ?, updated_at = ? WHERE id = ?"
+    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
     "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -244,6 +252,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           : "suggest",
       // 运行位置：非法/缺失值恢复为 local（本目录直跑）
       workspaceMode: row.workspace_mode === "worktree" ? "worktree" : "local",
+      // 原始仓库路径（ADR 0005）：旧库 / local 会话 / 旧 worktree 会话均为 null
+      workspaceOriginPath: row.workspace_origin_path ?? null,
       archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -276,6 +286,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.status,
         record.approvalMode,
         record.workspaceMode,
+        record.workspaceOriginPath,
         record.archivedAt,
         record.createdAt,
         record.updatedAt
@@ -298,6 +309,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.status,
         next.approvalMode,
         next.workspaceMode,
+        next.workspaceOriginPath,
         next.archivedAt,
         next.updatedAt,
         id

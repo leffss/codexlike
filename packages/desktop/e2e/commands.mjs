@@ -157,7 +157,7 @@ async function main() {
       undefined,
       { timeout: 5_000 },
     );
-    console.log('[e2e] /archive 与恢复：归档不在侧栏显示，可展开恢复');
+    console.log('[e2e] /archive 与恢复：归档收进项目组内「已归档」子折叠，可展开恢复');
 
     await closeApp(app);
     console.log('[e2e] 工单 07 命令冒烟通过 ✅');

@@ -18,6 +18,7 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     model: null,
     status: "idle",
     workspaceMode: "local",
+    workspaceOriginPath: null,
     approvalMode: "suggest",
     archivedAt: null,
     createdAt: "2026-11-10T08:00:00.000Z",
@@ -154,6 +155,68 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     });
     expect(store.listSessions()[0]?.workspaceMode).toBe("local");
   });
+
+  it("worktree 会话的原始仓库路径（workspaceOriginPath）随会话落库读回；local 会话为 null（ADR 0005）", () => {
+    const store = createSqliteSessionStore(":memory:");
+    store.insertSession(
+      sessionRecord({
+        id: "session-wt",
+        workspaceMode: "worktree",
+        workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
+        workspaceOriginPath: "C:\\work\\demo",
+        updatedAt: "2026-11-10T08:30:00.000Z",
+      })
+    );
+    store.insertSession(sessionRecord());
+
+    const byId = new Map(
+      store.listSessions().map((r) => [r.id, r.workspaceOriginPath]),
+    );
+    expect(byId.get("session-wt")).toBe("C:\\work\\demo");
+    expect(byId.get("session-1")).toBeNull();
+    store.close();
+  });
+
+  it("旧库迁移（ADR 0005）：无 workspace_origin_path 列的存量库打开后补列，旧行读回 null 且新写入正常", () => {
+    const dbPath = tempDbPath();
+    // ADR 0005 之前的生产库形状（有 workspace_mode、无 workspace_origin_path）
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT,
+        model TEXT,
+        status TEXT NOT NULL,
+        approval_mode TEXT NOT NULL,
+        workspace_mode TEXT NOT NULL DEFAULT 'local',
+        archived_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sessions VALUES ('legacy-wt', '旧worktree会话', 'C:\\home\\.codexlike\\worktrees\\legacy-wt', NULL, NULL, 'idle', 'assist', 'worktree', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteSessionStore(dbPath);
+    store.insertSession(
+      sessionRecord({
+        id: "session-wt",
+        workspaceMode: "worktree",
+        workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
+        workspaceOriginPath: "C:\\work\\demo",
+      })
+    );
+
+    const byId = new Map(
+      store.listSessions().map((r) => [r.id, r.workspaceOriginPath]),
+    );
+    expect(byId.get("legacy-wt")).toBeNull();
+    expect(byId.get("session-wt")).toBe("C:\\work\\demo");
+    store.close();
+  });
+
 
   it("旧库迁移：无 workspace_mode 列的旧会话恢复为 local（本目录直跑）", () => {
     const dbPath = tempDbPath();

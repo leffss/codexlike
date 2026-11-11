@@ -29,7 +29,8 @@
     "test:e2e:worktree": "node e2e/worktree.mjs",
     "test:e2e:mcp": "node e2e/mcp.mjs",
     "test:e2e:subagents": "node e2e/subagents.mjs",
-    "test:e2e:packaged": "node e2e/packaged.mjs"
+    "test:e2e:packaged": "node e2e/packaged.mjs",
+    "test:e2e:projects": "node e2e/projects-sidebar.mjs"
   },
   "devDependencies": {
     "@codexlike/agent-core": "workspace:*",

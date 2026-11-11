@@ -56,6 +56,11 @@ export interface SessionManager {
     title?: string;
     /** 运行位置（默认 local 本目录直跑；worktree 由宿主先检出副本再传入其路径） */
     workspaceMode?: 'local' | 'worktree';
+    /**
+     * worktree 模式：用户所选的原始仓库路径（ADR 0005，侧栏项目聚合键）；
+     * local 模式不传（origin 恒为 null，工作区即原始目录）。
+     */
+    workspaceOriginPath?: string;
     /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
     id?: string;
   }): AgentSession;
@@ -149,7 +154,13 @@ export function createSessionManager(
   }
 
   return {
-    create({ workspacePath, title, workspaceMode = 'local', id }) {
+    create({
+      workspacePath,
+      title,
+      workspaceMode = 'local',
+      id,
+      workspaceOriginPath = null,
+    }) {
       const timestamp = now();
       const record: SessionRecord = {
         // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
@@ -157,6 +168,7 @@ export function createSessionManager(
         title: title ?? (basename(workspacePath) || workspacePath),
         workspacePath,
         workspaceMode,
+        workspaceOriginPath,
         providerProfileId: null,
         model: null,
         status: 'idle',

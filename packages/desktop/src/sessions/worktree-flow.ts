@@ -40,5 +40,7 @@ export async function createSessionWithMode(options: {
     id: sessionId,
     workspacePath: worktree.path,
     workspaceMode: 'worktree',
+    // 原始仓库路径随会话落库（ADR 0005）：侧栏项目按它聚合，而非不可读的副本路径
+    workspaceOriginPath: workspacePath,
   }).record;
 }
