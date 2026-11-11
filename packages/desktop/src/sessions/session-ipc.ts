@@ -135,6 +135,14 @@ export function registerSessionHandlers(options: {
       (id) => management.execution(id)?.running ?? false
     )
   );
+  ipcMain.handle(
+    IPC.sessions.search,
+    (_e, query: unknown, includeArchived: unknown = false) => {
+      if (typeof query !== "string" || typeof includeArchived !== "boolean")
+        throw new Error("search：查询必须是字符串，归档选项必须是布尔值");
+      return manager.search(query, includeArchived);
+    }
+  );
   ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("execution：sessionId 必须是字符串");

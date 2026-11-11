@@ -9,6 +9,7 @@ import type {
   ProjectRecord,
   SessionEvent,
   SessionRecord,
+  SessionSearchResult,
   SessionResourcesView,
   ThinkingEffort,
   TranscriptItem,
@@ -60,6 +61,7 @@ export const IPC = {
   sessions: {
     /** 全部会话（含已归档；置顶优先、最近使用倒序，侧栏按归属分区）。 */
     list: "sessions:list",
+    search: "sessions:search",
     /** 首次发送：幂等创建正式会话并启动正常发送。 */
     start: "sessions:start",
     execution: "sessions:execution",
@@ -262,6 +264,11 @@ export interface CodexLikeApi {
     ): Promise<WorkspaceSharingView>;
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionListItem[]>;
+    /** 标题与持久消息正文的字面子串搜索；默认排除归档，不读取私有配置或目录。 */
+    search(
+      query: string,
+      includeArchived?: boolean
+    ): Promise<SessionSearchResult[]>;
     /** 原生目录选择器；取消返回 null */
     selectWorkspace(): Promise<string | null>;
     /** 指定会话的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */

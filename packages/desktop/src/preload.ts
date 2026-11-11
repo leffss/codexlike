@@ -35,6 +35,8 @@ const api: CodexLikeApi = {
     workspaceSharing: (target) =>
       ipcRenderer.invoke(IPC.sessions.workspaceSharing, target),
     list: () => ipcRenderer.invoke(IPC.sessions.list),
+    search: (query, includeArchived) =>
+      ipcRenderer.invoke(IPC.sessions.search, query, includeArchived),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.messages, sessionId),

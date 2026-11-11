@@ -49,40 +49,48 @@ afterAll(() => {
 });
 
 describe("worktree 创建", () => {
-  it("复制中途失败撤销本次副本和分支，修正来源文件后同一 id 可重试", async () => {
-    const repo = makeRepo();
-    const home = makeWorktreesDir();
-    // HEAD 中的 config 是文件，来源工作区把它换成目录：复制目标无法创建。
-    writeFileSync(join(repo, "config"), "已提交的文件");
-    git(repo, "add", "config");
-    git(repo, "commit", "-m", "复制目标冲突");
-    rmSync(join(repo, "config"));
-    mkdirSync(join(repo, "config"));
-    writeFileSync(join(repo, "config", "local.env"), "用户配置");
-    writeFileSync(join(repo, ".worktreeinclude"), "config/local.env");
-    const service = createWorktreeService({
-      worktreesDir: join(home, "worktrees"),
-    });
-    await expect(
-      service.createForSession({ sessionId: "retry-copy", workspacePath: repo })
-    ).rejects.toThrow();
-    expect(existsSync(join(home, "worktrees", "retry-copy"))).toBe(false);
-    expect(git(repo, "branch", "--list", "codexlike/retry-copy").trim()).toBe(
-      ""
-    );
-    expect(readFileSync(join(repo, "config", "local.env"), "utf8")).toBe(
-      "用户配置"
-    );
-    writeFileSync(join(repo, ".worktreeinclude"), "");
-    expect(
-      (
-        await service.createForSession({
+  // 真实 Git 建库、失败回滚与同 id 重试在全套并行下可能超过默认 5 秒；仅为本用例留出进程/I/O预算。
+  it(
+    "复制中途失败撤销本次副本和分支，修正来源文件后同一 id 可重试",
+    { timeout: 15_000 },
+    async () => {
+      const repo = makeRepo();
+      const home = makeWorktreesDir();
+      // HEAD 中的 config 是文件，来源工作区把它换成目录：复制目标无法创建。
+      writeFileSync(join(repo, "config"), "已提交的文件");
+      git(repo, "add", "config");
+      git(repo, "commit", "-m", "复制目标冲突");
+      rmSync(join(repo, "config"));
+      mkdirSync(join(repo, "config"));
+      writeFileSync(join(repo, "config", "local.env"), "用户配置");
+      writeFileSync(join(repo, ".worktreeinclude"), "config/local.env");
+      const service = createWorktreeService({
+        worktreesDir: join(home, "worktrees"),
+      });
+      await expect(
+        service.createForSession({
           sessionId: "retry-copy",
           workspacePath: repo,
         })
-      ).path
-    ).toBe(join(home, "worktrees", "retry-copy"));
-  });
+      ).rejects.toThrow();
+      expect(existsSync(join(home, "worktrees", "retry-copy"))).toBe(false);
+      expect(git(repo, "branch", "--list", "codexlike/retry-copy").trim()).toBe(
+        ""
+      );
+      expect(readFileSync(join(repo, "config", "local.env"), "utf8")).toBe(
+        "用户配置"
+      );
+      writeFileSync(join(repo, ".worktreeinclude"), "");
+      expect(
+        (
+          await service.createForSession({
+            sessionId: "retry-copy",
+            workspacePath: repo,
+          })
+        ).path
+      ).toBe(join(home, "worktrees", "retry-copy"));
+    }
+  );
   it(
     "不再公开按数量清理入口；创建超过旧阈值仍保留早期未提交成果与分支",
     { timeout: 120_000 },
