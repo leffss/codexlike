@@ -1,12 +1,5 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  statSync,
-} from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmdirSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -32,10 +25,14 @@ import {
 import type { ProfileStore } from "../profiles/profile-store";
 import { createInterruptRegistry } from "./interrupt-registry";
 import { registerWorkbenchHandlers } from "./workbench-ipc";
+import { createLiveSessions } from "./live-sessions";
+import { createSessionManagement } from "./session-management";
 import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
 import { listWorkspaceFiles } from "./workspace-files";
+import { prepareSessionWorkspace } from "./worktree-flow";
+import { canonicalWorkspacePath, workspaceSharing } from "./workspace-sharing";
 import {
   IPC,
   type SessionEventEnvelope,
@@ -51,7 +48,7 @@ export function registerSessionHandlers(options: {
   dataDir: string;
   /** 浏览器会话管理器（会话归档时释放其浏览器 context；工单 11） */
   browserManager?: BrowserSessionManager;
-  /** 托管 Worktree 服务（工单 09）：worktree 模式会话创建与 LRU 清理 */
+  /** 托管 Worktree 服务：首次发送创建隔离副本，不按数量清理。 */
   worktreeService: WorktreeService;
   /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
   resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
@@ -69,10 +66,20 @@ export function registerSessionHandlers(options: {
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
+  const management = createSessionManagement(manager, executions);
   const starts = new Map<string, Promise<SessionRecord>>();
   const workbench = registerWorkbenchHandlers(manager, profiles);
+  const liveSessions = createLiveSessions(manager);
 
-  function emit(envelope: SessionEventEnvelope): void {
+  function emit(
+    input: Pick<SessionEventEnvelope, "sessionId" | "executionId" | "event">
+  ): void {
+    const envelope = liveSessions.accept(
+      input.sessionId,
+      input.executionId,
+      input.event
+    );
+    if (!envelope) return;
     const win = getWindow();
     if (win !== null && !win.isDestroyed()) {
       win.webContents.send(IPC.sessionEvents, envelope);
@@ -85,23 +92,53 @@ export function registerSessionHandlers(options: {
       throw new Error("请选择项目目录");
     return manager.addProject(path);
   });
-  ipcMain.handle(IPC.sessions.list, () => manager.list());
+  ipcMain.handle(IPC.sessions.list, () =>
+    manager.list().map((record) => ({
+      ...record,
+      activity: liveSessions.activity(record.id),
+    }))
+  );
+  ipcMain.handle(IPC.sessions.view, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== "string")
+      throw new Error("view：sessionId 必须是字符串");
+    return liveSessions.view(sessionId);
+  });
+  ipcMain.handle(
+    IPC.sessions.markViewed,
+    (_e, sessionId: unknown, sequence: unknown) => {
+      if (typeof sessionId !== "string" || typeof sequence !== "number")
+        throw new Error("查看水位参数不合法");
+      liveSessions.markViewed(sessionId, sequence);
+    }
+  );
+  ipcMain.handle(
+    IPC.projects.setCollapsed,
+    (_e, id: unknown, collapsed: unknown) => {
+      if (typeof id !== "string" || typeof collapsed !== "boolean")
+        throw new Error("setCollapsed：参数不合法");
+      return manager.setProjectCollapsed(id, collapsed);
+    }
+  );
+  ipcMain.handle(IPC.sessions.setPinned, (_e, id: unknown, pinned: unknown) => {
+    if (typeof id !== "string" || typeof pinned !== "boolean")
+      throw new Error("setPinned：参数不合法");
+    return manager.setPinned(id, pinned);
+  });
+  ipcMain.handle(IPC.sessions.markUsed, (_e, id: unknown) => {
+    if (typeof id !== "string") throw new Error("markUsed：参数不合法");
+    return manager.markUsed(id);
+  });
+  ipcMain.handle(IPC.sessions.workspaceSharing, (_e, target) =>
+    workspaceSharing(
+      target,
+      manager,
+      (id) => management.execution(id)?.running ?? false
+    )
+  );
   ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("execution：sessionId 必须是字符串");
-    const record = manager.list().find((session) => session.id === sessionId);
-    if (!record) return null;
-    const pending = manager.get(sessionId)?.pendingInteractions ?? [];
-    return {
-      sessionId,
-      executionId: executions.get(sessionId) ?? null,
-      running:
-        executions.has(sessionId) ||
-        record.status !== "idle" ||
-        pending.length > 0,
-      waitingForUser: pending.length > 0,
-      pendingInteractionIds: pending.map((item) => item.request.id),
-    };
+    return management.execution(sessionId);
   });
 
   ipcMain.handle(IPC.sessions.start, (_e, input: unknown) => {
@@ -132,9 +169,12 @@ export function registerSessionHandlers(options: {
         throw new Error("审批模式不合法");
       if (
         request.workspaceMode !== undefined &&
-        request.workspaceMode !== "local"
+        request.workspaceMode !== "local" &&
+        request.workspaceMode !== "worktree"
       )
-        throw new Error("当前新建入口仅支持本地工作区");
+        throw new Error("工作区模式必须是 local 或 worktree");
+      if (request.projectId === null && request.workspaceMode === "worktree")
+        throw new Error("独立会话入口不支持直接创建 Worktree，请在项目内新建");
       const available = await profiles.list();
       const profile =
         request.providerProfileId === undefined
@@ -152,14 +192,9 @@ export function registerSessionHandlers(options: {
       const id = randomUUID();
       let workspacePath = project?.workspacePath ?? request.workspacePath;
       if (workspacePath !== undefined) {
-        if (typeof workspacePath !== "string" || !isAbsolute(workspacePath))
-          throw new Error("工作区必须是已有目录的绝对路径");
-        try {
-          workspacePath = realpathSync.native(workspacePath);
-          if (!statSync(workspacePath).isDirectory()) throw new Error();
-        } catch {
-          throw new Error("工作区目录不存在或无法访问，请重新选择目录后重试");
-        }
+        if (typeof workspacePath !== "string")
+          throw new Error("工作区路径不合法");
+        workspacePath = canonicalWorkspacePath(workspacePath);
       } else {
         workspacePath = join(dataDir, "sessions", id, "workspace");
         try {
@@ -170,12 +205,22 @@ export function registerSessionHandlers(options: {
           );
         }
       }
+      let rollbackWorkspace: (() => Promise<boolean>) | undefined;
+      let preparedPath: string | undefined;
       try {
+        const { rollback, ...workspace } = await prepareSessionWorkspace({
+          id,
+          workspacePath,
+          workspaceMode: request.workspaceMode,
+          worktreeService,
+        });
+        rollbackWorkspace = rollback;
+        preparedPath = workspace.workspacePath;
         const session = manager.create({
           id,
           projectId: request.projectId,
           creationRequestId: request.requestId,
-          workspacePath,
+          ...workspace,
           title: request.text.trim().split(/\r?\n/)[0]!.slice(0, 60),
           approvalMode: approval,
         });
@@ -201,6 +246,11 @@ export function registerSessionHandlers(options: {
         // 只回滚无历史记录；绝不递归删除用户目录或失败期间可能出现的成果。
         if (!manager.messages(id).length) {
           manager.removeUnstarted(id);
+          if (rollbackWorkspace && !(await rollbackWorkspace())) {
+            throw new Error(
+              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式会话，可重试）`
+            );
+          }
           if (!project && request.workspacePath === undefined) {
             // 非递归 rmdir：只撤销本次分配且仍为空的目录，有任何成果就保留。
             try {
@@ -247,7 +297,8 @@ export function registerSessionHandlers(options: {
     text: unknown,
     profileId?: unknown,
     mentionPaths?: unknown,
-    thinkingEffort?: unknown
+    thinkingEffort?: unknown,
+    approvalMode?: unknown
   ) {
     if (typeof sessionId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
@@ -279,7 +330,11 @@ export function registerSessionHandlers(options: {
       throw new Error("会话不存在或已损坏");
     }
     const approvalSnapshot =
-      saved?.value.preferences.approvalMode ?? session.record.approvalMode;
+      approvalMode ??
+      saved?.value.preferences.approvalMode ??
+      session.record.approvalMode;
+    if (!(APPROVAL_MODES as readonly unknown[]).includes(approvalSnapshot))
+      throw new Error("审批模式不合法");
     const profile = (await profiles.list()).find(
       (candidate: ProviderProfile) => candidate.id === profileId
     );
@@ -294,10 +349,10 @@ export function registerSessionHandlers(options: {
     );
 
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
-    if (executions.has(sessionId))
-      throw new Error("会话正在执行或等待用户回应");
+    management.assertCanExecute(sessionId);
     const executionId = randomUUID();
     executions.set(sessionId, executionId);
+    const rollbackLive = liveSessions.begin(sessionId, executionId);
     // 本条消息流的中断通道：停止按钮经 sessions:interrupt 打断
     const controller = interrupts.begin(sessionId);
     try {
@@ -309,12 +364,13 @@ export function registerSessionHandlers(options: {
           profile,
           mentions,
           thinkingEffort: effortSnapshot,
-          approvalMode: approvalSnapshot,
+          approvalMode: approvalSnapshot as ApprovalMode,
           signal: controller.signal,
         })
         [Symbol.asyncIterator]();
       const first = await iterator.next();
       if (first.done !== true) {
+        manager.markUsed(sessionId);
         emit({ sessionId, executionId, event: first.value });
       }
       void (async () => {
@@ -338,6 +394,7 @@ export function registerSessionHandlers(options: {
         });
     } catch (error) {
       // 启动失败：注销中断登记后再抛回渲染进程
+      rollbackLive();
       interrupts.end(sessionId, controller);
       if (executions.get(sessionId) === executionId)
         executions.delete(sessionId);
@@ -355,7 +412,9 @@ export function registerSessionHandlers(options: {
         throw new Error("interrupt：sessionId 必须是字符串");
       }
       // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲会话幂等返回 false
-      return interrupts.interrupt(sessionId);
+      const interrupted = interrupts.interrupt(sessionId);
+      if (interrupted) liveSessions.stop(sessionId);
+      return interrupted;
     }
   );
 
@@ -375,11 +434,11 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== "string" || typeof archived !== "boolean") {
         throw new Error("archive：参数不合法");
       }
-      // 会话结束（归档）：释放其浏览器 context（Cookie 等随之清理；工单 11）
-      if (archived) {
+      // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
+      const result = management.archive(sessionId, archived);
+      if (archived && result) {
         void browserManager?.closeSession(sessionId).catch(() => {});
       }
-      const result = manager.setArchived(sessionId, archived);
       // 归档只整理记录，不触发磁盘回收（包括新模型隔离保留的旧 Worktree）。
       return result;
     }
@@ -473,6 +532,7 @@ export function registerSessionHandlers(options: {
       }
       // 失败（模型错误/历史过短/会话正忙）以中文异常抛回渲染层；原历史不受损，可重试
       const result = await session.compact({ profile });
+      liveSessions.invalidate(sessionId);
       return { compactedMessages: result.compactedMessages };
     }
   );

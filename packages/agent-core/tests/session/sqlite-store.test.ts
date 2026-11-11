@@ -23,6 +23,8 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     workspaceOriginPath: null,
     approvalMode: "assist",
     archivedAt: null,
+    pinned: false,
+    lastUsedAt: overrides.createdAt ?? "2026-11-10T08:00:00.000Z",
     createdAt: "2026-11-10T08:00:00.000Z",
     updatedAt: "2026-11-10T08:00:00.000Z",
     ...overrides,
@@ -100,14 +102,14 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     first.close();
 
     const reopened = createSqliteSessionStore(dbPath);
-    // updatedAt 倒序：session-b（09:00）比 session-a（08:00）新
+    // 最近使用倒序：session-b（09:00）比 session-a（08:00）新
     const ids = reopened.listSessions().map((s) => s.id);
     expect(ids).toEqual(["session-b", "session-a"]);
     expect(reopened.listMessages("session-b")).toHaveLength(1);
     reopened.close();
   });
 
-  it("listSessions 按更新时间倒序（最近使用的排最前）", () => {
+  it("后台记录更新不改变最近使用排序", () => {
     const store = createSqliteSessionStore(":memory:");
     store.insertSession(
       sessionRecord({ id: "old", updatedAt: "2026-11-10T08:00:00.000Z" })
@@ -125,8 +127,8 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       updatedAt: "2026-11-10T10:00:00.000Z",
     });
 
-    expect(store.listSessions().map((s) => s.id)).toEqual(["old", "new"]);
-    expect(store.listSessions()[0]?.status).toBe("streaming");
+    expect(store.listSessions().map((s) => s.id)).toEqual(["new", "old"]);
+    expect(store.listSessions()[1]?.status).toBe("streaming");
   });
 
   it("未写入过的会话消息查询返回空数组", () => {

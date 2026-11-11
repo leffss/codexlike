@@ -38,6 +38,7 @@ export function registerWorkbenchHandlers(
     const saved = manager.readWorkbench(key);
     if (saved) return saved;
     const profile = (await profiles.list())[0];
+    targetOf(target);
     // 读默认值期间可能已有写入，不能用迟到的默认状态覆盖它。
     const latest = manager.readWorkbench(key);
     if (latest) return latest;

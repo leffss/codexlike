@@ -10,6 +10,16 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
+import { WorkspaceModeControl } from "../components/WorkspaceModeControl";
+import type {
+  SessionEventEnvelope,
+  SessionListItem,
+} from "@codexlike/desktop/ipc";
+import {
+  hydrateLiveSession,
+  receiveLiveEvent,
+  type LiveSession,
+} from "../lib/live-session";
 
 import {
   evaluateContextWarning,
@@ -17,8 +27,6 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type ProjectRecord,
-  type SessionEvent,
-  type SessionRecord,
   type SessionResourcesView,
   type ThinkingEffort,
 } from "@codexlike/agent-core";
@@ -29,13 +37,7 @@ import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { SessionSidebar } from "../components/SessionSidebar";
-import {
-  applySessionEvent,
-  initialTranscript,
-  hydrateTranscript,
-  mergeInteractions,
-  type UiItem,
-} from "../lib/session-view";
+import { mergeInteractions, type UiItem } from "../lib/session-view";
 import {
   formatSessionStatus,
   matchProfilesForModelSwitch,
@@ -65,10 +67,11 @@ export function WorkspacePage(props: {
   const loadingRef = useRef<{
     sessionId: string;
     generation: number;
-    events: SessionEvent[];
+    events: SessionEventEnvelope[];
   } | null>(null);
+  const liveRef = useRef<LiveSession | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -194,7 +197,7 @@ export function WorkspacePage(props: {
   }, []);
 
   const openSession = useCallback(
-    async (id: string) => {
+    async (id: string, userInitiated = false) => {
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
       setCurrentId(id);
@@ -215,52 +218,32 @@ export function WorkspacePage(props: {
       const buffer = {
         sessionId: id,
         generation: request,
-        events: [] as SessionEvent[],
+        events: [] as SessionEventEnvelope[],
       };
       loadingRef.current = buffer;
       const snapshotVersion = workspaceState.version();
       try {
-        const [history, pendingList, list] = await Promise.all([
-          window.codexlike.sessions.messages(id),
-          window.codexlike.sessions.pendingInteractions(id),
-          window.codexlike.sessions.list(),
+        if (userInitiated) await window.codexlike.sessions.markUsed(id);
+        const [view] = await Promise.all([
+          window.codexlike.sessions.view(id),
           workspaceState.loadSession(id),
         ]);
         if (!isCurrent()) return;
+        if (!view) throw new Error("会话不存在或已损坏");
+        const live = hydrateLiveSession(view, buffer.events);
+        liveRef.current = live;
         workspaceState.reconcile(
           id,
-          history.flatMap((item) =>
+          live.items.flatMap((item) =>
             item.kind === "interaction" ? [item.interaction] : []
           ),
           snapshotVersion
         );
-        for (const record of pendingList) workspaceState.observe(record);
-        setMessages(
-          mergeInteractions(
-            hydrateTranscript(history, buffer.events),
-            workspaceState.records(id)
-          )
-        );
-        setSessions(list);
-        const status = list.find((session) => session.id === id)?.status;
-        let running =
-          status === "streaming" ||
-          status === "waiting-user" ||
-          status === "waiting-approval";
-        for (const event of buffer.events) {
-          if (
-            event.type === "assistant-start" ||
-            event.type === "interaction-request"
-          )
-            running = true;
-          if (
-            event.type === "assistant-done" ||
-            event.type === "assistant-aborted" ||
-            event.type === "error"
-          )
-            running = false;
-        }
-        setStreaming(running || workspaceState.pending(id).length > 0);
+        setMessages(live.items);
+        setStreaming(live.activity.running);
+        void window.codexlike.sessions
+          .markViewed(id, live.sequence)
+          .then(() => refreshSessions());
       } catch (error) {
         if (!isCurrent()) return;
         setMessages([
@@ -286,7 +269,7 @@ export function WorkspacePage(props: {
         if (isCurrent()) setWorkspaceFiles([]);
       }
     },
-    [refreshContextWarning, refreshResources, workspaceState]
+    [refreshContextWarning, refreshResources, refreshSessions, workspaceState]
   );
 
   useEffect(() => {
@@ -320,16 +303,28 @@ export function WorkspacePage(props: {
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
-    return window.codexlike.onSessionEvent(({ sessionId, event }) => {
+    return window.codexlike.onSessionEvent((envelope) => {
+      const { sessionId, event } = envelope;
       if (sessionId === currentIdRef.current) {
-        if (loadingRef.current?.sessionId === sessionId)
-          loadingRef.current.events.push(event);
-        else setMessages((prev) => applySessionEvent(prev, event));
-        if (
-          event.type === "assistant-start" ||
-          event.type === "interaction-request"
-        ) {
-          setStreaming(true);
+        if (loadingRef.current?.sessionId === sessionId) {
+          loadingRef.current.events.push(envelope);
+        } else if (liveRef.current?.sessionId === sessionId) {
+          const previous = liveRef.current;
+          const live = receiveLiveEvent(previous, { ...envelope });
+          if (live === previous) return;
+          liveRef.current = live;
+          // 本地 /status 反馈不属于宿主历史，接续时保留。
+          setMessages((prev) => [
+            ...live.items,
+            ...prev.filter(
+              (item) => item.kind === undefined && item.role === "status"
+            ),
+          ]);
+          setStreaming(live.activity.running);
+          if (!live.activity.running)
+            void window.codexlike.sessions
+              .markViewed(sessionId, live.sequence)
+              .then(() => refreshSessions());
         }
         if (
           event.type === "assistant-start" ||
@@ -346,7 +341,6 @@ export function WorkspacePage(props: {
           event.type === "assistant-aborted" ||
           event.type === "error"
         ) {
-          setStreaming(false);
           // 每轮回复结束（完成/中断/出错）后重估上下文告警
           void refreshContextWarning(sessionId);
         }
@@ -442,7 +436,7 @@ export function WorkspacePage(props: {
       requestId: draft.requestId,
       projectId,
       workspacePath: draft.workspacePath,
-      workspaceMode: draft.workspaceMode,
+      workspaceMode: draft.workspaceMode ?? "local",
       text,
       mentionPaths,
       providerProfileId: draft.providerProfileId || undefined,
@@ -486,7 +480,8 @@ export function WorkspacePage(props: {
         text,
         selectedProfileId,
         mentionPaths.length === 0 ? undefined : mentionPaths,
-        thinkingEffort
+        thinkingEffort,
+        preferences?.approvalMode
       );
       if (workspaceState.composer(currentId) === composerSnapshot)
         workspaceState.setComposer(currentId, "");
@@ -517,6 +512,29 @@ export function WorkspacePage(props: {
     } catch (error) {
       pushLocalStatus(
         `停止失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 侧栏、主区及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
+  async function archiveSession(id: string, archived: boolean) {
+    const generation = sessionRequestRef.current;
+    try {
+      await window.codexlike.sessions.archive(id, archived);
+      const list = await refreshSessions();
+      if (
+        currentIdRef.current !== id ||
+        sessionRequestRef.current !== generation
+      )
+        return;
+      if (archived) {
+        const next = list.find((session) => session.archivedAt === null);
+        if (next) await openSession(next.id);
+        else startCreateSession();
+      }
+    } catch (error) {
+      pushLocalStatus(
+        `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -560,17 +578,19 @@ export function WorkspacePage(props: {
           await refreshSessions();
           // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
           const snapshotVersion = workspaceState.version();
-          const history =
-            await window.codexlike.sessions.messages(compactSessionId);
+          const view = await window.codexlike.sessions.view(compactSessionId);
+          if (!compactIsCurrent()) return;
+          if (!view) throw new Error("会话不存在或已损坏");
+          const live = hydrateLiveSession(view);
+          liveRef.current = live;
           workspaceState.reconcile(
             compactSessionId,
-            history.flatMap((item) =>
+            live.items.flatMap((item) =>
               item.kind === "interaction" ? [item.interaction] : []
             ),
             snapshotVersion
           );
-          if (!compactIsCurrent()) return;
-          setMessages(initialTranscript(history));
+          setMessages(live.items);
           // 压缩后用量下降，告警随之重估（大概率消失）
           await refreshContextWarning(compactSessionId);
           if (!compactIsCurrent()) return;
@@ -603,32 +623,7 @@ export function WorkspacePage(props: {
         pushLocalStatus("用法：/rename 新名称");
         return;
       case "archive": {
-        const archivedId = current!.id;
-        try {
-          await window.codexlike.sessions.archive(archivedId, true);
-          const list = await refreshSessions();
-          pushLocalStatus("会话已归档（侧栏「已归档」中可恢复）");
-          // 当前会话被归档：切到最近的未归档会话，没有则清空视图
-          const next = list.find((session) => session.archivedAt === null);
-          if (next !== undefined && next.id !== archivedId) {
-            await openSession(next.id);
-          } else if (next === undefined) {
-            setCurrentId(null);
-            currentIdRef.current = null;
-            sessionRequestRef.current += 1;
-            resourceRequestRef.current += 1;
-            setResources(null);
-            setResourcesLoading(false);
-            setResourcesError(null);
-            setMessages([]);
-            setWorkspaceFiles([]);
-            setContextWarning(null);
-          }
-        } catch (error) {
-          pushLocalStatus(
-            `归档失败：${error instanceof Error ? error.message : String(error)}`
-          );
-        }
+        await archiveSession(current!.id, true);
         return;
       }
       case "select-model": {
@@ -740,13 +735,15 @@ export function WorkspacePage(props: {
   }
 
   const composerHint =
-    profiles.length === 0
-      ? "尚未配置模型，请先前往设置页添加 Provider Profile"
-      : compacting
-        ? "正在压缩历史，请稍候…"
-        : currentId === null && !draft
-          ? "新建或选择一个会话后开始对话"
-          : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
+    current?.archivedAt != null
+      ? "已归档 · 历史只读，恢复会话后可继续发送"
+      : profiles.length === 0
+        ? "尚未配置模型，请先前往设置页添加 Provider Profile"
+        : compacting
+          ? "正在压缩历史，请稍候…"
+          : currentId === null && !draft
+            ? "新建或选择一个会话后开始对话"
+            : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
   return (
     <div className="flex h-full">
@@ -765,7 +762,7 @@ export function WorkspacePage(props: {
         onCreateInProject={startCreateSession}
         sessions={sessions}
         currentId={currentId}
-        onSelect={(id) => void openSession(id)}
+        onSelect={(id) => void openSession(id, true)}
         onCreate={() => void startCreateSession()}
         creating={creating}
         onRename={(id, title) => {
@@ -778,14 +775,22 @@ export function WorkspacePage(props: {
               )
             );
         }}
-        onArchive={(id, archived) => {
+        onArchive={(id, archived) => void archiveSession(id, archived)}
+        onPin={(id, pinned) => {
           void window.codexlike.sessions
-            .archive(id, archived)
-            .then(() => refreshSessions())
+            .setPinned(id, pinned)
+            .then(refreshSessions)
             .catch((error: unknown) =>
-              pushLocalStatus(
-                `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
-              )
+              pushLocalStatus(`置顶失败：${String(error)}`)
+            );
+        }}
+        onCollapseProject={(id, collapsed) => {
+          void window.codexlike.projects
+            .setCollapsed(id, collapsed)
+            .then(() => window.codexlike.projects.list())
+            .then(setProjects)
+            .catch((error: unknown) =>
+              pushLocalStatus(`折叠失败：${String(error)}`)
             );
         }}
       />
@@ -799,6 +804,22 @@ export function WorkspacePage(props: {
                   : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
                 : "未选择会话")}
           </span>
+          {current && (
+            <button
+              type="button"
+              data-testid={
+                current.archivedAt === null
+                  ? "session-archive"
+                  : "session-restore"
+              }
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
+              onClick={() =>
+                void archiveSession(current.id, current.archivedAt === null)
+              }
+            >
+              {current.archivedAt === null ? "归档会话" : "恢复会话"}
+            </button>
+          )}
           <button
             type="button"
             data-testid="resources-toggle"
@@ -833,17 +854,19 @@ export function WorkspacePage(props: {
               }
               className="break-all"
             >
-              工作区：
+              {draft?.workspaceMode === "worktree"
+                ? "来源目录（发送后使用隔离工作区）："
+                : "工作区："}
               {current?.workspacePath ??
                 draft?.workspacePath ??
                 projects.find((p) => p.id === draft?.projectId)
                   ?.workspacePath ??
                 "应用专用持久目录（首次发送时分配）"}
             </div>
-            {draft ? (
-              <span>首次发送才创建会话 · 本地模式</span>
-            ) : (
-              <span>工作区已固定</span>
+            {current?.workspaceOriginPath && (
+              <div data-testid="workspace-origin">
+                来源目录：{current.workspaceOriginPath}
+              </div>
             )}
             {draft?.projectId === null && (
               <button
@@ -945,6 +968,29 @@ export function WorkspacePage(props: {
                 {contextWarning}
               </div>
             )}
+            {(draft || current) && (
+              <WorkspaceModeControl
+                target={
+                  draft
+                    ? {
+                        projectId: draft.projectId,
+                        workspacePath: draft.workspacePath,
+                        workspaceMode: draft.workspaceMode ?? "local",
+                      }
+                    : { sessionId: current!.id }
+                }
+                mode={draft?.workspaceMode ?? current?.workspaceMode ?? "local"}
+                draft={draft !== null}
+                busy={creating}
+                onModeChange={(workspaceMode) => {
+                  if (draft && !draft.busy)
+                    workspaceState.editNewDraft(draft.projectId, {
+                      workspaceMode,
+                      error: null,
+                    });
+                }}
+              />
+            )}
             {interaction ? (
               <InteractionPanel
                 key={interaction.request.id}
@@ -1012,6 +1058,7 @@ export function WorkspacePage(props: {
                 readOnly={loading || creating}
                 disabled={
                   (currentId === null && !draft) ||
+                  current?.archivedAt != null ||
                   creating ||
                   profiles.length === 0 ||
                   streaming ||

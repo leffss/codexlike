@@ -27,12 +27,12 @@ export function MessageStream(props: {
   const container = useRef<HTMLDivElement>(null);
   const restored = useRef<string | null | undefined>(undefined);
   useLayoutEffect(() => {
-    if (
-      props.loading ||
-      !container.current ||
-      restored.current === props.sessionId
-    )
+    if (props.loading) {
+      // 同一会话被重新打开也会暂清历史，不能把这次归零当作用户阅读位置。
+      restored.current = undefined;
       return;
+    }
+    if (!container.current || restored.current === props.sessionId) return;
     const element = container.current;
     element.scrollTop = props.readingPosition?.scrollTop ?? 0;
     restored.current = props.sessionId;

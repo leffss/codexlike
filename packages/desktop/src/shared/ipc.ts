@@ -46,7 +46,11 @@ export type { ThemeName };
  */
 export const IPC = {
   workbench: { read: "workbench:read", write: "workbench:write" },
-  projects: { list: "projects:list", add: "projects:add" },
+  projects: {
+    list: "projects:list",
+    add: "projects:add",
+    setCollapsed: "projects:set-collapsed",
+  },
   providerProfiles: {
     list: "provider-profiles:list",
     create: "provider-profiles:create",
@@ -54,11 +58,17 @@ export const IPC = {
     remove: "provider-profiles:remove",
   },
   sessions: {
-    /** 全部会话（含已归档，侧栏列表自行过滤；updatedAt 倒序） */
+    /** 全部会话（含已归档；置顶优先、最近使用倒序，侧栏按归属分区）。 */
     list: "sessions:list",
     /** 首次发送：幂等创建正式会话并启动正常发送。 */
     start: "sessions:start",
     execution: "sessions:execution",
+    /** 执行起点历史与截至 sequence 的完整运行现场；先订阅再读取。 */
+    view: "sessions:view",
+    markViewed: "sessions:mark-viewed",
+    setPinned: "sessions:set-pinned",
+    markUsed: "sessions:mark-used",
+    workspaceSharing: "sessions:workspace-sharing",
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: "sessions:select-workspace",
     /** 指定会话的消息历史 */
@@ -144,7 +154,29 @@ export interface SessionEventEnvelope {
   sessionId: string;
   /** 本次宿主执行的稳定标识，结束后不复用。 */
   executionId: string;
+  /** 会话内单调递增，跨执行不重置；快照含 <= sequence 的全部事件。 */
+  sequence: number;
   event: SessionEvent;
+  activity: SessionActivity;
+}
+
+/** 当前进程的执行/查看状态，不参与最近使用排序，不持久化思考内容。 */
+export interface SessionActivity {
+  running: boolean;
+  waitingForUser: boolean;
+  outcome: "completed" | "failed" | "interrupted" | null;
+  unread: boolean;
+}
+export type SessionListItem = SessionRecord & { activity?: SessionActivity };
+
+export interface SessionView {
+  sessionId: string;
+  executionId: string | null;
+  sequence: number;
+  history: TranscriptItem[];
+  events: SessionEventEnvelope[];
+  pendingInteractions: InteractionRecord[];
+  activity: SessionActivity;
 }
 
 /** 一个草稿意图沿用同一个 requestId 重试；成功后重试仅返回原会话，不重放消息。 */
@@ -159,6 +191,19 @@ export interface StartSessionInput {
   thinkingEffort?: ThinkingEffort;
   approvalMode?: ApprovalMode;
   mentionPaths?: string[];
+}
+
+export type WorkspaceSharingTarget =
+  | { sessionId: string }
+  | {
+      projectId: string | null;
+      workspacePath?: string;
+      workspaceMode?: WorkspaceMode;
+    };
+
+export interface WorkspaceSharingView {
+  workspacePath: string | null;
+  runningSessions: { id: string; title: string }[];
 }
 
 /** 宿主权威运行信息；与当前页面无关，等待回应也视为执行中。 */
@@ -182,6 +227,10 @@ export interface CodexLikeApi {
   projects: {
     list(): Promise<ProjectRecord[]>;
     add(workspacePath: string): Promise<ProjectRecord>;
+    setCollapsed(
+      projectId: string,
+      collapsed: boolean
+    ): Promise<ProjectRecord | null>;
   };
   providerProfiles: {
     /** 全部 Provider Profile（apiKey 已解密，仅存在于渲染进程内存） */
@@ -198,8 +247,21 @@ export interface CodexLikeApi {
   sessions: {
     start(input: StartSessionInput): Promise<SessionRecord>;
     execution(sessionId: string): Promise<SessionExecutionState | null>;
+    view(sessionId: string): Promise<SessionView | null>;
+    /** 只确认用户已经看到的水位，不消费更新之后产生的完成提醒。 */
+    markViewed(sessionId: string, sequence: number): Promise<void>;
+    setPinned(
+      sessionId: string,
+      pinned: boolean
+    ): Promise<SessionRecord | null>;
+    /** 只在用户主动查看时调用；发送由宿主自动登记，后台刷新不调用。 */
+    markUsed(sessionId: string): Promise<SessionRecord | null>;
+    /** 读取同实际目录的其他运行会话；不锁定并行，不创建工作区。 */
+    workspaceSharing(
+      target: WorkspaceSharingTarget
+    ): Promise<WorkspaceSharingView>;
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
-    list(): Promise<SessionRecord[]>;
+    list(): Promise<SessionListItem[]>;
     /** 原生目录选择器；取消返回 null */
     selectWorkspace(): Promise<string | null>;
     /** 指定会话的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */
@@ -216,7 +278,8 @@ export interface CodexLikeApi {
       text: string,
       providerProfileId?: string,
       mentionPaths?: string[],
-      thinkingEffort?: ThinkingEffort
+      thinkingEffort?: ThinkingEffort,
+      approvalMode?: ApprovalMode
     ): Promise<void>;
     /**
      * 打断指定会话运行中的本轮（停止按钮）：

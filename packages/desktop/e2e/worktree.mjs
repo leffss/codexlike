@@ -1,10 +1,5 @@
-// E2E（工单 09：托管 Worktree）：真实 Electron 应用走 worktree 模式全链路——
-// git repo 工作区（.gitignore 忽略 .env + .worktreeinclude 声明复制）→ 新建会话
-// 对话框选「worktree 模式」→ 卡片 worktree 徽标 → 副本目录与独立分支就位、.env 已复制
-// → 消息驱动 write_file 落在副本（主仓库不受影响）→ 非 git 目录选 worktree 中文报错
-// 且会话不创建（改选本目录直跑可成功）→ 重启恢复仍指向原副本、续跑改动仍在副本内。
-// 运行：pnpm --filter @codexlike/desktop run test:e2e:worktree（先全仓 build）。
-import { execFileSync } from 'node:child_process';
+// ADR 0010：真实 Electron 首次发送 Worktree、共享目录提示、失败重试与进程重开。
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -13,164 +8,265 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import process from 'node:process';
-
-import { assert, closeApp, launchApp, startMockProvider } from './helpers.mjs';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
 
 function git(cwd, ...args) {
-  return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
-
-/** 场景脚本：第 1 次 tool_call（write_file，真实写盘）→ 之后流式文本；非流式请求 404 */
 async function main() {
-  let streamCount = 0;
-  const { server, port } = await startMockProvider((ctx, { body }) => {
-    if (!body.includes('"stream":true')) {
-      ctx.notFound();
-      return;
-    }
-    streamCount += 1;
-    if (streamCount === 1) {
-      ctx.toolCallRound('call-worktree-e2e', 'write_file', {
-        path: 'wt-e2e.txt',
-        content: 'worktree E2E 内容',
+  const root = mkdtempSync(join(tmpdir(), "codexlike-e2e-worktree-"));
+  const homeDir = join(root, "nested", "home");
+  const repo = join(root, "repo");
+  const plain = join(root, "plain");
+  let app;
+  let toolRound = 0;
+  const model = await startMockProvider((ctx, { body }) => {
+    if (body.includes("共享等待")) {
+      ctx.toolCallRound("shared-question", "ask_user_question", {
+        questions: [
+          {
+            id: "q",
+            header: "等待",
+            question: "是否继续？",
+            multiSelect: false,
+            options: [{ id: "ok", label: "继续" }],
+          },
+        ],
       });
       return;
     }
-    ctx.textRound('已在隔离副本中创建文件。');
-  });
-  const homeDir = mkdtempSync(join(tmpdir(), 'codexlike-e2e-worktree-'));
-  const repo = join(homeDir, 'workspace');
-  const plain = join(homeDir, 'plain-workspace');
-  let app;
-  try {
-    // git repo fixture：基线提交 + 被 ignore 的 .env（.worktreeinclude 声明复制进副本）
-    mkdirSync(repo);
-    git(repo, 'init', '-b', 'main');
-    git(repo, 'config', 'user.email', 'e2e@codexlike.local');
-    git(repo, 'config', 'user.name', 'CodexLike E2E');
-    writeFileSync(join(repo, 'README.md'), '# 基线\n');
-    writeFileSync(join(repo, '.gitignore'), '.env\n');
-    git(repo, 'add', '-A');
-    git(repo, 'commit', '-m', '基线提交');
-    writeFileSync(join(repo, '.env'), 'SECRET=e2e');
-    writeFileSync(join(repo, '.worktreeinclude'), '.env\n');
-    mkdirSync(plain);
-
-    // 1) 启动 → 配置 Profile → 新建会话选 worktree 模式
-    const first = await launchApp({ homeDir, workspaceDir: repo });
-    app = first.app;
-    let window = first.window;
-    await window.getByRole('button', { name: '设置', exact: true }).click();
-    await window.getByRole('button', { name: '+ 新建 Profile' }).click();
-    await window.getByLabel('名称').fill('Mock');
-    await window.getByLabel('baseURL').fill(`http://127.0.0.1:${port}/v1`);
-    await window.getByLabel('API Key').fill('sk-e2e');
-    // 设置页有子代理模型选择器（工单 13）也带「模型」label，限定在 Profile 表单内
-    await window.locator('form').getByLabel('模型').fill('mock-model');
-    await window
-      .locator('form')
-      .getByRole('button', { name: /保存|创建/ })
-      .click();
-    await window.getByText('Mock').first().waitFor();
-    await window.getByRole('button', { name: '返回工作台' }).click();
-
-    await window.getByTestId('new-session').click();
-    await window.getByTestId('new-session-dialog').waitFor({ timeout: 10_000 });
-    await window.getByTestId('mode-worktree').click();
-    await window.getByTestId('create-session-confirm').click();
-    await window.getByTestId('worktree-badge').waitFor({ timeout: 15_000 });
-    console.log('[e2e] worktree 模式会话已创建，卡片显示 worktree 徽标');
-
-    // 2) 副本就位：<home>/worktrees/<会话id>、独立分支、.worktreeinclude 的 .env 已复制
-    const worktreesDir = join(homeDir, 'worktrees');
-    const sessionIds = readdirSync(worktreesDir);
-    assert(sessionIds.length === 1, `副本目录数异常：${sessionIds.length}`);
-    const sessionId = sessionIds[0];
-    const worktreePath = join(worktreesDir, sessionId);
-    assert(existsSync(join(worktreePath, 'README.md')), '副本未检出 HEAD 内容');
-    assert(
-      git(repo, 'branch', '--list', `codexlike/${sessionId}`).trim() !== '',
-      '独立分支未创建',
-    );
-    assert(readFileSync(join(worktreePath, '.env'), 'utf8') === 'SECRET=e2e', '.env 未复制进副本');
-    console.log('[e2e] 副本目录、独立分支、.worktreeinclude 复制全部就位');
-
-    // 3) 消息驱动 write_file：文件落在副本，主仓库不受影响
-    await window.getByTestId('composer-input').fill('在隔离副本创建 wt-e2e.txt');
-    await window.getByTestId('composer-send').click();
-    await window.getByText('已在隔离副本中创建文件。').waitFor({ timeout: 15_000 });
-    assert(
-      readFileSync(join(worktreePath, 'wt-e2e.txt'), 'utf8') === 'worktree E2E 内容',
-      'write_file 未落在副本内',
-    );
-    assert(!existsSync(join(repo, 'wt-e2e.txt')), 'worktree 会话的改动泄漏进主仓库');
-    console.log('[e2e] 会话改动发生在副本内，主仓库不受影响');
-
-    // 4) 重启恢复：会话仍指向原副本，续跑改动仍在副本内
-    await closeApp(app);
-    const second = await launchApp({ homeDir, workspaceDir: repo });
-    app = second.app;
-    window = second.window;
-    await window.getByTestId('worktree-badge').waitFor({ timeout: 15_000 });
-    await window.getByTestId('session-item').first().click();
-    await window.getByTestId('composer-input').waitFor({ timeout: 10_000 });
-    await window.getByTestId('composer-input').fill('再写一个文件');
-    await window.getByTestId('composer-send').click();
-    await window.getByText('已在隔离副本中创建文件。').first().waitFor({ timeout: 15_000 });
-    assert(
-      readFileSync(join(worktreePath, 'wt-e2e.txt'), 'utf8') === 'worktree E2E 内容',
-      '恢复后续跑未指向原副本（文件内容被改写或丢失）',
-    );
-    assert(!existsSync(join(repo, 'wt-e2e.txt')), '恢复后改动泄漏进主仓库');
-    console.log('[e2e] 重启恢复后仍指向原 worktree，续跑改动仍在副本内');
-
-    // 5) 非 git 目录选 worktree：中文报错、会话不创建；改选本目录直跑可成功
-    await closeApp(app);
-    const third = await launchApp({ homeDir, workspaceDir: plain });
-    app = third.app;
-    window = third.window;
-    await window.getByTestId('new-session').click();
-    await window.getByTestId('new-session-dialog').waitFor({ timeout: 10_000 });
-    await window.getByTestId('mode-worktree').click();
-    await window.getByTestId('create-session-confirm').click();
-    const errorCard = window.getByTestId('message-error');
-    await errorCard.waitFor({ timeout: 15_000 });
-    assert(
-      (await errorCard.textContent()).includes('不是 git 仓库'),
-      '非 git 目录选 worktree 未给出明确中文错误',
-    );
-    const sessionCountBefore = await window.getByTestId('session-item').count();
-    assert(sessionCountBefore === 1, `worktree 失败后不应新增会话（现有 ${sessionCountBefore}）`);
-    console.log('[e2e] 非 git 目录选 worktree：中文报错且会话不创建');
-
-    // 同一对话框改选本目录直跑 → 创建成功（失败可恢复）
-    await window.getByTestId('mode-local').click();
-    await window.getByTestId('create-session-confirm').click();
-    await window.getByTestId('composer-input').waitFor({ timeout: 15_000 });
-    assert(
-      (await window.getByTestId('session-item').count()) === 2,
-      '改选本目录直跑后应创建成功',
-    );
-    console.log('[e2e] 报错后改选本目录直跑创建成功（对话框可恢复）');
-
-    await closeApp(app);
-    console.log('[e2e] 托管 Worktree E2E 通过 ✅');
-  } catch (error) {
-    console.error('[e2e] 托管 Worktree E2E 失败 ❌', error);
-    process.exitCode = 1;
-    try {
-      await closeApp(app);
-    } catch {
-      // 已关闭
+    const request = JSON.parse(body);
+    const lastUser = [...request.messages]
+      .reverse()
+      .find((message) => message.role === "user");
+    if (JSON.stringify(lastUser).includes("隔离写入")) {
+      const round = toolRound++;
+      if (round === 0) {
+        ctx.toolCallRound("write-wt", "write_file", {
+          path: "wt-e2e.txt",
+          content: "隔离成果",
+        });
+        return;
+      }
+      if (round === 1) {
+        ctx.toolCallRound("terminal-wt", "run_terminal_command", {
+          command: "git branch --show-current > terminal-branch.txt",
+        });
+        return;
+      }
     }
+    ctx.textRound("任务已完成");
+  });
+  try {
+    mkdirSync(repo);
+    mkdirSync(plain);
+    git(repo, "init", "-b", "main");
+    git(repo, "config", "user.email", "test@codexlike.local");
+    git(repo, "config", "user.name", "Test");
+    writeFileSync(join(repo, "tracked.txt"), "来源内容");
+    writeFileSync(join(repo, ".gitignore"), ".env\n");
+    git(repo, "add", "tracked.txt", ".gitignore");
+    git(repo, "commit", "-m", "fixture");
+    writeFileSync(join(repo, ".env"), "SECRET=e2e");
+    writeFileSync(join(repo, ".worktreeinclude"), ".env\n");
+    let window;
+    ({ app, window } = await launchApp({ homeDir, workspaceDir: repo }));
+    await window.getByTestId("settings-open").click();
+    await window
+      .locator("section")
+      .filter({
+        has: window.getByRole("heading", {
+          name: "Provider Profiles",
+          exact: true,
+        }),
+      })
+      .getByRole("button", { name: "+ 新建 Profile", exact: true })
+      .click();
+    const form = window.locator("form");
+    await form.getByLabel("名称").fill("Worktree Mock");
+    await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
+    await form.getByLabel("API Key").fill("test");
+    await form.getByLabel("模型").fill("mock-model");
+    await form.getByRole("button", { name: /保存|创建/ }).click();
+    await window.getByText("Worktree Mock", { exact: true }).waitFor();
+    await window.getByTestId("settings-back").click();
+    await window.getByTestId("add-project").click();
+    await window.getByTestId("project-new-session").click();
+    await window.getByTestId("draft-workspace-mode").waitFor({ timeout: 5000 });
+    assert(
+      (await window.getByTestId("draft-workspace-mode").inputValue()) ===
+        "local",
+      "项目草稿默认本地"
+    );
+    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+    await window.getByTestId("composer-input").fill("隔离写入");
+    assert(!existsSync(join(homeDir, "worktrees")), "首次发送前不得创建副本");
+    assert(
+      git(repo, "branch", "--list", "codexlike/*").trim() === "",
+      "首次发送前不得创建分支"
+    );
+    assert(
+      (await window.getByTestId("session-item").count()) === 0,
+      "首次发送前无会话"
+    );
+    assert(
+      (await window.getByTestId("new-session-dialog").count()) === 0,
+      "不恢复模式弹窗"
+    );
+    await window.getByTestId("approval-mode-select").selectOption("assist");
+    await window.getByTestId("composer-send").dblclick();
+    await window
+      .getByTestId("message-assistant")
+      .filter({ hasText: "任务已完成" })
+      .waitFor({ timeout: 20000 });
+    await window.getByTestId("composer-send").waitFor();
+    const ids = readdirSync(join(homeDir, "worktrees"));
+    assert(ids.length === 1, "双击仅创建一份副本");
+    const worktreePath = join(homeDir, "worktrees", ids[0]);
+    assert(
+      readFileSync(join(worktreePath, ".env"), "utf8") === "SECRET=e2e",
+      "复制声明文件"
+    );
+    assert(
+      readFileSync(join(worktreePath, "wt-e2e.txt"), "utf8") === "隔离成果",
+      "工具写入实际副本"
+    );
+    assert(!existsSync(join(repo, "wt-e2e.txt")), "主仓库不受影响");
+    assert(
+      readFileSync(join(worktreePath, "terminal-branch.txt"), "utf8").trim() ===
+        `codexlike/${ids[0]}`,
+      "终端命令也在隔离分支执行"
+    );
+    assert(
+      !existsSync(join(repo, "terminal-branch.txt")),
+      "终端不得写入来源目录"
+    );
+    assert(
+      git(worktreePath, "branch", "--show-current").trim() ===
+        `codexlike/${ids[0]}`,
+      "独立分支"
+    );
+    assert(
+      (await window.getByTestId("workspace-path").textContent()).includes(
+        worktreePath
+      ),
+      "显示实际工作区"
+    );
+    assert(
+      (await window.getByTestId("workspace-mode").textContent()).includes(
+        "Worktree"
+      ),
+      "显示工作区模式"
+    );
+    assert(
+      (await window.getByTestId("draft-workspace-mode").count()) === 0,
+      "首次执行后模式固定"
+    );
+
+    // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
+    await window.getByTestId("new-session").click();
+    assert(
+      (await window.getByTestId("draft-workspace-mode").count()) === 0,
+      "独立入口不直接提供 Worktree"
+    );
+    await window.getByTestId("draft-select-workspace").click();
+    await window.getByTestId("composer-input").fill("共享等待");
+    await window.getByTestId("composer-send").click();
+    await window.getByTestId("interaction-panel").waitFor({ timeout: 15000 });
+    await window.getByTestId("project-new-session").click();
+    await window.getByTestId("workspace-sharing-warning").waitFor();
+    assert(
+      (
+        await window.getByTestId("workspace-sharing-warning").textContent()
+      ).includes("共享文件"),
+      "同目录独立会话不遗漏"
+    );
+    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+    await window
+      .getByTestId("workspace-sharing-warning")
+      .waitFor({ state: "hidden" });
+    await window.getByTestId("draft-workspace-mode").selectOption("local");
+    await window.getByTestId("workspace-sharing-warning").waitFor();
+    await window.getByTestId("composer-input").fill("允许继续并行");
+    await window.getByTestId("composer-send").click();
+    await window
+      .getByTestId("message-assistant")
+      .filter({ hasText: "任务已完成" })
+      .waitFor();
+    assert(
+      (await window.getByTestId("session-item").count()) === 3,
+      "共享提示不锁死项目并行"
+    );
+    await window
+      .getByTestId("session-item")
+      .filter({ hasText: "共享等待" })
+      .click();
+    await window.getByTestId("composer-stop").click();
+    await window.getByTestId("composer-send").waitFor();
+
+    await closeApp(app);
+    app = null;
+    ({ app, window } = await launchApp({ homeDir, workspaceDir: plain }));
+    await window
+      .getByTestId("session-item")
+      .filter({ hasText: "隔离写入" })
+      .click();
+    assert(
+      (await window.getByTestId("workspace-path").textContent()).includes(
+        worktreePath
+      ),
+      "重开仍使用原副本"
+    );
+    await window.getByTestId("add-project").click();
+    await window
+      .getByTestId("project-group")
+      .filter({ hasText: "plain" })
+      .locator("..")
+      .getByTestId("project-new-session")
+      .click();
+    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+    await window.getByTestId("composer-input").fill("非 Git 失败重试");
+    await window.getByTestId("composer-send").click();
+    await window.getByTestId("draft-error").waitFor();
+    assert(
+      (await window.getByTestId("draft-error").textContent()).includes(
+        "不是 git 仓库"
+      ),
+      "非Git错误清晰"
+    );
+    assert(
+      (await window.getByTestId("composer-input").inputValue()) ===
+        "非 Git 失败重试",
+      "失败保留草稿"
+    );
+    assert(
+      (await window.getByTestId("session-item").count()) === 3,
+      "失败无空会话"
+    );
+    await window.getByTestId("draft-workspace-mode").selectOption("local");
+    await window.getByTestId("composer-send").click();
+    await window.getByTestId("message-assistant").waitFor();
+    assert(
+      (await window.getByTestId("session-item").count()) === 4,
+      "非Git本地模式可重试"
+    );
+    assert(
+      readFileSync(join(worktreePath, "wt-e2e.txt"), "utf8") === "隔离成果",
+      "重启与新建不清理旧成果"
+    );
+    await closeApp(app);
+    app = null;
+    console.log("[e2e] Worktree 首次发送、共享目录、失败重试与进程重开通过");
+  } catch (error) {
+    console.error("[e2e] Worktree 验收失败", error);
+    process.exitCode = 1;
   } finally {
-    server.close();
-    rmSync(homeDir, { recursive: true, force: true });
+    if (app) await closeApp(app);
+    model.server.close();
+    rmSync(root, { recursive: true, force: true });
   }
 }
-
 await main();

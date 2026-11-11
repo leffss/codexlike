@@ -1,6 +1,8 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 
-import type { ProjectRecord, SessionRecord } from "@codexlike/agent-core";
+import type { ProjectRecord } from "@codexlike/agent-core";
+import type { SessionListItem } from "@codexlike/desktop/ipc";
+import { SessionActivityBadge } from "./SessionActivityBadge";
 
 import { groupSessionsByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -43,12 +45,12 @@ function FolderIcon(props: { open: boolean }) {
  * 左栏：独立会话分区与显式项目列表（ADR 0010）。
  * 项目组头不依赖会话存在；归属只看 projectId，绝不按目录自动聚合。
  * 组内活跃会话在上、「已归档」子折叠在下。
- * 会话行右侧显示相对更新时间（updatedAt「最近更新」口径，lib/relative-time），
- * 状态徽标弱化为小徽标，操作按钮 hover / 键盘聚焦时浮现；
+ * 会话行右侧显示用户最近使用时间；后台输出不改变顺序。
+ * 整理操作独立成行，不遮挡会话选择，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
 export function SessionSidebar(props: {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
   projects: ProjectRecord[];
   onAddProject: () => void;
   onCreateInProject: (projectId: string) => void;
@@ -58,11 +60,10 @@ export function SessionSidebar(props: {
   creating: boolean;
   onRename: (id: string, title: string) => void;
   onArchive: (id: string, archived: boolean) => void;
+  onPin: (id: string, pinned: boolean) => void;
+  onCollapseProject: (id: string, collapsed: boolean) => void;
 }) {
-  // 折叠状态仅存组件内存（与刷新后全展开的既有行为一致，不持久化）
-  const [collapsedProjects, setCollapsedProjects] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
+  const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
     () => new Set()
   );
@@ -96,9 +97,10 @@ export function SessionSidebar(props: {
     }
   }
 
-  function renderSessionItem(session: SessionRecord) {
-    const relative = formatRelativeTime(session.updatedAt, now);
-    const absoluteTime = new Date(session.updatedAt).toLocaleString("zh-CN");
+  function renderSessionItem(session: SessionListItem) {
+    const usedAt = session.lastUsedAt ?? session.createdAt;
+    const relative = formatRelativeTime(usedAt, now);
+    const absoluteTime = `最近使用：${new Date(usedAt).toLocaleString("zh-CN")}`;
 
     return (
       <li key={session.id} className="group relative mt-0.5">
@@ -124,6 +126,9 @@ export function SessionSidebar(props: {
             }`}
             onClick={() => props.onSelect(session.id)}
           >
+            {session.pinned && (
+              <span className="text-[10px] text-accent">置顶</span>
+            )}
             <span className="truncate" title={session.workspacePath}>
               {session.title}
             </span>
@@ -137,20 +142,7 @@ export function SessionSidebar(props: {
                   worktree
                 </span>
               )}
-              {session.status === "streaming" ? (
-                <span
-                  title="会话正在运行中"
-                  className="flex items-center gap-1 rounded bg-ok-bg px-1 py-px text-[10px] text-ok-fg"
-                >
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ok-fg" />
-                  运行中
-                </span>
-              ) : session.status === "waiting-user" ||
-                session.status === "waiting-approval" ? (
-                <span className="rounded bg-warn-bg px-1 py-px text-[10px] text-warn-fg">
-                  等待用户
-                </span>
-              ) : null}
+              <SessionActivityBadge session={session} />
               {relative !== "" && (
                 <span
                   className="text-[10px] text-fg-subtle"
@@ -163,7 +155,17 @@ export function SessionSidebar(props: {
           </button>
         )}
         {editingId !== session.id && (
-          <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 gap-1 group-hover:flex group-focus-within:flex">
+          <span className="flex justify-end gap-1 px-1 pb-1">
+            <button
+              type="button"
+              data-testid="pin-button"
+              aria-pressed={session.pinned ?? false}
+              title={session.pinned ? "取消置顶" : "置顶会话"}
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
+              onClick={() => props.onPin(session.id, !session.pinned)}
+            >
+              {session.pinned ? "取消置顶" : "置顶"}
+            </button>
             <button
               type="button"
               data-testid="rename-button"
@@ -192,12 +194,16 @@ export function SessionSidebar(props: {
   }
 
   function renderGroup(group: (typeof groups)[number]) {
-    // 当前会话所在组强制展开：折叠过的组被激活时不失联
+    // 折叠只改变导航显示，不改变当前查看或待处理交互。
     const containsCurrent =
       props.currentId !== null &&
       (group.active.some((session) => session.id === props.currentId) ||
         group.archived.some((session) => session.id === props.currentId));
-    const expanded = !collapsedProjects.has(group.key) || containsCurrent;
+    const expanded =
+      group.projectId === null
+        ? !standaloneCollapsed
+        : !props.projects.find((project) => project.id === group.projectId)
+            ?.collapsed;
     const archivedOpen =
       expandedArchived.has(group.key) ||
       (containsCurrent &&
@@ -214,7 +220,9 @@ export function SessionSidebar(props: {
           aria-expanded={expanded}
           className="mt-2 flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium text-fg-muted hover:bg-hover hover:text-fg"
           onClick={() =>
-            setCollapsedProjects((prev) => toggleKey(prev, group.key))
+            group.projectId === null
+              ? setStandaloneCollapsed((prev) => !prev)
+              : props.onCollapseProject(group.projectId, expanded)
           }
         >
           <span className="w-3 shrink-0 text-center text-fg-subtle">
@@ -262,9 +270,19 @@ export function SessionSidebar(props: {
                     key={session.id}
                     className="mt-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-fg-subtle hover:bg-hover"
                   >
-                    <span className="truncate" title={session.workspacePath}>
+                    <button
+                      type="button"
+                      data-testid="archived-session-item"
+                      data-session-id={session.id}
+                      aria-current={
+                        session.id === props.currentId ? "page" : undefined
+                      }
+                      className="min-w-0 flex-1 truncate text-left hover:text-accent"
+                      title={`查看归档历史 · ${session.workspacePath}`}
+                      onClick={() => props.onSelect(session.id)}
+                    >
                       {session.title}
-                    </span>
+                    </button>
                     <button
                       type="button"
                       data-testid="unarchive-button"

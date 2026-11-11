@@ -61,7 +61,11 @@ it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所�
 it("各分区分别保留归档历史并按时间排序，不丢失空项目", () => {
   const groups = groupSessionsByProject(
     [
-      session({ id: "old", updatedAt: "2026-11-10T00:00:00Z" }),
+      session({
+        id: "old",
+        lastUsedAt: "2026-11-10T00:00:00Z",
+        updatedAt: "2026-11-12T00:00:00Z",
+      }),
       session({ id: "archived", archivedAt: project.createdAt }),
       session({ id: "recent" }),
     ],

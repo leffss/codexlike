@@ -37,7 +37,15 @@ export function groupSessionsByProject(
   for (const group of groups) {
     const members = sessions
       .filter((session) => session.projectId === group.projectId)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      .sort(
+        (a, b) =>
+          Number(b.pinned ?? false) - Number(a.pinned ?? false) ||
+          (b.lastUsedAt ?? b.createdAt).localeCompare(
+            a.lastUsedAt ?? a.createdAt
+          ) ||
+          b.createdAt.localeCompare(a.createdAt) ||
+          b.id.localeCompare(a.id)
+      );
     group.active = members.filter((session) => session.archivedAt === null);
     group.archived = members.filter((session) => session.archivedAt !== null);
   }
