@@ -330,8 +330,8 @@ void app.whenReady().then(async () => {
     }
   }
 
-  // 启动时跑一次 LRU 清理：会话已删除/已归档的托管 Worktree 超量部分回收
-  // （运行中的永不清理；此刻无运行中会话，主要是孤儿目录与超量归档副本）
+  // 启动时跑一次 LRU 清理：一切非运行中会话的托管 Worktree 按最近使用保留 15 个、
+  // 超量部分回收（运行中的永不清理；此刻无运行中会话，主要是孤儿目录与超量副本）
   void worktreeService
     .cleanup({ sessions: manager.list() })
     .then((result) => {

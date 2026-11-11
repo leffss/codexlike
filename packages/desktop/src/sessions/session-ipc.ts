@@ -212,7 +212,8 @@ export function registerSessionHandlers(options: {
         void browserManager?.closeSession(sessionId).catch(() => {});
       }
       const result = manager.setArchived(sessionId, archived);
-      // 归档后其托管 Worktree 进入 LRU 清理候选（运行中的永不清理；后台执行不阻塞归档反馈）
+      // 归档后触发一次 LRU 清理（一切非运行中的托管 Worktree 按量回收；
+      // 运行中的永不清理；后台执行不阻塞归档反馈）
       void worktreeService
         .cleanup({ sessions: manager.list() })
         .catch((error: unknown) => {
