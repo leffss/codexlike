@@ -72,7 +72,9 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
   /** 最新请求胜出；同时校验会话与请求代数，防止 A→B→A 的旧结果串线。 */
   const refreshResources = useCallback(async (sessionId: string) => {
     const request = ++resourceRequestRef.current;
-    const isCurrent = () => currentIdRef.current === sessionId && resourceRequestRef.current === request;
+    const isCurrent = () =>
+      currentIdRef.current === sessionId &&
+      resourceRequestRef.current === request;
     setResourcesLoading(true);
     setResourcesError(null);
     try {
@@ -83,7 +85,9 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
     } catch (error) {
       if (!isCurrent()) return;
       setResources(null);
-      setResourcesError(`读取规范与技能失败：${error instanceof Error ? error.message : String(error)}`);
+      setResourcesError(
+        `读取规范与技能失败：${error instanceof Error ? error.message : String(error)}`
+      );
     } finally {
       if (isCurrent()) setResourcesLoading(false);
     }
@@ -113,7 +117,9 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
    */
   const refreshContextWarning = useCallback(async (sessionId: string) => {
     const sessionRequest = sessionRequestRef.current;
-    const isCurrent = () => currentIdRef.current === sessionId && sessionRequestRef.current === sessionRequest;
+    const isCurrent = () =>
+      currentIdRef.current === sessionId &&
+      sessionRequestRef.current === sessionRequest;
     try {
       const status = await window.codexlike.sessions.status(sessionId);
       if (!isCurrent()) return;
@@ -135,7 +141,8 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       setCurrentId(id);
       currentIdRef.current = id;
       const request = ++sessionRequestRef.current;
-      const isCurrent = () => currentIdRef.current === id && sessionRequestRef.current === request;
+      const isCurrent = () =>
+        currentIdRef.current === id && sessionRequestRef.current === request;
       setMessages([]);
       setWorkspaceFiles([]);
       setResources(null);
@@ -208,8 +215,12 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
           setStreaming(true);
         }
         if (
-          event.type === "assistant-start" || event.type === "tool-result" ||
-          event.type === "assistant-done" || event.type === "assistant-aborted" || event.type === "error"
+          event.type === "assistant-start" ||
+          event.type === "tool-result" ||
+          (event.type === "subagent-tool" && event.phase === "result") ||
+          event.type === "assistant-done" ||
+          event.type === "assistant-aborted" ||
+          event.type === "error"
         ) {
           void refreshResources(sessionId);
         }
@@ -462,14 +473,22 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         const request = sessionRequestRef.current;
         try {
           const status = await window.codexlike.sessions.status(sessionId);
-          if (currentIdRef.current !== sessionId || sessionRequestRef.current !== request) return;
+          if (
+            currentIdRef.current !== sessionId ||
+            sessionRequestRef.current !== request
+          )
+            return;
           if (status === null) {
             pushLocalStatus("会话不存在或已损坏");
           } else {
             pushLocalStatus(formatSessionStatus(status));
           }
         } catch (error) {
-          if (currentIdRef.current !== sessionId || sessionRequestRef.current !== request) return;
+          if (
+            currentIdRef.current !== sessionId ||
+            sessionRequestRef.current !== request
+          )
+            return;
           pushLocalStatus(
             `查询状态失败：${error instanceof Error ? error.message : String(error)}`
           );

@@ -1,11 +1,11 @@
 // E2E 共享工具（code review 修复 5 抽取）：断言、应用关闭（含强杀兜底）、
 // OpenAI 兼容 mock 骨架与应用启动。各 E2E 脚本只保留自己的场景逻辑
 // （按请求序号/请求体特征脚本化的回复、UI 操作与断言）。
-import http from 'node:http';
-import { join } from 'node:path';
-import process from 'node:process';
+import http from "node:http";
+import { join } from "node:path";
+import process from "node:process";
 
-import { electron, launchTarget } from './launch-target.mjs';
+import { electron, launchTarget } from "./launch-target.mjs";
 
 /** 极简断言 */
 export function assert(condition, message) {
@@ -33,10 +33,10 @@ export async function closeApp(app) {
 /** OpenAI 兼容 SSE 单帧（chat.completion.chunk 包装） */
 function sseChunk(payload) {
   return `data: ${JSON.stringify({
-    id: 'chatcmpl-e2e',
-    object: 'chat.completion.chunk',
+    id: "chatcmpl-e2e",
+    object: "chat.completion.chunk",
     created: 0,
-    model: 'mock-model',
+    model: "mock-model",
     choices: [{ index: 0, ...payload }],
   })}\n\n`;
 }
@@ -52,13 +52,16 @@ function sseChunk(payload) {
 function createChatContext(res, port) {
   const send = (payload) => {
     if (!res.headersSent) {
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
     }
     res.write(sseChunk(payload));
   };
   const finishWith = (reason) => {
     send({ delta: {}, finish_reason: reason });
-    res.write('data: [DONE]\n\n');
+    res.write("data: [DONE]\n\n");
     res.end();
   };
   return {
@@ -73,18 +76,18 @@ function createChatContext(res, port) {
             {
               index: 0,
               id: callId,
-              type: 'function',
+              type: "function",
               function: { name, arguments: JSON.stringify(args) },
             },
           ],
         },
         finish_reason: null,
       });
-      setTimeout(() => finishWith('tool_calls'), 30);
+      setTimeout(() => finishWith("tool_calls"), 30);
     },
     textRound(text) {
       send({ delta: { content: text }, finish_reason: null });
-      setTimeout(() => finishWith('stop'), 30);
+      setTimeout(() => finishWith("stop"), 30);
     },
     textChunksRound(chunks, interval = 30) {
       let index = 0;
@@ -95,22 +98,22 @@ function createChatContext(res, port) {
             return;
           }
           clearInterval(timer);
-          finishWith('stop');
+          finishWith("stop");
         } catch {
           clearInterval(timer);
         }
       }, interval);
       // 客户端中断（abort）后停止发送
-      res.on('close', () => clearInterval(timer));
+      res.on("close", () => clearInterval(timer));
     },
     respondJson(payload) {
-      res.writeHead(200, { 'content-type': 'application/json' });
+      res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(payload));
     },
     notFound() {
       if (!res.headersSent) {
         res.writeHead(404);
-        res.end('not found');
+        res.end("not found");
       }
     },
   };
@@ -127,28 +130,32 @@ export function startMockProvider(onChat, onOther) {
   let requestCount = 0;
   const seenBodies = [];
   const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url !== undefined && req.url.endsWith('/chat/completions')) {
+    if (
+      req.method === "POST" &&
+      req.url !== undefined &&
+      req.url.endsWith("/chat/completions")
+    ) {
       requestCount += 1;
-      let body = '';
-      req.on('data', (chunk) => {
+      let body = "";
+      req.on("data", (chunk) => {
         body += String(chunk);
       });
-      req.on('end', () => {
+      req.on("end", () => {
         seenBodies.push(body);
-        onChat(
-          createChatContext(res, server.address().port),
-          { body, index: requestCount },
-        );
+        onChat(createChatContext(res, server.address().port), {
+          body,
+          index: requestCount,
+        });
       });
       return;
     }
     if (onOther === undefined || onOther(req, res) !== true) {
       res.writeHead(404);
-      res.end('not found');
+      res.end("not found");
     }
   });
   return new Promise((resolveServer) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, "127.0.0.1", () => {
       resolveServer({
         server,
         port: server.address().port,
@@ -168,17 +175,26 @@ export async function launchApp({ homeDir, workspaceDir, env }) {
   const fullEnv = {
     ...process.env,
     CODEXLIKE_HOME: homeDir,
-    CODEXLIKE_TEST_WORKSPACE: workspaceDir ?? join(homeDir, 'workspace'),
+    CODEXLIKE_TEST_AGENTS_HOME: join(homeDir, "compatible-agents"),
+    CODEXLIKE_TEST_WORKSPACE: workspaceDir ?? join(homeDir, "workspace"),
     // 生产模式：不带 VITE_DEV_SERVER_URL，主进程以 file:// 加载 ui/dist
-    VITE_DEV_SERVER_URL: '',
+    VITE_DEV_SERVER_URL: "",
     ...(env ?? {}),
   };
   const app = await electron.launch(launchTarget(fullEnv));
-  app.process().stdout?.on('data', (chunk) => console.log(`[main] ${String(chunk).trimEnd()}`));
-  app.process().stderr?.on('data', (chunk) => console.error(`[main:err] ${String(chunk).trimEnd()}`));
+  app
+    .process()
+    .stdout?.on("data", (chunk) =>
+      console.log(`[main] ${String(chunk).trimEnd()}`)
+    );
+  app
+    .process()
+    .stderr?.on("data", (chunk) =>
+      console.error(`[main:err] ${String(chunk).trimEnd()}`)
+    );
   const window = await app.firstWindow();
-  window.on('console', (message) => {
-    if (message.type() === 'error') {
+  window.on("console", (message) => {
+    if (message.type() === "error") {
       console.log(`[renderer console.error] ${message.text()}`);
     }
   });

@@ -11,6 +11,7 @@ import { createAgentSession } from "../../src/session/agent-session";
 import type { SessionEvent, SessionRecord } from "../../src/session/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { SearchSource } from "../../src/tools/web-search";
+import { fakeResourceSnapshot } from "./resource-fixture";
 
 const profile: ProviderProfile = {
   id: "profile-1",
@@ -153,6 +154,117 @@ function makeSession(
 }
 
 describe("AgentSession 工具循环（六件工具默认放行）", () => {
+  it("普通请求自主加载技能与资源，仅同轮回填且 active 摘要实时变化，下轮执行者清空", async () => {
+    const persistence = createSqliteSessionStore(":memory:");
+    const record = sessionRecord("C:/work/demo");
+    persistence.insertSession(record);
+    const model = scriptedModel([
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "load",
+            toolName: "load_skill",
+            input: { name: "alpha" },
+          },
+        ],
+      },
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "read",
+            toolName: "read_skill_resource",
+            input: { name: "alpha" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["已处理"] },
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "unloaded",
+            toolName: "read_skill_resource",
+            input: { name: "alpha" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["需要重新加载"] },
+    ]);
+    const session = createAgentSession({
+      record,
+      persistence,
+      resources: () => fakeResourceSnapshot(),
+      languageModelFor: () => model,
+    });
+    for await (const event of session.sendMessage({
+      text: "处理任务",
+      profile,
+    })) {
+      if (event.type === "tool-result" && event.call.id === "load") {
+        expect(event.call.isError).toBe(false);
+        expect(session.resourceState.active?.loaded).toHaveLength(1);
+      }
+    }
+    expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(
+      "RESOURCE_PRIVATE_BODY"
+    );
+    expect(session.resourceState.last?.loaded).toHaveLength(2);
+    expect(session.resourceState.active).toBeNull();
+    const next = await collect(
+      session.sendMessage({ text: "下一轮", profile })
+    );
+    expect(JSON.stringify(model.doStreamCalls[3]?.prompt)).not.toContain(
+      "PRIVATE_BODY"
+    );
+    expect(next.find((event) => event.type === "tool-result")).toMatchObject({
+      call: { isError: true, output: expect.stringContaining("尚未加载") },
+    });
+    expect(session.resourceState.last?.loaded).toEqual([]);
+    persistence.close();
+  });
+
+  it.each(["load_skill", "read_skill_resource"])(
+    "宿主工具与资源工具 %s 重名时发送前拒绝，不静默覆盖",
+    async (name) => {
+      const persistence = createSqliteSessionStore(":memory:");
+      const record = sessionRecord("C:/work/demo");
+      persistence.insertSession(record);
+      const model = scriptedModel([{ kind: "text", deltas: ["不应请求"] }]);
+      const session = createAgentSession({
+        record,
+        persistence,
+        resources: () => fakeResourceSnapshot(),
+        languageModelFor: () => model,
+        tools: [
+          {
+            name,
+            description: "重名工具",
+            parameters: { type: "object", properties: {} },
+            permission: "readonly",
+            async execute() {
+              throw new Error("不应执行");
+            },
+          },
+        ],
+      });
+      await expect(
+        collect(session.sendMessage({ text: "任务", profile }))
+      ).rejects.toThrow(`工具名称冲突：${name}`);
+      expect(model.doStreamCalls).toHaveLength(0);
+      expect(persistence.listMessages(record.id)).toEqual([]);
+      expect(session.resourceState.active).toBeNull();
+      persistence.close();
+    }
+  );
+
   it("模型调工具 → 执行 → 结果回填 → 最终回复；文件真实落盘，调用记录入库", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([

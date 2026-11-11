@@ -8,8 +8,8 @@ import {
 } from "electron";
 
 import {
-  discoverAgentsInstructions,
   APPROVAL_MODES,
+  type AgentResourceSnapshot,
   type ApprovalMode,
   type BrowserSessionManager,
   type ProviderProfile,
@@ -38,6 +38,8 @@ export function registerSessionHandlers(options: {
   browserManager?: BrowserSessionManager;
   /** 托管 Worktree 服务（工单 09）：worktree 模式会话创建与 LRU 清理 */
   worktreeService: WorktreeService;
+  /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
+  resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
 }): void {
   const {
     manager,
@@ -46,6 +48,7 @@ export function registerSessionHandlers(options: {
     dataDir,
     browserManager,
     worktreeService,
+    resourcesFor,
   } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
@@ -281,17 +284,37 @@ export function registerSessionHandlers(options: {
               (candidate: ProviderProfile) =>
                 candidate.id === record.providerProfileId
             );
+      const { active, last } = manager.resourceState(sessionId);
       return buildSessionStatus({
         record,
         messages: manager.messages(sessionId),
-        agentsMd: discoverAgentsInstructions({
-          workspacePath: record.workspacePath,
-        }),
+        resources: active ?? resourcesFor(record).summary(),
+        resourcePhase: active === null ? "preview" : "active",
+        lastResources: last,
         providerProfileName: profile?.name ?? null,
         // 上下文告警阈值 = Profile 可配的上下文窗口 × 80%（未配置走 agent-core 默认 128k）
         contextWindowTokens: profile?.contextWindowTokens ?? null,
         latestCompact: manager.latestCompact(sessionId),
       });
+    }
+  );
+
+  ipcMain.handle(
+    IPC.sessions.resources,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== "string") {
+        throw new Error("resources：sessionId 必须是字符串");
+      }
+      const record = manager
+        .list()
+        .find((candidate) => candidate.id === sessionId);
+      if (record === undefined) {
+        return null;
+      }
+      return {
+        ...manager.resourceState(sessionId),
+        preview: resourcesFor(record).summary(),
+      };
     }
   );
 

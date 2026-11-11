@@ -106,6 +106,174 @@ describe("matchProfilesForModelSwitch（/model 关键词匹配）", () => {
 });
 
 describe("formatSessionStatus（/status 展示文案）", () => {
+  it("最近轮摘要独立显示采集时间与分执行者加载，明确不代表当前激活", () => {
+    for (const resourcePhase of ["active", "preview"] as const) {
+      const text = formatSessionStatus({
+        model: null,
+        providerProfileName: null,
+        estimatedContextTokens: 500,
+        messageCount: 0,
+        agentsMd: null,
+        approvalMode: "assist",
+        contextWindowTokens: null,
+        compacted: null,
+        resourcePhase,
+        resources: {
+          estimatedTokens: 10,
+          loaded: [],
+          catalog: {
+            capturedAt: "2026-11-11T02:00:00Z",
+            indexBytes: 0,
+            agents: { sources: [], truncated: false },
+            skills: [],
+            diagnostics: [],
+          },
+        },
+        lastResources: {
+          estimatedTokens: 100,
+          catalog: {
+            capturedAt: "2026-11-11T01:00:00Z",
+            indexBytes: 0,
+            agents: { sources: [], truncated: false },
+            skills: [],
+            diagnostics: [],
+          },
+          loaded: [
+            {
+              executorId: "main",
+              name: "previous-review",
+              path: "/previous/SKILL.md",
+              kind: "skill",
+              bytes: 50,
+            },
+            {
+              executorId: "child-previous",
+              name: "previous-review",
+              path: "/previous/example.txt",
+              kind: "resource",
+              bytes: 20,
+            },
+          ],
+        },
+      });
+      expect(text).toContain(
+        resourcePhase === "active"
+          ? "当前运行快照（active）"
+          : "下轮磁盘预览（preview，非当前已加载）"
+      );
+      expect(text).toContain("最近一轮摘要（last，非当前激活）");
+      expect(text).toContain("采集于 2026-11-11T01:00:00Z");
+      expect(text).toContain(
+        "执行者 main：$previous-review skill /previous/SKILL.md（50 字节）"
+      );
+      expect(text).toContain(
+        "执行者 child-previous：$previous-review resource /previous/example.txt（20 字节）"
+      );
+      expect(text).toContain("已加载：无（技能正文仅本轮生效）");
+    }
+  });
+  it("没有最近轮摘要不显示历史加载，空加载摘要仍展示采集时间", () => {
+    const status: SessionStatusInfo = {
+      model: null,
+      providerProfileName: null,
+      estimatedContextTokens: 0,
+      messageCount: 0,
+      agentsMd: null,
+      approvalMode: "assist",
+      contextWindowTokens: null,
+      compacted: null,
+    };
+    expect(formatSessionStatus(status)).not.toContain("最近一轮摘要");
+    expect(
+      formatSessionStatus({ ...status, lastResources: null })
+    ).not.toContain("最近一轮摘要");
+    const text = formatSessionStatus({
+      ...status,
+      lastResources: {
+        estimatedTokens: 0,
+        loaded: [],
+        catalog: {
+          capturedAt: "2026-11-11T03:00:00Z",
+          indexBytes: 0,
+          agents: { sources: [], truncated: false },
+          skills: [],
+          diagnostics: [],
+        },
+      },
+    });
+    expect(text).toContain("采集于 2026-11-11T03:00:00Z");
+    expect(text).toContain("最近一轮已加载：无");
+    expect(text).not.toContain("当前运行快照");
+  });
+
+  it("资源状态区分当前快照和下轮预览，展示来源/状态/诊断与执行者而非正文", () => {
+    for (const resourcePhase of ["active", "preview"] as const) {
+      const text = formatSessionStatus({
+        model: null,
+        providerProfileName: null,
+        estimatedContextTokens: 500,
+        messageCount: 0,
+        agentsMd: null,
+        approvalMode: "assist",
+        contextWindowTokens: null,
+        compacted: null,
+        resourcePhase,
+        resources: {
+          estimatedTokens: 200,
+          loaded: [
+            {
+              executorId: "child-2",
+              name: "review",
+              path: "/review/SKILL.md",
+              kind: "skill",
+              bytes: 50,
+            },
+          ],
+          catalog: {
+            capturedAt: "2026-11-11T01:00:00Z",
+            indexBytes: 80,
+            agents: {
+              sources: [
+                {
+                  path: "/project/AGENTS.md",
+                  scope: "project",
+                  bytes: 40000,
+                  includedBytes: 32768,
+                },
+              ],
+              truncated: true,
+            },
+            skills: [
+              {
+                name: "review",
+                description: "审查",
+                path: "/review/SKILL.md",
+                directory: "/review",
+                scope: "project",
+                source: "agents",
+                status: "shadowed",
+                reason: "已覆盖来源",
+              },
+            ],
+            diagnostics: [{ path: "/review/SKILL.md", message: "诊断信息" }],
+          },
+        },
+      });
+      for (const expected of [
+        resourcePhase === "active" ? "当前运行快照" : "下轮磁盘预览",
+        "/project/AGENTS.md",
+        "32768",
+        "40000",
+        "已截断",
+        "child-2",
+        "review",
+        "已覆盖来源",
+        "诊断信息",
+        "200",
+      ])
+        expect(text).toContain(expected);
+    }
+  });
   it("包含模型、用量估算、消息数、AGENTS.md 来源与审批模式（中文档位说明）", () => {
     const text = formatSessionStatus({
       model: "glm-4.7",

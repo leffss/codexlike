@@ -5,7 +5,8 @@ import {
   type CompactRecord,
   type SessionRecord,
   type StoredMessage,
-} from '@codexlike/agent-core/node';
+  type ResourceSnapshotSummary,
+} from "@codexlike/agent-core/node";
 
 /** /status 展示的会话状态（工单 07；审批模式自工单 04 起显示真实档位） */
 export interface SessionStatusInfo {
@@ -13,7 +14,7 @@ export interface SessionStatusInfo {
   model: string | null;
   providerProfileName: string | null;
   /**
-   * 上下文 token 用量估算：系统提示（AGENTS.md）+ user/assistant 消息
+   * 上下文 token 用量估算：规范、技能索引与本轮已加载文本 + user/assistant 消息
    * （error 提示不进模型上下文，也不计入）。估算函数与 compact（工单 08）共用。
    * 压缩后为压缩后用量（compact-summary 摘要按上下文消息计入）。
    */
@@ -27,9 +28,14 @@ export interface SessionStatusInfo {
   messageCount: number;
   /** AGENTS.md 来源摘要；未发现任何文件为 null */
   agentsMd: { sources: string[]; truncated: boolean } | null;
+  /** 当前运行快照或下轮预览；不包含技能正文。 */
+  resources?: ResourceSnapshotSummary;
+  resourcePhase?: "active" | "preview";
+  /** 最近完成轮的审计摘要，不计入当前上下文用量。 */
+  lastResources?: ResourceSnapshotSummary | null;
   /** /compact 已压缩标记（最近一次压缩）；从未压缩为 null（工单 08） */
   compacted: { at: string; messagesCompacted: number } | null;
-  /** 审批模式（工单 04）：readonly / suggest / full */
+  /** 审批模式：ask / assist / full-access */
   approvalMode: ApprovalMode;
 }
 
@@ -39,23 +45,38 @@ export interface SessionStatusInfo {
 export function buildSessionStatus(input: {
   record: SessionRecord;
   messages: StoredMessage[];
-  agentsMd: AgentsMdDiscovery;
+  agentsMd?: AgentsMdDiscovery;
+  resources?: ResourceSnapshotSummary;
+  resourcePhase?: "active" | "preview";
+  /** 最近完成轮的审计摘要，不计入当前上下文用量。 */
+  lastResources?: ResourceSnapshotSummary | null;
   providerProfileName: string | null;
   /** 最近一次发送消息所用 Profile 的上下文窗口（未配置/无 Profile 传 null） */
   contextWindowTokens?: number | null;
   /** 最近一次 compact 记录（listCompacts 末条）；未压缩传 null */
   latestCompact: CompactRecord | null;
 }): SessionStatusInfo {
-  const { record, messages, agentsMd } = input;
+  const { record, messages, resources } = input;
+  const agentsMd = input.agentsMd ?? {
+    sections: [],
+    combined: "",
+    truncated: false,
+  };
+  const sources =
+    resources?.catalog.agents.sources.map((source) => source.path) ??
+    agentsMd.sections.map((section) => section.path);
   const contextMessages = messages.filter(
     (message) =>
-      message.role === 'user' ||
-      message.role === 'assistant' ||
-      message.role === 'compact-summary',
+      message.role === "user" ||
+      message.role === "assistant" ||
+      message.role === "compact-summary"
   );
   const estimated =
-    estimateTokens(agentsMd.combined) +
-    contextMessages.reduce((sum, message) => sum + estimateTokens(message.content), 0);
+    (resources?.estimatedTokens ?? estimateTokens(agentsMd.combined)) +
+    contextMessages.reduce(
+      (sum, message) => sum + estimateTokens(message.content),
+      0
+    );
 
   return {
     model: record.model,
@@ -64,12 +85,20 @@ export function buildSessionStatus(input: {
     contextWindowTokens: input.contextWindowTokens ?? null,
     messageCount: contextMessages.length,
     agentsMd:
-      agentsMd.sections.length === 0
+      sources.length === 0
         ? null
         : {
-            sources: agentsMd.sections.map((section) => section.path),
-            truncated: agentsMd.truncated,
+            sources,
+            truncated:
+              resources?.catalog.agents.truncated ?? agentsMd.truncated,
           },
+    ...(resources === undefined
+      ? {}
+      : {
+          resources,
+          resourcePhase: input.resourcePhase ?? "preview",
+          lastResources: input.lastResources ?? null,
+        }),
     compacted:
       input.latestCompact === null
         ? null

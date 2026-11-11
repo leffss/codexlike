@@ -87,11 +87,12 @@ export function formatSessionStatus(status: SessionStatusInfo): string {
     status.model === null
       ? "未选择（发送消息后记录所用模型）"
       : `${status.providerProfileName ?? "未知 Profile"} · ${status.model}`;
+  const agents = status.resources?.catalog.agents ?? status.agentsMd;
   const agentsMd =
-    status.agentsMd === null
+    agents === null
       ? "未发现 AGENTS.md"
-      : `${status.agentsMd.sources.length} 个来源${
-          status.agentsMd.truncated ? "（总量超 32 KiB 已截断）" : ""
+      : `${agents.sources.length} 个来源${
+          agents.truncated ? "（总量超 32 KiB 已截断）" : ""
         }`;
   const compacted =
     status.compacted === null
@@ -104,5 +105,44 @@ export function formatSessionStatus(status: SessionStatusInfo): string {
     `压缩状态：${compacted}`,
     `AGENTS.md：${agentsMd}`,
     `审批模式：${APPROVAL_MODE_LABELS[status.approvalMode]}`,
+    ...(status.resources === undefined
+      ? []
+      : [
+          `资源：${status.resourcePhase === "active" ? "当前运行快照（active）" : "下轮磁盘预览（preview，非当前已加载）"}`,
+          `资源估算：约 ${status.resources.estimatedTokens} tokens；索引 ${status.resources.catalog.indexBytes} 字节`,
+          ...status.resources.catalog.agents.sources.map(
+            (source) =>
+              `- AGENTS ${source.path}：已纳入 ${source.includedBytes} / ${source.bytes} 字节`
+          ),
+          ...status.resources.catalog.skills.map(
+            (skill) =>
+              `- $${skill.name} [${skill.status}] ${skill.scope}/${skill.source} ${skill.path}${skill.reason ? `：${skill.reason}` : ""}`
+          ),
+          status.resources.loaded.length === 0
+            ? "已加载：无（技能正文仅本轮生效）"
+            : "已加载（按执行者独立记录）：",
+          ...status.resources.loaded.map(
+            (record) =>
+              `- 执行者 ${record.executorId}：$${record.name} ${record.kind} ${record.path}（${record.bytes} 字节）`
+          ),
+          ...status.resources.catalog.diagnostics.map(
+            (diagnostic) => `- 诊断 ${diagnostic.path}：${diagnostic.message}`
+          ),
+          "完整来源元数据请查看「规范与技能」；不展示正文。",
+        ]),
+    ...(status.lastResources == null
+      ? []
+      : [
+          "最近一轮摘要（last，非当前激活）",
+          `采集于 ${status.lastResources.catalog.capturedAt}`,
+          "以下仅为最近一轮加载记录，不会自动激活本轮技能。",
+          status.lastResources.loaded.length === 0
+            ? "最近一轮已加载：无"
+            : "最近一轮已加载（按执行者独立记录）：",
+          ...status.lastResources.loaded.map(
+            (record) =>
+              `- 执行者 ${record.executorId}：$${record.name} ${record.kind} ${record.path}（${record.bytes} 字节）`
+          ),
+        ]),
   ].join("\n");
 }

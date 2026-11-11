@@ -9,6 +9,12 @@ import {
   type ToolResultPart,
 } from "ai";
 
+import { extractSkillNames } from "../composer/skill-reference";
+import type {
+  AgentResourceSnapshot,
+  ResourceSnapshotSummary,
+  SessionResourceState,
+} from "../context/resource-types";
 import { createLanguageModelFromProfile } from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
@@ -59,6 +65,8 @@ export interface CreateAgentSessionOptions {
   history?: StoredMessage[];
   /** AGENTS.md 等组装的系统提示；空串/省略时不注入 system 角色 */
   systemPrompt?: string;
+  /** 每条消息互斥内创建资源快照；正文与工具加载状态仅本轮有效。 */
+  resources?: () => AgentResourceSnapshot;
   /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认走 OpenAI 兼容构造 */
   languageModelFor?: (profile: ProviderProfile) => LanguageModel;
   /**
@@ -91,6 +99,8 @@ export interface AgentSession {
   readonly id: string;
   /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
   readonly record: SessionRecord;
+  /** 当前运行快照实时摘要与最近一轮摘要；不包含正文，不随持久化恢复。 */
+  readonly resourceState: SessionResourceState;
   /**
    * 全部等待用户审批的请求（主会话与子代理并行等待时可能多个）。
    * UI 切回会话时据此恢复审批卡片。
@@ -273,6 +283,8 @@ export function createAgentSession(
   let approvalMode = options.approvalMode ?? record.approvalMode ?? "assist";
   // 主会话流的中断信号（子代理审批等待与之贯通；每次 sendMessage 更新）
   let activeSignal: AbortSignal | undefined;
+  let currentResources: AgentResourceSnapshot | undefined;
+  let lastResources: ResourceSnapshotSummary | null = null;
   const approvalWaiters = new Map<
     string,
     { request: ApprovalRequest; resolve: (decision: ApprovalDecision) => void }
@@ -289,6 +301,7 @@ export function createAgentSession(
       sessionId: record.id,
       workspacePath: record.workspacePath,
       approvalMode: () => approvalMode,
+      resources: () => currentResources,
       requestApproval(request) {
         return requestSessionApproval(request);
       },
@@ -361,6 +374,12 @@ export function createAgentSession(
   return {
     id: record.id,
     record,
+    get resourceState() {
+      return {
+        active: currentResources?.summary() ?? null,
+        last: lastResources,
+      };
+    },
     get pendingApprovals() {
       return pendingApprovalList();
     },
@@ -392,6 +411,33 @@ export function createAgentSession(
       // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
       activeSignal = signal;
       try {
+        const snapshot = (currentResources = options.resources?.());
+        const execution = snapshot?.createExecution("main");
+        // 显式引用全部验证成功后才落库用户消息；正文只进入本轮 system，不污染历史。
+        const explicitBody =
+          execution?.loadExplicit(extractSkillNames(text)) ?? "";
+        const turnSystemPrompt = [
+          systemPrompt,
+          snapshot?.systemPrompt ?? "",
+          explicitBody,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        // 工具逐条消息解析（MCP 启停即时生效），资源工具重名必须显式拒绝。
+        const toolsByName = new Map(
+          resolveSessionTools().map((tool) => [tool.name, tool])
+        );
+        for (const tool of execution?.tools ?? []) {
+          if (toolsByName.has(tool.name)) {
+            throw new Error(`工具名称冲突：${tool.name}`);
+          }
+          toolsByName.set(tool.name, tool);
+        }
+        const modelTools =
+          toolsByName.size > 0
+            ? toModelTools([...toolsByName.values()])
+            : undefined;
+
         // 模型选择对本次及后续消息生效，落库
         persistence.updateSession(record.id, {
           providerProfileId: profile.id,
@@ -415,17 +461,6 @@ export function createAgentSession(
         persistence.insertMessage(userMessage);
         yield { type: "user-message", message: userMessage };
 
-        // 工具逐条消息解析（工单 12）：工厂函数让设置页的 MCP 工具启停、
-        // server 断线/重连对后续消息即时生效；数组形式行为不变。
-        // spawn_subagent（工单 13）随解析一并加入工具表
-        const toolsByName = new Map(
-          resolveSessionTools().map((tool) => [tool.name, tool])
-        );
-        const modelTools =
-          toolsByName.size > 0
-            ? toModelTools([...toolsByName.values()])
-            : undefined;
-
         const assistantMessageId = generateId();
         yield { type: "assistant-start", messageId: assistantMessageId };
 
@@ -446,7 +481,7 @@ export function createAgentSession(
           while (true) {
             const result = streamText({
               model: modelFor(profile),
-              system: systemPrompt === "" ? undefined : systemPrompt,
+              system: turnSystemPrompt === "" ? undefined : turnSystemPrompt,
               messages: pending,
               abortSignal: signal,
               tools: modelTools,
@@ -688,11 +723,19 @@ export function createAgentSession(
           ? { type: "assistant-aborted", message: assistantMessage }
           : { type: "assistant-done", message: assistantMessage };
       } finally {
-        persistence.updateSession(record.id, {
-          status: "idle",
-          updatedAt: now(),
-        });
-        busy = false;
+        try {
+          if (currentResources !== undefined) {
+            lastResources = currentResources.summary();
+          }
+        } finally {
+          currentResources = undefined;
+          activeSignal = undefined;
+          busy = false;
+          persistence.updateSession(record.id, {
+            status: "idle",
+            updatedAt: now(),
+          });
+        }
       }
     },
 

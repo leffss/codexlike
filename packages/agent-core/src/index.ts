@@ -73,6 +73,21 @@ export {
 } from "./composer/parse";
 export type { ComposerDraftMenu, ComposerSubmission } from "./composer/parse";
 export { fuzzyMatch } from "./composer/fuzzy";
+export { extractSkillNames } from "./composer/skill-reference";
+
+// 规范与技能元数据（浏览器安全；正文发现/加载实现只从 /node 导出）
+export type {
+  AgentInstructionSource,
+  AgentResourceSnapshot,
+  ResourceCatalog,
+  ResourceDiagnostic,
+  ResourceExecution,
+  ResourceSnapshotSummary,
+  SessionResourcesView,
+  SessionResourceState,
+  SkillDescriptor,
+  SkillLoadRecord,
+} from "./context/resource-types";
 
 // 上下文用量估算（/status 与 compact 共用的稳定接口）
 export { estimateTokens } from "./context/tokens";

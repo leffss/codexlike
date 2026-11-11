@@ -7,6 +7,8 @@ import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteSessionStore } from "../../src/session/persistence";
 import { createAgentSession } from "../../src/session/agent-session";
 import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSessionManager } from "../../src/session/manager";
+import { fakeResourceSnapshot } from "./resource-fixture";
 
 /**
  * 工单 08：/compact 手动压缩（GLOSSARY「Compact」）。
@@ -154,6 +156,66 @@ async function talkRounds(
 }
 
 describe("AgentSession.compact（手动压缩）", () => {
+  it("恢复及 compact 不解析历史技能引用，压缩输入与后续请求均无已加载正文", async () => {
+    const persistence = memoryStore();
+    const model = compactableModel("摘要保留文字引用 $alpha，但不激活技能");
+    let available = true;
+    const resourcesFor = () =>
+      fakeResourceSnapshot(
+        "当前规范",
+        available ? { alpha: "ALPHA_PRIVATE_BODY" } : {}
+      );
+    const manager = createSessionManager({
+      persistence,
+      languageModelFor: () => model,
+      resourcesFor,
+      now: fakeClock(),
+    });
+    const session = manager.create({ workspacePath: "C:/work/demo" });
+    for (const text of ["第一轮 $alpha", "第二轮", "第三轮", "第四轮 $alpha"]) {
+      for await (const _event of session.sendMessage({ text, profile })) {
+      }
+    }
+    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    available = false;
+    await session.compact({ profile });
+    expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).toContain(
+      "$alpha"
+    );
+    expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(session.resourceState.active).toBeNull();
+    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    for await (const _event of session.sendMessage({
+      text: "压缩后继续",
+      profile,
+    })) {
+    }
+    expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(session.resourceState.last?.loaded).toEqual([]);
+    const restored = createSessionManager({
+      persistence,
+      languageModelFor: () => model,
+      resourcesFor,
+    }).get(session.id)!;
+    expect(restored.resourceState).toEqual({ active: null, last: null });
+    for await (const _event of restored.sendMessage({
+      text: "重启后继续",
+      profile,
+    })) {
+    }
+    expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
+      "$alpha"
+    );
+    expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(restored.resourceState.last?.loaded).toEqual([]);
+  });
+
   it("压缩成功：摘要替换旧历史，仅保留最近 3 轮原始对话，compact 记录入库", async () => {
     const persistence = memoryStore();
     persistence.insertSession(sessionRecord());

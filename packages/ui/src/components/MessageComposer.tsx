@@ -107,9 +107,15 @@ export function MessageComposer(props: {
         return;
       }
       const draft = parseComposerDraft(text, { caretIndex });
-      const openingSkills = draft.menu === "skills" && !skillMenuOpenRef.current;
+      const openingSkills =
+        draft.menu === "skills" && !skillMenuOpenRef.current;
       skillMenuOpenRef.current = draft.menu === "skills";
-      setMenu(computeMenu(draft, { files: props.workspaceFiles, skills: props.skills }));
+      setMenu(
+        computeMenu(draft, {
+          files: props.workspaceFiles,
+          skills: props.skills,
+        })
+      );
       if (openingSkills) props.onOpenSkills?.();
     },
     [props.workspaceFiles, props.skills, props.onOpenSkills]
@@ -132,8 +138,9 @@ export function MessageComposer(props: {
   }
 
   function submit() {
-    const text = value.trim();
-    if (text === "" || props.disabled) {
+    // 空白检查不改原文；提交解析层决定 trim，避免破坏 Markdown 代码缩进。
+    const text = value;
+    if (text.trim() === "" || props.disabled) {
       return;
     }
     props.onSend(text);
@@ -142,13 +149,26 @@ export function MessageComposer(props: {
     dismissedRef.current = null;
   }
 
-  function selectItem(item: ComposerMenuState["items"][number], caretIndex: number) {
+  function selectItem(
+    item: ComposerMenuState["items"][number],
+    caretIndex: number
+  ) {
     if (menu === null) return;
     if (menu.kind === "skills") {
-      const applied = applySkillSelection({ text: value, skillStart: menu.skillStart ?? 0, selectedName: (item as SkillDescriptor).name, caretIndex });
+      const applied = applySkillSelection({
+        text: value,
+        skillStart: menu.skillStart ?? 0,
+        selectedName: (item as SkillDescriptor).name,
+        caretIndex,
+      });
       commitText(applied.text, applied.caretIndex);
     } else if (menu.kind === "mentions") {
-      const applied = applyMentionSelection({ text: value, mentionStart: menu.mentionStart ?? 0, selectedPath: item as string, caretIndex });
+      const applied = applyMentionSelection({
+        text: value,
+        mentionStart: menu.mentionStart ?? 0,
+        selectedPath: item as string,
+        caretIndex,
+      });
       commitText(applied.text, applied.caretIndex);
     } else {
       const command = item as SlashCommandDef;
@@ -174,7 +194,10 @@ export function MessageComposer(props: {
     }
     const prefix = value.slice(0, caret);
     const insertion = `${prefix === "" || /\s$/.test(prefix) ? "" : " "}$`;
-    commitText(prefix + insertion + value.slice(caret), caret + insertion.length);
+    commitText(
+      prefix + insertion + value.slice(caret),
+      caret + insertion.length
+    );
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -196,7 +219,10 @@ export function MessageComposer(props: {
       }
       if (result.action === "select") {
         event.preventDefault();
-        selectItem(result.item, event.currentTarget.selectionStart ?? value.length);
+        selectItem(
+          result.item,
+          event.currentTarget.selectionStart ?? value.length
+        );
         return;
       }
     }
@@ -237,16 +263,24 @@ export function MessageComposer(props: {
               {menu.items.map((item, index) => {
                 const isCommand = menu.kind === "slash-commands";
                 const command = isCommand ? (item as SlashCommandDef) : null;
-                const skill = menu.kind === "skills" ? (item as SkillDescriptor) : null;
+                const skill =
+                  menu.kind === "skills" ? (item as SkillDescriptor) : null;
                 const path = menu.kind === "mentions" ? (item as string) : null;
                 return (
                   <li
                     key={command?.name ?? skill?.path ?? path}
                     role="option"
                     aria-selected={index === menu.activeIndex}
-                    data-testid={skill ? `composer-skill-${skill.name}` : undefined}
+                    data-testid={
+                      skill ? `composer-skill-${skill.name}` : undefined
+                    }
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => selectItem(item, textareaRef.current?.selectionStart ?? value.length)}
+                    onClick={() =>
+                      selectItem(
+                        item,
+                        textareaRef.current?.selectionStart ?? value.length
+                      )
+                    }
                     className={
                       index === menu.activeIndex
                         ? "bg-selected px-3 py-1.5 text-sm text-fg"
@@ -266,9 +300,13 @@ export function MessageComposer(props: {
                     ) : skill !== null ? (
                       <span className="block" title={skill.path}>
                         <code className="text-accent">${skill.name}</code>
-                        <span className="ml-2 text-xs text-fg-muted">{skill.description}</span>
+                        <span className="ml-2 text-xs text-fg-muted">
+                          {skill.description}
+                        </span>
                         <span className="block truncate text-xs text-fg-subtle">
-                          下轮预览 · {skill.scope === "project" ? "项目" : "全局"} · {skill.source} · {skill.path}
+                          下轮预览 ·{" "}
+                          {skill.scope === "project" ? "项目" : "全局"} ·{" "}
+                          {skill.source} · {skill.path}
                         </span>
                       </span>
                     ) : (

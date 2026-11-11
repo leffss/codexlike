@@ -3,7 +3,8 @@ import {
   parseComposerDraft,
   SLASH_COMMANDS,
   type SlashCommandDef,
-} from '@codexlike/agent-core';
+  type SkillDescriptor,
+} from "@codexlike/agent-core";
 
 /**
  * 输入框菜单（/ 命令与 @文件引用）的纯函数核心：
@@ -17,64 +18,106 @@ import {
 const MENTION_MENU_LIMIT = 20;
 
 export interface ComposerMenuState {
-  kind: 'slash-commands' | 'mentions';
-  /** 命令（SlashCommandDef）或文件相对路径（string） */
-  items: readonly (SlashCommandDef | string)[];
+  kind: "slash-commands" | "mentions" | "skills";
+  /** 命令、文件相对路径或有效技能元数据。 */
+  items: readonly (SlashCommandDef | string | SkillDescriptor)[];
   activeIndex: number;
   /** mentions 菜单：@ 字符在输入框文本中的位置（选中写回用） */
   mentionStart?: number;
+  skillStart?: number;
 }
 
 export function computeMenu(
   draft: ReturnType<typeof parseComposerDraft>,
-  options: { commands?: readonly SlashCommandDef[]; files: readonly string[] },
+  options: {
+    commands?: readonly SlashCommandDef[];
+    files: readonly string[];
+    skills?: readonly SkillDescriptor[];
+  }
 ): ComposerMenuState | null {
   const commands = options.commands ?? SLASH_COMMANDS;
-  if (draft.menu === 'slash-commands') {
+  if (draft.menu === "slash-commands") {
     const items = fuzzyMatch(draft.query, commands, (command) => command.name);
     return items.length === 0
       ? null
-      : { kind: 'slash-commands', items, activeIndex: 0 };
+      : { kind: "slash-commands", items, activeIndex: 0 };
   }
-  if (draft.menu === 'mentions') {
+  if (draft.menu === "skills") {
+    const items = fuzzyMatch(
+      draft.query,
+      (options.skills ?? []).filter((skill) => skill.status === "active"),
+      (skill) => `${skill.name} ${skill.description}`
+    ).slice(0, MENTION_MENU_LIMIT);
+    return items.length === 0
+      ? null
+      : { kind: "skills", items, activeIndex: 0, skillStart: draft.skillStart };
+  }
+  if (draft.menu === "mentions") {
     const items = fuzzyMatch(draft.query, [...options.files]).slice(
       0,
-      MENTION_MENU_LIMIT,
+      MENTION_MENU_LIMIT
     );
     return items.length === 0
       ? null
-      : { kind: 'mentions', items, activeIndex: 0, mentionStart: draft.mentionStart };
+      : {
+          kind: "mentions",
+          items,
+          activeIndex: 0,
+          mentionStart: draft.mentionStart,
+        };
   }
   return null;
 }
 
 export type MenuKeyResult =
-  | { action: 'move'; activeIndex: number }
-  | { action: 'select'; item: SlashCommandDef | string }
-  | { action: 'close' }
-  | { action: 'default' };
+  | { action: "move"; activeIndex: number }
+  | { action: "select"; item: SlashCommandDef | string | SkillDescriptor }
+  | { action: "close" }
+  | { action: "default" };
 
 export function handleMenuKey(
   menu: ComposerMenuState,
-  key: string,
+  key: string
 ): MenuKeyResult {
   const lastIndex = menu.items.length - 1;
-  if (key === 'ArrowDown') {
-    return { action: 'move', activeIndex: (menu.activeIndex + 1) % menu.items.length };
-  }
-  if (key === 'ArrowUp') {
+  if (key === "ArrowDown") {
     return {
-      action: 'move',
+      action: "move",
+      activeIndex: (menu.activeIndex + 1) % menu.items.length,
+    };
+  }
+  if (key === "ArrowUp") {
+    return {
+      action: "move",
       activeIndex: menu.activeIndex === 0 ? lastIndex : menu.activeIndex - 1,
     };
   }
-  if (key === 'Enter' || key === 'Tab') {
-    return { action: 'select', item: menu.items[menu.activeIndex]! };
+  if (key === "Enter" || key === "Tab") {
+    return { action: "select", item: menu.items[menu.activeIndex]! };
   }
-  if (key === 'Escape') {
-    return { action: 'close' };
+  if (key === "Escape") {
+    return { action: "close" };
   }
-  return { action: 'default' };
+  return { action: "default" };
+}
+
+/** 选择技能只替换引用，不发送消息；保留后续标点和其他引用。 */
+export function applySkillSelection(input: {
+  text: string;
+  skillStart: number;
+  selectedName: string;
+  caretIndex?: number;
+}): { text: string; caretIndex: number } {
+  let end = input.caretIndex ?? input.text.length;
+  while (end < input.text.length && /[a-z0-9-]/.test(input.text[end]!))
+    end += 1;
+  const rest = input.text.slice(end);
+  const replacement = `$${input.selectedName}${/^\s/.test(rest) ? "" : " "}`;
+  return {
+    text: input.text.slice(0, input.skillStart) + replacement + rest,
+    caretIndex:
+      input.skillStart + replacement.length + (/^\s/.test(rest) ? 1 : 0),
+  };
 }
 
 /**
@@ -104,8 +147,7 @@ export function applyMentionSelection(input: {
   const replacement = /^\s/.test(rest)
     ? `@${selectedPath}`
     : `@${selectedPath} `;
-  const next =
-    text.slice(0, mentionStart) + replacement + rest;
+  const next = text.slice(0, mentionStart) + replacement + rest;
   return {
     text: next,
     caretIndex: mentionStart + replacement.length,

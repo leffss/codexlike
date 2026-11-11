@@ -11,6 +11,9 @@ import { createSqliteSessionStore } from "../../src/session/persistence";
 import { createAgentSession } from "../../src/session/agent-session";
 import type { SessionEvent, SessionRecord } from "../../src/session/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
+import type { AgentResourceSnapshot } from "../../src/context/resource-types";
+import type { ToolDefinition } from "../../src/tools/types";
+import { fakeResourceSnapshot } from "./resource-fixture";
 
 const profile: ProviderProfile = {
   id: "main-profile",
@@ -155,6 +158,8 @@ interface SubagentHarnessOptions {
   maxConcurrent?: number;
   /** 审批模式 */
   approvalMode?: SessionRecord["approvalMode"];
+  resources?: () => AgentResourceSnapshot;
+  subTools?: ToolDefinition[];
 }
 
 /**
@@ -178,9 +183,10 @@ function makeSubagentSession(options: SubagentHarnessOptions) {
     history: persistence.listMessages(record.id),
     languageModelFor: (p) => (p.id === subProfile.id ? subModel : mainModel),
     tools: createBuiltinTools(),
+    resources: options.resources,
     subagents: {
       // 子代理可用工具：内置六件（实现侧必须剔除 spawn_subagent 防递归）
-      tools: createBuiltinTools(),
+      tools: options.subTools ?? createBuiltinTools(),
       languageModelFor: (p) => (p.id === subProfile.id ? subModel : mainModel),
       settings: () => ({ maxConcurrent: options.maxConcurrent ?? 3 }),
       resolveProfile: options.resolveProfile ?? (async () => subProfile),
@@ -191,6 +197,245 @@ function makeSubagentSession(options: SubagentHarnessOptions) {
 }
 
 describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
+  it("子代理继承本轮规范与目录，正文隔离且任务中的美元引用不自动激活", async () => {
+    const { session, mainModel, subModel, persistence } = makeSubagentSession({
+      workspacePath: "C:/work/demo",
+      resources: () =>
+        fakeResourceSnapshot("共享规范：使用中文、目录含 alpha/beta"),
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate",
+              toolName: "spawn_subagent",
+              input: { task: "检查 $beta" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "read-main",
+              toolName: "read_skill_resource",
+              input: { name: "alpha" },
+            },
+          ],
+        },
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "load-sub",
+              toolName: "load_skill",
+              input: { name: "beta" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["子代理报告"] },
+      ],
+    });
+    const events = await collect(
+      session.sendMessage({ text: "$alpha 委派任务", profile })
+    );
+    const firstSub = JSON.stringify(subModel.doStreamCalls[0]?.prompt);
+    expect(firstSub).toContain("你是 CodexLike 的子代理");
+    expect(firstSub).toContain("共享规范：使用中文");
+    expect(firstSub).not.toContain("ALPHA_PRIVATE_BODY");
+    expect(firstSub).not.toContain("BETA_PRIVATE_BODY");
+    expect(
+      subModel.doStreamCalls[0]?.tools?.map((tool) => tool.name)
+    ).not.toContain("spawn_subagent");
+    expect(
+      subModel.doStreamCalls[0]?.tools?.map((tool) => tool.name)
+    ).toContain("load_skill");
+    expect(
+      events.find(
+        (event) =>
+          event.type === "subagent-tool" &&
+          event.phase === "result" &&
+          event.call.id === "read-main"
+      )
+    ).toMatchObject({
+      call: { isError: true, output: expect.stringContaining("尚未加载") },
+    });
+    expect(JSON.stringify(subModel.doStreamCalls[2]?.prompt)).toContain(
+      "BETA_PRIVATE_BODY"
+    );
+    const nextMain = JSON.stringify(mainModel.doStreamCalls[1]?.prompt);
+    expect(nextMain).toContain("ALPHA_PRIVATE_BODY");
+    expect(nextMain).not.toContain("BETA_PRIVATE_BODY");
+    const queued = events.find((event) => event.type === "subagent-queued");
+    expect(session.resourceState.last?.loaded).toEqual([
+      expect.objectContaining({ executorId: "main", name: "alpha" }),
+      expect.objectContaining({
+        executorId:
+          queued?.type === "subagent-queued" ? queued.subagentId : "missing",
+        name: "beta",
+      }),
+    ]);
+    expect(session.resourceState.active).toBeNull();
+    persistence.close();
+  });
+
+  it("子代理工具与资源工具重名时报错回流，不请求子模型", async () => {
+    const { session, subModel, persistence } = makeSubagentSession({
+      workspacePath: "C:/work/demo",
+      resources: () => fakeResourceSnapshot(),
+      subTools: [
+        {
+          name: "load_skill",
+          description: "重名工具",
+          parameters: { type: "object", properties: {} },
+          permission: "readonly",
+          async execute() {
+            throw new Error("不应执行");
+          },
+        },
+      ],
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate",
+              toolName: "spawn_subagent",
+              input: { task: "任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["失败报告已收到"] },
+      ],
+    });
+    const events = await collect(
+      session.sendMessage({ text: "委派", profile })
+    );
+    expect(
+      events.find((event) => event.type === "subagent-report")
+    ).toMatchObject({
+      ok: false,
+      report: expect.stringContaining("工具名称冲突：load_skill"),
+    });
+    expect(subModel.doStreamCalls).toHaveLength(0);
+    expect(events.at(-1)?.type).toBe("assistant-done");
+    expect(session.resourceState.active).toBeNull();
+    persistence.close();
+  });
+
+  it("并行子代理共享固定规范快照但不共享已加载正文或资源权限", async () => {
+    let revision = "运行快照第一版";
+    let releaseAlpha!: () => void;
+    const alphaGate = new Promise<void>((resolve) => {
+      releaseAlpha = resolve;
+    });
+    const steps = new Map<string, number>();
+    const subModel = new MockLanguageModelV4({
+      doStream: async (request) => {
+        const isAlpha = JSON.stringify(request.prompt[1]).includes(
+          "alpha-worker"
+        );
+        const worker = isAlpha ? "alpha-worker" : "beta-worker";
+        const step = steps.get(worker) ?? 0;
+        steps.set(worker, step + 1);
+        if (isAlpha && step === 0)
+          return toolCallRound([
+            {
+              toolCallId: "a-load",
+              toolName: "load_skill",
+              input: { name: "alpha" },
+            },
+          ]);
+        if (isAlpha) {
+          await alphaGate;
+          return { stream: textRound(["甲报告"]) };
+        }
+        if (step === 0)
+          return toolCallRound([
+            {
+              toolCallId: "b-read",
+              toolName: "read_skill_resource",
+              input: { name: "alpha" },
+            },
+          ]);
+        if (step === 1)
+          return toolCallRound([
+            {
+              toolCallId: "b-load",
+              toolName: "load_skill",
+              input: { name: "beta" },
+            },
+          ]);
+        return { stream: textRound(["乙报告"]) };
+      },
+    });
+    const { session, mainModel, persistence } = makeSubagentSession({
+      workspacePath: "C:/work/demo",
+      maxConcurrent: 2,
+      subModel,
+      resources: () => fakeResourceSnapshot(revision),
+      main: [
+        {
+          kind: "tool",
+          calls: ["alpha-worker", "beta-worker"].map((task) => ({
+            toolCallId: task,
+            toolName: "spawn_subagent",
+            input: { task },
+          })),
+        },
+        { kind: "text", deltas: ["两份报告已收到"] },
+      ],
+    });
+    const events: SessionEvent[] = [];
+    for await (const event of session.sendMessage({
+      text: "并行委派",
+      profile,
+    })) {
+      events.push(event);
+      if (event.type === "user-message") revision = "下轮磁盘第二版";
+      if (event.type === "subagent-report" && event.task === "beta-worker") {
+        expect(
+          events.some(
+            (item) =>
+              item.type === "subagent-report" && item.task === "alpha-worker"
+          )
+        ).toBe(false);
+        expect(session.resourceState.active?.loaded).toHaveLength(2);
+        releaseAlpha();
+      }
+    }
+    expect(
+      events.find(
+        (event) =>
+          event.type === "subagent-tool" &&
+          event.phase === "result" &&
+          event.call.id === "b-read"
+      )
+    ).toMatchObject({
+      call: { isError: true, output: expect.stringContaining("尚未加载") },
+    });
+    for (const request of subModel.doStreamCalls) {
+      const prompt = JSON.stringify(request.prompt);
+      expect(prompt).toContain("运行快照第一版");
+      expect(prompt).not.toContain("下轮磁盘第二版");
+      if (prompt.includes("alpha-worker"))
+        expect(prompt).not.toContain("BETA_PRIVATE_BODY");
+      else expect(prompt).not.toContain("ALPHA_PRIVATE_BODY");
+    }
+    expect(
+      JSON.stringify(mainModel.doStreamCalls.at(-1)?.prompt)
+    ).not.toContain("PRIVATE_BODY");
+    const loaded = session.resourceState.last?.loaded ?? [];
+    expect(loaded.map((item) => item.name).sort()).toEqual(["alpha", "beta"]);
+    expect(new Set(loaded.map((item) => item.executorId)).size).toBe(2);
+    expect(loaded.every((item) => item.executorId !== "main")).toBe(true);
+    expect(session.resourceState.active).toBeNull();
+    persistence.close();
+  });
+
   it("委派调研任务：子代理独立完成并以文本报告回流主会话上下文", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { session, persistence, mainModel, subModel } = makeSubagentSession({
@@ -443,6 +688,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     const { session } = makeSubagentSession({
       workspacePath: workspace,
       approvalMode: "ask",
+      resources: () => fakeResourceSnapshot(),
       main: [
         {
           kind: "tool",
@@ -456,8 +702,18 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
         },
         { kind: "text", deltas: ["ask 档下子代理的写入没被批准"] },
       ],
-      // 子代理先尝试 write_file（弹卡被拒），再返回报告
+      // 加载技能不会提升写入权限：只读加载放行，write_file 仍须审批。
       sub: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-load",
+              toolName: "load_skill",
+              input: { name: "alpha" },
+            },
+          ],
+        },
         {
           kind: "tool",
           calls: [
@@ -495,6 +751,15 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(approvalRequest).not.toBeNull();
     expect(approvalRequest!.request.subagentId).toBeDefined();
     expect(approvalRequest!.request.toolName).toBe("write_file");
+    expect(session.resourceState.active?.loaded).toEqual([
+      expect.objectContaining({
+        executorId: approvalRequest!.request.subagentId,
+        name: "alpha",
+      }),
+    ]);
+    expect(
+      events.filter((event) => event.type === "approval-request")
+    ).toHaveLength(1);
     expect(session.respondApproval(approvalRequest!.request.id, "reject")).toBe(
       true
     );
@@ -685,40 +950,54 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
   it("主会话中断：运行中的子代理随 AbortSignal 一并中止，主会话以中断态收尾", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-    // 挂起子模型：中断前一直挂着；abort signal 到达时以 AbortError 终止流
+    // 子模型先独立加载技能，再挂起；中断时须释放本轮资源与审批状态。
     // （模拟真实 provider 流对 abortSignal 的响应——MockLanguageModelV4 不会自动做）
     let releaseGate: (() => void) | null = null;
     const gate = new Promise<void>((resolve) => {
       releaseGate = resolve;
     });
+    let loaded = false;
     const subModel = new MockLanguageModelV4({
-      doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
-          async start(controller) {
-            const onAbort = () =>
-              controller.error(new DOMException("Aborted", "AbortError"));
-            const signal = options.abortSignal;
-            if (signal?.aborted) {
-              onAbort();
-              return;
-            }
-            signal?.addEventListener("abort", onAbort, { once: true });
-            await gate;
-            signal?.removeEventListener("abort", onAbort);
-            controller.enqueue({ type: "text-start", id: "text-1" });
-            controller.enqueue({
-              type: "text-delta",
-              id: "text-1",
-              delta: "不应到达",
-            });
-            controller.enqueue({ type: "text-end", id: "text-1" });
-            controller.enqueue({ type: "finish", ...finishPart() });
-            controller.close();
-          },
-        }),
-      }),
+      doStream: async (options) => {
+        if (!loaded) {
+          loaded = true;
+          return toolCallRound([
+            {
+              toolCallId: "before-abort",
+              toolName: "load_skill",
+              input: { name: "alpha" },
+            },
+          ]);
+        }
+        return {
+          stream: new ReadableStream<LanguageModelV4StreamPart>({
+            async start(controller) {
+              const onAbort = () =>
+                controller.error(new DOMException("Aborted", "AbortError"));
+              const signal = options.abortSignal;
+              if (signal?.aborted) {
+                onAbort();
+                return;
+              }
+              signal?.addEventListener("abort", onAbort, { once: true });
+              await gate;
+              signal?.removeEventListener("abort", onAbort);
+              controller.enqueue({ type: "text-start", id: "text-1" });
+              controller.enqueue({
+                type: "text-delta",
+                id: "text-1",
+                delta: "不应到达",
+              });
+              controller.enqueue({ type: "text-end", id: "text-1" });
+              controller.enqueue({ type: "finish", ...finishPart() });
+              controller.close();
+            },
+          }),
+        };
+      },
     });
     const { session } = makeSubagentSession({
+      resources: () => fakeResourceSnapshot(),
       workspacePath: workspace,
       main: [
         {
@@ -753,11 +1032,16 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       head = await iterator.next()
     ) {
       events.push(head.value);
-      if (head.value.type === "subagent-start") {
+      if (
+        head.value.type === "subagent-tool" &&
+        head.value.phase === "result" &&
+        head.value.call.id === "before-abort"
+      ) {
         break;
       }
     }
     expect(events.some((e) => e.type === "subagent-start")).toBe(true);
+    expect(session.resourceState.active?.loaded).toHaveLength(1);
 
     // 中断主会话：子代理的模型流随 signal 以 AbortError 终止，事件流收尾不卡死
     controller.abort();
@@ -782,5 +1066,10 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     // 主会话以中断态收尾（02 的语义），无 error
     expect(events.at(-1)?.type).toBe("assistant-aborted");
     expect(events.filter((e) => e.type === "error")).toHaveLength(0);
+    expect(session.resourceState.active).toBeNull();
+    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    expect(JSON.stringify(session.resourceState)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
   });
 });
