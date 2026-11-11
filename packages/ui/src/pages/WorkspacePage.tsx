@@ -10,6 +10,15 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
+import type {
+  SessionEventEnvelope,
+  SessionListItem,
+} from "@codexlike/desktop/ipc";
+import {
+  hydrateLiveSession,
+  receiveLiveEvent,
+  type LiveSession,
+} from "../lib/live-session";
 
 import {
   evaluateContextWarning,
@@ -17,8 +26,6 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type ProjectRecord,
-  type SessionEvent,
-  type SessionRecord,
   type SessionResourcesView,
   type ThinkingEffort,
 } from "@codexlike/agent-core";
@@ -29,13 +36,7 @@ import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { SessionSidebar } from "../components/SessionSidebar";
-import {
-  applySessionEvent,
-  initialTranscript,
-  hydrateTranscript,
-  mergeInteractions,
-  type UiItem,
-} from "../lib/session-view";
+import { mergeInteractions, type UiItem } from "../lib/session-view";
 import {
   formatSessionStatus,
   matchProfilesForModelSwitch,
@@ -61,10 +62,11 @@ export function WorkspacePage(props: {
   const loadingRef = useRef<{
     sessionId: string;
     generation: number;
-    events: SessionEvent[];
+    events: SessionEventEnvelope[];
   } | null>(null);
+  const liveRef = useRef<LiveSession | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -206,51 +208,28 @@ export function WorkspacePage(props: {
       const buffer = {
         sessionId: id,
         generation: request,
-        events: [] as SessionEvent[],
+        events: [] as SessionEventEnvelope[],
       };
       loadingRef.current = buffer;
       const snapshotVersion = workspaceState.version();
       try {
-        const [history, pendingList, list] = await Promise.all([
-          window.codexlike.sessions.messages(id),
-          window.codexlike.sessions.pendingInteractions(id),
-          window.codexlike.sessions.list(),
-        ]);
+        const view = await window.codexlike.sessions.view(id);
         if (!isCurrent()) return;
+        if (!view) throw new Error("会话不存在或已损坏");
+        const live = hydrateLiveSession(view, buffer.events);
+        liveRef.current = live;
         workspaceState.reconcile(
           id,
-          history.flatMap((item) =>
+          live.items.flatMap((item) =>
             item.kind === "interaction" ? [item.interaction] : []
           ),
           snapshotVersion
         );
-        for (const record of pendingList) workspaceState.observe(record);
-        setMessages(
-          mergeInteractions(
-            hydrateTranscript(history, buffer.events),
-            workspaceState.records(id)
-          )
-        );
-        setSessions(list);
-        const status = list.find((session) => session.id === id)?.status;
-        let running =
-          status === "streaming" ||
-          status === "waiting-user" ||
-          status === "waiting-approval";
-        for (const event of buffer.events) {
-          if (
-            event.type === "assistant-start" ||
-            event.type === "interaction-request"
-          )
-            running = true;
-          if (
-            event.type === "assistant-done" ||
-            event.type === "assistant-aborted" ||
-            event.type === "error"
-          )
-            running = false;
-        }
-        setStreaming(running || workspaceState.pending(id).length > 0);
+        setMessages(live.items);
+        setStreaming(live.activity.running);
+        void window.codexlike.sessions
+          .markViewed(id, live.sequence)
+          .then(() => refreshSessions());
       } catch (error) {
         if (!isCurrent()) return;
         setMessages([
@@ -276,7 +255,7 @@ export function WorkspacePage(props: {
         if (isCurrent()) setWorkspaceFiles([]);
       }
     },
-    [refreshContextWarning, refreshResources, workspaceState]
+    [refreshContextWarning, refreshResources, refreshSessions, workspaceState]
   );
 
   useEffect(() => {
@@ -313,16 +292,28 @@ export function WorkspacePage(props: {
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
-    return window.codexlike.onSessionEvent(({ sessionId, event }) => {
+    return window.codexlike.onSessionEvent((envelope) => {
+      const { sessionId, event } = envelope;
       if (sessionId === currentIdRef.current) {
-        if (loadingRef.current?.sessionId === sessionId)
-          loadingRef.current.events.push(event);
-        else setMessages((prev) => applySessionEvent(prev, event));
-        if (
-          event.type === "assistant-start" ||
-          event.type === "interaction-request"
-        ) {
-          setStreaming(true);
+        if (loadingRef.current?.sessionId === sessionId) {
+          loadingRef.current.events.push(envelope);
+        } else if (liveRef.current?.sessionId === sessionId) {
+          const previous = liveRef.current;
+          const live = receiveLiveEvent(previous, { ...envelope });
+          if (live === previous) return;
+          liveRef.current = live;
+          // 本地 /status 反馈不属于宿主历史，接续时保留。
+          setMessages((prev) => [
+            ...live.items,
+            ...prev.filter(
+              (item) => item.kind === undefined && item.role === "status"
+            ),
+          ]);
+          setStreaming(live.activity.running);
+          if (!live.activity.running)
+            void window.codexlike.sessions
+              .markViewed(sessionId, live.sequence)
+              .then(() => refreshSessions());
         }
         if (
           event.type === "assistant-start" ||
@@ -339,7 +330,6 @@ export function WorkspacePage(props: {
           event.type === "assistant-aborted" ||
           event.type === "error"
         ) {
-          setStreaming(false);
           // 每轮回复结束（完成/中断/出错）后重估上下文告警
           void refreshContextWarning(sessionId);
         }
@@ -537,17 +527,19 @@ export function WorkspacePage(props: {
           await refreshSessions();
           // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
           const snapshotVersion = workspaceState.version();
-          const history =
-            await window.codexlike.sessions.messages(compactSessionId);
+          const view = await window.codexlike.sessions.view(compactSessionId);
+          if (!compactIsCurrent()) return;
+          if (!view) throw new Error("会话不存在或已损坏");
+          const live = hydrateLiveSession(view);
+          liveRef.current = live;
           workspaceState.reconcile(
             compactSessionId,
-            history.flatMap((item) =>
+            live.items.flatMap((item) =>
               item.kind === "interaction" ? [item.interaction] : []
             ),
             snapshotVersion
           );
-          if (!compactIsCurrent()) return;
-          setMessages(initialTranscript(history));
+          setMessages(live.items);
           // 压缩后用量下降，告警随之重估（大概率消失）
           await refreshContextWarning(compactSessionId);
           if (!compactIsCurrent()) return;

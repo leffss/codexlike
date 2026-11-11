@@ -30,6 +30,7 @@ import {
 
 import type { ProfileStore } from "../profiles/profile-store";
 import { createInterruptRegistry } from "./interrupt-registry";
+import { createLiveSessions } from "./live-sessions";
 import { readMentionAttachments } from "./mentions";
 import { screenshotPathFor } from "./screenshots";
 import { buildSessionStatus } from "./status";
@@ -68,8 +69,17 @@ export function registerSessionHandlers(options: {
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
   const starts = new Map<string, Promise<SessionRecord>>();
+  const liveSessions = createLiveSessions(manager);
 
-  function emit(envelope: SessionEventEnvelope): void {
+  function emit(
+    input: Pick<SessionEventEnvelope, "sessionId" | "executionId" | "event">
+  ): void {
+    const envelope = liveSessions.accept(
+      input.sessionId,
+      input.executionId,
+      input.event
+    );
+    if (!envelope) return;
     const win = getWindow();
     if (win !== null && !win.isDestroyed()) {
       win.webContents.send(IPC.sessionEvents, envelope);
@@ -82,7 +92,25 @@ export function registerSessionHandlers(options: {
       throw new Error("请选择项目目录");
     return manager.addProject(path);
   });
-  ipcMain.handle(IPC.sessions.list, () => manager.list());
+  ipcMain.handle(IPC.sessions.list, () =>
+    manager.list().map((record) => ({
+      ...record,
+      activity: liveSessions.activity(record.id),
+    }))
+  );
+  ipcMain.handle(IPC.sessions.view, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== "string")
+      throw new Error("view：sessionId 必须是字符串");
+    return liveSessions.view(sessionId);
+  });
+  ipcMain.handle(
+    IPC.sessions.markViewed,
+    (_e, sessionId: unknown, sequence: unknown) => {
+      if (typeof sessionId !== "string" || typeof sequence !== "number")
+        throw new Error("查看水位参数不合法");
+      liveSessions.markViewed(sessionId, sequence);
+    }
+  );
   ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("execution：sessionId 必须是字符串");
@@ -278,6 +306,7 @@ export function registerSessionHandlers(options: {
       throw new Error("会话正在执行或等待用户回应");
     const executionId = randomUUID();
     executions.set(sessionId, executionId);
+    const rollbackLive = liveSessions.begin(sessionId, executionId);
     // 本条消息流的中断通道：停止按钮经 sessions:interrupt 打断
     const controller = interrupts.begin(sessionId);
     try {
@@ -317,6 +346,7 @@ export function registerSessionHandlers(options: {
         });
     } catch (error) {
       // 启动失败：注销中断登记后再抛回渲染进程
+      rollbackLive();
       interrupts.end(sessionId, controller);
       if (executions.get(sessionId) === executionId)
         executions.delete(sessionId);
@@ -334,7 +364,9 @@ export function registerSessionHandlers(options: {
         throw new Error("interrupt：sessionId 必须是字符串");
       }
       // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲会话幂等返回 false
-      return interrupts.interrupt(sessionId);
+      const interrupted = interrupts.interrupt(sessionId);
+      if (interrupted) liveSessions.stop(sessionId);
+      return interrupted;
     }
   );
 
@@ -452,6 +484,7 @@ export function registerSessionHandlers(options: {
       }
       // 失败（模型错误/历史过短/会话正忙）以中文异常抛回渲染层；原历史不受损，可重试
       const result = await session.compact({ profile });
+      liveSessions.invalidate(sessionId);
       return { compactedMessages: result.compactedMessages };
     }
   );

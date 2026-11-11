@@ -26,6 +26,66 @@ function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
 }
 
 describe("历史快照与加载期间事件合并", () => {
+  it("错过开始事件时结果补齐普通工具、子代理和子代理内部工具且重复事件不重建卡", () => {
+    const call = {
+      id: "tool",
+      sessionId: "s1",
+      toolName: "read_file",
+      arguments: '{"path":"a.txt"}',
+      output: "文件正文",
+      isError: false,
+      createdAt: "2026-11-11T08:00:00Z",
+    };
+    let items = applySessionEvent([], { type: "tool-result", call });
+    items = applySessionEvent(items, { type: "tool-result", call });
+    items = applySessionEvent(items, { type: "tool-call", call });
+    expect(items).toEqual([
+      {
+        kind: "tool-call",
+        id: "tool",
+        sessionId: "s1",
+        toolName: "read_file",
+        arguments: call.arguments,
+        output: "文件正文",
+        isError: false,
+        running: false,
+      },
+    ]);
+    items = applySessionEvent(items, {
+      type: "subagent-start",
+      subagentId: "sub",
+      toolCallId: "spawn",
+      task: "检查文件",
+    });
+    items = applySessionEvent(items, {
+      type: "subagent-tool",
+      subagentId: "sub",
+      phase: "result",
+      call,
+    });
+    expect(items[1]).toMatchObject({
+      kind: "subagent",
+      id: "sub",
+      tools: [{ id: "tool", output: "文件正文", running: false }],
+    });
+    const restored = applySessionEvent([], {
+      type: "tool-result",
+      call: {
+        ...call,
+        id: "spawn",
+        toolName: "spawn_subagent",
+        arguments: '{"task":"检查文件"}',
+      },
+    });
+    expect(restored).toMatchObject([
+      {
+        kind: "subagent",
+        toolCallId: "spawn",
+        state: "done",
+        report: "文件正文",
+      },
+    ]);
+  });
   it("设置/切会话错过 assistant-start 后，当前会话 delta 和 done 仍重建助手气泡", () => {
     let state = initialTranscript([
       { kind: "message", message: stored({ content: "开始四题混合问答" }) },

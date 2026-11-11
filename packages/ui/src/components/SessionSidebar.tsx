@@ -1,6 +1,8 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 
-import type { ProjectRecord, SessionRecord } from "@codexlike/agent-core";
+import type { ProjectRecord } from "@codexlike/agent-core";
+import type { SessionListItem } from "@codexlike/desktop/ipc";
+import { SessionActivityBadge } from "./SessionActivityBadge";
 
 import { groupSessionsByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -48,7 +50,7 @@ function FolderIcon(props: { open: boolean }) {
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
 export function SessionSidebar(props: {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
   projects: ProjectRecord[];
   onAddProject: () => void;
   onCreateInProject: (projectId: string) => void;
@@ -96,7 +98,7 @@ export function SessionSidebar(props: {
     }
   }
 
-  function renderSessionItem(session: SessionRecord) {
+  function renderSessionItem(session: SessionListItem) {
     const relative = formatRelativeTime(session.updatedAt, now);
     const absoluteTime = new Date(session.updatedAt).toLocaleString("zh-CN");
 
@@ -137,20 +139,7 @@ export function SessionSidebar(props: {
                   worktree
                 </span>
               )}
-              {session.status === "streaming" ? (
-                <span
-                  title="会话正在运行中"
-                  className="flex items-center gap-1 rounded bg-ok-bg px-1 py-px text-[10px] text-ok-fg"
-                >
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ok-fg" />
-                  运行中
-                </span>
-              ) : session.status === "waiting-user" ||
-                session.status === "waiting-approval" ? (
-                <span className="rounded bg-warn-bg px-1 py-px text-[10px] text-warn-fg">
-                  等待用户
-                </span>
-              ) : null}
+              <SessionActivityBadge session={session} />
               {relative !== "" && (
                 <span
                   className="text-[10px] text-fg-subtle"

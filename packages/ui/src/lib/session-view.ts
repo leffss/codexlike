@@ -162,6 +162,8 @@ export function applySessionEvent(
 ): UiItem[] {
   switch (event.type) {
     case "user-message":
+      if (messages.some((item) => item.id === event.message.id))
+        return messages;
       return [
         ...messages,
         {
@@ -287,6 +289,12 @@ export function applySessionEvent(
       if (event.call.toolName === "spawn_subagent") {
         return messages;
       }
+      if (
+        messages.some(
+          (item) => item.kind === "tool-call" && item.id === event.call.id
+        )
+      )
+        return messages;
       return [
         ...messages,
         {
@@ -304,6 +312,13 @@ export function applySessionEvent(
     case "tool-result":
       // spawn_subagent 的报告回填对应嵌套卡片（按 toolCallId 匹配）
       if (event.call.toolName === "spawn_subagent") {
+        if (
+          !messages.some(
+            (item) =>
+              item.kind === "subagent" && item.toolCallId === event.call.id
+          )
+        )
+          return [...messages, subagentFromToolRecord(event.call)];
         return messages.map((item) =>
           item.kind === "subagent" && item.toolCallId === event.call.id
             ? {
@@ -315,6 +330,15 @@ export function applySessionEvent(
             : item
         );
       }
+      if (
+        !messages.some(
+          (item) => item.kind === "tool-call" && item.id === event.call.id
+        )
+      )
+        return [
+          ...messages,
+          ...initialTranscript([{ kind: "tool-call", call: event.call }]),
+        ];
       return messages.map((item) =>
         item.kind === "tool-call" && item.id === event.call.id
           ? {
@@ -327,6 +351,12 @@ export function applySessionEvent(
       );
 
     case "subagent-queued":
+      if (
+        messages.some(
+          (item) => item.kind === "subagent" && item.id === event.subagentId
+        )
+      )
+        return messages;
       return [
         ...messages,
         {
@@ -343,8 +373,20 @@ export function applySessionEvent(
       ];
 
     case "subagent-start":
+      if (
+        !messages.some(
+          (item) => item.kind === "subagent" && item.id === event.subagentId
+        )
+      )
+        messages = applySessionEvent(messages, {
+          type: "subagent-queued",
+          subagentId: event.subagentId,
+          task: event.task,
+        });
       return messages.map((item) =>
-        item.kind === "subagent" && item.id === event.subagentId
+        item.kind === "subagent" &&
+        item.id === event.subagentId &&
+        item.state !== "done"
           ? {
               ...item,
               state: "running" as const,
@@ -359,36 +401,12 @@ export function applySessionEvent(
         if (item.kind !== "subagent" || item.id !== event.subagentId) {
           return item;
         }
-        if (event.phase === "call") {
-          return {
-            ...item,
-            tools: [
-              ...item.tools,
-              {
-                kind: "tool-call" as const,
-                id: event.call.id,
-                sessionId: event.call.sessionId,
-                toolName: event.call.toolName,
-                arguments: event.call.arguments,
-                output: "",
-                isError: false,
-                running: true,
-              },
-            ],
-          };
-        }
         return {
           ...item,
-          tools: item.tools.map((tool) =>
-            tool.id === event.call.id
-              ? {
-                  ...tool,
-                  output: event.call.output,
-                  isError: event.call.isError,
-                  running: false,
-                }
-              : tool
-          ),
+          tools: applySessionEvent(item.tools, {
+            type: event.phase === "call" ? "tool-call" : "tool-result",
+            call: event.call,
+          }).filter((tool): tool is UiToolCall => tool.kind === "tool-call"),
         };
       });
 

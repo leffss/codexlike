@@ -703,10 +703,16 @@ async function queueScenario() {
       ctx.finishWith("tool_calls");
     },
     async ({ window, homeDir, seenBodies }) => {
-      const session = await newSession(window, "并发 FIFO 会话");
-      const sessionId = await session.getAttribute("data-session-id");
+      // ADR 0010：先草稿，首次发送才建立会话；目录选择不创建项目。
+      await window.getByTestId("new-session").click();
+      await window.getByTestId("draft-select-workspace").click();
       await window.getByTestId("approval-mode-select").selectOption("ask");
       await send(window, "同时委派两个子代理，主代理也需要问答");
+      const session = window
+        .getByTestId("session-item")
+        .filter({ hasText: "同时委派两个子代理" });
+      await session.waitFor();
+      const sessionId = await session.getAttribute("data-session-id");
       await waitQuestion(window, 1, 1);
       const first = await pendingCount(window, sessionId, 1);
       assert(first[0].request.source.kind === "main", "第一项必须是主代理问答");
@@ -734,6 +740,15 @@ async function queueScenario() {
         .waitFor();
       await expectFront(window, queued[0], "主代理");
       await session.getByText("等待用户").waitFor();
+      // 后台完整现场包含主/子代理全部请求；切到草稿不会取消任何等待。
+      await window.getByTestId("new-session").click();
+      await session.click();
+      await expectFront(window, queued[0], "主代理");
+      await pendingCount(window, sessionId, 3);
+      assert(
+        (await window.getByTestId("subagent-card").count()) === 2,
+        "切回恢复两张子代理卡"
+      );
       assert(
         !existsSync(join(homeDir, "workspace", "queue-approved.txt")),
         "排队审批前不能写文件"

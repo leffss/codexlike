@@ -19,6 +19,9 @@ const api: CodexLikeApi = {
   sessions: {
     start: (input) => ipcRenderer.invoke(IPC.sessions.start, input),
     execution: (id) => ipcRenderer.invoke(IPC.sessions.execution, id),
+    view: (id) => ipcRenderer.invoke(IPC.sessions.view, id),
+    markViewed: (id, sequence) =>
+      ipcRenderer.invoke(IPC.sessions.markViewed, id, sequence),
     list: () => ipcRenderer.invoke(IPC.sessions.list),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) =>
