@@ -23,6 +23,7 @@ import {
 } from "@codexlike/agent-core/node";
 
 import type { ProfileStore } from "../profiles/profile-store";
+import type { SessionExitRuntime } from "../lifecycle/application-exit";
 import { createInterruptRegistry } from "./interrupt-registry";
 import { registerWorkbenchHandlers } from "./workbench-ipc";
 import { createLiveSessions } from "./live-sessions";
@@ -53,7 +54,7 @@ export function registerSessionHandlers(options: {
   worktreeService: WorktreeService;
   /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
   resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
-}): void {
+}): SessionExitRuntime {
   const {
     manager,
     profiles,
@@ -72,6 +73,28 @@ export function registerSessionHandlers(options: {
   const starts = new Map<string, Promise<SessionRecord>>();
   const workbench = registerWorkbenchHandlers(manager, profiles);
   const liveSessions = createLiveSessions(manager);
+  const tasks = new Set<Promise<unknown>>();
+  let exiting = false;
+  let stopping = false;
+  const deferredStarts = new Set<() => void>();
+  function assertOpen() {
+    if (exiting) throw new Error("应用正在退出，请取消退出后再操作");
+  }
+  async function resumeAcceptedStart() {
+    // 已接收但尚未占位的操作暂停而非提前取消；取消退出后继续原意图。
+    while (exiting && !stopping)
+      await new Promise<void>((resolve) => deferredStarts.add(resolve));
+    assertOpen();
+  }
+  function releaseDeferredStarts() {
+    for (const resume of deferredStarts) resume();
+    deferredStarts.clear();
+  }
+  function track<T>(task: Promise<T>): Promise<T> {
+    tasks.add(task);
+    void task.finally(() => tasks.delete(task)).catch(() => {});
+    return task;
+  }
 
   function emit(
     input: Pick<SessionEventEnvelope, "sessionId" | "executionId" | "event">
@@ -173,6 +196,7 @@ export function registerSessionHandlers(options: {
   });
 
   ipcMain.handle(IPC.sessions.start, (_e, input: unknown) => {
+    assertOpen();
     if (!input || typeof input !== "object")
       throw new Error("首次发送参数不合法");
     const request = input as StartSessionInput;
@@ -214,6 +238,8 @@ export function registerSessionHandlers(options: {
       if (request.projectId === null && request.workspaceMode === "worktree")
         throw new Error("独立会话入口不支持直接创建 Worktree，请在项目内新建");
       const available = await profiles.list();
+      await resumeAcceptedStart();
+      assertOpen();
       const profile =
         request.providerProfileId === undefined
           ? available[0]
@@ -254,6 +280,8 @@ export function registerSessionHandlers(options: {
         });
         rollbackWorkspace = rollback;
         preparedPath = workspace.workspacePath;
+        await resumeAcceptedStart();
+        assertOpen();
         // 异步准备期间项目可能已被移除；复查与创建之间不得 await。
         if (
           project &&
@@ -349,6 +377,7 @@ export function registerSessionHandlers(options: {
     thinkingEffort?: unknown,
     approvalMode?: unknown
   ) {
+    assertOpen();
     if (typeof sessionId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
     }
@@ -397,6 +426,9 @@ export function registerSessionHandlers(options: {
       (mentionPaths as string[] | undefined) ?? []
     );
 
+    // await 后复查退出闸门；已到达的异步发送不能在 flush 期间偷启动。
+    await resumeAcceptedStart();
+    assertOpen();
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
     management.assertCanExecute(sessionId);
     const executionId = randomUUID();
@@ -422,25 +454,27 @@ export function registerSessionHandlers(options: {
         manager.markUsed(sessionId);
         emit({ sessionId, executionId, event: first.value });
       }
-      void (async () => {
-        for (
-          let head = await iterator.next();
-          !head.done;
-          head = await iterator.next()
-        ) {
-          emit({ sessionId, executionId, event: head.value });
-        }
-      })()
-        .catch((error: unknown) => {
-          // 防御：流中途的意外异常不应成为未处理 rejection
-          console.error("[sessions] 事件流意外终止", error);
-        })
-        .finally(() => {
-          // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
-          interrupts.end(sessionId, controller);
-          if (executions.get(sessionId) === executionId)
-            executions.delete(sessionId);
-        });
+      track(
+        (async () => {
+          for (
+            let head = await iterator.next();
+            !head.done;
+            head = await iterator.next()
+          ) {
+            emit({ sessionId, executionId, event: head.value });
+          }
+        })()
+          .catch((error: unknown) => {
+            // 防御：流中途的意外异常不应成为未处理 rejection
+            console.error("[sessions] 事件流意外终止", error);
+          })
+          .finally(() => {
+            // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
+            interrupts.end(sessionId, controller);
+            if (executions.get(sessionId) === executionId)
+              executions.delete(sessionId);
+          })
+      );
     } catch (error) {
       // 启动失败：注销中断登记后再抛回渲染进程
       rollbackLive();
@@ -451,7 +485,7 @@ export function registerSessionHandlers(options: {
     }
   }
   ipcMain.handle(IPC.sessions.send, (_e, ...args: Parameters<typeof send>) =>
-    send(...args)
+    track(send(...args))
   );
 
   ipcMain.handle(
@@ -562,36 +596,47 @@ export function registerSessionHandlers(options: {
 
   ipcMain.handle(
     IPC.sessions.compact,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown, profileId: unknown) => {
-      if (typeof sessionId !== "string" || typeof profileId !== "string") {
-        throw new Error("compact：参数不合法");
-      }
-      if (profileId === "") {
-        throw new Error("请先选择模型（Provider Profile）");
-      }
-      const session = manager.get(sessionId);
-      if (session === null) {
-        throw new Error("会话不存在或已损坏");
-      }
-      const profile = (await profiles.list()).find(
-        (candidate: ProviderProfile) => candidate.id === profileId
-      );
-      if (profile === undefined) {
-        throw new Error("所选 Provider Profile 不存在，请重新选择模型");
-      }
-      // 压缩同样会异步写历史，复用唯一执行占位，不能让移除在期间清掉记录。
-      management.assertCanExecute(sessionId);
-      const executionId = randomUUID();
-      executions.set(sessionId, executionId);
-      try {
-        const result = await session.compact({ profile });
-        liveSessions.invalidate(sessionId);
-        return { compactedMessages: result.compactedMessages };
-      } finally {
-        if (executions.get(sessionId) === executionId)
-          executions.delete(sessionId);
-      }
-    }
+    (_e: IpcMainInvokeEvent, sessionId: unknown, profileId: unknown) =>
+      track(
+        (async () => {
+          assertOpen();
+          if (typeof sessionId !== "string" || typeof profileId !== "string") {
+            throw new Error("compact：参数不合法");
+          }
+          if (profileId === "") {
+            throw new Error("请先选择模型（Provider Profile）");
+          }
+          const session = manager.get(sessionId);
+          if (session === null) {
+            throw new Error("会话不存在或已损坏");
+          }
+          const profile = (await profiles.list()).find(
+            (candidate: ProviderProfile) => candidate.id === profileId
+          );
+          if (profile === undefined) {
+            throw new Error("所选 Provider Profile 不存在，请重新选择模型");
+          }
+          await resumeAcceptedStart();
+          assertOpen();
+          // 沿票07唯一占位保护整理操作，不另建执行锁。
+          management.assertCanExecute(sessionId);
+          const executionId = randomUUID();
+          executions.set(sessionId, executionId);
+          const controller = interrupts.begin(sessionId);
+          try {
+            const result = await session.compact({
+              profile,
+              signal: controller.signal,
+            });
+            liveSessions.invalidate(sessionId);
+            return { compactedMessages: result.compactedMessages };
+          } finally {
+            interrupts.end(sessionId, controller);
+            if (executions.get(sessionId) === executionId)
+              executions.delete(sessionId);
+          }
+        })()
+      )
   );
 
   ipcMain.handle(
@@ -672,6 +717,7 @@ export function registerSessionHandlers(options: {
       if (session === null) {
         throw new Error("会话不存在或已损坏");
       }
+      assertOpen();
       // Core 以自身持有的请求校验响应，不能信任渲染层提供的题目、来源或授权范围。
       return session.respondInteraction(requestId, response);
     }
@@ -701,6 +747,7 @@ export function registerSessionHandlers(options: {
       if (session === null) {
         throw new Error("会话不存在或已损坏");
       }
+      assertOpen();
       return session.respondApproval(requestId, decision);
     }
   );
@@ -728,4 +775,32 @@ export function registerSessionHandlers(options: {
       return session?.pendingApprovals ?? [];
     }
   );
+
+  return {
+    hasWork: () =>
+      starts.size > 0 ||
+      tasks.size > 0 ||
+      executions.size > 0 ||
+      manager.list().some((record) => management.execution(record.id)?.running),
+    freeze: () => {
+      exiting = true;
+    },
+    thaw: () => {
+      exiting = false;
+      stopping = false;
+      releaseDeferredStarts();
+    },
+    async stopAndDrain() {
+      stopping = true;
+      releaseDeferredStarts();
+      for (const id of executions.keys()) {
+        interrupts.interrupt(id);
+        liveSessions.stop(id);
+      }
+      // 首次发送/异步profile查询也必须排空；它们复查退出闸门后拒绝启动。
+      while (starts.size || tasks.size)
+        await Promise.allSettled([...starts.values(), ...tasks]);
+      manager.cancelInteractions("应用已退出");
+    },
+  };
 }

@@ -34,7 +34,10 @@ export function createLiveSessions(manager: SessionManager) {
   });
   function activity(id: string): SessionActivity {
     const live = sessions.get(id);
-    if (!live) return idle();
+    if (!live) {
+      const last = manager.messages(id).at(-1);
+      return { ...idle(), outcome: last?.aborted ? "interrupted" : null };
+    }
     return { ...live.activity, unread: live.terminalAt > live.viewed };
   }
   function begin(id: string, executionId: string) {

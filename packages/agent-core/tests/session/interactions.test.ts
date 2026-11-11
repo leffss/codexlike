@@ -356,7 +356,15 @@ describe("用户交互公开 seam", () => {
       false
     );
     expect(model.doStreamCalls).toHaveLength(0);
-    expect(manager.messages("legacy")).toHaveLength(1);
+    expect(manager.messages("legacy")).toHaveLength(2);
+    expect(manager.messages("legacy")[0]).toMatchObject({
+      id: "turn",
+      content: "旧问题",
+    });
+    expect(manager.messages("legacy")[1]).toMatchObject({
+      role: "assistant",
+      aborted: true,
+    });
     persistence.close();
     const reopened = createSqliteSessionStore(path);
     expect(reopened.listInteractions("legacy")[0]?.status).toBe("cancelled");

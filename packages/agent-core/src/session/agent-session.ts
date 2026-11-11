@@ -164,7 +164,10 @@ export interface AgentSession {
    * 摘要生成成功前不动任何状态（失败可原样重试）；
    * 与 sendMessage 共享互斥（回复中不可压缩、压缩中不可发送）。
    */
-  compact(options: { profile: ProviderProfile }): Promise<CompactResult>;
+  compact(options: {
+    profile: ProviderProfile;
+    signal?: AbortSignal;
+  }): Promise<CompactResult>;
 }
 
 /** 单次回复允许的工具轮次上限（防模型失控循环） */
@@ -827,7 +830,7 @@ export function createAgentSession(
       }
     },
 
-    async compact({ profile }) {
+    async compact({ profile, signal }) {
       if (busy) {
         throw new Error("会话正在回复或压缩中，请等待完成后再操作");
       }
@@ -837,7 +840,10 @@ export function createAgentSession(
           `当前历史不超过最近 ${COMPACT_KEEP_ROUNDS} 轮，没有可压缩的内容`
         );
       }
+      signal?.throwIfAborted();
       busy = true;
+      record.status = "streaming";
+      persistence.updateSession(record.id, { status: "streaming" });
       try {
         // 第一步（副本上生成）：请求当前模型压缩被替换的旧历史；失败直接抛出，
         // 库与内存上下文都未动，可原样重试
@@ -848,6 +854,7 @@ export function createAgentSession(
             // compact 是辅助调用：不附加档位控制参数（空对象 = 服务端默认行为）
             model: modelFor(profile, {}),
             system: COMPACT_SYSTEM_PROMPT,
+            abortSignal: signal,
             prompt: [
               {
                 role: "user",
@@ -855,6 +862,7 @@ export function createAgentSession(
               },
             ],
           });
+          signal?.throwIfAborted();
           summary = result.text.trim();
         } catch (error) {
           throw new Error(describeModelError(error));
@@ -916,8 +924,24 @@ export function createAgentSession(
           keptMessages,
           compactedMessages: compactable.length,
         };
+      } catch (error) {
+        if (signal?.aborted) {
+          const message: StoredMessage = {
+            id: generateId(),
+            sessionId: record.id,
+            role: "assistant",
+            content: "压缩已中断，原有历史已保留。",
+            aborted: true,
+            createdAt: now(),
+          };
+          persistence.insertMessage(message);
+          context.push(toModelMessage(message));
+        }
+        throw error;
       } finally {
         busy = false;
+        record.status = "idle";
+        persistence.updateSession(record.id, { status: "idle" });
       }
     },
   };

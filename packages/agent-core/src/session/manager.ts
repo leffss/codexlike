@@ -142,7 +142,11 @@ export function createSessionManager(
   const cache = new Map<string, AgentSession>();
   // 启动即终结所有残留请求：transcript 可在 get 前读取，绝不重放待执行工具。
   for (const session of persistence.listSessions()) {
-    for (const interaction of persistence.listInteractions(session.id)) {
+    const interactions = persistence.listInteractions(session.id);
+    const unfinished =
+      session.status !== "idle" ||
+      interactions.some((item) => item.status === "pending");
+    for (const interaction of interactions) {
       if (interaction.status === "pending")
         persistence.settleInteraction({
           ...interaction,
@@ -151,8 +155,19 @@ export function createSessionManager(
           cancelReason: "应用已重启，原执行已结束",
         });
     }
-    if (session.status !== "idle")
+    if (unfinished) {
+      // 只恢复历史中断点，不构建模型或重放工具。复用 aborted 消息，二次重开幂等。
+      if (!persistence.listMessages(session.id).at(-1)?.aborted)
+        persistence.insertMessage({
+          id: generateId(),
+          sessionId: session.id,
+          role: "assistant",
+          content: "上次执行因应用退出而中断；如需继续，请明确发送新消息。",
+          aborted: true,
+          createdAt: now(),
+        });
       persistence.updateSession(session.id, { status: "idle" });
+    }
   }
 
   function createdAtOf(item: TranscriptItem): string {

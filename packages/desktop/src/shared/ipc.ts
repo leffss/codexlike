@@ -31,6 +31,8 @@ import type { TerminalShell } from "@codexlike/agent-core/node";
 import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
+import type { ExitState } from "../lifecycle/application-exit";
+export type { ExitState };
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
@@ -46,6 +48,12 @@ export type { ThemeName };
  * 主→渲染：会话事件流（`session:events` channel，按会话 ID 多路复用）。
  */
 export const IPC = {
+  application: {
+    exitState: "application:exit-state",
+    exitChanged: "application:exit-changed",
+    answerExit: "application:answer-exit",
+    flushed: "application:flushed",
+  },
   workbench: { read: "workbench:read", write: "workbench:write" },
   projects: {
     list: "projects:list",
@@ -226,6 +234,12 @@ export interface SessionExecutionState {
 
 /** `window.codexlike` 的完整 API 形状 */
 export interface CodexLikeApi {
+  application: {
+    exitState(): Promise<ExitState>;
+    answerExit(id: string, confirmed: boolean): Promise<void>;
+    flushed(id: string, error?: string): Promise<void>;
+    onExitState(listener: (state: ExitState) => void): () => void;
+  };
   workbench: {
     read(target: WorkbenchTarget): Promise<WorkbenchEntry>;
     write(

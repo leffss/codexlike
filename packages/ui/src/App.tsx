@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createWorkspaceState } from "./lib/workspace-state";
+import { ApplicationExit } from "./components/ApplicationExit";
 
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -102,17 +103,19 @@ function AppShell() {
 
   return (
     <div className="flex h-full flex-col">
-      <Header view={view} onSwitch={setView} />
-      <main className="min-h-0 flex-1">
-        {view === "workspace" ? (
-          <WorkspacePage
-            state={workspaceState}
-            onOpenSettings={() => setView("settings")}
-          />
-        ) : (
-          <SettingsPage />
-        )}
-      </main>
+      <ApplicationExit state={workspaceState}>
+        <Header view={view} onSwitch={setView} />
+        <main className="min-h-0 flex-1">
+          {view === "workspace" ? (
+            <WorkspacePage
+              state={workspaceState}
+              onOpenSettings={() => setView("settings")}
+            />
+          ) : (
+            <SettingsPage />
+          )}
+        </main>
+      </ApplicationExit>
     </div>
   );
 }

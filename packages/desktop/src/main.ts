@@ -48,6 +48,7 @@ import {
 } from "./theme/theme-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
+import { registerApplicationExit } from "./lifecycle/exit-ipc";
 import { sessionScreenshotDir } from "./sessions/screenshots";
 import {
   createSubagentSettingsStore,
@@ -486,7 +487,7 @@ void app.whenReady().then(async () => {
     },
   });
   registerMcpHandlers(mcpService);
-  registerSessionHandlers({
+  const sessionRuntime = registerSessionHandlers({
     manager,
     profiles: store,
     getWindow: () => mainWindow,
@@ -500,23 +501,12 @@ void app.whenReady().then(async () => {
   mainWindow = createMainWindow(themePreference);
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
-  // Windows 优先：全部窗口关闭即退出（无 macOS dock 常驻）
-  app.on("window-all-closed", () => {
-    app.quit();
-  });
-
-  // 退出前释放数据库句柄（Windows 上未关闭会锁住库文件）、
-  // 断开 MCP 子进程与浏览器收尾（尽力而为，不阻塞退出流程：
-  // preventDefault + 二次 quit 在 Electron 45 上会让进程挂起不退）
-  app.on("will-quit", () => {
-    manager.cancelInteractions("应用已退出");
-    persistence.close();
-    void mcpService.shutdown();
-    void browserManager.close().catch(() => {});
-    // 强退兜底（code review 修复 7，工单 11 实证 Electron 45 偶发收尾挂起）：
-    // will-quit 后正常退出应在毫秒级完成；2 秒后进程仍活着说明退出流程挂起，
-    // 以 app.exit(0) 强制退出（不再触发 will-quit，无递归）。unref 使该定时器
-    // 本身不成为保活进程的句柄——正常退出时进程先于定时器结束，兜底不生效。
-    setTimeout(() => app.exit(0), 2_000).unref();
+  registerApplicationExit({
+    window: mainWindow,
+    runtime: sessionRuntime,
+    closeStorage: () => persistence.close(),
+    releaseResources: async () => {
+      await Promise.allSettled([mcpService.shutdown(), browserManager.close()]);
+    },
   });
 });

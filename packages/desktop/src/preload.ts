@@ -5,6 +5,23 @@ import { IPC, type CodexLikeApi } from "./shared/ipc";
 // contextBridge 暴露类型化 API；渲染进程经 `window.codexlike` 访问，
 // 无 nodeIntegration、无裸 ipcRenderer（安全基线）。
 const api: CodexLikeApi = {
+  application: {
+    exitState: () => ipcRenderer.invoke(IPC.application.exitState),
+    answerExit: (id, confirmed) =>
+      ipcRenderer.invoke(IPC.application.answerExit, id, confirmed),
+    flushed: (id, error) =>
+      ipcRenderer.invoke(IPC.application.flushed, id, error),
+    onExitState: (listener) => {
+      const handle = (
+        _event: Electron.IpcRendererEvent,
+        state: import("./shared/ipc").ExitState
+      ) => listener(state);
+      ipcRenderer.on(IPC.application.exitChanged, handle);
+      return () => {
+        ipcRenderer.removeListener(IPC.application.exitChanged, handle);
+      };
+    },
+  },
   workbench: {
     read: (target) => ipcRenderer.invoke(IPC.workbench.read, target),
     write: (target, entry) =>
