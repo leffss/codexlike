@@ -3,20 +3,24 @@
  * 全部可 JSON 序列化：ToolCallRecord 与会话事件、IPC、UI 卡片共用。
  * 本文件浏览器安全（无 Node 内置模块），实现（fs/child_process）在 ./node 出口。
  */
-import type { ProviderProfile } from '../provider/provider-profile';
+import type { ApprovalMode } from "../session/approval";
+import type { ProviderProfile } from "../provider/provider-profile";
 
 /**
- * 权限类别（spec「审批模式」三档在工单 04 接入前的预留字段）：
+ * 权限类别（GLOSSARY「审批模式」三档的判定输入）：
  * - `readonly`：只读操作（read_file、glob、grep），任何审批模式下放行；
  * - `write`：工作区内写入（write_file、apply_patch）；
- * - `command`：终端命令（run_terminal_command）与其它任意副作用。
+ * - `command`：终端命令（run_terminal_command）与其它任意副作用；
+ * - `network`：联网操作（web_search）——ask 档审批，assist / full-access 放行。
  */
-export type ToolPermission = 'readonly' | 'write' | 'command';
+export type ToolPermission = "readonly" | "write" | "command" | "network";
 
 /** 工具执行上下文：会话循环在每次调用时提供（工作区边界与会话级资源随之逐会话生效） */
 export interface ToolExecutionContext {
   /** 会话绑定的工作区目录（绝对路径） */
   workspacePath: string;
+  /** 当前审批模式：full-access 档文件工具放开工作区边界（ADR 0004），其余档强制边界 */
+  approvalMode: ApprovalMode;
   /** 调用所属会话：会话级资源（如浏览器 context/Cookie）按它隔离复用 */
   sessionId: string;
   /** 会话中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
@@ -50,7 +54,7 @@ export interface ToolResult {
 }
 
 /** JSON Schema（draft-07 的 object 子集；声明为交叉类型以允许额外关键字如 additionalProperties） */
-export type ToolParametersSchema = { type: 'object' } & Record<string, unknown>;
+export type ToolParametersSchema = { type: "object" } & Record<string, unknown>;
 
 /**
  * 统一工具接口：名称、JSON Schema 参数、权限类别、执行器。

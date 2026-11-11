@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ToolCallRecord } from "../tools/types";
+import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
 import type { CompactRecord, SessionRecord, StoredMessage } from "./types";
 
 /**
@@ -58,7 +59,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   provider_profile_id TEXT,
   model TEXT,
   status TEXT NOT NULL,
-  approval_mode TEXT NOT NULL DEFAULT 'suggest',
+  approval_mode TEXT NOT NULL DEFAULT 'assist',
   workspace_mode TEXT NOT NULL DEFAULT 'local',
   workspace_origin_path TEXT,
   archived_at TEXT,
@@ -166,7 +167,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
   try {
     db.exec(
-      "ALTER TABLE sessions ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'suggest'"
+      "ALTER TABLE sessions ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'assist'"
     );
   } catch {
     // 列已存在（新库或已迁移）
@@ -245,11 +246,15 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       providerProfileId: row.provider_profile_id,
       model: row.model,
       status: row.status as SessionRecord["status"],
-      // 非法/缺失的 approval_mode 值（旧库行、损坏数据）：恢复为默认档 suggest
+      // 审批模式读侧迁移（ADR 0004，不回写数据）：旧三档值映射到新三档
+      // （readonly→ask、suggest→assist、full→full-access）；
+      // 非法/缺失/损坏值恢复为默认档 assist
       approvalMode:
-        row.approval_mode === "readonly" || row.approval_mode === "full"
+        row.approval_mode === "ask" ||
+        row.approval_mode === "assist" ||
+        row.approval_mode === "full-access"
           ? row.approval_mode
-          : "suggest",
+          : (LEGACY_APPROVAL_MODE_MAP[row.approval_mode] ?? "assist"),
       // 运行位置：非法/缺失值恢复为 local（本目录直跑）
       workspaceMode: row.workspace_mode === "worktree" ? "worktree" : "local",
       // 原始仓库路径（ADR 0005）：旧库 / local 会话 / 旧 worktree 会话均为 null

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   evaluateContextWarning,
@@ -7,32 +7,31 @@ import {
   type ProviderProfile,
   type SessionRecord,
   type WorkspaceMode,
-} from '@codexlike/agent-core';
+} from "@codexlike/agent-core";
 
-import { ChangesPanel } from '../components/ChangesPanel';
-import { MessageComposer } from '../components/MessageComposer';
-import { MessageStream } from '../components/MessageStream';
-import { NewSessionDialog } from '../components/NewSessionDialog';
-import { SessionSidebar } from '../components/SessionSidebar';
+import { ChangesPanel } from "../components/ChangesPanel";
+import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
+import { MessageComposer } from "../components/MessageComposer";
+import { MessageStream } from "../components/MessageStream";
+import { NewSessionDialog } from "../components/NewSessionDialog";
+import { SessionSidebar } from "../components/SessionSidebar";
 import {
   applySessionEvent,
   initialTranscript,
   type UiItem,
-} from '../lib/session-view';
+} from "../lib/session-view";
 import {
   formatSessionStatus,
   matchProfilesForModelSwitch,
   planSlashCommand,
-} from '../lib/slash-command-actions';
+} from "../lib/slash-command-actions";
 
 /**
  * 主界面三栏装配：会话列表 / 消息流 / 输入框。
  * 会话与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
  * 斜杠命令与 @引用 在发送前经解析层分发（工单 07）。
  */
-export function WorkspacePage(props: {
-  onOpenSettings: () => void;
-}) {
+export function WorkspacePage(props: { onOpenSettings: () => void }) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiItem[]>([]);
@@ -41,11 +40,13 @@ export function WorkspacePage(props: {
   const [compacting, setCompacting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [selectedProfileId, setSelectedProfileId] = useState("");
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
   /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
   const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null);
+  /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
+  const [fullAccessPending, setFullAccessPending] = useState(false);
   /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const currentIdRef = useRef<string | null>(null);
@@ -64,7 +65,11 @@ export function WorkspacePage(props: {
   const pushLocalStatus = useCallback((content: string) => {
     setMessages((prev) => [
       ...prev,
-      { id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role: 'status', content },
+      {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: "status",
+        content,
+      },
     ]);
   }, []);
 
@@ -81,43 +86,50 @@ export function WorkspacePage(props: {
           ? null
           : (evaluateContextWarning(
               status.estimatedContextTokens,
-              status.contextWindowTokens ?? undefined,
-            )?.message ?? null),
+              status.contextWindowTokens ?? undefined
+            )?.message ?? null)
       );
     } catch {
       setContextWarning(null);
     }
   }, []);
 
-  const openSession = useCallback(async (id: string) => {
-    setCurrentId(id);
-    currentIdRef.current = id;
-    const history = await window.codexlike.sessions.messages(id);
-    let items = initialTranscript(history);
-    setStreaming(false);
-    // 切换会话后按该会话的当前用量重估上下文告警
-    void refreshContextWarning(id);
-    // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
-    // （主会话与子代理可能并行等待——工单 13，全部恢复）
-    try {
-      const pendingList = await window.codexlike.sessions.pendingApprovals(id);
-      if (pendingList.length > 0) {
-        for (const request of pendingList) {
-          items = applySessionEvent(items, { type: 'approval-request', request });
+  const openSession = useCallback(
+    async (id: string) => {
+      setCurrentId(id);
+      currentIdRef.current = id;
+      const history = await window.codexlike.sessions.messages(id);
+      let items = initialTranscript(history);
+      setStreaming(false);
+      // 切换会话后按该会话的当前用量重估上下文告警
+      void refreshContextWarning(id);
+      // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
+      // （主会话与子代理可能并行等待——工单 13，全部恢复）
+      try {
+        const pendingList =
+          await window.codexlike.sessions.pendingApprovals(id);
+        if (pendingList.length > 0) {
+          for (const request of pendingList) {
+            items = applySessionEvent(items, {
+              type: "approval-request",
+              request,
+            });
+          }
+          setStreaming(true);
         }
-        setStreaming(true);
+      } catch {
+        // 查询失败不阻塞会话打开
       }
-    } catch {
-      // 查询失败不阻塞会话打开
-    }
-    setMessages(items);
-    // @引用 菜单候选：随会话（工作区）切换重新枚举
-    try {
-      setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(id));
-    } catch {
-      setWorkspaceFiles([]);
-    }
-  }, [refreshContextWarning]);
+      setMessages(items);
+      // @引用 菜单候选：随会话（工作区）切换重新枚举
+      try {
+        setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(id));
+      } catch {
+        setWorkspaceFiles([]);
+      }
+    },
+    [refreshContextWarning]
+  );
 
   useEffect(() => {
     void (async () => {
@@ -139,7 +151,9 @@ export function WorkspacePage(props: {
         setMessages(initialTranscript(history));
         void refreshContextWarning(latest.id);
         try {
-          setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(latest.id));
+          setWorkspaceFiles(
+            await window.codexlike.sessions.workspaceFiles(latest.id)
+          );
         } catch {
           setWorkspaceFiles([]);
         }
@@ -152,13 +166,13 @@ export function WorkspacePage(props: {
     return window.codexlike.onSessionEvent(({ sessionId, event }) => {
       if (sessionId === currentIdRef.current) {
         setMessages((prev) => applySessionEvent(prev, event));
-        if (event.type === 'assistant-start') {
+        if (event.type === "assistant-start") {
           setStreaming(true);
         }
         if (
-          event.type === 'assistant-done' ||
-          event.type === 'assistant-aborted' ||
-          event.type === 'error'
+          event.type === "assistant-done" ||
+          event.type === "assistant-aborted" ||
+          event.type === "error"
         ) {
           setStreaming(false);
           // 每轮回复结束（完成/中断/出错）后重估上下文告警
@@ -166,12 +180,12 @@ export function WorkspacePage(props: {
         }
       }
       if (
-        event.type === 'user-message' ||
-        event.type === 'assistant-done' ||
-        event.type === 'assistant-aborted' ||
-        event.type === 'error' ||
-        event.type === 'approval-request' ||
-        event.type === 'approval-resolved'
+        event.type === "user-message" ||
+        event.type === "assistant-done" ||
+        event.type === "assistant-aborted" ||
+        event.type === "error" ||
+        event.type === "approval-request" ||
+        event.type === "approval-resolved"
       ) {
         // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
         void refreshSessions();
@@ -195,7 +209,10 @@ export function WorkspacePage(props: {
     }
     setCreating(true);
     try {
-      const record = await window.codexlike.sessions.create(pendingWorkspace, mode);
+      const record = await window.codexlike.sessions.create(
+        pendingWorkspace,
+        mode
+      );
       setPendingWorkspace(null);
       await refreshSessions();
       await openSession(record.id);
@@ -204,7 +221,7 @@ export function WorkspacePage(props: {
         ...prev,
         {
           id: `local-${Date.now()}`,
-          role: 'error',
+          role: "error",
           content: `新建会话失败：${error instanceof Error ? error.message : String(error)}`,
         },
       ]);
@@ -225,7 +242,7 @@ export function WorkspacePage(props: {
         ...prev,
         {
           id: `local-${Date.now()}`,
-          role: 'error',
+          role: "error",
           content: `新建会话失败：${error instanceof Error ? error.message : String(error)}`,
         },
       ]);
@@ -235,7 +252,12 @@ export function WorkspacePage(props: {
   }
 
   async function send(text: string, mentionPaths: string[]) {
-    if (currentId === null || selectedProfileId === '' || streaming || compacting) {
+    if (
+      currentId === null ||
+      selectedProfileId === "" ||
+      streaming ||
+      compacting
+    ) {
       return;
     }
     setStreaming(true);
@@ -244,7 +266,7 @@ export function WorkspacePage(props: {
         currentId,
         text,
         selectedProfileId,
-        mentionPaths.length === 0 ? undefined : mentionPaths,
+        mentionPaths.length === 0 ? undefined : mentionPaths
       );
     } catch (error) {
       // 启动失败（会话回复中 / Profile 缺失 / @引用 不可读等）：直接在消息流提示
@@ -253,7 +275,7 @@ export function WorkspacePage(props: {
         ...prev,
         {
           id: `local-${Date.now()}`,
-          role: 'error',
+          role: "error",
           content: `发送失败：${error instanceof Error ? error.message : String(error)}`,
         },
       ]);
@@ -269,7 +291,9 @@ export function WorkspacePage(props: {
     try {
       await window.codexlike.sessions.interrupt(currentId);
     } catch (error) {
-      pushLocalStatus(`停止失败：${error instanceof Error ? error.message : String(error)}`);
+      pushLocalStatus(
+        `停止失败：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -277,32 +301,32 @@ export function WorkspacePage(props: {
   async function runCommand(name: string, argument: string) {
     const action = planSlashCommand(
       { name: name as never, argument },
-      current !== null,
+      current !== null
     );
     switch (action.type) {
-      case 'needs-session':
-        pushLocalStatus('该命令需要先选择一个会话');
+      case "needs-session":
+        pushLocalStatus("该命令需要先选择一个会话");
         return;
-      case 'new-session': {
+      case "new-session": {
         // /new：同工作区新会话（不走目录选择器与模式对话框，本目录直跑）
         await createSessionInWorkspace(current!.workspacePath);
         return;
       }
-      case 'compact': {
+      case "compact": {
         // /compact：压缩进行中不可重复触发；模型在主进程解析（apiKey 不入渲染层）
         if (compacting) {
-          pushLocalStatus('正在压缩历史，请等待完成…');
+          pushLocalStatus("正在压缩历史，请等待完成…");
           return;
         }
-        if (selectedProfileId === '') {
-          pushLocalStatus('压缩需要先选择模型（Provider Profile）');
+        if (selectedProfileId === "") {
+          pushLocalStatus("压缩需要先选择模型（Provider Profile）");
           return;
         }
         setCompacting(true);
         try {
           const result = await window.codexlike.sessions.compact(
             current!.id,
-            selectedProfileId,
+            selectedProfileId
           );
           await refreshSessions();
           // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
@@ -311,36 +335,38 @@ export function WorkspacePage(props: {
           // 压缩后用量下降，告警随之重估（大概率消失）
           await refreshContextWarning(current!.id);
           pushLocalStatus(
-            `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`,
+            `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`
           );
         } catch (error) {
           pushLocalStatus(
-            `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`,
+            `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`
           );
         } finally {
           setCompacting(false);
         }
         return;
       }
-      case 'rename': {
+      case "rename": {
         try {
           await window.codexlike.sessions.rename(current!.id, action.title);
           await refreshSessions();
           pushLocalStatus(`会话已重命名为「${action.title}」`);
         } catch (error) {
-          pushLocalStatus(`重命名失败：${error instanceof Error ? error.message : String(error)}`);
+          pushLocalStatus(
+            `重命名失败：${error instanceof Error ? error.message : String(error)}`
+          );
         }
         return;
       }
-      case 'rename-missing-argument':
-        pushLocalStatus('用法：/rename 新名称');
+      case "rename-missing-argument":
+        pushLocalStatus("用法：/rename 新名称");
         return;
-      case 'archive': {
+      case "archive": {
         const archivedId = current!.id;
         try {
           await window.codexlike.sessions.archive(archivedId, true);
           const list = await refreshSessions();
-          pushLocalStatus('会话已归档（侧栏「已归档」中可恢复）');
+          pushLocalStatus("会话已归档（侧栏「已归档」中可恢复）");
           // 当前会话被归档：切到最近的未归档会话，没有则清空视图
           const next = list.find((session) => session.archivedAt === null);
           if (next !== undefined && next.id !== archivedId) {
@@ -353,41 +379,45 @@ export function WorkspacePage(props: {
             setContextWarning(null);
           }
         } catch (error) {
-          pushLocalStatus(`归档失败：${error instanceof Error ? error.message : String(error)}`);
+          pushLocalStatus(
+            `归档失败：${error instanceof Error ? error.message : String(error)}`
+          );
         }
         return;
       }
-      case 'select-model': {
+      case "select-model": {
         const match = matchProfilesForModelSwitch(action.query, profiles);
-        if (match.kind === 'unique') {
+        if (match.kind === "unique") {
           setSelectedProfileId(match.profile.id);
           pushLocalStatus(
-            `模型已切换：${match.profile.name} · ${match.profile.model}（对下一条消息生效）`,
+            `模型已切换：${match.profile.name} · ${match.profile.model}（对下一条消息生效）`
           );
         } else {
           pushLocalStatus(
             [
-              action.query === ''
-                ? '当前可选模型（用 /model 关键词 切换）：'
+              action.query === ""
+                ? "当前可选模型（用 /model 关键词 切换）："
                 : `「${action.query}」匹配多个模型，请更精确地指定：`,
               ...match.candidates.map(
-                (profile) => `- ${profile.name} · ${profile.model}`,
+                (profile) => `- ${profile.name} · ${profile.model}`
               ),
-            ].join('\n'),
+            ].join("\n")
           );
         }
         return;
       }
-      case 'status': {
+      case "status": {
         try {
           const status = await window.codexlike.sessions.status(current!.id);
           if (status === null) {
-            pushLocalStatus('会话不存在或已损坏');
+            pushLocalStatus("会话不存在或已损坏");
           } else {
             pushLocalStatus(formatSessionStatus(status));
           }
         } catch (error) {
-          pushLocalStatus(`查询状态失败：${error instanceof Error ? error.message : String(error)}`);
+          pushLocalStatus(
+            `查询状态失败：${error instanceof Error ? error.message : String(error)}`
+          );
         }
         return;
       }
@@ -400,7 +430,7 @@ export function WorkspacePage(props: {
     if (submission === null) {
       return;
     }
-    if (submission.kind === 'slash-command') {
+    if (submission.kind === "slash-command") {
       void runCommand(submission.name, submission.argument);
       return;
     }
@@ -408,7 +438,10 @@ export function WorkspacePage(props: {
   }
 
   /** 审批响应（审批卡片三键）：经 IPC 唤醒等待中的工具循环 */
-  async function respondApproval(id: string, decision: 'approve' | 'reject' | 'always') {
+  async function respondApproval(
+    id: string,
+    decision: "approve" | "reject" | "always"
+  ) {
     if (currentId === null) {
       return;
     }
@@ -416,18 +449,35 @@ export function WorkspacePage(props: {
       const accepted = await window.codexlike.sessions.respondApproval(
         currentId,
         id,
-        decision,
+        decision
       );
       if (!accepted) {
-        pushLocalStatus('该审批请求已失效（可能已被响应）');
+        pushLocalStatus("该审批请求已失效（可能已被响应）");
       }
     } catch (error) {
-      pushLocalStatus(`审批响应失败：${error instanceof Error ? error.message : String(error)}`);
+      pushLocalStatus(
+        `审批响应失败：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
-  /** 审批模式切换：随时可切，对下一次工具调用立即生效 */
-  async function selectApprovalMode(mode: ApprovalMode) {
+  /**
+   * 审批模式切换：随时可切，对下一次工具调用立即生效。
+   * 切到「完全访问」先弹风险确认（ADR 0004：该档放开工作区文件边界）；
+   * 取消不发起 IPC，选择器受控值自然回显原档位。
+   */
+  function selectApprovalMode(mode: ApprovalMode) {
+    if (mode === "full-access") {
+      const current = sessions.find((session) => session.id === currentId);
+      if (current?.approvalMode !== "full-access") {
+        setFullAccessPending(true);
+        return;
+      }
+    }
+    void applyApprovalMode(mode);
+  }
+
+  async function applyApprovalMode(mode: ApprovalMode) {
     if (currentId === null) {
       return;
     }
@@ -435,18 +485,20 @@ export function WorkspacePage(props: {
       await window.codexlike.sessions.setApprovalMode(currentId, mode);
       await refreshSessions();
     } catch (error) {
-      pushLocalStatus(`切换审批模式失败：${error instanceof Error ? error.message : String(error)}`);
+      pushLocalStatus(
+        `切换审批模式失败：${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
   const composerHint =
     profiles.length === 0
-      ? '尚未配置模型，请先前往设置页添加 Provider Profile'
+      ? "尚未配置模型，请先前往设置页添加 Provider Profile"
       : compacting
-        ? '正在压缩历史，请稍候…'
+        ? "正在压缩历史，请稍候…"
         : currentId === null
-          ? '新建或选择一个会话后开始对话'
-          : '输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件';
+          ? "新建或选择一个会话后开始对话"
+          : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件";
 
   return (
     <div className="flex h-full">
@@ -456,6 +508,15 @@ export function WorkspacePage(props: {
           creating={creating}
           onCreate={(mode) => void createSession(mode)}
           onCancel={() => setPendingWorkspace(null)}
+        />
+      )}
+      {fullAccessPending && (
+        <FullAccessConfirmDialog
+          onConfirm={() => {
+            setFullAccessPending(false);
+            void applyApprovalMode("full-access");
+          }}
+          onCancel={() => setFullAccessPending(false)}
         />
       )}
       <SessionSidebar
@@ -469,7 +530,9 @@ export function WorkspacePage(props: {
             .rename(id, title)
             .then(() => refreshSessions())
             .catch((error: unknown) =>
-              pushLocalStatus(`重命名失败：${error instanceof Error ? error.message : String(error)}`),
+              pushLocalStatus(
+                `重命名失败：${error instanceof Error ? error.message : String(error)}`
+              )
             );
         }}
         onArchive={(id, archived) => {
@@ -478,15 +541,15 @@ export function WorkspacePage(props: {
             .then(() => refreshSessions())
             .catch((error: unknown) =>
               pushLocalStatus(
-                `${archived ? '归档' : '恢复'}失败：${error instanceof Error ? error.message : String(error)}`,
-              ),
+                `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
+              )
             );
         }}
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
           <span className="min-w-0 flex-1 truncate text-sm text-slate-400">
-            {current?.title ?? '未选择会话'}
+            {current?.title ?? "未选择会话"}
           </span>
           <button
             type="button"
@@ -495,7 +558,7 @@ export function WorkspacePage(props: {
             disabled={currentId === null}
             className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-sky-600 hover:text-sky-400 disabled:opacity-50"
           >
-            {changesOpen ? '收起改动' : '改动'}
+            {changesOpen ? "收起改动" : "改动"}
           </button>
         </header>
         <div className="flex min-h-0 flex-1">
@@ -514,7 +577,9 @@ export function WorkspacePage(props: {
                   </button>
                 ) : undefined
               }
-              onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
+              onApprovalRespond={(id, decision) =>
+                void respondApproval(id, decision)
+              }
             />
             {contextWarning !== null && (
               <div
@@ -530,7 +595,12 @@ export function WorkspacePage(props: {
               onSelectProfile={setSelectedProfileId}
               onSend={handleSubmit}
               workspaceFiles={workspaceFiles}
-              disabled={currentId === null || profiles.length === 0 || streaming || compacting}
+              disabled={
+                currentId === null ||
+                profiles.length === 0 ||
+                streaming ||
+                compacting
+              }
               streaming={streaming}
               onStop={() => void stop()}
               hint={composerHint}

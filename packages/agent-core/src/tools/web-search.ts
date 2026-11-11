@@ -1,5 +1,5 @@
-import { defineTool } from './define-tool';
-import type { ToolDefinition } from './types';
+import { defineTool } from "./define-tool";
+import type { ToolDefinition } from "./types";
 
 /**
  * web_search（工单 10）：搜索源抽象 + Tavily 默认实现 + 工具定义。
@@ -41,7 +41,7 @@ export interface TavilySearchSourceOptions {
   timeoutMs?: number;
 }
 
-const DEFAULT_TAVILY_ENDPOINT = 'https://api.tavily.com/search';
+const DEFAULT_TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_RESULTS_LIMIT = 10;
 
@@ -51,7 +51,7 @@ const MAX_RESULTS_LIMIT = 10;
  * 超时、HTTP 错误、网络失败均抛中文错误（由工具层转 isError 结果）。
  */
 export function createTavilySearchSource(
-  options: TavilySearchSourceOptions,
+  options: TavilySearchSourceOptions
 ): SearchSource {
   const fetchLike = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -65,8 +65,8 @@ export function createTavilySearchSource(
       let response: Response;
       try {
         response = await fetchLike(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             api_key: options.apiKey,
             query,
@@ -75,11 +75,15 @@ export function createTavilySearchSource(
           signal: timeout,
         });
       } catch (error) {
-        if (error instanceof Error && error.name === 'TimeoutError') {
-          throw new Error(`搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`);
+        if (error instanceof Error && error.name === "TimeoutError") {
+          throw new Error(
+            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`
+          );
         }
-        if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error(`搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`);
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new Error(
+            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`
+          );
         }
         const reason = error instanceof Error ? error.message : String(error);
         throw new Error(`搜索请求发送失败：${reason}`);
@@ -99,14 +103,15 @@ export function createTavilySearchSource(
 
       const rawResults = (body as { results?: unknown }).results;
       if (!Array.isArray(rawResults)) {
-        throw new Error('Tavily API 响应缺少 results 字段');
+        throw new Error("Tavily API 响应缺少 results 字段");
       }
       return rawResults.map((item) => {
         const record = (item ?? {}) as Record<string, unknown>;
         return {
-          title: typeof record['title'] === 'string' ? record['title'] : '',
-          url: typeof record['url'] === 'string' ? record['url'] : '',
-          snippet: typeof record['content'] === 'string' ? record['content'] : '',
+          title: typeof record["title"] === "string" ? record["title"] : "",
+          url: typeof record["url"] === "string" ? record["url"] : "",
+          snippet:
+            typeof record["content"] === "string" ? record["content"] : "",
         };
       });
     },
@@ -122,43 +127,48 @@ export interface WebSearchToolOptions {
 }
 
 /** web_search 工具：query → 搜索源 → 标题/URL/片段列表回填模型 */
-export function createWebSearchTool(options: WebSearchToolOptions): ToolDefinition {
+export function createWebSearchTool(
+  options: WebSearchToolOptions
+): ToolDefinition {
   return defineTool({
-    name: 'web_search',
+    name: "web_search",
     description:
-      '搜索互联网上的最新资料（文档、新闻、技术方案等），返回结果的标题、URL 与内容摘要。' +
-      '适合回答时效性问题或补充训练数据之外的细节。',
+      "搜索互联网上的最新资料（文档、新闻、技术方案等），返回结果的标题、URL 与内容摘要。" +
+      "适合回答时效性问题或补充训练数据之外的细节。",
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        query: { type: 'string', description: '搜索关键词' },
+        query: { type: "string", description: "搜索关键词" },
         maxResults: {
-          type: 'number',
+          type: "number",
           description: `结果条数（1-${MAX_RESULTS_LIMIT}，默认 5）`,
         },
       },
-      required: ['query'],
+      required: ["query"],
       additionalProperties: false,
     },
-    permission: 'readonly',
+    permission: "network",
 
     async execute(rawArgs) {
       const source = options.searchSource();
       if (source === null) {
-        throw new Error('未配置搜索源：请在设置页填写搜索服务（Tavily）的 API key');
+        throw new Error(
+          "未配置搜索源：请在设置页填写搜索服务（Tavily）的 API key"
+        );
       }
 
-      const args = (typeof rawArgs === 'object' && rawArgs !== null ? rawArgs : {}) as Record<
-        string,
-        unknown
-      >;
-      const query = args['query'];
-      if (typeof query !== 'string' || query === '') {
-        throw new Error('参数 query 缺失或不是非空字符串');
+      const args = (
+        typeof rawArgs === "object" && rawArgs !== null ? rawArgs : {}
+      ) as Record<string, unknown>;
+      const query = args["query"];
+      if (typeof query !== "string" || query === "") {
+        throw new Error("参数 query 缺失或不是非空字符串");
       }
-      const maxResults = args['maxResults'];
+      const maxResults = args["maxResults"];
       const resolvedMax =
-        typeof maxResults === 'number' && Number.isInteger(maxResults) && maxResults > 0
+        typeof maxResults === "number" &&
+        Number.isInteger(maxResults) &&
+        maxResults > 0
           ? Math.min(maxResults, MAX_RESULTS_LIMIT)
           : undefined;
 
@@ -171,9 +181,9 @@ export function createWebSearchTool(options: WebSearchToolOptions): ToolDefiniti
       }
       const lines = results.map(
         (item, index) =>
-          `${index + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet}`,
+          `${index + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet}`
       );
-      return { output: lines.join('\n\n'), isError: false };
+      return { output: lines.join("\n\n"), isError: false };
     },
   });
 }

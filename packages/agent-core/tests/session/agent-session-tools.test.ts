@@ -29,7 +29,8 @@ function sessionRecord(workspacePath: string): SessionRecord {
     model: null,
     status: "idle",
     workspaceMode: "local",
-    approvalMode: "suggest",
+    workspaceOriginPath: null,
+    approvalMode: "assist",
     archivedAt: null,
     createdAt: "2026-11-11T08:00:00.000Z",
     updatedAt: "2026-11-11T08:00:00.000Z",
@@ -470,7 +471,10 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["（不应被请求）"] },
     ]);
-    const { session, persistence } = makeSession(model, workspace);
+    // ask 档：echo 长命令也弹审批（本用例以批准点为 abort 计时锚点，见下）
+    const askRecord = sessionRecord(workspace);
+    askRecord.approvalMode = "ask";
+    const { session, persistence } = makeSession(model, workspace, askRecord);
 
     const controller = new AbortController();
     const events: SessionEvent[] = [];

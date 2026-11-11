@@ -20,43 +20,43 @@ import {
   type ComposerMenuState,
 } from "../lib/composer-menu";
 
-/** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档中文名） */
+/** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
 export const APPROVAL_MODE_OPTIONS: {
   value: ApprovalMode;
   label: string;
   title: string;
 }[] = [
   {
-    value: "readonly",
-    label: "只读",
-    title: "readonly：禁止一切写入与终端命令（纯调研）",
+    value: "ask",
+    label: "请求批准",
+    title: "ask：编辑文件、执行命令与联网搜索前先询问我",
   },
   {
-    value: "suggest",
-    label: "协作",
-    title: "suggest：文件编辑自动应用，终端命令逐条审批",
+    value: "assist",
+    label: "帮我批准",
+    title: "assist：文件编辑与联网自动放行，仅危险命令（rm、强推等）询问我",
   },
   {
-    value: "full",
-    label: "自主",
-    title: "full：全自动执行（不询问）",
+    value: "full-access",
+    label: "完全访问",
+    title: "full-access：全自动执行，且可不受限读写本地任意文件（切换需确认）",
   },
 ];
 
-/** 审批模式 → 底部工具栏胶囊样式：权限越高越暖色（full=琥珀，呼应参考稿「完全访问」） */
+/** 审批模式 → 底部工具栏胶囊样式：权限越高越暖色（full-access=琥珀） */
 const APPROVAL_PILL_STYLES: Record<
   ApprovalMode,
   { pill: string; icon: string }
 > = {
-  readonly: {
+  ask: {
     pill: "border-sky-500/30 bg-sky-500/10 text-sky-300",
     icon: "text-sky-400",
   },
-  suggest: {
+  assist: {
     pill: "border-slate-600 bg-slate-800/80 text-slate-300",
     icon: "text-slate-400",
   },
-  full: {
+  "full-access": {
     pill: "border-amber-500/40 bg-amber-500/10 text-amber-300",
     icon: "text-amber-400",
   },
@@ -191,8 +191,8 @@ export function MessageComposer(props: {
   }
 
   const approvalPill =
-    APPROVAL_PILL_STYLES[props.approvalMode ?? "suggest"] ??
-    APPROVAL_PILL_STYLES.suggest;
+    APPROVAL_PILL_STYLES[props.approvalMode ?? "assist"] ??
+    APPROVAL_PILL_STYLES.assist;
 
   return (
     <div className="border-t border-slate-800 bg-slate-900/60 p-3">
@@ -280,7 +280,7 @@ export function MessageComposer(props: {
             />
             <select
               data-testid="approval-mode-select"
-              value={props.approvalMode ?? "suggest"}
+              value={props.approvalMode ?? "assist"}
               disabled={props.approvalMode === null}
               onChange={(event) =>
                 props.onSelectApprovalMode(event.target.value as ApprovalMode)

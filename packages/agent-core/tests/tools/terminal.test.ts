@@ -12,7 +12,11 @@ function makeWorkspace(): string {
 }
 
 function context(workspacePath: string): ToolExecutionContext {
-  return { workspacePath, sessionId: "unit-test-session" };
+  return {
+    workspacePath,
+    sessionId: "unit-test-session",
+    approvalMode: "assist",
+  };
 }
 
 /** 与生产宿主同构：传完整 process.env，工具层做白名单过滤 */
@@ -185,6 +189,7 @@ describe("run_terminal_command 工具（默认 Git Bash）", () => {
       { command: "echo started; sleep 30", timeoutMs: 120_000 },
       {
         workspacePath: workspace,
+        approvalMode: "assist",
         sessionId: "terminal-test",
         signal: controller.signal,
       }

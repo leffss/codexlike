@@ -17,8 +17,8 @@ _Avoid_: repo、folder
 _Avoid_: 文件夹、分组、folder
 
 **审批模式（Approval Mode）**:
-会话级权限档位，可随时切换：`readonly`（只读——禁止一切写入与命令）、`suggest`（协作——文件编辑自动应用、终端命令逐条审批）、`full`（自主——全自动执行）。
-_Avoid_: 权限级别、mode、沙箱模式
+会话级权限档位，可随时切换（ADR 0004）：`ask`（请求批准——编辑文件、执行命令与联网搜索前一律先询问）、`assist`（帮我批准——文件编辑与联网自动放行，仅危险命令（rm、强推等，见 `isRiskyCommand`）询问）、`full-access`（完全访问——全自动执行且不受限读写本地任意文件，工作区边界失效，切换前 UI 弹风险确认）。
+_Avoid_: 权限级别、mode、沙箱模式、readonly/suggest/full（旧三档名）
 
 **Agent Core**:
 纯 TypeScript 的 agent 运行时模块（对话循环、工具执行、审批状态机），不依赖 Electron；Electron 主进程只是它的宿主。

@@ -19,7 +19,7 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     status: "idle",
     workspaceMode: "local",
     workspaceOriginPath: null,
-    approvalMode: "suggest",
+    approvalMode: "assist",
     archivedAt: null,
     createdAt: "2026-11-10T08:00:00.000Z",
     updatedAt: "2026-11-10T08:00:00.000Z",
@@ -134,14 +134,56 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
 
   it("审批模式随会话落库：insert 读回一致，updateSession 补丁生效", () => {
     const store = createSqliteSessionStore(":memory:");
-    store.insertSession(sessionRecord({ approvalMode: "readonly" }));
-    expect(store.listSessions()[0]?.approvalMode).toBe("readonly");
+    store.insertSession(sessionRecord({ approvalMode: "ask" }));
+    expect(store.listSessions()[0]?.approvalMode).toBe("ask");
 
     store.updateSession("session-1", {
-      approvalMode: "full",
+      approvalMode: "full-access",
       updatedAt: "2026-11-10T08:30:00.000Z",
     });
-    expect(store.listSessions()[0]?.approvalMode).toBe("full");
+    expect(store.listSessions()[0]?.approvalMode).toBe("full-access");
+  });
+
+  it("旧三档值读侧迁移（ADR 0004，不回写）：readonly→ask、suggest→assist、full→full-access；非法值回退 assist", () => {
+    const dbPath = tempDbPath();
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT,
+        model TEXT,
+        status TEXT NOT NULL,
+        approval_mode TEXT NOT NULL,
+        workspace_mode TEXT NOT NULL DEFAULT 'local',
+        archived_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sessions VALUES ('legacy-ro', '旧只读', 'C:\\work\\old', NULL, NULL, 'idle', 'readonly', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO sessions VALUES ('legacy-sg', '旧协作', 'C:\\work\\old', NULL, NULL, 'idle', 'suggest', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO sessions VALUES ('legacy-fl', '旧自主', 'C:\\work\\old', NULL, NULL, 'idle', 'full', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO sessions VALUES ('legacy-bad', '损坏值', 'C:\\work\\old', NULL, NULL, 'idle', 'yolo', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteSessionStore(dbPath);
+    const byId = new Map(
+      store.listSessions().map((r) => [r.id, r.approvalMode])
+    );
+    expect(byId.get("legacy-ro")).toBe("ask");
+    expect(byId.get("legacy-sg")).toBe("assist");
+    expect(byId.get("legacy-fl")).toBe("full-access");
+    expect(byId.get("legacy-bad")).toBe("assist");
+    // 不回写：库里仍是旧值（幂等迁移，无数据改写风险）
+    const rawAgain = new DatabaseSync(dbPath);
+    const values = rawAgain
+      .prepare("SELECT approval_mode FROM sessions WHERE id = 'legacy-ro'")
+      .all() as { approval_mode: string }[];
+    expect(values[0]?.approval_mode).toBe("readonly");
+    rawAgain.close();
+    store.close();
   });
 
   it("运行模式（local/worktree）随会话落库：insert 读回一致，updateSession 补丁生效", () => {
@@ -170,7 +212,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     store.insertSession(sessionRecord());
 
     const byId = new Map(
-      store.listSessions().map((r) => [r.id, r.workspaceOriginPath]),
+      store.listSessions().map((r) => [r.id, r.workspaceOriginPath])
     );
     expect(byId.get("session-wt")).toBe("C:\\work\\demo");
     expect(byId.get("session-1")).toBeNull();
@@ -210,13 +252,12 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     );
 
     const byId = new Map(
-      store.listSessions().map((r) => [r.id, r.workspaceOriginPath]),
+      store.listSessions().map((r) => [r.id, r.workspaceOriginPath])
     );
     expect(byId.get("legacy-wt")).toBeNull();
     expect(byId.get("session-wt")).toBe("C:\\work\\demo");
     store.close();
   });
-
 
   it("旧库迁移：无 workspace_mode 列的旧会话恢复为 local（本目录直跑）", () => {
     const dbPath = tempDbPath();
@@ -288,18 +329,18 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     `);
     raw.close();
 
-    // 打开旧库：迁移幂等补列（approval_mode 默认 suggest）+ approvals 表可用
+    // 打开旧库：迁移幂等补列（approval_mode 默认 assist）+ approvals 表可用
     const store = createSqliteSessionStore(dbPath);
     const record = store.listSessions()[0]!;
     expect(record.id).toBe("legacy-1");
-    expect(record.approvalMode).toBe("suggest");
+    expect(record.approvalMode).toBe("assist");
     store.insertApproval("legacy-1", "git");
     expect(store.listApprovals("legacy-1")).toEqual(["git"]);
     store.updateSession("legacy-1", {
-      approvalMode: "full",
+      approvalMode: "full-access",
       updatedAt: "2026-11-02T00:00:00.000Z",
     });
-    expect(store.listSessions()[0]?.approvalMode).toBe("full");
+    expect(store.listSessions()[0]?.approvalMode).toBe("full-access");
     store.close();
   });
 

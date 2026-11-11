@@ -1,22 +1,22 @@
-import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
+import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 
-import type { LanguageModel } from 'ai';
+import type { LanguageModel } from "ai";
 
-import { createLanguageModelFromProfile } from '../provider/language-model';
-import type { ProviderProfile } from '../provider/provider-profile';
-import type { ToolDefinition } from '../tools/types';
+import { createLanguageModelFromProfile } from "../provider/language-model";
+import type { ProviderProfile } from "../provider/provider-profile";
+import type { ToolDefinition } from "../tools/types";
 
-import { createAgentSession, type AgentSession } from './agent-session';
-import type { ApprovalMode } from './approval';
-import type { SessionPersistence } from './persistence';
-import type { SubagentsConfig } from './subagent';
+import { createAgentSession, type AgentSession } from "./agent-session";
+import type { ApprovalMode } from "./approval";
+import type { SessionPersistence } from "./persistence";
+import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
   SessionRecord,
   StoredMessage,
   TranscriptItem,
-} from './types';
+} from "./types";
 
 export interface CreateSessionManagerOptions {
   persistence: SessionPersistence;
@@ -55,7 +55,7 @@ export interface SessionManager {
     workspacePath: string;
     title?: string;
     /** 运行位置（默认 local 本目录直跑；worktree 由宿主先检出副本再传入其路径） */
-    workspaceMode?: 'local' | 'worktree';
+    workspaceMode?: "local" | "worktree";
     /**
      * worktree 模式：用户所选的原始仓库路径（ADR 0005，侧栏项目聚合键）；
      * local 模式不传（origin 恒为 null，工作区即原始目录）。
@@ -86,10 +86,11 @@ export interface SessionManager {
 }
 
 export function createSessionManager(
-  options: CreateSessionManagerOptions,
+  options: CreateSessionManagerOptions
 ): SessionManager {
   const { persistence } = options;
-  const languageModelFor = options.languageModelFor ?? createLanguageModelFromProfile;
+  const languageModelFor =
+    options.languageModelFor ?? createLanguageModelFromProfile;
   const systemPromptFor = options.systemPromptFor;
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
@@ -97,15 +98,17 @@ export function createSessionManager(
   const cache = new Map<string, AgentSession>();
 
   function createdAtOf(item: TranscriptItem): string {
-    return item.kind === 'message' ? item.message.createdAt : item.call.createdAt;
+    return item.kind === "message"
+      ? item.message.createdAt
+      : item.call.createdAt;
   }
 
   function restore(record: SessionRecord): AgentSession {
     const history = persistence.listMessages(record.id);
     // 上次退出时若流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；恢复即视为空闲
-    if (record.status === 'streaming' || record.status === 'waiting-approval') {
-      const patched: SessionRecord = { ...record, status: 'idle' };
-      persistence.updateSession(record.id, { status: 'idle' });
+    if (record.status === "streaming" || record.status === "waiting-approval") {
+      const patched: SessionRecord = { ...record, status: "idle" };
+      persistence.updateSession(record.id, { status: "idle" });
       return createCachedSession(patched, history);
     }
     return createCachedSession(record, history);
@@ -113,7 +116,7 @@ export function createSessionManager(
 
   function createCachedSession(
     record: SessionRecord,
-    history: StoredMessage[],
+    history: StoredMessage[]
   ): AgentSession {
     const session = createAgentSession({
       record,
@@ -121,11 +124,10 @@ export function createSessionManager(
       history,
       tools: options.tools,
       subagents: options.subagents,
-      systemPrompt: systemPromptFor?.(record) ?? '',
+      systemPrompt: systemPromptFor?.(record) ?? "",
       attachToolImages: options.attachToolImages,
       languageModelFor,
       approvalMode: record.approvalMode,
-      approvalMemory: persistence.listApprovals(record.id),
       now,
       generateId,
     });
@@ -136,7 +138,7 @@ export function createSessionManager(
   /** 读取最新记录并应用补丁（rename / setArchived 共用）；同步刷新缓存实例的 record */
   function patchRecord(
     sessionId: string,
-    patch: Partial<Omit<SessionRecord, 'id' | 'createdAt'>>,
+    patch: Partial<Omit<SessionRecord, "id" | "createdAt">>
   ): SessionRecord | null {
     const current = persistence
       .listSessions()
@@ -157,7 +159,7 @@ export function createSessionManager(
     create({
       workspacePath,
       title,
-      workspaceMode = 'local',
+      workspaceMode = "local",
       id,
       workspaceOriginPath = null,
     }) {
@@ -171,9 +173,9 @@ export function createSessionManager(
         workspaceOriginPath,
         providerProfileId: null,
         model: null,
-        status: 'idle',
-        // 新建会话默认协作模式（suggest：文件编辑自动应用、命令逐条审批）
-        approvalMode: 'suggest',
+        status: "idle",
+        // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
+        approvalMode: "assist",
         archivedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -192,16 +194,20 @@ export function createSessionManager(
 
     transcript(sessionId) {
       const items: TranscriptItem[] = [
-        ...persistence.listMessages(sessionId).map(
-          (message): TranscriptItem => ({ kind: 'message', message }),
-        ),
-        ...persistence.listToolCalls(sessionId).map(
-          (call): TranscriptItem => ({ kind: 'tool-call', call }),
-        ),
+        ...persistence
+          .listMessages(sessionId)
+          .map((message): TranscriptItem => ({ kind: "message", message })),
+        ...persistence
+          .listToolCalls(sessionId)
+          .map((call): TranscriptItem => ({ kind: "tool-call", call })),
       ];
       // stable sort：同 createdAt 保持 messages 在前的插入顺序
       items.sort((a, b) =>
-        createdAtOf(a) < createdAtOf(b) ? -1 : createdAtOf(a) > createdAtOf(b) ? 1 : 0,
+        createdAtOf(a) < createdAtOf(b)
+          ? -1
+          : createdAtOf(a) > createdAtOf(b)
+            ? 1
+            : 0
       );
       return items;
     },
@@ -222,8 +228,8 @@ export function createSessionManager(
 
     rename(sessionId, title) {
       const trimmed = title.trim();
-      if (trimmed === '') {
-        throw new Error('会话名称不能为空');
+      if (trimmed === "") {
+        throw new Error("会话名称不能为空");
       }
       return patchRecord(sessionId, { title: trimmed, updatedAt: now() });
     },
@@ -237,7 +243,10 @@ export function createSessionManager(
 
     /** 审批模式切换（输入区选择器）：落库 + 对缓存实例立即生效（下一次工具调用） */
     setApprovalMode(sessionId, mode) {
-      const next = patchRecord(sessionId, { approvalMode: mode, updatedAt: now() });
+      const next = patchRecord(sessionId, {
+        approvalMode: mode,
+        updatedAt: now(),
+      });
       if (next !== null) {
         cache.get(sessionId)?.setApprovalMode(mode);
       }

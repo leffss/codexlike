@@ -14,24 +14,33 @@
  * 会话工具循环在本轮工具全部派发后经 pump() 等待本轮全部子代理结束，
  * 再把真实报告作为延迟的 tool-result 落库与回填（见 agent-session 的轮末等待）。
  */
-import { streamText, type LanguageModel, type ModelMessage, type ToolModelMessage } from 'ai';
+import {
+  streamText,
+  type LanguageModel,
+  type ModelMessage,
+  type ToolModelMessage,
+} from "ai";
 
-import { createLanguageModelFromProfile } from '../provider/language-model';
-import type { ProviderProfile } from '../provider/provider-profile';
-import { runTool, toModelTools } from '../tools/registry';
-import type { ToolCallRecord, ToolDefinition, ToolResult } from '../tools/types';
+import { createLanguageModelFromProfile } from "../provider/language-model";
+import type { ProviderProfile } from "../provider/provider-profile";
+import { runTool, toModelTools } from "../tools/registry";
+import type {
+  ToolCallRecord,
+  ToolDefinition,
+  ToolResult,
+} from "../tools/types";
 
 import {
   decideApproval,
   type ApprovalDecision,
   type ApprovalMode,
   type ApprovalRequest,
-} from './approval';
-import { describeModelError, isAbortLike } from './errors';
-import type { SessionEvent } from './types';
+} from "./approval";
+import { describeModelError, isAbortLike } from "./errors";
+import type { SessionEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
-export const SUBAGENT_TOOL_NAME = 'spawn_subagent';
+export const SUBAGENT_TOOL_NAME = "spawn_subagent";
 
 /** 单会话子代理并发上限默认值（spec：默认 3，设置页可配） */
 export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 3;
@@ -66,17 +75,14 @@ export interface SubagentsConfig {
 
 /**
  * 会话（agent-session）向编排器提供的端口：审批状态、审批等待注册与事件出口。
- * 子代理审批与主会话共用同一审批模式 / 「总是允许」记忆 / respondApproval 路由。
+ * 子代理审批与主会话共用同一审批模式 / respondApproval 路由
+ * （「总是允许」记忆已随三档重构移除，ADR 0004）。
  */
 export interface SubagentHostPort {
   sessionId: string;
   workspacePath: string;
   /** 实时读取当前审批模式（切换对子代理的下一次工具调用立即生效） */
   approvalMode(): ApprovalMode;
-  /** 「本会话总是允许」记忆（与主会话共享，子代理命中免审批） */
-  approvalMemory: ReadonlySet<string>;
-  /** 子代理审批的 always 决定：记忆命令首词（由会话负责落库） */
-  rememberAlways(commandWord: string): void;
   /**
    * 子代理的命令审批：注册等待（主会话 waiter 表）并以 approval-request 事件
    * 推给 UI（request.subagentId 标注来源）；resolve 由 respondApproval 触发。
@@ -88,20 +94,20 @@ export interface SubagentHostPort {
 
 /** 子代理系统提示：独立上下文的固定指令（不注入 AGENTS.md，与主会话提示无关） */
 const SUBAGENT_SYSTEM_PROMPT = [
-  '你是 CodexLike 的子代理：主会话把一项独立任务委派给你执行。',
-  '- 你拥有独立上下文，看不到主会话历史，只会收到本条任务描述；',
-  '- 你不能再委派子代理（没有 spawn_subagent 工具）；',
-  '- 工作区与主会话相同，文件与命令边界一致；',
-  '- 使用可用工具完成任务后，直接输出最终的中文文本报告——主会话只能看到这份报告，',
-  '报告应包含结论、关键细节（文件路径/命令/数据）与未尽事项。',
-].join('\n');
+  "你是 CodexLike 的子代理：主会话把一项独立任务委派给你执行。",
+  "- 你拥有独立上下文，看不到主会话历史，只会收到本条任务描述；",
+  "- 你不能再委派子代理（没有 spawn_subagent 工具）；",
+  "- 工作区与主会话相同，文件与命令边界一致；",
+  "- 使用可用工具完成任务后，直接输出最终的中文文本报告——主会话只能看到这份报告，",
+  "报告应包含结论、关键细节（文件路径/命令/数据）与未尽事项。",
+].join("\n");
 
 interface SubagentEntry {
   subagentId: string;
   /** 主会话的 spawn_subagent tool call id（报告回流绑定键） */
   toolCallId: string;
   task: string;
-  state: 'queued' | 'running' | 'done';
+  state: "queued" | "running" | "done";
   /** 最终报告（成功）或中文失败/中断原因 */
   output: string;
   isError: boolean;
@@ -133,9 +139,9 @@ export interface SubagentOrchestrator {
 
 /** 从工具参数中读取 command 字段（与 agent-session 的审批门同构） */
 function commandOfToolInput(input: unknown): string | undefined {
-  if (typeof input === 'object' && input !== null && 'command' in input) {
+  if (typeof input === "object" && input !== null && "command" in input) {
     const value = (input as Record<string, unknown>).command;
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       return value;
     }
   }
@@ -153,13 +159,13 @@ function safeJsonStringify(value: unknown): string {
 /** 创建子代理编排器（由 createAgentSession 内部装配；port 即会话自身） */
 export function createSubagentOrchestrator(
   config: SubagentsConfig,
-  port: SubagentHostPort,
+  port: SubagentHostPort
 ): SubagentOrchestrator {
   // 子代理工具集：完整工具集但剔除 spawn_subagent（防递归；编排器侧的双保险）。
   // 逐次解析（工单 12 的工厂语义）：每次委派时重新取用，MCP 启停即时生效
   function resolveSubagentTools(): ToolDefinition[] {
     const resolved =
-      typeof config.tools === 'function' ? config.tools() : config.tools;
+      typeof config.tools === "function" ? config.tools() : config.tools;
     return resolved.filter((tool) => tool.name !== SUBAGENT_TOOL_NAME);
   }
 
@@ -180,7 +186,7 @@ export function createSubagentOrchestrator(
 
   function hasPending(): boolean {
     for (const entry of entries.values()) {
-      if (entry.state === 'queued' || entry.state === 'running') {
+      if (entry.state === "queued" || entry.state === "running") {
         return true;
       }
     }
@@ -190,7 +196,7 @@ export function createSubagentOrchestrator(
   function runningCount(): number {
     let count = 0;
     for (const entry of entries.values()) {
-      if (entry.state === 'running') {
+      if (entry.state === "running") {
         count += 1;
       }
     }
@@ -200,13 +206,15 @@ export function createSubagentOrchestrator(
   /** 有空位则按 FIFO 让队首子代理开跑（委派时与子代理结束时各调用一次） */
   function startQueued(signal: AbortSignal | undefined): void {
     while (runningCount() < config.settings().maxConcurrent) {
-      const next = [...entries.values()].find((entry) => entry.state === 'queued');
+      const next = [...entries.values()].find(
+        (entry) => entry.state === "queued"
+      );
       if (next === undefined) {
         return;
       }
-      next.state = 'running';
+      next.state = "running";
       emit({
-        type: 'subagent-start',
+        type: "subagent-start",
         subagentId: next.subagentId,
         task: next.task,
         toolCallId: next.toolCallId,
@@ -221,21 +229,24 @@ export function createSubagentOrchestrator(
     definition: ToolDefinition,
     input: unknown,
     entry: SubagentEntry,
-    signal: AbortSignal | undefined,
+    signal: AbortSignal | undefined
   ): Promise<ToolResult> {
     const command = commandOfToolInput(input);
+    const approvalMode = port.approvalMode();
     const gate = decideApproval({
-      mode: port.approvalMode(),
+      mode: approvalMode,
       permission: definition.permission,
       toolName: definition.name,
       command,
-      memory: port.approvalMemory,
     });
 
-    if (gate.kind === 'blocked') {
-      return { output: `工具调用被审批策略拒绝：${gate.reason}`, isError: true };
+    if (gate.kind === "blocked") {
+      return {
+        output: `工具调用被审批策略拒绝：${gate.reason}`,
+        isError: true,
+      };
     }
-    if (gate.kind === 'ask') {
+    if (gate.kind === "ask") {
       const request: ApprovalRequest = {
         id: port.generateId(),
         sessionId: port.sessionId,
@@ -246,19 +257,18 @@ export function createSubagentOrchestrator(
         subagentId: entry.subagentId,
       };
       const decision = await port.requestApproval(request);
-      if (decision === 'reject') {
+      if (decision === "reject") {
         return {
           output:
-            '工具调用被用户拒绝：用户未批准子代理执行该命令。可以改用只读工具继续，或在报告中说明未完成的部分。',
+            "工具调用被用户拒绝：用户未批准子代理执行该命令。可以改用只读工具继续，或在报告中说明未完成的部分。",
           isError: true,
         };
       }
-      if (decision === 'always') {
-        port.rememberAlways(gate.commandWord);
-      }
+      // always 与 approve 同效：不再写「总是允许」记忆（ADR 0004）
     }
     return runTool(definition, input, {
       workspacePath: port.workspacePath,
+      approvalMode,
       // 工单 11：子代理与主会话共享同一会话级浏览器 context/Cookie
       sessionId: port.sessionId,
       signal,
@@ -268,9 +278,9 @@ export function createSubagentOrchestrator(
   /** 子代理运行循环：独立上下文的 streamText 工具循环（结构与主会话循环同构） */
   async function runSubagent(
     entry: SubagentEntry,
-    signal: AbortSignal | undefined,
+    signal: AbortSignal | undefined
   ): Promise<void> {
-    let output = '';
+    let output = "";
     let isError = false;
     let aborted = false;
     try {
@@ -278,11 +288,13 @@ export function createSubagentOrchestrator(
       const fallback = fallbackProfiles.get(entry.subagentId);
       const profile = (await config.resolveProfile()) ?? fallback;
       if (profile === undefined) {
-        throw new Error('未解析到子代理模型（Provider Profile）');
+        throw new Error("未解析到子代理模型（Provider Profile）");
       }
-      const messages: ModelMessage[] = [{ role: 'user', content: entry.task }];
+      const messages: ModelMessage[] = [{ role: "user", content: entry.task }];
       const subagentTools = resolveSubagentTools();
-      const toolsByName = new Map(subagentTools.map((tool) => [tool.name, tool]));
+      const toolsByName = new Map(
+        subagentTools.map((tool) => [tool.name, tool])
+      );
       const modelTools =
         subagentTools.length > 0 ? toModelTools(subagentTools) : undefined;
       let round = 0;
@@ -297,19 +309,23 @@ export function createSubagentOrchestrator(
           abortSignal: signal,
         });
 
-        const toolCalls: { toolCallId: string; toolName: string; input: unknown }[] = [];
+        const toolCalls: {
+          toolCallId: string;
+          toolName: string;
+          input: unknown;
+        }[] = [];
         for await (const part of result.fullStream) {
-          if (part.type === 'text-delta') {
+          if (part.type === "text-delta") {
             output += part.text;
-          } else if (part.type === 'tool-call') {
+          } else if (part.type === "tool-call") {
             toolCalls.push({
               toolCallId: part.toolCallId,
               toolName: part.toolName,
               input: part.input,
             });
-          } else if (part.type === 'error') {
+          } else if (part.type === "error") {
             throw part.error;
-          } else if (part.type === 'abort') {
+          } else if (part.type === "abort") {
             aborted = true;
           }
         }
@@ -326,47 +342,56 @@ export function createSubagentOrchestrator(
         messages.push(...(await result.response).messages);
 
         // 逐个执行工具：进度事件 → 审批门 → 执行 → 进度事件
-        const resultParts: ToolModelMessage['content'] = [];
+        const resultParts: ToolModelMessage["content"] = [];
         for (const call of toolCalls) {
           const base: ToolCallRecord = {
             id: call.toolCallId,
             sessionId: port.sessionId,
             toolName: call.toolName,
             arguments: safeJsonStringify(call.input),
-            output: '',
+            output: "",
             isError: false,
             createdAt: port.now(),
           };
-          emit({ type: 'subagent-tool', subagentId: entry.subagentId, phase: 'call', call: base });
+          emit({
+            type: "subagent-tool",
+            subagentId: entry.subagentId,
+            phase: "call",
+            call: base,
+          });
 
           const definition = toolsByName.get(call.toolName);
           let executed: ToolResult;
           if (definition === undefined) {
             executed = {
-              output: `工具 ${call.toolName} 未注册（子代理不能再委派子代理），可用工具：${subagentTools.map((t) => t.name).join('、')}`,
+              output: `工具 ${call.toolName} 未注册（子代理不能再委派子代理），可用工具：${subagentTools.map((t) => t.name).join("、")}`,
               isError: true,
             };
           } else {
             executed = await gateAndRun(definition, call.input, entry, signal);
           }
 
-          const completed = { ...base, output: executed.output, isError: executed.isError };
+          const completed = {
+            ...base,
+            output: executed.output,
+            isError: executed.isError,
+          };
           emit({
-            type: 'subagent-tool',
+            type: "subagent-tool",
             subagentId: entry.subagentId,
-            phase: 'result',
+            phase: "result",
             call: completed,
           });
           resultParts.push({
-            type: 'tool-result',
+            type: "tool-result",
             toolCallId: call.toolCallId,
             toolName: call.toolName,
-            output: { type: 'text', value: executed.output },
+            output: { type: "text", value: executed.output },
           });
         }
 
         // 工具结果作为 tool 消息回填，进入下一轮生成（与主会话循环一致）
-        messages.push({ role: 'tool', content: resultParts });
+        messages.push({ role: "tool", content: resultParts });
       }
     } catch (error) {
       if (isAbortLike(error, signal)) {
@@ -380,20 +405,20 @@ export function createSubagentOrchestrator(
 
     if (aborted) {
       // 中断：已生成的部分文本保留为报告；完全没产出则记为失败（原因可读）
-      if (output.trim() === '') {
-        output = '子代理已随主会话中断，未产出报告';
+      if (output.trim() === "") {
+        output = "子代理已随主会话中断，未产出报告";
         isError = true;
       }
-    } else if (output.trim() === '' && !isError) {
-      output = '子代理已完成任务，但未产出文本报告';
+    } else if (output.trim() === "" && !isError) {
+      output = "子代理已完成任务，但未产出文本报告";
     }
 
     entry.output = output;
     entry.isError = isError;
-    entry.state = 'done';
+    entry.state = "done";
     fallbackProfiles.delete(entry.subagentId);
     emit({
-      type: 'subagent-report',
+      type: "subagent-report",
       subagentId: entry.subagentId,
       task: entry.task,
       report: output,
@@ -404,31 +429,32 @@ export function createSubagentOrchestrator(
   const tool: ToolDefinition = {
     name: SUBAGENT_TOOL_NAME,
     description:
-      '把一项独立任务（调研、大范围搜索、资料整理等）委派给后台子代理执行。' +
-      '子代理拥有独立上下文与完整工具集（不可再委派子代理），完成后返回中文文本报告。' +
-      '多个委派并行执行（并发上限见设置页），适合把大范围搜索从主会话上下文中卸载出去。' +
-      'task 应当自包含：写清目标、范围与期望的报告内容（子代理看不到本会话历史）。',
+      "把一项独立任务（调研、大范围搜索、资料整理等）委派给后台子代理执行。" +
+      "子代理拥有独立上下文与完整工具集（不可再委派子代理），完成后返回中文文本报告。" +
+      "多个委派并行执行（并发上限见设置页），适合把大范围搜索从主会话上下文中卸载出去。" +
+      "task 应当自包含：写清目标、范围与期望的报告内容（子代理看不到本会话历史）。",
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
         task: {
-          type: 'string',
-          description: '委派给子代理的任务描述（自包含：目标、范围、期望产出）',
+          type: "string",
+          description: "委派给子代理的任务描述（自包含：目标、范围、期望产出）",
         },
       },
-      required: ['task'],
+      required: ["task"],
       additionalProperties: false,
     },
     // 委派本身是元操作：readonly 下放行（子代理内部工具仍受审批模式约束）
-    permission: 'readonly',
+    permission: "readonly",
     async execute(args, context) {
       const task =
-        typeof (args as { task?: unknown } | null)?.task === 'string'
-          ? ((args as { task: string }).task).trim()
-          : '';
-      if (task === '') {
+        typeof (args as { task?: unknown } | null)?.task === "string"
+          ? (args as { task: string }).task.trim()
+          : "";
+      if (task === "") {
         return {
-          output: '工具 spawn_subagent 执行失败：task 必须是非空字符串的任务描述',
+          output:
+            "工具 spawn_subagent 执行失败：task 必须是非空字符串的任务描述",
           isError: true,
         };
       }
@@ -437,20 +463,21 @@ export function createSubagentOrchestrator(
         subagentId,
         toolCallId: context.toolCallId ?? subagentId,
         task,
-        state: 'queued',
-        output: '',
+        state: "queued",
+        output: "",
         isError: false,
       };
       entries.set(subagentId, entry);
       if (context.profile !== undefined) {
         fallbackProfiles.set(subagentId, context.profile);
       }
-      emit({ type: 'subagent-queued', subagentId, task });
+      emit({ type: "subagent-queued", subagentId, task });
       // 立即尝试占位开跑；并发上限满则留在 FIFO 队列（前一个结束时推进）
       startQueued(context.signal);
       // 占位输出：真实报告在会话轮末等待后作为延迟 tool-result 回填（见 resultFor）
       return {
-        output: '已接受委派：子代理正在后台执行任务，完成后报告将回流到主会话。',
+        output:
+          "已接受委派：子代理正在后台执行任务，完成后报告将回流到主会话。",
         isError: false,
       };
     },
@@ -467,7 +494,7 @@ export function createSubagentOrchestrator(
     hasPending,
     resultFor(toolCallId) {
       for (const entry of entries.values()) {
-        if (entry.toolCallId === toolCallId && entry.state === 'done') {
+        if (entry.toolCallId === toolCallId && entry.state === "done") {
           return { output: entry.output, isError: entry.isError };
         }
       }
