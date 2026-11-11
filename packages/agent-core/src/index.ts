@@ -31,6 +31,7 @@ export type {
   CompactResult,
   MentionAttachment,
   MessageRole,
+  ProjectRecord,
   SessionEvent,
   SessionRecord,
   SessionStatus,

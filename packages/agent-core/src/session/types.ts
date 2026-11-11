@@ -34,16 +34,28 @@ export type SessionStatus =
  */
 export type WorkspaceMode = "local" | "worktree";
 
+/** 显式项目；不依赖会话存在，工作区目录不要求是 Git 仓库。 */
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  workspacePath: string;
+  createdAt: string;
+}
+
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
   id: string;
+  /** 管理归属；null 为独立会话，绝不从目录推导。 */
+  projectId: string | null;
+  /** 首次发送幂等键；宿主生成草稿后提交，成功后随记录持久保存。 */
+  creationRequestId?: string | null;
   /** 侧栏显示名，默认取工作区目录名 */
   title: string;
   /** 绑定的工作区目录，agent 的所有文件、终端操作都被限制在其中 */
   workspacePath: string;
   /** 运行位置（本目录直跑 / 托管 Worktree）；旧库无此列恢复为 local */
   workspaceMode: WorkspaceMode;
-  /** worktree 模式：用户所选的原始仓库路径（侧栏项目聚合键，ADR 0005）；local 恒为 null，旧库恢复为 null */
+  /** Worktree 来源目录，独立于项目归属保存；local 为 null，不作侧栏分组键。 */
   workspaceOriginPath: string | null;
   /** 最近一次发送消息所用的 Provider Profile（模型选择器「对下一条生效」的落点） */
   providerProfileId: string | null;

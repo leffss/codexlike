@@ -32,6 +32,7 @@ function sessionRecord(
     model: null,
     status: "idle",
     workspaceMode: "local",
+    projectId: null,
     workspaceOriginPath: null,
     approvalMode,
     archivedAt: null,

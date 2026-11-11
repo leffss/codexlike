@@ -17,6 +17,7 @@ function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
     model: "glm-4.7",
     status: "idle",
     workspaceMode: "local",
+    projectId: null,
     workspaceOriginPath: null,
     approvalMode: "assist",
     archivedAt: null,

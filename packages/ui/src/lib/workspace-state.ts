@@ -1,6 +1,8 @@
 import type {
   InteractionRecord,
   InteractionResponse,
+  ApprovalMode,
+  ThinkingEffort,
 } from "@codexlike/agent-core";
 
 import {
@@ -9,6 +11,18 @@ import {
   type QuestionAction,
   type QuestionDraft,
 } from "./interaction-draft";
+
+export interface NewSessionDraft {
+  requestId: string;
+  projectId: string | null;
+  text: string;
+  workspacePath?: string;
+  providerProfileId: string;
+  thinkingEffort: ThinkingEffort;
+  approvalMode: ApprovalMode;
+  busy: boolean;
+  error: string | null;
+}
 
 export interface SubmissionState {
   busy: boolean;
@@ -23,6 +37,26 @@ export function createWorkspaceState() {
   const observedAt = new Map<string, number>();
   const drafts = new Map<string, QuestionDraft>();
   const composers = new Map<string, string>();
+  const newDrafts = new Map<string | null, NewSessionDraft>();
+  function newDraft(projectId: string | null, defaultProfile = "") {
+    let draft = newDrafts.get(projectId);
+    if (!draft) {
+      draft = {
+        requestId: crypto.randomUUID(),
+        projectId,
+        text: "",
+        providerProfileId: defaultProfile,
+        thinkingEffort: "auto",
+        approvalMode: "ask",
+        busy: false,
+        error: null,
+      };
+      newDrafts.set(projectId, draft);
+    }
+    if (!draft.providerProfileId && defaultProfile)
+      draft.providerProfileId = defaultProfile;
+    return draft;
+  }
   const submissions = new Map<string, SubmissionState>();
   const listeners = new Set<() => void>();
   let revision = 0;
@@ -46,6 +80,19 @@ export function createWorkspaceState() {
   }
   return {
     activeSessionId: null as string | null,
+    activeDraftProjectId: undefined as string | null | undefined,
+    newDraft,
+    editNewDraft(
+      projectId: string | null,
+      patch: Partial<Omit<NewSessionDraft, "requestId" | "projectId">>
+    ) {
+      Object.assign(newDraft(projectId), patch);
+      notify();
+    },
+    completeNewDraft(projectId: string | null) {
+      newDrafts.delete(projectId);
+      notify();
+    },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {

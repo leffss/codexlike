@@ -146,6 +146,8 @@ export function MessageComposer(props: {
   selectedProfileId: string;
   onSelectProfile: (id: string) => void;
   onSend: (text: string) => void;
+  /** 受控草稿由父级在发送确认后清空，失败则保留输入。 */
+  clearOnSend?: boolean;
   /** @引用 菜单候选（工作区文件） */
   workspaceFiles: string[];
   /** 最新磁盘预览候选；打开技能菜单时重新发现，不沿用运行快照。 */
@@ -225,7 +227,7 @@ export function MessageComposer(props: {
       return;
     }
     props.onSend(text);
-    setValue("");
+    if (props.clearOnSend !== false) setValue("");
     setMenu(null);
     dismissedRef.current = null;
   }

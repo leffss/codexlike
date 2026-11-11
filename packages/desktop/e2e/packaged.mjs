@@ -27,7 +27,10 @@ try {
   // firstWindow 已隐含「窗口创建」断言（无窗口则超时抛错）；标题再显式确认
   assert((await window.title()).length > 0, "窗口标题为空（窗口未真正创建）");
   assert(existsSync(homeDir), "数据目录未自动创建（打包冷启动黑屏回归）");
-  assert(existsSync(join(homeDir, "codexlike.db")), "SQLite 库文件未落盘");
+  assert(
+    existsSync(join(homeDir, "session-workbench.db")),
+    "SQLite 库文件未落盘"
+  );
   console.log("[packaged] 冷启动冒烟通过：窗口已开，数据目录自建，库文件落盘");
 } finally {
   await closeApp(app);

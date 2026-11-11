@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 
-import type { SessionRecord } from "@codexlike/agent-core";
+import type { ProjectRecord, SessionRecord } from "@codexlike/agent-core";
 
 import { groupSessionsByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -40,16 +40,18 @@ function FolderIcon(props: { open: boolean }) {
 }
 
 /**
- * 左栏：单一项目树（GLOSSARY「项目」，ADR 0005）。
- * 项目组 = 同一工作区目录（worktree 会话按原始仓库路径）自动聚合的会话分组，
- * 组头常驻、项目永不消失；组内活跃会话在上、「已归档」子折叠在下。
- * 分组与排序见 lib/project-groups（纯派生，无持久实体）。
+ * 左栏：独立会话分区与显式项目列表（ADR 0010）。
+ * 项目组头不依赖会话存在；归属只看 projectId，绝不按目录自动聚合。
+ * 组内活跃会话在上、「已归档」子折叠在下。
  * 会话行右侧显示相对更新时间（updatedAt「最近更新」口径，lib/relative-time），
  * 状态徽标弱化为小徽标，操作按钮 hover / 键盘聚焦时浮现；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
 export function SessionSidebar(props: {
   sessions: SessionRecord[];
+  projects: ProjectRecord[];
+  onAddProject: () => void;
+  onCreateInProject: (projectId: string) => void;
   currentId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
@@ -74,7 +76,7 @@ export function SessionSidebar(props: {
     return () => window.clearInterval(timer);
   }, []);
 
-  const groups = groupSessionsByProject(props.sessions);
+  const groups = groupSessionsByProject(props.sessions, props.projects);
 
   function submitRename(id: string) {
     const title = editingTitle.trim();
@@ -205,7 +207,9 @@ export function SessionSidebar(props: {
       <li key={group.key}>
         <button
           type="button"
-          data-testid="project-group"
+          data-testid={
+            group.projectId === null ? "standalone-group" : "project-group"
+          }
           title={group.path}
           aria-expanded={expanded}
           className="mt-2 flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium text-fg-muted hover:bg-hover hover:text-fg"
@@ -223,6 +227,17 @@ export function SessionSidebar(props: {
             {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
           </span>
         </button>
+        {group.projectId !== null && (
+          <button
+            type="button"
+            data-testid="project-new-session"
+            disabled={props.creating}
+            className="ml-4 rounded px-2 py-1 text-xs text-accent hover:bg-hover"
+            onClick={() => props.onCreateInProject(group.projectId!)}
+          >
+            + 新建会话
+          </button>
+        )}
         {expanded && (
           <ul className="pl-3">
             {group.active.map((session) => renderSessionItem(session))}
@@ -277,7 +292,7 @@ export function SessionSidebar(props: {
           type="button"
           data-testid="new-session"
           disabled={props.creating}
-          title="选择工作区目录，新建会话"
+          title="新建独立会话草稿"
           className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={props.onCreate}
         >
@@ -285,6 +300,14 @@ export function SessionSidebar(props: {
         </button>
       </div>
 
+      <button
+        type="button"
+        data-testid="add-project"
+        className="mx-3 rounded border border-line px-2 py-1 text-xs text-fg-muted hover:text-accent"
+        onClick={props.onAddProject}
+      >
+        添加项目
+      </button>
       {groups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4">
           <p className="text-center text-xs text-fg-subtle">

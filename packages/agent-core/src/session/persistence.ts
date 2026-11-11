@@ -8,7 +8,12 @@ import type {
   QuestionAnswerSnapshot,
 } from "../interaction/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
-import type { CompactRecord, SessionRecord, StoredMessage } from "./types";
+import type {
+  CompactRecord,
+  ProjectRecord,
+  SessionRecord,
+  StoredMessage,
+} from "./types";
 
 /**
  * 会话持久化接口（spec「会话与持久化」节）。
@@ -18,7 +23,11 @@ import type { CompactRecord, SessionRecord, StoredMessage } from "./types";
  * compact（工单 08）与审批记忆（工单 04）均已落地，各自在此接口上扩展方法。
  */
 export interface SessionPersistence {
+  insertProject(record: ProjectRecord): void;
+  listProjects(): ProjectRecord[];
   insertSession(record: SessionRecord): void;
+  /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
+  removeUnstartedSession(id: string): void;
   /** 只更新给定字段；目标不存在时静默忽略（写入方持有内存态，读路径不经过这里） */
   updateSession(
     id: string,
@@ -63,6 +72,12 @@ export interface SessionPersistence {
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  workspace_path TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -123,6 +138,8 @@ CREATE TABLE IF NOT EXISTS approvals (
 
 interface SessionRow {
   id: string;
+  project_id: string | null;
+  creation_request_id: string | null;
   title: string;
   workspace_path: string;
   provider_profile_id: string | null;
@@ -222,8 +239,18 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     db.exec("ALTER TABLE messages ADD COLUMN question_answers TEXT");
   }
 
+  const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all();
+  if (!sessionColumns.some((column) => column.name === "project_id"))
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id)"
+    );
+  if (!sessionColumns.some((column) => column.name === "creation_request_id"))
+    db.exec("ALTER TABLE sessions ADD COLUMN creation_request_id TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_creation_request ON sessions(creation_request_id)"
+  );
   const insertSession = db.prepare(
-    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
     "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ? WHERE id = ?"
@@ -265,6 +292,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   function toRecord(row: SessionRow): SessionRecord {
     return {
       id: row.id,
+      projectId: row.project_id ?? null,
+      creationRequestId: row.creation_request_id ?? null,
       title: row.title,
       workspacePath: row.workspace_path,
       providerProfileId: row.provider_profile_id,
@@ -311,6 +340,22 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   return {
+    insertProject(record) {
+      db.prepare(
+        "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"
+      ).run(record.id, record.name, record.workspacePath, record.createdAt);
+    },
+    listProjects() {
+      return db
+        .prepare("SELECT * FROM projects ORDER BY created_at, rowid")
+        .all()
+        .map((row) => ({
+          id: String(row.id),
+          name: String(row.name),
+          workspacePath: String(row.workspace_path),
+          createdAt: String(row.created_at),
+        }));
+    },
     insertSession(record) {
       insertSession.run(
         record.id,
@@ -324,8 +369,15 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.workspaceOriginPath,
         record.archivedAt,
         record.createdAt,
-        record.updatedAt
+        record.updatedAt,
+        record.projectId ?? null,
+        record.creationRequestId ?? null
       );
+    },
+    removeUnstartedSession(id) {
+      db.prepare(
+        "DELETE FROM sessions WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE session_id = ?)"
+      ).run(id, id);
     },
 
     updateSession(id, patch) {

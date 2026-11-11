@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import { basename, isAbsolute } from "node:path";
+import { realpathSync, statSync } from "node:fs";
 
 import type { LanguageModel } from "ai";
 
@@ -20,6 +21,7 @@ import type { SessionPersistence } from "./persistence";
 import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
+  ProjectRecord,
   SessionRecord,
   StoredMessage,
   TranscriptItem,
@@ -67,7 +69,13 @@ export interface CreateSessionManagerOptions {
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
 export interface SessionManager {
+  addProject(workspacePath: string): ProjectRecord;
+  projects(): ProjectRecord[];
+  removeUnstarted(sessionId: string): void;
   create(options: {
+    projectId?: string | null;
+    creationRequestId?: string;
+    approvalMode?: ApprovalMode;
     workspacePath: string;
     title?: string;
     /** 运行位置（默认 local 本目录直跑；worktree 由宿主先检出副本再传入其路径） */
@@ -195,10 +203,42 @@ export function createSessionManager(
   }
 
   return {
+    addProject(workspacePath) {
+      if (!isAbsolute(workspacePath)) throw new Error("项目目录必须是绝对路径");
+      let path: string;
+      try {
+        path = realpathSync.native(workspacePath);
+        if (!statSync(path).isDirectory()) throw new Error();
+      } catch {
+        throw new Error(`项目目录不存在或无法访问：${workspacePath}`);
+      }
+      const existing = persistence
+        .listProjects()
+        .find((project) => project.workspacePath === path);
+      if (existing) return existing;
+      const project = {
+        id: generateId(),
+        name: basename(path) || path,
+        workspacePath: path,
+        createdAt: now(),
+      };
+      persistence.insertProject(project);
+      return project;
+    },
+    projects: () => persistence.listProjects(),
     cancelInteractions(reason) {
       for (const session of cache.values()) session.cancelInteractions(reason);
     },
+    removeUnstarted(sessionId) {
+      if (persistence.listMessages(sessionId).length)
+        throw new Error("不能回滚已有历史的会话");
+      persistence.removeUnstartedSession(sessionId);
+      cache.delete(sessionId);
+    },
     create({
+      projectId = null,
+      creationRequestId = null,
+      approvalMode = "assist",
       workspacePath,
       title,
       workspaceMode = "local",
@@ -209,6 +249,8 @@ export function createSessionManager(
       const record: SessionRecord = {
         // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
         id: id ?? generateId(),
+        projectId,
+        creationRequestId,
         title: title ?? (basename(workspacePath) || workspacePath),
         workspacePath,
         workspaceMode,
@@ -217,7 +259,7 @@ export function createSessionManager(
         model: null,
         status: "idle",
         // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
-        approvalMode: "assist",
+        approvalMode,
         archivedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,

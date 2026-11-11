@@ -12,12 +12,14 @@ import type { SessionRecord, StoredMessage } from "../../src/session/types";
 function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
     id: "session-1",
+    creationRequestId: null,
     title: "demo",
     workspacePath: "C:\\work\\demo",
     providerProfileId: null,
     model: null,
     status: "idle",
     workspaceMode: "local",
+    projectId: null,
     workspaceOriginPath: null,
     approvalMode: "assist",
     archivedAt: null,

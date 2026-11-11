@@ -30,6 +30,7 @@ function sessionRecord(workspacePath: string): SessionRecord {
     model: null,
     status: "idle",
     workspaceMode: "local",
+    projectId: null,
     workspaceOriginPath: null,
     approvalMode: "assist",
     archivedAt: null,

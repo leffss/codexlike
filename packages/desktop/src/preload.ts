@@ -5,6 +5,10 @@ import { IPC, type CodexLikeApi } from "./shared/ipc";
 // contextBridge 暴露类型化 API；渲染进程经 `window.codexlike` 访问，
 // 无 nodeIntegration、无裸 ipcRenderer（安全基线）。
 const api: CodexLikeApi = {
+  projects: {
+    list: () => ipcRenderer.invoke(IPC.projects.list),
+    add: (workspacePath) => ipcRenderer.invoke(IPC.projects.add, workspacePath),
+  },
   providerProfiles: {
     list: () => ipcRenderer.invoke(IPC.providerProfiles.list),
     create: (input) => ipcRenderer.invoke(IPC.providerProfiles.create, input),
@@ -13,9 +17,9 @@ const api: CodexLikeApi = {
     remove: (id) => ipcRenderer.invoke(IPC.providerProfiles.remove, id),
   },
   sessions: {
+    start: (input) => ipcRenderer.invoke(IPC.sessions.start, input),
+    execution: (id) => ipcRenderer.invoke(IPC.sessions.execution, id),
     list: () => ipcRenderer.invoke(IPC.sessions.list),
-    create: (workspacePath, workspaceMode) =>
-      ipcRenderer.invoke(IPC.sessions.create, workspacePath, workspaceMode),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
     messages: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.messages, sessionId),

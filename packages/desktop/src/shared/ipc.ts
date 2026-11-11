@@ -6,6 +6,7 @@ import type {
   InteractionResponse,
   ProviderProfile,
   ProviderProfileInput,
+  ProjectRecord,
   SessionEvent,
   SessionRecord,
   SessionResourcesView,
@@ -42,6 +43,7 @@ export type { ThemeName };
  * 主→渲染：会话事件流（`session:events` channel，按会话 ID 多路复用）。
  */
 export const IPC = {
+  projects: { list: "projects:list", add: "projects:add" },
   providerProfiles: {
     list: "provider-profiles:list",
     create: "provider-profiles:create",
@@ -51,8 +53,9 @@ export const IPC = {
   sessions: {
     /** 全部会话（含已归档，侧栏列表自行过滤；updatedAt 倒序） */
     list: "sessions:list",
-    /** 新建会话（绑定工作区目录；可选运行位置 local/worktree） */
-    create: "sessions:create",
+    /** 首次发送：幂等创建正式会话并启动正常发送。 */
+    start: "sessions:start",
+    execution: "sessions:execution",
     /** 打开原生目录选择器；取消返回 null */
     selectWorkspace: "sessions:select-workspace",
     /** 指定会话的消息历史 */
@@ -136,11 +139,40 @@ export const IPC = {
 /** 事件流信封：按会话 ID 多路复用 */
 export interface SessionEventEnvelope {
   sessionId: string;
+  /** 本次宿主执行的稳定标识，结束后不复用。 */
+  executionId: string;
   event: SessionEvent;
+}
+
+/** 一个草稿意图沿用同一个 requestId 重试；成功后重试仅返回原会话，不重放消息。 */
+export interface StartSessionInput {
+  requestId: string;
+  projectId: string | null;
+  /** 仅独立会话可指定；省略则在首次发送时分配专用持久目录。 */
+  workspacePath?: string;
+  workspaceMode?: WorkspaceMode;
+  text: string;
+  providerProfileId?: string;
+  thinkingEffort?: ThinkingEffort;
+  approvalMode?: ApprovalMode;
+  mentionPaths?: string[];
+}
+
+/** 宿主权威运行信息；与当前页面无关，等待回应也视为执行中。 */
+export interface SessionExecutionState {
+  sessionId: string;
+  executionId: string | null;
+  running: boolean;
+  waitingForUser: boolean;
+  pendingInteractionIds: string[];
 }
 
 /** `window.codexlike` 的完整 API 形状 */
 export interface CodexLikeApi {
+  projects: {
+    list(): Promise<ProjectRecord[]>;
+    add(workspacePath: string): Promise<ProjectRecord>;
+  };
   providerProfiles: {
     /** 全部 Provider Profile（apiKey 已解密，仅存在于渲染进程内存） */
     list(): Promise<ProviderProfile[]>;
@@ -154,17 +186,10 @@ export interface CodexLikeApi {
     remove(id: string): Promise<boolean>;
   };
   sessions: {
+    start(input: StartSessionInput): Promise<SessionRecord>;
+    execution(sessionId: string): Promise<SessionExecutionState | null>;
     /** 全部会话（重启后从 SQLite 恢复；含已归档，侧栏自行过滤） */
     list(): Promise<SessionRecord[]>;
-    /**
-     * 在指定工作区目录新建会话。workspaceMode 缺省 local（本目录直跑）；
-     * `worktree` 在 ~/.codexlike/worktrees/<会话id> 检出托管 Worktree（独立分支），
-     * 非 git 目录以中文异常抛回且会话不创建。
-     */
-    create(
-      workspacePath: string,
-      workspaceMode?: WorkspaceMode
-    ): Promise<SessionRecord>;
     /** 原生目录选择器；取消返回 null */
     selectWorkspace(): Promise<string | null>;
     /** 指定会话的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */

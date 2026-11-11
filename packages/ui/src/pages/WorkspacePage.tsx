@@ -16,11 +16,11 @@ import {
   resolveComposerSubmission,
   type ApprovalMode,
   type ProviderProfile,
+  type ProjectRecord,
   type SessionEvent,
   type SessionRecord,
   type SessionResourcesView,
   type ThinkingEffort,
-  type WorkspaceMode,
 } from "@codexlike/agent-core";
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
@@ -28,7 +28,6 @@ import { ChangesPanel } from "../components/ChangesPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
-import { NewSessionDialog } from "../components/NewSessionDialog";
 import { SessionSidebar } from "../components/SessionSidebar";
 import {
   applySessionEvent,
@@ -71,8 +70,16 @@ export function WorkspacePage(props: {
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [draftProjectId, setDraftProjectId] = useState<
+    string | null | undefined
+  >(workspaceState.activeDraftProjectId);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const draft =
+    draftProjectId === undefined
+      ? null
+      : workspaceState.newDraft(draftProjectId, profiles[0]?.id ?? "");
+  const creating = draft?.busy ?? false;
   const [selectedProfileId, setSelectedProfileId] = useState("");
   /**
    * 思考档位（GLOSSARY「思考档位」）：前端临时发送设置，默认 auto，不做会话级记忆。
@@ -88,8 +95,6 @@ export function WorkspacePage(props: {
   const [resourcesError, setResourcesError] = useState<string | null>(null);
   const resourceRequestRef = useRef(0);
   const sessionRequestRef = useRef(0);
-  /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
-  const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null);
   /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
   const [fullAccessPending, setFullAccessPending] = useState(false);
   /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
@@ -181,6 +186,8 @@ export function WorkspacePage(props: {
 
   const openSession = useCallback(
     async (id: string) => {
+      setDraftProjectId(undefined);
+      workspaceState.activeDraftProjectId = undefined;
       setCurrentId(id);
       workspaceState.activeSessionId = id;
       currentIdRef.current = id;
@@ -275,10 +282,12 @@ export function WorkspacePage(props: {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [list, profileList] = await Promise.all([
+      const [list, profileList, projectList] = await Promise.all([
         window.codexlike.sessions.list(),
         window.codexlike.providerProfiles.list(),
+        window.codexlike.projects.list(),
       ]);
+      if (active) setProjects(projectList);
       if (!active) return;
       setSessions(list);
       setProfiles(profileList);
@@ -289,7 +298,11 @@ export function WorkspacePage(props: {
       const latest =
         list.find((session) => session.id === workspaceState.activeSessionId) ??
         list.find((session) => session.archivedAt === null);
-      if (latest !== undefined && currentIdRef.current === null) {
+      if (
+        latest !== undefined &&
+        currentIdRef.current === null &&
+        workspaceState.activeDraftProjectId === undefined
+      ) {
         await openSession(latest.id);
       }
     })();
@@ -360,61 +373,77 @@ export function WorkspacePage(props: {
     []
   );
 
-  /** 侧栏「+ 新建会话」：选目录 → 模式对话框（本目录直跑 / worktree 模式）→ 创建 */
-  async function startCreateSession() {
-    const dir = await window.codexlike.sessions.selectWorkspace();
-    if (dir === null) {
-      return; // 用户取消目录选择
-    }
-    setPendingWorkspace(dir);
+  /** 入口只打开每项目/独立入口唯一的内存草稿，不调用创建 IPC。 */
+  function startCreateSession(projectId: string | null = null) {
+    workspaceState.newDraft(projectId, profiles[0]?.id ?? "");
+    workspaceState.activeDraftProjectId = projectId;
+    workspaceState.activeSessionId = null;
+    setDraftProjectId(projectId);
+    setCurrentId(null);
+    currentIdRef.current = null;
+    sessionRequestRef.current += 1;
+    resourceRequestRef.current += 1;
+    loadingRef.current = null;
+    setMessages([]);
+    setWorkspaceFiles([]);
+    setResources(null);
+    setLoading(false);
+    setStreaming(false);
+    setCompacting(false);
+    setContextWarning(null);
+    setFullAccessPending(false);
   }
 
-  /** 模式对话框确认：创建会话（worktree 失败的中文错误显示在消息流，可改选重试） */
-  async function createSession(mode: WorkspaceMode) {
-    if (pendingWorkspace === null) {
-      return;
-    }
-    setCreating(true);
+  async function addProject() {
     try {
-      const record = await window.codexlike.sessions.create(
-        pendingWorkspace,
-        mode
+      const path = await window.codexlike.sessions.selectWorkspace();
+      if (path === null) return;
+      await window.codexlike.projects.add(path);
+      setProjects(await window.codexlike.projects.list());
+    } catch (error) {
+      pushLocalStatus(
+        `添加项目失败：${error instanceof Error ? error.message : String(error)}`
       );
-      setPendingWorkspace(null);
-      await refreshSessions();
-      await openSession(record.id);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          role: "error",
-          content: `新建会话失败：${error instanceof Error ? error.message : String(error)}`,
-        },
-      ]);
-    } finally {
-      setCreating(false);
     }
   }
 
-  /** /new：同工作区新会话（不经目录选择器与模式对话框，本目录直跑当前工作区） */
-  async function createSessionInWorkspace(workspacePath: string) {
-    setCreating(true);
+  async function selectDraftWorkspace() {
+    if (!draft || draft.projectId !== null || draft.busy) return;
+    const path = await window.codexlike.sessions.selectWorkspace();
+    if (path !== null)
+      workspaceState.editNewDraft(null, { workspacePath: path });
+  }
+
+  async function sendFirst(text: string, mentionPaths: string[]) {
+    if (!draft || draft.busy) return;
+    const projectId = draft.projectId;
+    const request = {
+      requestId: draft.requestId,
+      projectId,
+      workspacePath: draft.workspacePath,
+      text,
+      mentionPaths,
+      providerProfileId: draft.providerProfileId || undefined,
+      thinkingEffort: draft.thinkingEffort,
+      approvalMode: draft.approvalMode,
+    };
+    workspaceState.editNewDraft(projectId, { busy: true, error: null });
     try {
-      const record = await window.codexlike.sessions.create(workspacePath);
+      const record = await window.codexlike.sessions.start(request);
+      workspaceState.completeNewDraft(projectId);
       await refreshSessions();
-      await openSession(record.id);
+      if (workspaceState.activeDraftProjectId === projectId) {
+        setSelectedProfileId(
+          request.providerProfileId ?? profiles[0]?.id ?? ""
+        );
+        setThinkingEffort(request.thinkingEffort);
+        await openSession(record.id);
+      }
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          role: "error",
-          content: `新建会话失败：${error instanceof Error ? error.message : String(error)}`,
-        },
-      ]);
-    } finally {
-      setCreating(false);
+      workspaceState.editNewDraft(projectId, {
+        busy: false,
+        error: `创建失败，可重试：${error instanceof Error ? error.message : String(error)}`,
+      });
     }
   }
 
@@ -481,7 +510,7 @@ export function WorkspacePage(props: {
         return;
       case "new-session": {
         // /new：同工作区新会话（不走目录选择器与模式对话框，本目录直跑）
-        await createSessionInWorkspace(current!.workspacePath);
+        startCreateSession(current?.projectId ?? null);
         return;
       }
       case "compact": {
@@ -645,7 +674,8 @@ export function WorkspacePage(props: {
       void runCommand(submission.name, submission.argument);
       return;
     }
-    void send(submission.text, submission.mentionPaths);
+    if (draft) void sendFirst(submission.text, submission.mentionPaths);
+    else void send(submission.text, submission.mentionPaths);
   }
 
   /**
@@ -665,6 +695,10 @@ export function WorkspacePage(props: {
   }
 
   async function applyApprovalMode(mode: ApprovalMode) {
+    if (draft) {
+      workspaceState.editNewDraft(draft.projectId, { approvalMode: mode });
+      return;
+    }
     if (currentId === null) {
       return;
     }
@@ -683,20 +717,12 @@ export function WorkspacePage(props: {
       ? "尚未配置模型，请先前往设置页添加 Provider Profile"
       : compacting
         ? "正在压缩历史，请稍候…"
-        : currentId === null
+        : currentId === null && !draft
           ? "新建或选择一个会话后开始对话"
           : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
   return (
     <div className="flex h-full">
-      {pendingWorkspace !== null && (
-        <NewSessionDialog
-          workspacePath={pendingWorkspace}
-          creating={creating}
-          onCreate={(mode) => void createSession(mode)}
-          onCancel={() => setPendingWorkspace(null)}
-        />
-      )}
       {fullAccessPending && (
         <FullAccessConfirmDialog
           onConfirm={() => {
@@ -707,6 +733,9 @@ export function WorkspacePage(props: {
         />
       )}
       <SessionSidebar
+        projects={projects}
+        onAddProject={() => void addProject()}
+        onCreateInProject={startCreateSession}
         sessions={sessions}
         currentId={currentId}
         onSelect={(id) => void openSession(id)}
@@ -736,7 +765,12 @@ export function WorkspacePage(props: {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-line px-4 py-2">
           <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">
-            {current?.title ?? "未选择会话"}
+            {current?.title ??
+              (draft
+                ? draft.projectId === null
+                  ? "新建独立会话"
+                  : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
+                : "未选择会话")}
           </span>
           <button
             type="button"
@@ -761,6 +795,66 @@ export function WorkspacePage(props: {
             {changesOpen ? "收起改动" : "改动"}
           </button>
         </header>
+        {(current || draft) && (
+          <div className="border-b border-line px-4 py-2 text-xs text-fg-muted">
+            <div
+              data-testid="workspace-path"
+              title={
+                current?.workspacePath ??
+                draft?.workspacePath ??
+                projects.find((p) => p.id === draft?.projectId)?.workspacePath
+              }
+              className="break-all"
+            >
+              工作区：
+              {current?.workspacePath ??
+                draft?.workspacePath ??
+                projects.find((p) => p.id === draft?.projectId)
+                  ?.workspacePath ??
+                "应用专用持久目录（首次发送时分配）"}
+            </div>
+            {draft ? (
+              <span>首次发送才创建会话 · 本地模式</span>
+            ) : (
+              <span>工作区已固定</span>
+            )}
+            {draft?.projectId === null && (
+              <button
+                type="button"
+                data-testid="draft-select-workspace"
+                disabled={creating}
+                onClick={() => void selectDraftWorkspace()}
+                className="ml-3 text-accent"
+              >
+                选择已有目录
+              </button>
+            )}
+            {draft?.workspacePath && (
+              <button
+                type="button"
+                data-testid="draft-managed-workspace"
+                disabled={creating}
+                onClick={() =>
+                  workspaceState.editNewDraft(null, {
+                    workspacePath: undefined,
+                  })
+                }
+                className="ml-3 text-accent"
+              >
+                使用专用目录
+              </button>
+            )}
+            {draft?.error && (
+              <p
+                data-testid="draft-error"
+                role="alert"
+                className="mt-2 text-danger-fg"
+              >
+                {draft.error}
+              </p>
+            )}
+          </div>
+        )}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <MessageStream
@@ -823,23 +917,36 @@ export function WorkspacePage(props: {
               />
             ) : (
               <MessageComposer
-                key={currentId ?? "no-session"}
+                key={currentId ?? `draft-${draftProjectId}`}
                 draftValue={
-                  currentId === null ? "" : workspaceState.composer(currentId)
+                  draft?.text ??
+                  (currentId === null ? "" : workspaceState.composer(currentId))
                 }
                 onDraftChange={(text) => {
-                  if (currentId !== null)
+                  if (draft)
+                    workspaceState.editNewDraft(draft.projectId, { text });
+                  else if (currentId !== null)
                     workspaceState.setComposer(currentId, text);
                 }}
+                clearOnSend={!draft}
                 profiles={profiles}
-                selectedProfileId={selectedProfileId}
-                onSelectProfile={setSelectedProfileId}
+                selectedProfileId={
+                  draft?.providerProfileId ?? selectedProfileId
+                }
+                onSelectProfile={(id) =>
+                  draft
+                    ? workspaceState.editNewDraft(draft.projectId, {
+                        providerProfileId: id,
+                      })
+                    : setSelectedProfileId(id)
+                }
                 onSend={handleSubmit}
                 workspaceFiles={workspaceFiles}
                 skills={resources?.preview.catalog.skills}
                 onOpenSkills={refreshCurrentResources}
                 disabled={
-                  currentId === null ||
+                  (currentId === null && !draft) ||
+                  creating ||
                   profiles.length === 0 ||
                   streaming ||
                   compacting ||
@@ -849,10 +956,21 @@ export function WorkspacePage(props: {
                 streaming={streaming}
                 onStop={() => void stop()}
                 hint={composerHint}
-                approvalMode={current?.approvalMode ?? null}
+                approvalMode={
+                  draft?.approvalMode ?? current?.approvalMode ?? null
+                }
                 onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-                thinkingEffort={currentId === null ? null : thinkingEffort}
-                onSelectThinkingEffort={setThinkingEffort}
+                thinkingEffort={
+                  draft?.thinkingEffort ??
+                  (currentId === null ? null : thinkingEffort)
+                }
+                onSelectThinkingEffort={(effort) =>
+                  draft
+                    ? workspaceState.editNewDraft(draft.projectId, {
+                        thinkingEffort: effort,
+                      })
+                    : setThinkingEffort(effort)
+                }
               />
             )}
           </div>

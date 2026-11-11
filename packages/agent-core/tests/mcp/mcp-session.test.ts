@@ -63,6 +63,7 @@ function sessionRecord(
     providerProfileId: null,
     model: null,
     workspaceMode: "local",
+    projectId: null,
     workspaceOriginPath: null,
     status: "idle",
     approvalMode,

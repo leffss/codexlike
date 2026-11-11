@@ -332,8 +332,10 @@ function registerThemeSettingsHandlers(options: {
 }
 
 void app.whenReady().then(async () => {
-  // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
-  const persistence = createSqliteSessionStore(join(dataDir(), "codexlike.db"));
+  // ADR 0010：新管理数据独立初始化，旧 codexlike.db 与用户文件原样保留，不迁移不删除。
+  const persistence = createSqliteSessionStore(
+    join(dataDir(), "session-workbench.db")
+  );
 
   // 搜索源（工单 10）：key 存设置页（safeStorage 加密），内存缓存供 web_search 逐次解析；
   // 未配置时 searchSource 为 null → 工具返回「未配置搜索源」中文指引，会话不崩。
@@ -460,20 +462,7 @@ void app.whenReady().then(async () => {
     if (record.status !== "idle") manager.get(record.id);
   }
 
-  // 启动时跑一次 LRU 清理：一切非运行中会话的托管 Worktree 按最近使用保留 15 个、
-  // 超量部分回收（运行中的永不清理；此刻无运行中会话，主要是孤儿目录与超量副本）
-  void worktreeService
-    .cleanup({ sessions: manager.list() })
-    .then((result) => {
-      if (result.removed.length > 0) {
-        console.log(
-          `[main] 已清理 ${result.removed.length} 个过期托管 Worktree`
-        );
-      }
-    })
-    .catch((error: unknown) => {
-      console.error("[main] worktree 启动清理失败", error);
-    });
+  // 新库不认识旧会话，不以此将旧 Worktree 当孤儿回收；磁盘文件独立保留。
 
   registerProviderProfileHandlers(store);
   registerSearchSettingsHandlers(searchSettings, refreshSearchSource);
