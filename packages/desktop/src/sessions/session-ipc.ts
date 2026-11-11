@@ -10,11 +10,13 @@ import {
 import {
   discoverAgentsInstructions,
   APPROVAL_MODES,
+  THINKING_EFFORTS,
   type ApprovalMode,
   type BrowserSessionManager,
   type ProviderProfile,
   type SessionManager,
   type SessionRecord,
+  type ThinkingEffort,
   type WorktreeService,
 } from "@codexlike/agent-core/node";
 
@@ -128,7 +130,8 @@ export function registerSessionHandlers(options: {
       sessionId: unknown,
       text: unknown,
       profileId: unknown,
-      mentionPaths: unknown
+      mentionPaths: unknown,
+      thinkingEffort: unknown
     ) => {
       if (typeof sessionId !== "string" || typeof text !== "string") {
         throw new Error("send：参数不合法");
@@ -145,6 +148,17 @@ export function registerSessionHandlers(options: {
           mentionPaths.some((path) => typeof path !== "string"))
       ) {
         throw new Error("send：@引用 路径列表不合法");
+      }
+      // 思考档位（GLOSSARY「思考档位」）：IPC 边界不信任渲染进程，只接受五档枚举；
+      // 未传等价 auto（agent-core 发送入口同样校验并固定快照）
+      if (
+        thinkingEffort !== undefined &&
+        (typeof thinkingEffort !== "string" ||
+          !(THINKING_EFFORTS as readonly string[]).includes(thinkingEffort))
+      ) {
+        throw new Error(
+          "send：思考档位必须是 auto / low / medium / high / off"
+        );
       }
       const session = manager.get(sessionId);
       if (session === null) {
@@ -173,6 +187,7 @@ export function registerSessionHandlers(options: {
             text,
             profile,
             mentions,
+            thinkingEffort: thinkingEffort as ThinkingEffort | undefined,
             signal: controller.signal,
           })
           [Symbol.asyncIterator]();

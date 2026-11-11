@@ -5,14 +5,14 @@ import type {
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
-} from '@codexlike/agent-core';
+} from "@codexlike/agent-core";
 
 /** 消息流里一条消息的 UI 状态（含流式/中断标记）；kind 为联合判别保留位 */
 /**
  * 本地状态消息角色（工单 07）：命令反馈与 /status 展示。
  * 只存在于渲染层（不落库、不进模型上下文、不来自 SessionEvent）。
  */
-export type LocalMessageRole = 'status';
+export type LocalMessageRole = "status";
 
 /** 消息流里一条消息的 UI 状态（含流式/中断标记） */
 export interface UiMessage {
@@ -20,6 +20,11 @@ export interface UiMessage {
   id: string;
   role: MessageRole | LocalMessageRole;
   content: string;
+  /**
+   * 模型思考过程（GLOSSARY「思考档位」）：仅运行期展示，与正文分开累积；
+   * 不来自持久化（历史加载不重建），终态由 done/aborted/error 事件收敛。
+   */
+  reasoning?: string;
   /** 助手消息流式进行中 */
   streaming?: boolean;
   /** 助手消息被用户中断，content 为部分内容 */
@@ -28,7 +33,7 @@ export interface UiMessage {
 
 /** 消息流里一张工具卡片的 UI 状态 */
 export interface UiToolCall {
-  kind: 'tool-call';
+  kind: "tool-call";
   id: string;
   /** 所属会话（截图卡片按会话+调用 id 向主进程请求图片数据） */
   sessionId: string;
@@ -44,7 +49,7 @@ export interface UiToolCall {
 
 /** 消息流里一张审批卡片的 UI 状态（工单 04：批准 / 拒绝 / 本会话总是允许） */
 export interface UiApproval {
-  kind: 'approval';
+  kind: "approval";
   /** 审批 id（即对应 tool call id） */
   id: string;
   toolName: string;
@@ -61,14 +66,14 @@ export interface UiApproval {
  * 排队 → 运行（当前活动工具 + 已用时）→ 完成（报告可展开）。
  */
 export interface UiSubagent {
-  kind: 'subagent';
+  kind: "subagent";
   /** 子代理 id（编排器生成，进度事件匹配键） */
   id: string;
   /** 主会话 spawn_subagent 的 tool call id（报告回流匹配；queued 阶段尚未知为空串） */
   toolCallId: string;
   /** 委派任务描述 */
   task: string;
-  state: 'queued' | 'running' | 'done';
+  state: "queued" | "running" | "done";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
   report: string | null;
@@ -93,7 +98,7 @@ export function initialMessages(history: StoredMessage[]): UiMessage[] {
 /** 会话时间线（消息 + 工具调用）→ 消息流初始状态 */
 export function initialTranscript(items: TranscriptItem[]): UiItem[] {
   return items.map((item) =>
-    item.kind === 'message'
+    item.kind === "message"
       ? {
           id: item.message.id,
           role: item.message.role,
@@ -101,10 +106,10 @@ export function initialTranscript(items: TranscriptItem[]): UiItem[] {
           // 重启恢复：被中断的助手消息仍显示中断点标记
           interrupted: item.message.aborted === true || undefined,
         }
-      : item.call.toolName === 'spawn_subagent'
+      : item.call.toolName === "spawn_subagent"
         ? subagentFromToolRecord(item.call)
         : {
-            kind: 'tool-call',
+            kind: "tool-call",
             id: item.call.id,
             sessionId: item.call.sessionId,
             toolName: item.call.toolName,
@@ -112,30 +117,30 @@ export function initialTranscript(items: TranscriptItem[]): UiItem[] {
             output: item.call.output,
             isError: item.call.isError,
             running: false,
-          },
+          }
   );
 }
 
 /** 重启恢复：spawn_subagent 的落库记录 → 完成态嵌套卡片（task 从参数解析、报告即 output） */
 function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
-  let task = '';
+  let task = "";
   try {
     const parsed: unknown = JSON.parse(call.arguments);
-    if (typeof parsed === 'object' && parsed !== null && 'task' in parsed) {
+    if (typeof parsed === "object" && parsed !== null && "task" in parsed) {
       const value = (parsed as { task?: unknown }).task;
-      if (typeof value === 'string') {
+      if (typeof value === "string") {
         task = value;
       }
     }
   } catch {
-    task = '';
+    task = "";
   }
   return {
-    kind: 'subagent',
+    kind: "subagent",
     id: `restore-${call.id}`,
     toolCallId: call.id,
     task,
-    state: 'done' as const,
+    state: "done" as const,
     startedAt: null,
     report: call.output,
     ok: !call.isError,
@@ -149,45 +154,53 @@ function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
  */
 export function applySessionEvent(
   messages: UiItem[],
-  event: SessionEvent,
+  event: SessionEvent
 ): UiItem[] {
   switch (event.type) {
-    case 'user-message':
+    case "user-message":
       return [
         ...messages,
         {
           id: event.message.id,
-          role: 'user',
+          role: "user",
           content: event.message.content,
         },
       ];
 
-    case 'assistant-start':
+    case "assistant-start":
       return [
         ...messages,
         {
           id: event.messageId,
-          role: 'assistant',
-          content: '',
+          role: "assistant",
+          content: "",
           streaming: true,
         },
       ];
 
-    case 'assistant-delta':
+    case "assistant-delta":
       return messages.map((message) =>
         message.kind === undefined && message.id === event.messageId
           ? { ...message, content: message.content + event.delta }
-          : message,
+          : message
       );
 
-    case 'assistant-done':
+    case "assistant-reasoning":
+      // 思考与正文分离累积；未知 messageId（会话切换后迟到）忽略
+      return messages.map((message) =>
+        message.kind === undefined && message.id === event.messageId
+          ? { ...message, reasoning: (message.reasoning ?? "") + event.delta }
+          : message
+      );
+
+    case "assistant-done":
       return messages.map((message) =>
         message.kind === undefined && message.id === event.message.id
           ? { ...message, content: event.message.content, streaming: undefined }
-          : message,
+          : message
       );
 
-    case 'assistant-aborted':
+    case "assistant-aborted":
       return messages.map((message) =>
         message.kind === undefined && message.id === event.message.id
           ? {
@@ -196,62 +209,62 @@ export function applySessionEvent(
               streaming: undefined,
               interrupted: true,
             }
-          : message,
+          : message
       );
 
-    case 'tool-call':
+    case "tool-call":
       // spawn_subagent 由嵌套卡片呈现（subagent-queued/start 事件建卡），不出普通工具卡片
-      if (event.call.toolName === 'spawn_subagent') {
+      if (event.call.toolName === "spawn_subagent") {
         return messages;
       }
       return [
         ...messages,
         {
-          kind: 'tool-call',
+          kind: "tool-call",
           id: event.call.id,
           sessionId: event.call.sessionId,
           toolName: event.call.toolName,
           arguments: event.call.arguments,
-          output: '',
+          output: "",
           isError: false,
           running: true,
         },
       ];
 
-    case 'tool-result':
+    case "tool-result":
       // spawn_subagent 的报告回填对应嵌套卡片（按 toolCallId 匹配）
-      if (event.call.toolName === 'spawn_subagent') {
+      if (event.call.toolName === "spawn_subagent") {
         return messages.map((item) =>
-          item.kind === 'subagent' && item.toolCallId === event.call.id
+          item.kind === "subagent" && item.toolCallId === event.call.id
             ? {
                 ...item,
-                state: 'done' as const,
+                state: "done" as const,
                 report: event.call.output,
                 ok: !event.call.isError,
               }
-            : item,
+            : item
         );
       }
       return messages.map((item) =>
-        item.kind === 'tool-call' && item.id === event.call.id
+        item.kind === "tool-call" && item.id === event.call.id
           ? {
               ...item,
               output: event.call.output,
               isError: event.call.isError,
               running: false,
             }
-          : item,
+          : item
       );
 
-    case 'subagent-queued':
+    case "subagent-queued":
       return [
         ...messages,
         {
-          kind: 'subagent',
+          kind: "subagent",
           id: event.subagentId,
-          toolCallId: '',
+          toolCallId: "",
           task: event.task,
-          state: 'queued' as const,
+          state: "queued" as const,
           startedAt: null,
           report: null,
           ok: null,
@@ -259,30 +272,35 @@ export function applySessionEvent(
         },
       ];
 
-    case 'subagent-start':
+    case "subagent-start":
       return messages.map((item) =>
-        item.kind === 'subagent' && item.id === event.subagentId
-          ? { ...item, state: 'running' as const, toolCallId: event.toolCallId, startedAt: nowIso() }
-          : item,
+        item.kind === "subagent" && item.id === event.subagentId
+          ? {
+              ...item,
+              state: "running" as const,
+              toolCallId: event.toolCallId,
+              startedAt: nowIso(),
+            }
+          : item
       );
 
-    case 'subagent-tool':
+    case "subagent-tool":
       return messages.map((item) => {
-        if (item.kind !== 'subagent' || item.id !== event.subagentId) {
+        if (item.kind !== "subagent" || item.id !== event.subagentId) {
           return item;
         }
-        if (event.phase === 'call') {
+        if (event.phase === "call") {
           return {
             ...item,
             tools: [
               ...item.tools,
               {
-                kind: 'tool-call' as const,
+                kind: "tool-call" as const,
                 id: event.call.id,
                 sessionId: event.call.sessionId,
                 toolName: event.call.toolName,
                 arguments: event.call.arguments,
-                output: '',
+                output: "",
                 isError: false,
                 running: true,
               },
@@ -299,23 +317,28 @@ export function applySessionEvent(
                   isError: event.call.isError,
                   running: false,
                 }
-              : tool,
+              : tool
           ),
         };
       });
 
-    case 'subagent-report':
+    case "subagent-report":
       return messages.map((item) =>
-        item.kind === 'subagent' && item.id === event.subagentId
-          ? { ...item, state: 'done' as const, report: event.report, ok: event.ok }
-          : item,
+        item.kind === "subagent" && item.id === event.subagentId
+          ? {
+              ...item,
+              state: "done" as const,
+              report: event.report,
+              ok: event.ok,
+            }
+          : item
       );
 
-    case 'approval-request':
+    case "approval-request":
       return [
         ...messages,
         {
-          kind: 'approval',
+          kind: "approval",
           id: event.request.id,
           toolName: event.request.toolName,
           command: event.request.command,
@@ -324,19 +347,24 @@ export function applySessionEvent(
         },
       ];
 
-    case 'approval-resolved':
+    case "approval-resolved":
       return messages.map((item) =>
-        item.kind === 'approval' && item.id === event.requestId
+        item.kind === "approval" && item.id === event.requestId
           ? { ...item, decision: event.decision }
-          : item,
+          : item
       );
 
-    case 'error':
+    case "error":
       return [
-        ...messages,
+        // 出错即本轮终止：正在流式中的助手消息（含思考块）收敛，不残留进行中状态
+        ...messages.map((message) =>
+          message.kind === undefined && message.streaming === true
+            ? { ...message, streaming: undefined }
+            : message
+        ),
         {
           id: event.message.id,
-          role: 'error',
+          role: "error",
           content: event.message.content,
         },
       ];

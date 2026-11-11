@@ -6,7 +6,8 @@ import type { ProviderProfile } from "./provider-profile";
 /** 逐条消息的思考档位；缺省保留服务端默认行为。 */
 export type ThinkingEffort = "auto" | "low" | "medium" | "high" | "off";
 
-const THINKING_EFFORTS: readonly ThinkingEffort[] = [
+/** 五档枚举值（IPC 边界校验与 UI 选项列表共用；spec「边界接受值限于上述枚举」） */
+export const THINKING_EFFORTS: readonly ThinkingEffort[] = [
   "auto",
   "low",
   "medium",

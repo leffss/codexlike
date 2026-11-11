@@ -9,7 +9,12 @@ import {
   type ToolResultPart,
 } from "ai";
 
-import { createLanguageModelFromProfile } from "../provider/language-model";
+import {
+  createLanguageModelFromProfile,
+  THINKING_EFFORTS,
+  type CreateLanguageModelOptions,
+  type ThinkingEffort,
+} from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
 import type {
@@ -47,6 +52,11 @@ export interface SendMessageOptions {
   profile: ProviderProfile;
   /** @引用 的工作区文件；内容附加进本条消息的模型上下文（落库与回显保持原文） */
   mentions?: MentionAttachment[];
+  /**
+   * 思考档位（GLOSSARY「思考档位」）：发送入口固定快照，本条消息的全部工具轮次
+   * 复用同一档位；缺省按 auto 处理（未传该字段的既有调用方不受影响）。
+   */
+  thinkingEffort?: ThinkingEffort;
   /** 中断信号：中断后已生成的部分文本保留为助手消息 */
   signal?: AbortSignal;
 }
@@ -59,8 +69,15 @@ export interface CreateAgentSessionOptions {
   history?: StoredMessage[];
   /** AGENTS.md 等组装的系统提示；空串/省略时不注入 system 角色 */
   systemPrompt?: string;
-  /** Provider Profile → 语言模型 的工厂；测试注入 mock，默认走 OpenAI 兼容构造 */
-  languageModelFor?: (profile: ProviderProfile) => LanguageModel;
+  /**
+   * Provider Profile → 语言模型 的工厂；测试注入 mock，默认走 OpenAI 兼容构造。
+   * options 携带本条消息的思考档位快照（sendMessage 入口固定，逐轮构造时传入；
+   * compact 等辅助调用传空对象 = 不附加控制参数）。
+   */
+  languageModelFor?: (
+    profile: ProviderProfile,
+    options: CreateLanguageModelOptions
+  ) => LanguageModel;
   /**
    * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
    * 支持工厂函数：每条消息发送时逐次解析——设置页对 MCP 工具的启停、
@@ -384,9 +401,15 @@ export function createAgentSession(
       return true;
     },
 
-    async *sendMessage({ text, profile, mentions, signal }) {
+    async *sendMessage({ text, profile, mentions, thinkingEffort, signal }) {
       if (busy) {
         throw new Error("上一条消息仍在回复中，请等待完成后再发送");
+      }
+      // 思考档位快照（spec「生效边界」）：发送入口一次性固定，未传等价 auto；
+      // 枚举外的值在此拒绝——不把伪造控制值发往服务端（与 provider 工厂同一校验）
+      const effort: ThinkingEffort = thinkingEffort ?? "auto";
+      if (!THINKING_EFFORTS.includes(effort)) {
+        throw new Error(`无效的思考档位：${String(thinkingEffort)}`);
       }
       busy = true;
       // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
@@ -444,8 +467,9 @@ export function createAgentSession(
           let round = 0;
 
           while (true) {
+            // 档位快照逐轮复用：本条消息的全部工具往返都构造自同一档位
             const result = streamText({
-              model: modelFor(profile),
+              model: modelFor(profile, { thinkingEffort: effort }),
               system: systemPrompt === "" ? undefined : systemPrompt,
               messages: pending,
               abortSignal: signal,
@@ -458,7 +482,15 @@ export function createAgentSession(
               input: unknown;
             }[] = [];
             for await (const part of result.fullStream) {
-              if (part.type === "text-delta") {
+              if (part.type === "reasoning-delta") {
+                // 思考与正文分离：只作为事件流出（运行期展示），
+                // 不累积进落库正文、不进入对话上下文
+                yield {
+                  type: "assistant-reasoning",
+                  messageId: assistantMessageId,
+                  delta: part.text,
+                };
+              } else if (part.type === "text-delta") {
                 accumulated += part.text;
                 yield {
                   type: "assistant-delta",
@@ -714,7 +746,8 @@ export function createAgentSession(
         let summary = "";
         try {
           const result = await generateText({
-            model: modelFor(profile),
+            // compact 是辅助调用：不附加档位控制参数（空对象 = 服务端默认行为）
+            model: modelFor(profile, {}),
             system: COMPACT_SYSTEM_PROMPT,
             prompt: [
               {

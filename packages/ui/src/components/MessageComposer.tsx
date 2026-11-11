@@ -11,6 +11,7 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type SlashCommandDef,
+  type ThinkingEffort,
 } from "@codexlike/agent-core";
 
 import {
@@ -63,6 +64,71 @@ const APPROVAL_PILL_STYLES: Record<
 };
 
 /**
+ * 思考档位（GLOSSARY「思考档位」）→ 胶囊选项文案。
+ * 与 Provider Profile 选择一样属于「下一条消息怎么发」的临时设置：
+ * 只对下一条发送的消息生效，不做会话级记忆；「关」是显式发送关闭请求，
+ * 不保证强制思考模型实际停止思考（以服务端行为为准）。
+ */
+export const THINKING_EFFORT_OPTIONS: {
+  value: ThinkingEffort;
+  label: string;
+  title: string;
+}[] = [
+  {
+    value: "auto",
+    label: "思考：自动",
+    title: "自动：不附加控制参数，由服务端决定思考行为（默认）",
+  },
+  {
+    value: "low",
+    label: "思考：低",
+    title: "低：请求较浅的思考强度（下一条消息生效）",
+  },
+  {
+    value: "medium",
+    label: "思考：中",
+    title: "中：请求中等思考强度（下一条消息生效）",
+  },
+  {
+    value: "high",
+    label: "思考：高",
+    title: "高：请求更深思考强度（下一条消息生效）",
+  },
+  {
+    value: "off",
+    label: "思考：关",
+    title: "关：显式请求关闭思考；服务端可能忽略，不保证强制停止",
+  },
+];
+
+/** 思考档位 → 胶囊样式：档位越强越亮（auto=灰、low=绿、medium=天蓝、high=紫、off=玫红） */
+const THINKING_PILL_STYLES: Record<
+  ThinkingEffort,
+  { pill: string; icon: string }
+> = {
+  auto: {
+    pill: "border-slate-600 bg-slate-800/80 text-slate-300",
+    icon: "text-slate-400",
+  },
+  low: {
+    pill: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    icon: "text-emerald-400",
+  },
+  medium: {
+    pill: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+    icon: "text-sky-400",
+  },
+  high: {
+    pill: "border-violet-500/40 bg-violet-500/10 text-violet-300",
+    icon: "text-violet-400",
+  },
+  off: {
+    pill: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+    icon: "text-rose-400",
+  },
+};
+
+/**
  * 中栏底部：消息输入区（卡片式 composer：上行输入、下行工具栏）。
  * - `/` 开头的单行草稿弹出命令菜单，`@` 触发工作区文件模糊搜索菜单（键盘可选）；
  * - 模型选择器（Provider Profile）对下一条发送的消息生效；
@@ -87,6 +153,13 @@ export function MessageComposer(props: {
   /** 当前会话审批模式；无会话时选择器禁用 */
   approvalMode: ApprovalMode | null;
   onSelectApprovalMode: (mode: ApprovalMode) => void;
+  /**
+   * 思考档位（GLOSSARY「思考档位」）当前选择：逐条消息的临时发送设置，
+   * 只对下一条发送的消息生效；null（无会话）时选择器禁用。
+   * 回复运行中允许改选（为下一条消息预置）。
+   */
+  thinkingEffort: ThinkingEffort | null;
+  onSelectThinkingEffort: (effort: ThinkingEffort) => void;
 }) {
   const [value, setValue] = useState("");
   const [menu, setMenu] = useState<ComposerMenuState | null>(null);
@@ -193,6 +266,9 @@ export function MessageComposer(props: {
   const approvalPill =
     APPROVAL_PILL_STYLES[props.approvalMode ?? "assist"] ??
     APPROVAL_PILL_STYLES.assist;
+  const thinkingPill =
+    THINKING_PILL_STYLES[props.thinkingEffort ?? "auto"] ??
+    THINKING_PILL_STYLES.auto;
 
   return (
     <div className="border-t border-slate-800 bg-slate-900/60 p-3">
@@ -267,37 +343,78 @@ export function MessageComposer(props: {
             className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none"
           />
         </div>
-        {/* 底部工具栏：左审批胶囊，右模型选择 + 圆形动作按钮 */}
+        {/* 底部工具栏：左审批胶囊 + 思考档位胶囊，右模型选择 + 圆形动作按钮 */}
         <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
-          <div
-            className={`relative shrink-0 rounded-full border ${approvalPill.pill} ${
-              props.approvalMode === null ? "cursor-not-allowed opacity-50" : ""
-            }`}
-            title="审批模式：随时切换，对下一次工具调用立即生效"
-          >
-            <ShieldIcon
-              className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${approvalPill.icon}`}
-            />
-            <select
-              data-testid="approval-mode-select"
-              value={props.approvalMode ?? "assist"}
-              disabled={props.approvalMode === null}
-              onChange={(event) =>
-                props.onSelectApprovalMode(event.target.value as ApprovalMode)
-              }
-              className="cursor-pointer appearance-none rounded-full bg-transparent py-1 pl-7 pr-5 text-xs focus:outline-none"
+          <div className="flex items-center gap-2">
+            <div
+              className={`relative shrink-0 rounded-full border ${approvalPill.pill} ${
+                props.approvalMode === null
+                  ? "cursor-not-allowed opacity-50"
+                  : ""
+              }`}
+              title="审批模式：随时切换，对下一次工具调用立即生效"
             >
-              {APPROVAL_MODE_OPTIONS.map((option) => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                  title={option.title}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
+              <ShieldIcon
+                className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${approvalPill.icon}`}
+              />
+              <select
+                data-testid="approval-mode-select"
+                value={props.approvalMode ?? "assist"}
+                disabled={props.approvalMode === null}
+                onChange={(event) =>
+                  props.onSelectApprovalMode(event.target.value as ApprovalMode)
+                }
+                className="cursor-pointer appearance-none rounded-full bg-transparent py-1 pl-7 pr-5 text-xs focus:outline-none"
+              >
+                {APPROVAL_MODE_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    title={option.title}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
+            </div>
+            {/* 思考档位胶囊（GLOSSARY「思考档位」）：审批胶囊旁的胶囊内嵌 select，
+                无会话禁用；运行中允许改选（只对下一条消息生效） */}
+            <div
+              className={`relative shrink-0 rounded-full border ${thinkingPill.pill} ${
+                props.thinkingEffort === null
+                  ? "cursor-not-allowed opacity-50"
+                  : ""
+              }`}
+              title="思考档位：只对下一条发送的消息生效（一次发送内的工具往返保持快照）"
+            >
+              <BrainIcon
+                className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${thinkingPill.icon}`}
+              />
+              <select
+                data-testid="thinking-effort-select"
+                aria-label="思考档位"
+                value={props.thinkingEffort ?? "auto"}
+                disabled={props.thinkingEffort === null}
+                onChange={(event) =>
+                  props.onSelectThinkingEffort(
+                    event.target.value as ThinkingEffort
+                  )
+                }
+                className="cursor-pointer appearance-none rounded-full bg-transparent py-1 pl-7 pr-5 text-xs focus:outline-none"
+              >
+                {THINKING_EFFORT_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    title={option.title}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
+            </div>
           </div>
           <div className="flex min-w-0 items-center gap-2">
             <div
@@ -361,6 +478,24 @@ function ShieldIcon(props: { className?: string }) {
         d="M8 1.5 13 3.4V7c0 3.1-2.1 5.8-5 6.9C5.1 12.8 3 10.1 3 7V3.4L8 1.5Z"
         stroke="currentColor"
         strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function BrainIcon(props: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      className={props.className}
+      aria-hidden="true"
+    >
+      <path
+        d="M6 2.5a2 2 0 0 0-2 2c-1.1.2-2 1.1-2 2.3 0 .8.4 1.5 1 1.9v.6c0 1.7 1.3 3.2 3 3.2h1V2.5H6ZM10 2.5a2 2 0 0 1 2 2c1.1.2 2 1.1 2 2.3 0 .8-.4 1.5-1 1.9v.6c0 1.7-1.3 3.2-3 3.2H9V2.5h1Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
         strokeLinejoin="round"
       />
     </svg>

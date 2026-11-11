@@ -6,6 +6,7 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type SessionRecord,
+  type ThinkingEffort,
   type WorkspaceMode,
 } from "@codexlike/agent-core";
 
@@ -41,6 +42,12 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
   const [creating, setCreating] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  /**
+   * 思考档位（GLOSSARY「思考档位」）：前端临时发送设置，默认 auto，不做会话级记忆。
+   * 发送时随消息传 IPC（快照由 agent-core 发送入口固定）；
+   * 运行中可改选，只影响下一条消息。
+   */
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("auto");
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
   /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
@@ -266,7 +273,8 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         currentId,
         text,
         selectedProfileId,
-        mentionPaths.length === 0 ? undefined : mentionPaths
+        mentionPaths.length === 0 ? undefined : mentionPaths,
+        thinkingEffort
       );
     } catch (error) {
       // 启动失败（会话回复中 / Profile 缺失 / @引用 不可读等）：直接在消息流提示
@@ -606,6 +614,8 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
               hint={composerHint}
               approvalMode={current?.approvalMode ?? null}
               onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+              thinkingEffort={currentId === null ? null : thinkingEffort}
+              onSelectThinkingEffort={setThinkingEffort}
             />
           </div>
           {changesOpen && current !== null && (

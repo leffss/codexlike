@@ -1,6 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from "electron";
 
-import { IPC, type CodexLikeApi } from './shared/ipc';
+import { IPC, type CodexLikeApi } from "./shared/ipc";
 
 // contextBridge 暴露类型化 API；渲染进程经 `window.codexlike` 访问，
 // 无 nodeIntegration、无裸 ipcRenderer（安全基线）。
@@ -17,16 +17,19 @@ const api: CodexLikeApi = {
     create: (workspacePath, workspaceMode) =>
       ipcRenderer.invoke(IPC.sessions.create, workspacePath, workspaceMode),
     selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
-    messages: (sessionId) => ipcRenderer.invoke(IPC.sessions.messages, sessionId),
-    send: (sessionId, text, providerProfileId, mentionPaths) =>
+    messages: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.messages, sessionId),
+    send: (sessionId, text, providerProfileId, mentionPaths, thinkingEffort) =>
       ipcRenderer.invoke(
         IPC.sessions.send,
         sessionId,
         text,
         providerProfileId,
         mentionPaths,
+        thinkingEffort
       ),
-    interrupt: (sessionId) => ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
+    interrupt: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>
@@ -41,7 +44,12 @@ const api: CodexLikeApi = {
     setApprovalMode: (sessionId, mode) =>
       ipcRenderer.invoke(IPC.sessions.setApprovalMode, sessionId, mode),
     respondApproval: (sessionId, requestId, decision) =>
-      ipcRenderer.invoke(IPC.sessions.respondApproval, sessionId, requestId, decision),
+      ipcRenderer.invoke(
+        IPC.sessions.respondApproval,
+        sessionId,
+        requestId,
+        decision
+      ),
     pendingApproval: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.pendingApproval, sessionId),
     pendingApprovals: (sessionId) =>
@@ -70,7 +78,7 @@ const api: CodexLikeApi = {
   onSessionEvent: (listener) => {
     const handler: (
       _event: Electron.IpcRendererEvent,
-      envelope: Parameters<typeof listener>[0],
+      envelope: Parameters<typeof listener>[0]
     ) => void = (_event, envelope) => listener(envelope);
     ipcRenderer.on(IPC.sessionEvents, handler);
     return () => {
@@ -90,4 +98,4 @@ const api: CodexLikeApi = {
   },
 };
 
-contextBridge.exposeInMainWorld('codexlike', api);
+contextBridge.exposeInMainWorld("codexlike", api);

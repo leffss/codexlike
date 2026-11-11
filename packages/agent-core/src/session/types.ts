@@ -3,14 +3,18 @@
  * 全部可 JSON 序列化：SessionEvent 经 Electron IPC 转发到渲染进程，
  * StoredMessage / SessionRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
  */
-import type { ApprovalDecision, ApprovalMode, ApprovalRequest } from './approval';
-import type { ToolCallRecord } from '../tools/types';
+import type {
+  ApprovalDecision,
+  ApprovalMode,
+  ApprovalRequest,
+} from "./approval";
+import type { ToolCallRecord } from "../tools/types";
 
 /**
  * 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
  * `waiting-approval` 工具执行暂停、等待用户审批（spec 用户故事 10，侧栏可见）
  */
-export type SessionStatus = 'idle' | 'streaming' | 'waiting-approval';
+export type SessionStatus = "idle" | "streaming" | "waiting-approval";
 
 /**
  * 审批模式（GLOSSARY「审批模式」）三档：`readonly` 只读 / `suggest` 协作 / `full` 自主。
@@ -23,7 +27,7 @@ export type SessionStatus = 'idle' | 'streaming' | 'waiting-approval';
  * `worktree` 托管 Worktree 隔离副本——workspacePath 指向 `~/.codexlike/worktrees/<会话id>`，
  * 由宿主在会话创建前先检出（agent-core 的 worktree 模块），落库后恢复天然指向原副本。
  */
-export type WorkspaceMode = 'local' | 'worktree';
+export type WorkspaceMode = "local" | "worktree";
 
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
 export interface SessionRecord {
@@ -60,7 +64,7 @@ export interface SessionRecord {
 export interface ApprovalDecisionRecord {
   id: string;
   sessionId: string;
-  decision: 'allow' | 'allow-always' | 'deny';
+  decision: "allow" | "allow-always" | "deny";
   /** 记忆主体：命令首词/前缀（如 `npm`），或工具名 */
   subject: string;
   /** ISO 8601 */
@@ -69,7 +73,7 @@ export interface ApprovalDecisionRecord {
 
 /** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
  * 压缩摘要（/compact 生成，进入对话上下文时按 user 角色注入；消息流渲染为可展开的摘要卡片） */
-export type MessageRole = 'user' | 'assistant' | 'error' | 'compact-summary';
+export type MessageRole = "user" | "assistant" | "error" | "compact-summary";
 
 /** 消息记录（messages 表一行） */
 export interface StoredMessage {
@@ -92,8 +96,8 @@ export interface StoredMessage {
 
 /** 会话时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
 export type TranscriptItem =
-  | { kind: 'message'; message: StoredMessage }
-  | { kind: 'tool-call'; call: ToolCallRecord };
+  | { kind: "message"; message: StoredMessage }
+  | { kind: "tool-call"; call: ToolCallRecord };
 
 /**
  * @文件引用（GLOSSARY「@ Mention」）：随消息附加的工作区文件。
@@ -133,43 +137,66 @@ export interface CompactResult {
  * `user-message → assistant-start → assistant-delta* → assistant-done`
  */
 export type SessionEvent =
-  | { type: 'user-message'; message: StoredMessage }
-  | { type: 'assistant-start'; messageId: string }
-  | { type: 'assistant-delta'; messageId: string; delta: string }
-  | { type: 'assistant-done'; message: StoredMessage }
+  | { type: "user-message"; message: StoredMessage }
+  | { type: "assistant-start"; messageId: string }
+  | { type: "assistant-delta"; messageId: string; delta: string }
+  /**
+   * 模型思考过程的流式增量（GLOSSARY「思考档位」，OpenAI 兼容端点的 reasoning_content）。
+   * 与正文（assistant-delta）分离累积，仅供运行期展示：不写入 StoredMessage、
+   * 不进入后续请求上下文（provider 层已剥离回传）；终态由
+   * assistant-done / assistant-aborted / error 一并收敛。
+   */
+  | { type: "assistant-reasoning"; messageId: string; delta: string }
+  | { type: "assistant-done"; message: StoredMessage }
   /** 用户中断：已生成的部分文本保留为助手消息 */
-  | { type: 'assistant-aborted'; message: StoredMessage }
+  | { type: "assistant-aborted"; message: StoredMessage }
   /** 模型 API 出错：中文提示落为 error 消息，会话可继续使用 */
-  | { type: 'error'; message: StoredMessage }
+  | { type: "error"; message: StoredMessage }
   /**
    * 模型发起了工具调用（执行开始前；output 为空串，UI 卡片显示运行中）。
    * 审批拦截（工单 04）将发生在本事件与 tool-result 之间。
    */
-  | { type: 'tool-call'; call: ToolCallRecord }
+  | { type: "tool-call"; call: ToolCallRecord }
   /** 工具执行完成：call.output 已填（截断后）、isError 标记失败；记录同时落库 */
-  | { type: 'tool-result'; call: ToolCallRecord }
+  | { type: "tool-result"; call: ToolCallRecord }
   /**
    * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
    * 发出后会话进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
    * 子代理的命令审批（工单 13）同样走本事件（request.subagentId 标注来源）。
    */
-  | { type: 'approval-request'; request: ApprovalRequest }
+  | { type: "approval-request"; request: ApprovalRequest }
   /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本会话总是允许） */
-  | { type: 'approval-resolved'; requestId: string; decision: ApprovalDecision }
+  | { type: "approval-resolved"; requestId: string; decision: ApprovalDecision }
   /**
    * 子代理委派进入排队（工单 13，GLOSSARY「子代理」）：并发上限满，
    * FIFO 等待；有空位即转 subagent-start。UI 嵌套卡片显示排队状态。
    */
-  | { type: 'subagent-queued'; subagentId: string; task: string }
+  | { type: "subagent-queued"; subagentId: string; task: string }
   /** 子代理开始运行（排队结束或直接有空位） */
-  | { type: 'subagent-start'; subagentId: string; task: string; toolCallId: string }
+  | {
+      type: "subagent-start";
+      subagentId: string;
+      task: string;
+      toolCallId: string;
+    }
   /**
    * 子代理内部工具调用进度（嵌套卡片显示「当前活动工具」）：
    * phase=call 开始执行（运行中），phase=result 完成（含截断输出与失败标记）。
    */
-  | { type: 'subagent-tool'; subagentId: string; phase: 'call' | 'result'; call: ToolCallRecord }
+  | {
+      type: "subagent-tool";
+      subagentId: string;
+      phase: "call" | "result";
+      call: ToolCallRecord;
+    }
   /**
    * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
    * ok=false 表示失败或被中断（report 为中文原因）。
    */
-  | { type: 'subagent-report'; subagentId: string; task: string; report: string; ok: boolean };
+  | {
+      type: "subagent-report";
+      subagentId: string;
+      task: string;
+      report: string;
+      ok: boolean;
+    };

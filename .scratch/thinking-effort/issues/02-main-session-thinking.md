@@ -28,3 +28,32 @@
 ## Testing notes
 
 沿用既有模型 mock、事件收集器、内存持久化及 desktop 本地 HTTP/SSE mock。UI 状态断言验证归并语义；折叠可操作性和完整 IPC 链路由 E2E 验证。以可观测行为为断言，不锁死内部函数调用和 CSS 实现。
+
+## Comments
+
+### 2026-11-11 · 02 implementer（worktree feat/thinking-effort-02，基于 1f96e15）
+
+**交付摘要**
+
+- agent-core：`SendMessageOptions.thinkingEffort`（缺省 auto、枚举外入口拒绝）；发送入口固定快照，工具循环每轮 `modelFor(profile, { thinkingEffort })` 复用同一快照；`CreateAgentSessionOptions.languageModelFor` 签名扩展为 `(profile, options)`（少参注入仍兼容，compact 传 `{}` 不附加控制参数）；fullStream 消费 reasoning-delta → 新事件 `assistant-reasoning { messageId, delta }`（SessionEvent 联合新增 variant，随既有 type-only 出口导出）；`THINKING_EFFORTS` 常量自 `src/index.ts` 导出。
+- desktop：`sessions:send` IPC 增加 `thinkingEffort` 参数，主进程枚举校验（`auto/low/medium/high/off`，未传等价 auto）后传入 sendMessage（shared/ipc.ts、preload.ts、session-ipc.ts）。
+- ui：MessageComposer 审批胶囊旁新增思考档位胶囊内嵌 select（`data-testid="thinking-effort-select"`，五档中文文案 + 档位颜色 Record，默认自动，无会话禁用，运行中可改选）；WorkspacePage 持有临时选择（默认 auto，无会话级记忆）随消息传 IPC；session-view 归并 `assistant-reasoning`（只更新所属消息、未知 messageId 忽略、error 时清除 streaming 终态收敛、历史加载不造思考块）；MessageStream assistant 气泡内渲染可折叠思考块（`thinking-block`，默认收起、流式指示、与正文 `assistant-content` 分离渲染）。
+- E2E：新增 `packages/desktop/e2e/thinking.mjs`（挂进 `test:e2e:all` 与 `test:e2e:thinking`），复用 helpers 的 startMockProvider/seenBodies/SSE 发送器。
+
+**TDD 红绿证据**
+
+- agent-core（`tests/session/thinking.test.ts`）：红 = 8 failed / 3 passed（档位快照、reasoning 事件均未实现）；绿 = 11 passed（含真实 provider 工厂 + fetch 替身全链路：reasoning SSE → 事件流出、两轮请求 body 不回传思考、high 档 body 字段）。
+- ui（`tests/session-view.test.ts`）：红 = 5 failed / 9 passed；绿 = 14 passed。
+
+**验证退出码（真实执行，不接管道）**
+
+- `pnpm test`（根全量单测）：**0** —— agent-core 42 files / 333 tests、desktop 13 files / 66 tests、ui 9 files / 64 tests 全部 passed。
+- `pnpm typecheck`（根，含 agent-core build + 三包 tsc）：**0**。
+- `pnpm build`（全仓）：**0**。
+- E2E 新场景 `test:e2e:thinking`：**0** —— 五档 body 契约（auto 无控制字段、low/medium/high = thinking.enabled + reasoning_effort、off = disabled 且无 reasoning_effort）、reasoning 折叠展示与正文隔离 + 展开/收起、运行中切档（本轮工具回填轮保持 medium 快照、下一条消息采用 off）。
+- E2E smoke 基线 `test:e2e`：**0**。
+
+**范围说明**
+
+- 子代理档位继承与 SubagentCard 思考展示未动（03 票）；compact/commit 草稿不附加档位参数；无持久化/schema/`/thinking` 命令改动。
+- E2E 尾部日志的 `database is not open` 为应用关闭后事件流 finally 收尾的既有噪音（断言全部通过后出现），非本票引入。
