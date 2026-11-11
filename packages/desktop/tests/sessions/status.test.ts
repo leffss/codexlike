@@ -112,6 +112,27 @@ describe('buildSessionStatus（/status 数据组装）', () => {
     });
     expect(status.agentsMd).toEqual({ sources: ['g'], truncated: true });
   });
+
+  it('上下文窗口（告警阈值用，code review 修复 2）：Profile 配置透传，未配置为 null', () => {
+    const configured = buildSessionStatus({
+      record: record(),
+      messages: [],
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      contextWindowTokens: 200_000,
+      latestCompact: null,
+    });
+    expect(configured.contextWindowTokens).toBe(200_000);
+
+    const unconfigured = buildSessionStatus({
+      record: record(),
+      messages: [],
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    });
+    expect(unconfigured.contextWindowTokens).toBeNull();
+  });
 });
 
 describe('buildSessionStatus 已压缩标记（工单 08）', () => {

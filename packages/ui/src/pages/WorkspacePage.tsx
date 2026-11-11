@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  evaluateContextWarning,
   resolveComposerSubmission,
   type ApprovalMode,
   type ProviderProfile,
@@ -45,6 +46,8 @@ export function WorkspacePage(props: {
   const [changesOpen, setChangesOpen] = useState(false);
   /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
   const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null);
+  /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
+  const [contextWarning, setContextWarning] = useState<string | null>(null);
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
@@ -65,12 +68,35 @@ export function WorkspacePage(props: {
     ]);
   }, []);
 
+  /**
+   * 上下文告警刷新（code review 修复 2，spec 验收场景 4）：
+   * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）× 80%，
+   * 超阈值在输入区上方常驻中文告警（/compact 后重估自然消失）；查询失败静默不打扰。
+   */
+  const refreshContextWarning = useCallback(async (sessionId: string) => {
+    try {
+      const status = await window.codexlike.sessions.status(sessionId);
+      setContextWarning(
+        status === null
+          ? null
+          : (evaluateContextWarning(
+              status.estimatedContextTokens,
+              status.contextWindowTokens ?? undefined,
+            )?.message ?? null),
+      );
+    } catch {
+      setContextWarning(null);
+    }
+  }, []);
+
   const openSession = useCallback(async (id: string) => {
     setCurrentId(id);
     currentIdRef.current = id;
     const history = await window.codexlike.sessions.messages(id);
     let items = initialTranscript(history);
     setStreaming(false);
+    // 切换会话后按该会话的当前用量重估上下文告警
+    void refreshContextWarning(id);
     // 该会话可能在别的窗口/此前处于等待审批：恢复等待中的审批卡片
     // （主会话与子代理可能并行等待——工单 13，全部恢复）
     try {
@@ -91,7 +117,7 @@ export function WorkspacePage(props: {
     } catch {
       setWorkspaceFiles([]);
     }
-  }, []);
+  }, [refreshContextWarning]);
 
   useEffect(() => {
     void (async () => {
@@ -111,6 +137,7 @@ export function WorkspacePage(props: {
         currentIdRef.current = latest.id;
         const history = await window.codexlike.sessions.messages(latest.id);
         setMessages(initialTranscript(history));
+        void refreshContextWarning(latest.id);
         try {
           setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(latest.id));
         } catch {
@@ -118,7 +145,7 @@ export function WorkspacePage(props: {
         }
       }
     })();
-  }, []);
+  }, [refreshContextWarning]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
@@ -134,6 +161,8 @@ export function WorkspacePage(props: {
           event.type === 'error'
         ) {
           setStreaming(false);
+          // 每轮回复结束（完成/中断/出错）后重估上下文告警
+          void refreshContextWarning(sessionId);
         }
       }
       if (
@@ -148,7 +177,7 @@ export function WorkspacePage(props: {
         void refreshSessions();
       }
     });
-  }, [refreshSessions]);
+  }, [refreshSessions, refreshContextWarning]);
 
   /** 侧栏「+ 新建会话」：选目录 → 模式对话框（本目录直跑 / worktree 模式）→ 创建 */
   async function startCreateSession() {
@@ -279,6 +308,8 @@ export function WorkspacePage(props: {
           // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
           const history = await window.codexlike.sessions.messages(current!.id);
           setMessages(initialTranscript(history));
+          // 压缩后用量下降，告警随之重估（大概率消失）
+          await refreshContextWarning(current!.id);
           pushLocalStatus(
             `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`,
           );
@@ -319,6 +350,7 @@ export function WorkspacePage(props: {
             currentIdRef.current = null;
             setMessages([]);
             setWorkspaceFiles([]);
+            setContextWarning(null);
           }
         } catch (error) {
           pushLocalStatus(`归档失败：${error instanceof Error ? error.message : String(error)}`);
@@ -484,6 +516,14 @@ export function WorkspacePage(props: {
               }
               onApprovalRespond={(id, decision) => void respondApproval(id, decision)}
             />
+            {contextWarning !== null && (
+              <div
+                data-testid="context-warning"
+                className="border-t border-amber-900/60 bg-amber-950/40 px-4 py-2 text-xs text-amber-300"
+              >
+                {contextWarning}
+              </div>
+            )}
             <MessageComposer
               profiles={profiles}
               selectedProfileId={selectedProfileId}

@@ -43,4 +43,24 @@ describe('validateProviderProfile（Provider Profile 表单校验）', () => {
 
     expect(errors.model).toBe('请填写模型名称');
   });
+
+  it('上下文窗口（可选）：正整数通过；非整数/非正数给出中文错误；缺省合法', () => {
+    expect(validateProviderProfile({ ...validInput, contextWindowTokens: 200_000 })).toEqual(
+      {},
+    );
+    expect(validateProviderProfile(validInput).contextWindowTokens).toBeUndefined();
+
+    expect(
+      validateProviderProfile({ ...validInput, contextWindowTokens: 1.5 })
+        .contextWindowTokens,
+    ).toBe('上下文窗口必须是正整数（tokens）');
+    expect(
+      validateProviderProfile({ ...validInput, contextWindowTokens: 0 })
+        .contextWindowTokens,
+    ).toBe('上下文窗口必须是正整数（tokens）');
+    expect(
+      validateProviderProfile({ ...validInput, contextWindowTokens: Number.NaN })
+        .contextWindowTokens,
+    ).toBe('上下文窗口必须是正整数（tokens）');
+  });
 });

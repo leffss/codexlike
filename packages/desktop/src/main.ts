@@ -137,12 +137,21 @@ function assertValidInput(input: unknown) {
   if (typeof input !== 'object' || input === null) {
     throw new Error('Provider Profile 输入不合法');
   }
-  const { name, baseURL, apiKey, model } = input as Record<string, unknown>;
+  const { name, baseURL, apiKey, model, contextWindowTokens } =
+    input as Record<string, unknown>;
+  // 上下文窗口为可选数字（表单空串/未填 → undefined，走默认 128k）
+  const windowTokens =
+    contextWindowTokens === undefined ||
+    contextWindowTokens === null ||
+    contextWindowTokens === ''
+      ? undefined
+      : Number(contextWindowTokens);
   const parsed = {
     name: String(name ?? ''),
     baseURL: String(baseURL ?? ''),
     apiKey: String(apiKey ?? ''),
     model: String(model ?? ''),
+    ...(windowTokens !== undefined ? { contextWindowTokens: windowTokens } : {}),
   };
   const errors = validateProviderProfile(parsed);
   const first = Object.values(errors).find((message) => message !== undefined);

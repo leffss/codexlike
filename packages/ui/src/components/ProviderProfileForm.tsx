@@ -13,6 +13,20 @@ const EMPTY_INPUT: ProviderProfileInput = {
   model: '',
 };
 
+/** 上下文窗口字段的字符串形态（'' = 未配置，走默认 128k） */
+function windowTokensToText(value: number | undefined): string {
+  return value === undefined ? '' : String(value);
+}
+
+function windowTokensFromText(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  return Number.isNaN(parsed) ? Number.NaN : parsed; // 非数字留给校验报中文错误
+}
+
 /** 设置页的 Provider Profile 表单：新建/编辑共用，校验复用 agent-core 规则 */
 export function ProviderProfileForm(props: {
   initial?: ProviderProfileInput;
@@ -22,6 +36,9 @@ export function ProviderProfileForm(props: {
 }) {
   const [input, setInput] = useState<ProviderProfileInput>(
     props.initial ?? EMPTY_INPUT,
+  );
+  const [windowTokensText, setWindowTokensText] = useState(
+    windowTokensToText(props.initial?.contextWindowTokens),
   );
   const [errors, setErrors] = useState<ProviderProfileErrors>({});
   const [submitError, setSubmitError] = useState('');
@@ -34,14 +51,20 @@ export function ProviderProfileForm(props: {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitError('');
-    const validation = validateProviderProfile(input);
+    // 上下文窗口为可选字段：空串 → undefined（走默认 128k），数字随表单提交
+    const windowTokens = windowTokensFromText(windowTokensText);
+    const withWindow: ProviderProfileInput = {
+      ...input,
+      ...(windowTokens !== undefined ? { contextWindowTokens: windowTokens } : {}),
+    };
+    const validation = validateProviderProfile(withWindow);
     setErrors(validation);
     if (Object.values(validation).some((message) => message !== undefined)) {
       return;
     }
     setSaving(true);
     try {
-      await props.onSubmit(input);
+      await props.onSubmit(withWindow);
     } catch (error) {
       // 主进程 IPC 拒绝（校验失败 / safeStorage 不可用等）的中文消息直接展示
       setSubmitError(error instanceof Error ? error.message : String(error));
@@ -82,6 +105,13 @@ export function ProviderProfileForm(props: {
         value={input.model}
         error={errors.model}
         onChange={(v) => setField('model', v)}
+      />
+      <Field
+        label="上下文窗口（tokens，可选）"
+        placeholder="如：128000；留空按默认 128k 估算（上下文告警阈值 = 窗口 × 80%）"
+        value={windowTokensText}
+        error={errors.contextWindowTokens}
+        onChange={(v) => setWindowTokensText(v)}
       />
 
       {submitError !== '' && (

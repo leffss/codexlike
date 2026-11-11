@@ -107,6 +107,28 @@ describe('profile store（safeStorage 加密落盘）', () => {
     expect(await reopened.list()).toEqual([glm, deepseek]);
   });
 
+  it('上下文窗口（可选，告警阈值用）：配置后随 Profile 持久化恢复，未配置保持 undefined', async () => {
+    const dir = makeTempDir();
+    const first = createProfileStore({ dir, safeStorage: fakeSafeStorage });
+    const withWindow = await first.create({
+      ...validInput,
+      contextWindowTokens: 200_000,
+    });
+    const withoutWindow = await first.create({ ...validInput, name: 'Ollama 本地' });
+
+    expect(withWindow.contextWindowTokens).toBe(200_000);
+    expect(withoutWindow.contextWindowTokens).toBeUndefined();
+
+    const reopened = createProfileStore({ dir, safeStorage: fakeSafeStorage });
+    const restored = await reopened.list();
+    expect(restored.find((p) => p.id === withWindow.id)?.contextWindowTokens).toBe(
+      200_000,
+    );
+    expect(
+      restored.find((p) => p.id === withoutWindow.id)?.contextWindowTokens,
+    ).toBeUndefined();
+  });
+
   it('safeStorage 不可用时 create/update 抛错，绝不写明文 key', async () => {
     const dir = makeTempDir();
     const store = createProfileStore({

@@ -247,20 +247,22 @@ export function registerSessionHandlers(options: {
     if (record === undefined) {
       return null;
     }
-    const providerProfileName =
+    const profile =
       record.providerProfileId === null
-        ? null
-        : ((await profiles.list()).find(
+        ? undefined
+        : (await profiles.list()).find(
             (candidate: ProviderProfile) =>
               candidate.id === record.providerProfileId,
-          )?.name ?? null);
+          );
     return buildSessionStatus({
       record,
       messages: manager.messages(sessionId),
       agentsMd: discoverAgentsInstructions({
         workspacePath: record.workspacePath,
       }),
-      providerProfileName,
+      providerProfileName: profile?.name ?? null,
+      // 上下文告警阈值 = Profile 可配的上下文窗口 × 80%（未配置走 agent-core 默认 128k）
+      contextWindowTokens: profile?.contextWindowTokens ?? null,
       latestCompact: manager.latestCompact(sessionId),
     });
   });

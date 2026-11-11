@@ -22,6 +22,8 @@ interface StoredProfile {
   baseURL: string;
   model: string;
   encryptedApiKey: string;
+  /** 模型上下文窗口（tokens，可选；上下文告警阈值用），旧文件无此字段 */
+  contextWindowTokens?: number;
 }
 
 interface StoredFile {
@@ -74,6 +76,9 @@ export function createProfileStore(options: {
       baseURL: input.baseURL,
       model: input.model,
       encryptedApiKey: encrypted.toString('base64'),
+      ...(input.contextWindowTokens !== undefined
+        ? { contextWindowTokens: input.contextWindowTokens }
+        : {}),
     };
   }
 
@@ -85,6 +90,9 @@ export function createProfileStore(options: {
       baseURL: stored.baseURL,
       apiKey: await safeStorage.decryptString(encrypted),
       model: stored.model,
+      ...(stored.contextWindowTokens !== undefined
+        ? { contextWindowTokens: stored.contextWindowTokens }
+        : {}),
     };
   }
 

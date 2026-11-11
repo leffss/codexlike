@@ -15,6 +15,11 @@ export interface ProviderProfile {
   apiKey: string;
   /** 模型标识，如 `glm-4.7` */
   model: string;
+  /**
+   * 模型上下文窗口（tokens，可选；上下文告警阈值 = 窗口 × 80%）。
+   * 未配置时按默认 128k 估算（见 context/context-warning）。
+   */
+  contextWindowTokens?: number;
 }
 
 /** 设置页表单输入（无 `id`，`id` 由存储层生成） */
@@ -22,10 +27,10 @@ export type ProviderProfileInput = Omit<ProviderProfile, 'id'>;
 
 /** 按字段给出中文错误消息；空对象表示校验通过 */
 export type ProviderProfileErrors = Partial<
-  Record<'name' | 'baseURL' | 'apiKey' | 'model', string>
+  Record<'name' | 'baseURL' | 'apiKey' | 'model' | 'contextWindowTokens', string>
 >;
 
-/** 校验 Provider Profile 表单输入（URL 合法、name/model 非空），供 UI 与存储层共用 */
+/** 校验 Provider Profile 表单输入（URL 合法、name/model 非空、上下文窗口为正整数），供 UI 与存储层共用 */
 export function validateProviderProfile(
   input: ProviderProfileInput,
 ): ProviderProfileErrors {
@@ -47,6 +52,13 @@ export function validateProviderProfile(
 
   if (input.model.trim() === '') {
     errors.model = '请填写模型名称';
+  }
+
+  if (
+    input.contextWindowTokens !== undefined &&
+    (!Number.isInteger(input.contextWindowTokens) || input.contextWindowTokens <= 0)
+  ) {
+    errors.contextWindowTokens = '上下文窗口必须是正整数（tokens）';
   }
 
   return errors;
