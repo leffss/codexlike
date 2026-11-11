@@ -75,7 +75,7 @@ export function ProviderProfileForm(props: {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/60 p-4"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4"
       onSubmit={(handleSubmit)}
     >
       <Field
@@ -115,7 +115,7 @@ export function ProviderProfileForm(props: {
       />
 
       {submitError !== '' && (
-        <p className="rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-400">
+        <p className="rounded border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg">
           {submitError}
         </p>
       )}
@@ -123,7 +123,7 @@ export function ProviderProfileForm(props: {
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          className="rounded px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-800"
+          className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
           onClick={props.onCancel}
         >
           取消
@@ -131,7 +131,7 @@ export function ProviderProfileForm(props: {
         <button
           type="submit"
           disabled={saving}
-          className="rounded bg-sky-700 px-4 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
+          className="rounded bg-accent px-4 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
         >
           {saving ? '保存中…' : props.submitLabel}
         </button>
@@ -149,19 +149,19 @@ function Field(props: {
 }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="text-slate-400">{props.label}</span>
+      <span className="text-fg-muted">{props.label}</span>
       <input
         value={props.value}
         placeholder={props.placeholder}
         onChange={(event) => props.onChange(event.target.value)}
-        className={`rounded border bg-slate-950/70 px-3 py-2 text-slate-200 placeholder:text-slate-600 ${
+        className={`rounded border bg-code-bg px-3 py-2 text-fg placeholder:text-fg-subtle ${
           props.error !== undefined
-            ? 'border-red-700'
-            : 'border-slate-700 focus:border-sky-600'
+            ? 'border-danger-fg'
+            : 'border-line focus:border-accent'
         } outline-none`}
       />
       {props.error !== undefined && (
-        <span className="text-xs text-red-400">{props.error}</span>
+        <span className="text-xs text-danger-fg">{props.error}</span>
       )}
     </label>
   );

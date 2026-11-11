@@ -13,6 +13,7 @@
     "test:e2e": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e",
     "test:e2e:acceptance": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:acceptance",
     "test:e2e:commands": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:commands",
+    "test:e2e:skills": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:skills",
     "test:e2e:compact": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:compact",
     "test:e2e:changes": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:changes",
     "test:e2e:interrupt": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interrupt",
@@ -20,6 +21,7 @@
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
     "prepare": "husky",
     "test:e2e:projects": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:projects",
+    "test:e2e:theme": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:theme",
     "check:adr": "node scripts/check-adr.mjs",
     "test:e2e:all": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:all"
   },

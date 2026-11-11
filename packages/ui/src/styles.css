@@ -1,8 +1,151 @@
 @import 'tailwindcss';
 
-/* CodexLike 深色工作台主题 */
-:root {
+/* 主题块用纯属性选择器（与 dark 块对称）：Tailwind v4 构建会吞掉 :root 前缀的自定义属性块 */
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* 表面 */
+  --canvas: #ffffff; /* 页面主底 */
+  --surface: #ffffff; /* 卡片 / 面板 */
+  --surface-muted: #f2f3f5; /* 侧栏 / 输入条等次级面 */
+  --hover: rgba(15, 23, 42, 0.06);
+  --selected: rgba(9, 105, 218, 0.14);
+
+  /* 内容 */
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --fg-subtle: #898f98; /* 时间戳等最弱信息 */
+  --line: #e1e4e8;
+
+  /* 操作 */
+  --accent: #0969da;
+  --accent-hover: #0860c9;
+  --on-accent: #ffffff;
+
+  /* 特殊 */
+  --overlay: rgba(23, 26, 31, 0.45);
+  --code-bg: #f6f8fa;
+  --code-fg: #1f2328;
+  --code-inline-bg: #f2f3f5;
+  --code-inline-fg: #24292f;
+
+  /* 状态（前景 + 淡底） */
+  --ok-fg: #1a7f37;
+  --ok-bg: #dafbe1;
+  /* 实心确认按钮（批准）：白字可读的绿 */
+  --ok-solid: #1f883d;
+  --ok-solid-hover: #1a7f37;
+  --warn-fg: #9a6700;
+  --warn-bg: #fff3c4;
+  --danger-fg: #cf222e;
+  --danger-bg: #ffebe9;
+  /* 实心危险按钮（停止）：白字可读的深红 */
+  --danger-solid: #cf222e;
+  --danger-solid-hover: #a40e26;
+  --info-fg: #0969da;
+  --info-bg: #ddf4ff;
+
+  /* worktree 徽标（需与普通会话区分的辅助色，GLOSSARY「Worktree」） */
+  --worktree-fg: #8250df;
+  --worktree-bg: #ebe8ff;
+
+  /* 子代理卡片（GLOSSARY「子代理」）：消息流中与工具卡片区分 */
+  --subagent-fg: #8250df;
+  --subagent-bg: #f1edfd;
+
+  /* highlight.js token（github 浅色） */
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-title: #8250df;
+  --hl-comment: #6e7781;
+  --hl-number: #0550ae;
+  --hl-tag: #116329;
+}
+
+[data-theme='dark'] {
   color-scheme: dark;
+
+  --canvas: #0f172a;
+  --surface: #16203a;
+  --surface-muted: #0d1526;
+  --hover: rgba(148, 163, 184, 0.14);
+  --selected: rgba(2, 132, 199, 0.22);
+
+  --fg: #e2e8f0;
+  --fg-muted: #94a3b8;
+  --fg-subtle: #6b7a93;
+  --line: #2c3b57;
+
+  --accent: #0369a1;
+  --accent-hover: #0284c7;
+  --on-accent: #ffffff;
+
+  --overlay: rgba(0, 0, 0, 0.55);
+  --code-bg: #0d1117;
+  --code-fg: #e2e8f0;
+  --code-inline-bg: #1e293b;
+  --code-inline-fg: #fda4af;
+
+  --ok-fg: #34d399;
+  --ok-bg: rgba(6, 95, 70, 0.45);
+  --ok-solid: #238636;
+  --ok-solid-hover: #2ea043;
+  --warn-fg: #fbbf24;
+  --warn-bg: rgba(120, 53, 15, 0.45);
+  --danger-fg: #f87171;
+  --danger-bg: rgba(127, 29, 29, 0.5);
+  --danger-solid: #e5484d;
+  --danger-solid-hover: #f2555a;
+  --info-fg: #7dd3fc;
+  --info-bg: rgba(12, 74, 110, 0.5);
+
+  --worktree-fg: #c4b5fd;
+  --worktree-bg: rgba(76, 29, 149, 0.5);
+
+  --subagent-fg: #c4b5fd;
+  --subagent-bg: rgba(46, 16, 101, 0.35);
+
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-title: #d2a8ff;
+  --hl-comment: #8b949e;
+  --hl-number: #79c0ff;
+  --hl-tag: #7ee787;
+}
+
+/* 语义变量 → Tailwind 工具类（bg-canvas / text-fg-muted / border-line …） */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-overlay: var(--overlay);
+  --color-code-bg: var(--code-bg);
+  --color-code-fg: var(--code-fg);
+  --color-ok-fg: var(--ok-fg);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-solid: var(--ok-solid);
+  --color-ok-solid-hover: var(--ok-solid-hover);
+  --color-warn-fg: var(--warn-fg);
+  --color-warn-bg: var(--warn-bg);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-solid-hover: var(--danger-solid-hover);
+  --color-info-fg: var(--info-fg);
+  --color-info-bg: var(--info-bg);
+  --color-worktree-fg: var(--worktree-fg);
+  --color-worktree-bg: var(--worktree-bg);
+  --color-subagent-fg: var(--subagent-fg);
+  --color-subagent-bg: var(--subagent-bg);
 }
 
 html,
@@ -19,8 +162,8 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
-  background-color: #0f172a;
-  color: #e2e8f0;
+  background-color: var(--canvas);
+  color: var(--fg);
 }
 
 /* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版） */
@@ -43,7 +186,7 @@ body {
 .markdown h4 {
   margin: 0.8em 0 0.4em;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--fg);
 }
 
 .markdown ul,
@@ -65,15 +208,15 @@ body {
 }
 
 .markdown a {
-  color: #7dd3fc;
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .markdown blockquote {
   margin: 0.5em 0;
   padding: 0.2em 0.9em;
-  border-left: 3px solid #475569;
-  color: #94a3b8;
+  border-left: 3px solid var(--line);
+  color: var(--fg-muted);
 }
 
 .markdown code {
@@ -84,15 +227,15 @@ body {
 .markdown :not(pre) > code {
   padding: 0.15em 0.35em;
   border-radius: 4px;
-  background-color: #1e293b;
-  color: #fda4af;
+  background-color: var(--code-inline-bg);
+  color: var(--code-inline-fg);
 }
 
 .markdown pre {
   margin: 0.6em 0;
   padding: 0.75em 1em;
   border-radius: 8px;
-  background-color: #0d1117;
+  background-color: var(--code-bg);
   overflow-x: auto;
 }
 
@@ -108,16 +251,85 @@ body {
 .markdown th,
 .markdown td {
   padding: 0.3em 0.7em;
-  border: 1px solid #334155;
+  border: 1px solid var(--line);
 }
 
 .markdown th {
-  background-color: #1e293b;
+  background-color: var(--surface-muted);
 }
 
 .markdown hr {
   margin: 0.8em 0;
-  border-color: #334155;
+  border-color: var(--line);
+}
+
+/*
+ * highlight.js token（rehype-highlight 输出 .hljs-*）：
+ * 主题作用域化——不再全局 import github-dark.css（无法按主题切换），
+ * token 色经 --hl-* 变量随 data-theme 整体翻转；未列出的 token 继承 code-fg。
+ */
+.hljs {
+  color: var(--code-fg);
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--hl-comment);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst,
+.hljs-doctag,
+.hljs-formula,
+.hljs-deletion {
+  color: var(--hl-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-template-string {
+  color: var(--hl-string);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-section,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--hl-title);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-type,
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: var(--hl-number);
+}
+
+.hljs-tag,
+.hljs-name {
+  color: var(--hl-tag);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
 }
 
 /* 流式回复进行中的光标 */
@@ -127,7 +339,7 @@ body {
   height: 1em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background-color: #7dd3fc;
+  background-color: var(--accent);
   animation: markdown-cursor-blink 1s steps(2, start) infinite;
 }
 

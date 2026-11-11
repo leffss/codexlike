@@ -6,9 +6,11 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type SessionRecord,
+  type SessionResourcesView,
   type WorkspaceMode,
 } from "@codexlike/agent-core";
 
+import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
 import { ChangesPanel } from "../components/ChangesPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
@@ -43,6 +45,12 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [resources, setResources] = useState<SessionResourcesView | null>(null);
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
+  const resourceRequestRef = useRef(0);
+  const sessionRequestRef = useRef(0);
   /** 待确认的新建会话（已选目录、等待用户选择运行位置） */
   const [pendingWorkspace, setPendingWorkspace] = useState<string | null>(null);
   /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
@@ -60,6 +68,31 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
     setSessions(list);
     return list;
   }, []);
+
+  /** 最新请求胜出；同时校验会话与请求代数，防止 A→B→A 的旧结果串线。 */
+  const refreshResources = useCallback(async (sessionId: string) => {
+    const request = ++resourceRequestRef.current;
+    const isCurrent = () => currentIdRef.current === sessionId && resourceRequestRef.current === request;
+    setResourcesLoading(true);
+    setResourcesError(null);
+    try {
+      const view = await window.codexlike.sessions.resources(sessionId);
+      if (!isCurrent()) return;
+      setResources(view);
+      if (view === null) setResourcesError("会话资源不可用");
+    } catch (error) {
+      if (!isCurrent()) return;
+      setResources(null);
+      setResourcesError(`读取规范与技能失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (isCurrent()) setResourcesLoading(false);
+    }
+  }, []);
+
+  const refreshCurrentResources = useCallback(() => {
+    const id = currentIdRef.current;
+    if (id !== null) void refreshResources(id);
+  }, [refreshResources]);
 
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
@@ -79,8 +112,11 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
    * 超阈值在输入区上方常驻中文告警（/compact 后重估自然消失）；查询失败静默不打扰。
    */
   const refreshContextWarning = useCallback(async (sessionId: string) => {
+    const sessionRequest = sessionRequestRef.current;
+    const isCurrent = () => currentIdRef.current === sessionId && sessionRequestRef.current === sessionRequest;
     try {
       const status = await window.codexlike.sessions.status(sessionId);
+      if (!isCurrent()) return;
       setContextWarning(
         status === null
           ? null
@@ -90,7 +126,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
             )?.message ?? null)
       );
     } catch {
-      setContextWarning(null);
+      if (isCurrent()) setContextWarning(null);
     }
   }, []);
 
@@ -98,7 +134,17 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
     async (id: string) => {
       setCurrentId(id);
       currentIdRef.current = id;
+      const request = ++sessionRequestRef.current;
+      const isCurrent = () => currentIdRef.current === id && sessionRequestRef.current === request;
+      setMessages([]);
+      setWorkspaceFiles([]);
+      setResources(null);
+      setContextWarning(null);
+      setCompacting(false);
+      setFullAccessPending(false);
+      void refreshResources(id);
       const history = await window.codexlike.sessions.messages(id);
+      if (!isCurrent()) return;
       let items = initialTranscript(history);
       setStreaming(false);
       // 切换会话后按该会话的当前用量重估上下文告警
@@ -108,6 +154,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       try {
         const pendingList =
           await window.codexlike.sessions.pendingApprovals(id);
+        if (!isCurrent()) return;
         if (pendingList.length > 0) {
           for (const request of pendingList) {
             items = applySessionEvent(items, {
@@ -120,15 +167,17 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       } catch {
         // 查询失败不阻塞会话打开
       }
+      if (!isCurrent()) return;
       setMessages(items);
       // @引用 菜单候选：随会话（工作区）切换重新枚举
       try {
-        setWorkspaceFiles(await window.codexlike.sessions.workspaceFiles(id));
+        const files = await window.codexlike.sessions.workspaceFiles(id);
+        if (isCurrent()) setWorkspaceFiles(files);
       } catch {
-        setWorkspaceFiles([]);
+        if (isCurrent()) setWorkspaceFiles([]);
       }
     },
-    [refreshContextWarning]
+    [refreshContextWarning, refreshResources]
   );
 
   useEffect(() => {
@@ -144,22 +193,11 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
       }
       // 启动时自动打开最近的未归档会话（若有）
       const latest = list.find((session) => session.archivedAt === null);
-      if (latest !== undefined) {
-        setCurrentId(latest.id);
-        currentIdRef.current = latest.id;
-        const history = await window.codexlike.sessions.messages(latest.id);
-        setMessages(initialTranscript(history));
-        void refreshContextWarning(latest.id);
-        try {
-          setWorkspaceFiles(
-            await window.codexlike.sessions.workspaceFiles(latest.id)
-          );
-        } catch {
-          setWorkspaceFiles([]);
-        }
+      if (latest !== undefined && currentIdRef.current === null) {
+        await openSession(latest.id);
       }
     })();
-  }, [refreshContextWarning]);
+  }, [openSession]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
@@ -168,6 +206,12 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         setMessages((prev) => applySessionEvent(prev, event));
         if (event.type === "assistant-start") {
           setStreaming(true);
+        }
+        if (
+          event.type === "assistant-start" || event.type === "tool-result" ||
+          event.type === "assistant-done" || event.type === "assistant-aborted" || event.type === "error"
+        ) {
+          void refreshResources(sessionId);
         }
         if (
           event.type === "assistant-done" ||
@@ -191,7 +235,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         void refreshSessions();
       }
     });
-  }, [refreshSessions, refreshContextWarning]);
+  }, [refreshSessions, refreshContextWarning, refreshResources]);
 
   /** 侧栏「+ 新建会话」：选目录 → 模式对话框（本目录直跑 / worktree 模式）→ 创建 */
   async function startCreateSession() {
@@ -269,8 +313,10 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         mentionPaths.length === 0 ? undefined : mentionPaths
       );
     } catch (error) {
-      // 启动失败（会话回复中 / Profile 缺失 / @引用 不可读等）：直接在消息流提示
+      // 启动失败（含显式技能解析/加载错误）：只在发起会话仍打开时提示。
+      if (currentIdRef.current !== currentId) return;
       setStreaming(false);
+      void refreshResources(currentId);
       setMessages((prev) => [
         ...prev,
         {
@@ -374,6 +420,11 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
           } else if (next === undefined) {
             setCurrentId(null);
             currentIdRef.current = null;
+            sessionRequestRef.current += 1;
+            resourceRequestRef.current += 1;
+            setResources(null);
+            setResourcesLoading(false);
+            setResourcesError(null);
             setMessages([]);
             setWorkspaceFiles([]);
             setContextWarning(null);
@@ -407,14 +458,18 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         return;
       }
       case "status": {
+        const sessionId = current!.id;
+        const request = sessionRequestRef.current;
         try {
-          const status = await window.codexlike.sessions.status(current!.id);
+          const status = await window.codexlike.sessions.status(sessionId);
+          if (currentIdRef.current !== sessionId || sessionRequestRef.current !== request) return;
           if (status === null) {
             pushLocalStatus("会话不存在或已损坏");
           } else {
             pushLocalStatus(formatSessionStatus(status));
           }
         } catch (error) {
+          if (currentIdRef.current !== sessionId || sessionRequestRef.current !== request) return;
           pushLocalStatus(
             `查询状态失败：${error instanceof Error ? error.message : String(error)}`
           );
@@ -498,7 +553,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         ? "正在压缩历史，请稍候…"
         : currentId === null
           ? "新建或选择一个会话后开始对话"
-          : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令菜单、@ 引用工作区文件";
+          : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
   return (
     <div className="flex h-full">
@@ -547,16 +602,29 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
         }}
       />
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
-          <span className="min-w-0 flex-1 truncate text-sm text-slate-400">
+        <header className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">
             {current?.title ?? "未选择会话"}
           </span>
+          <button
+            type="button"
+            data-testid="resources-toggle"
+            disabled={currentId === null}
+            aria-expanded={resourcesOpen}
+            onClick={() => {
+              if (!resourcesOpen) refreshCurrentResources();
+              setResourcesOpen((prev) => !prev);
+            }}
+            className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
+          >
+            规范与技能
+          </button>
           <button
             type="button"
             data-testid="changes-toggle"
             onClick={() => setChangesOpen((prev) => !prev)}
             disabled={currentId === null}
-            className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-sky-600 hover:text-sky-400 disabled:opacity-50"
+            className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
           >
             {changesOpen ? "收起改动" : "改动"}
           </button>
@@ -570,7 +638,7 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
                 profiles.length === 0 ? (
                   <button
                     type="button"
-                    className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-sky-600 hover:text-sky-400"
+                    className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
                     onClick={props.onOpenSettings}
                   >
                     前往设置配置 Provider Profile
@@ -584,17 +652,20 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
             {contextWarning !== null && (
               <div
                 data-testid="context-warning"
-                className="border-t border-amber-900/60 bg-amber-950/40 px-4 py-2 text-xs text-amber-300"
+                className="border-t border-warn-fg/40 bg-warn-bg px-4 py-2 text-xs text-warn-fg"
               >
                 {contextWarning}
               </div>
             )}
             <MessageComposer
+              key={currentId ?? "no-session"}
               profiles={profiles}
               selectedProfileId={selectedProfileId}
               onSelectProfile={setSelectedProfileId}
               onSend={handleSubmit}
               workspaceFiles={workspaceFiles}
+              skills={resources?.preview.catalog.skills}
+              onOpenSkills={refreshCurrentResources}
               disabled={
                 currentId === null ||
                 profiles.length === 0 ||
@@ -608,6 +679,15 @@ export function WorkspacePage(props: { onOpenSettings: () => void }) {
               onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
             />
           </div>
+          {resourcesOpen && currentId !== null && (
+            <AgentResourcesPanel
+              resources={resources}
+              loading={resourcesLoading}
+              error={resourcesError}
+              onRefresh={refreshCurrentResources}
+              onClose={() => setResourcesOpen(false)}
+            />
+          )}
           {changesOpen && current !== null && (
             <ChangesPanel
               key={current.id}

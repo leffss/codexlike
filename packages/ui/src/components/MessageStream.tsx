@@ -19,11 +19,11 @@ export function MessageStream(props: {
 }) {
   return (
     <div
-      className="min-h-0 flex-1 overflow-y-auto bg-slate-950/40 px-4 py-4"
+      className="min-h-0 flex-1 overflow-y-auto bg-canvas px-4 py-4"
       data-testid="message-stream"
     >
       {props.items.length === 0 && props.compacting !== true ? (
-        <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-600">
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-fg-subtle">
           <p className="text-sm">消息流为空</p>
           {props.emptyHint}
         </div>
@@ -47,9 +47,9 @@ export function MessageStream(props: {
           {props.compacting === true && (
             <li
               data-testid="compacting-indicator"
-              className="flex items-center gap-2 rounded-lg border border-indigo-800/60 bg-indigo-950/40 px-3 py-2 text-xs text-indigo-300"
+              className="flex items-center gap-2 rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
             >
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-info-fg" />
               正在压缩历史为摘要…（压缩期间输入已暂停）
             </li>
           )}
@@ -68,7 +68,7 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-user"
-        className="ml-auto max-w-[85%] rounded-lg bg-sky-800/50 px-3 py-2 text-sm whitespace-pre-wrap text-slate-100"
+        className="ml-auto max-w-[85%] rounded-lg bg-selected px-3 py-2 text-sm whitespace-pre-wrap text-fg"
       >
         {message.content}
       </li>
@@ -79,7 +79,7 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-error"
-        className="rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+        className="rounded-lg border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg"
       >
         {message.content}
       </li>
@@ -91,7 +91,7 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-status"
-        className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2 text-xs whitespace-pre-wrap text-slate-400"
+        className="rounded-lg border border-line bg-surface px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
       >
         {message.content}
       </li>
@@ -102,11 +102,11 @@ function MessageBubble(props: {
     // /compact 摘要卡片：被压缩的历史折叠显示，点击展开摘要全文（工单 08）
     return (
       <li data-testid="message-compact-summary">
-        <details className="rounded-lg border border-indigo-900/60 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-300">
+        <details className="rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg">
           <summary className="cursor-pointer select-none">
             已压缩的历史（点击展开摘要全文）
           </summary>
-          <div className="markdown mt-2 rounded border border-indigo-900/40 bg-slate-900/60 px-3 py-2 text-sm text-slate-200">
+          <div className="markdown mt-2 rounded border border-line bg-surface px-3 py-2 text-sm text-fg">
             <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
               {message.content}
             </ReactMarkdown>
@@ -118,7 +118,7 @@ function MessageBubble(props: {
 
   return (
     <li data-testid="message-assistant" className="max-w-full">
-      <div className="markdown rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm">
+      <div className="markdown rounded-lg border border-line bg-surface px-4 py-3 text-sm">
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
           {message.content}
         </ReactMarkdown>
@@ -126,7 +126,7 @@ function MessageBubble(props: {
           <span className="markdown-cursor" aria-label="正在生成" />
         )}
         {message.interrupted === true && (
-          <p className="mt-2 text-xs text-amber-400">（已中断，以上为部分回复）</p>
+          <p className="mt-2 text-xs text-warn-fg">（已中断，以上为部分回复）</p>
         )}
       </div>
     </li>

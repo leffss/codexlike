@@ -11,31 +11,31 @@ export function FullAccessConfirmDialog(props: {
   return (
     <div
       data-testid="full-access-confirm-dialog"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
     >
-      <div className="w-[28rem] rounded-lg border border-amber-600/50 bg-slate-900 p-5 shadow-xl">
-        <h3 className="text-base font-medium text-amber-300">
+      <div className="w-[28rem] rounded-lg border border-warn-fg/50 bg-surface p-5 shadow-xl">
+        <h3 className="text-base font-medium text-warn-fg">
           切换到完全访问？
         </h3>
-        <p className="mt-2 text-sm leading-6 text-slate-300">
+        <p className="mt-2 text-sm leading-6 text-fg-muted">
           完全访问（full-access）下，Agent 将：
         </p>
-        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-400">
+        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-fg-muted">
           <li>自动执行全部操作，不再逐条询问（含危险命令）；</li>
           <li>
             可不受限地读写本机任意位置的文件——
-            <span className="text-amber-300">工作区边界保护将失效</span>；
+            <span className="text-warn-fg">工作区边界保护将失效</span>；
           </li>
           <li>可自由访问互联网。</li>
         </ul>
-        <p className="mt-3 text-sm leading-6 text-slate-400">
+        <p className="mt-3 text-sm leading-6 text-fg-muted">
           仅在你完全信任当前任务时使用；随时可切回「帮我批准」恢复边界。
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
             data-testid="full-access-confirm-cancel"
-            className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500"
+            className="rounded border border-line px-3 py-1.5 text-sm text-fg-muted hover:border-fg-muted"
             onClick={props.onCancel}
           >
             取消
@@ -43,7 +43,7 @@ export function FullAccessConfirmDialog(props: {
           <button
             type="button"
             data-testid="full-access-confirm-ok"
-            className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-500"
+            className="rounded bg-danger-solid px-3 py-1.5 text-sm text-on-accent hover:bg-danger-solid-hover"
             onClick={props.onConfirm}
           >
             我已了解风险，切换

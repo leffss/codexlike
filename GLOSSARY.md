@@ -55,3 +55,7 @@ _Avoid_: 附件、文件上传
 **Provider Profile**:
 一份 LLM 接入配置（`baseURL` / `apiKey` / `model`），全部走 OpenAI 兼容协议，可在界面中配置多份并切换。
 _Avoid_: api config、model config、账号
+
+**主题（Theme）**:
+应用级外观偏好（`light` / `dark`），默认浅色；持久化到主进程设置文件，窗口底色与界面配色随之整体切换（ADR 0006）。
+_Avoid_: 皮肤、skin、暗黑模式（dark mode）

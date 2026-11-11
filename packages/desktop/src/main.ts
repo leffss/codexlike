@@ -5,6 +5,7 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  nativeTheme,
   safeStorage,
   type IpcMainInvokeEvent,
 } from 'electron';
@@ -40,6 +41,12 @@ import {
   resolveTerminalShell,
   type TerminalSettingsStore,
 } from './terminal/terminal-settings-store';
+import {
+  createThemeSettingsStore,
+  isThemeName,
+  type ThemeName,
+  type ThemeSettingsStore,
+} from './theme/theme-settings-store';
 import type { TerminalShell } from '@codexlike/agent-core/node';
 import { registerSessionHandlers } from './sessions/session-ipc';
 import { sessionScreenshotDir } from './sessions/screenshots';
@@ -75,12 +82,24 @@ function dataDir(): string {
 
 let mainWindow: BrowserWindow | null = null;
 
-function createMainWindow(): BrowserWindow {
+/** 各主题的窗口底色（页面加载前可见；与 styles.css 的 --canvas 保持一致） */
+const WINDOW_BACKGROUND: Record<ThemeName, string> = {
+  light: '#f8fafc',
+  dark: '#0f172a',
+};
+
+/** 原生侧同步（原生控件/滚动条跟随应用主题而非系统；未配置默认浅色，ADR 0006） */
+function applyNativeTheme(theme: ThemeName | null): void {
+  const resolved = theme ?? 'light';
+  nativeTheme.themeSource = resolved;
+}
+
+function createMainWindow(theme: ThemeName | null): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     title: 'CodexLike',
-    backgroundColor: '#0f172a',
+    backgroundColor: WINDOW_BACKGROUND[theme ?? 'light'],
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -260,6 +279,36 @@ function registerTerminalSettingsHandlers(options: {
   );
 }
 
+/**
+ * 注册外观主题偏好的 IPC 指令（ADR 0006）。
+ * 保存后同步原生窗口底色与 nativeTheme（渲染端由 ThemeProvider 换 data-theme）。
+ */
+function registerThemeSettingsHandlers(options: {
+  store: ThemeSettingsStore;
+  onSaved: (theme: ThemeName) => void;
+}): void {
+  const { store, onSaved } = options;
+  ipcMain.handle(IPC.themeSettings.get, () => store.get());
+  ipcMain.handle(
+    IPC.themeSettings.set,
+    (_e: IpcMainInvokeEvent, input: unknown) => {
+      // IPC 边界不信任渲染进程：只接受 light / dark 枚举
+      if (!isThemeName(input)) {
+        throw new Error('主题偏好必须是 light / dark 之一');
+      }
+      return store
+        .set(input)
+        .then((theme) => {
+          onSaved(theme);
+          return theme;
+        })
+        .catch((error: unknown) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        });
+    },
+  );
+}
+
 void app.whenReady().then(async () => {
   // 会话持久化：SQLite 库文件位于 ~/.codexlike/codexlike.db（spec「会话与持久化」）
   const persistence = createSqliteSessionStore(join(dataDir(), 'codexlike.db'));
@@ -289,6 +338,12 @@ void app.whenReady().then(async () => {
   // 未配置时 CODEXLIKE_SHELL 环境变量兜底（E2E/自动化兼容），最终默认 Git Bash。
   const terminalSettingsStore = createTerminalSettingsStore({ dir: dataDir() });
   let shellPreference = await terminalSettingsStore.get();
+
+  // 外观主题偏好（ADR 0006）：启动时先读偏好再建窗口——窗口底色与页面主题一致，
+  // 避免深色用户重启先闪浅色底；未配置默认浅色。渲染端另有 localStorage 镜像防页内闪烁。
+  const themeSettingsStore = createThemeSettingsStore({ dir: dataDir() });
+  const themePreference = await themeSettingsStore.get();
+  applyNativeTheme(themePreference);
   // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
   // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
   const browserManager = createBrowserSessionManager({
@@ -401,6 +456,14 @@ void app.whenReady().then(async () => {
       shellPreference = shell;
     },
   });
+  registerThemeSettingsHandlers({
+    store: themeSettingsStore,
+    onSaved: (theme: ThemeName) => {
+      applyNativeTheme(theme);
+      // 已打开窗口的底色同步（页面加载完成前穿透可见的原生层）
+      mainWindow?.setBackgroundColor(WINDOW_BACKGROUND[theme]);
+    },
+  });
   registerMcpHandlers(mcpService);
   registerSessionHandlers({
     manager,
@@ -412,7 +475,7 @@ void app.whenReady().then(async () => {
   });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
-  mainWindow = createMainWindow();
+  mainWindow = createMainWindow(themePreference);
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
   // Windows 优先：全部窗口关闭即退出（无 macOS dock 常驻）

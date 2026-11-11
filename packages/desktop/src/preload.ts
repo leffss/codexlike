@@ -59,6 +59,10 @@ const api: CodexLikeApi = {
     get: () => ipcRenderer.invoke(IPC.terminalSettings.get),
     set: (shell) => ipcRenderer.invoke(IPC.terminalSettings.set, shell),
   },
+  themeSettings: {
+    get: () => ipcRenderer.invoke(IPC.themeSettings.get),
+    set: (theme) => ipcRenderer.invoke(IPC.themeSettings.set, theme),
+  },
   mcp: {
     overview: () => ipcRenderer.invoke(IPC.mcp.overview),
     addServer: (input) => ipcRenderer.invoke(IPC.mcp.addServer, input),

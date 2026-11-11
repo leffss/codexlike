@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App';
 import './styles.css';
-import 'highlight.js/styles/github-dark.css';
+// highlight.js token 色不再全局导入 github-dark.css：
+// 已在 styles.css 以 --hl-* 变量随 data-theme 主题化（ADR 0006）
 
 const container = document.getElementById('root');
 if (!container) {

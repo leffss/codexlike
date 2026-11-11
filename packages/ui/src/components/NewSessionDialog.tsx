@@ -20,23 +20,23 @@ export function NewSessionDialog(props: {
   return (
     <div
       data-testid="new-session-dialog"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
     >
-      <div className="w-[28rem] rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl">
-        <h3 className="text-base font-medium text-slate-100">新建会话</h3>
+      <div className="w-[28rem] rounded-lg border border-line bg-surface p-5 shadow-xl">
+        <h3 className="text-base font-medium text-fg">新建会话</h3>
         <p
           data-testid="new-session-workspace"
-          className="mt-2 truncate rounded bg-slate-950 px-3 py-2 text-xs text-slate-400"
+          className="mt-2 truncate rounded bg-code-bg px-3 py-2 text-xs text-fg-muted"
           title={props.workspacePath}
         >
           工作区：{props.workspacePath}
         </p>
         <fieldset className="mt-4 space-y-2">
-          <legend className="text-sm text-slate-300">运行位置</legend>
+          <legend className="text-sm text-fg-muted">运行位置</legend>
           <label
             data-testid="mode-local"
             className={`flex cursor-pointer items-start gap-2 rounded border px-3 py-2 ${
-              mode === 'local' ? 'border-sky-600 bg-sky-900/20' : 'border-slate-700'
+              mode === 'local' ? 'border-accent bg-selected' : 'border-line'
             }`}
           >
             <input
@@ -47,8 +47,8 @@ export function NewSessionDialog(props: {
               onChange={() => setMode('local')}
             />
             <span>
-              <span className="block text-sm text-slate-200">本目录直跑（默认）</span>
-              <span className="block text-xs text-slate-500">
+              <span className="block text-sm text-fg">本目录直跑（默认）</span>
+              <span className="block text-xs text-fg-subtle">
                 直接在所选目录中读写文件与执行命令
               </span>
             </span>
@@ -56,7 +56,7 @@ export function NewSessionDialog(props: {
           <label
             data-testid="mode-worktree"
             className={`flex cursor-pointer items-start gap-2 rounded border px-3 py-2 ${
-              mode === 'worktree' ? 'border-sky-600 bg-sky-900/20' : 'border-slate-700'
+              mode === 'worktree' ? 'border-accent bg-selected' : 'border-line'
             }`}
           >
             <input
@@ -67,8 +67,8 @@ export function NewSessionDialog(props: {
               onChange={() => setMode('worktree')}
             />
             <span>
-              <span className="block text-sm text-slate-200">worktree 模式</span>
-              <span className="block text-xs text-slate-500">
+              <span className="block text-sm text-fg">worktree 模式</span>
+              <span className="block text-xs text-fg-subtle">
                 在托管 Worktree 隔离副本上运行（独立分支，需 git 仓库）；
                 项目根 .worktreeinclude 列出的被忽略文件会复制进副本
               </span>
@@ -79,7 +79,7 @@ export function NewSessionDialog(props: {
           <button
             type="button"
             data-testid="create-session-cancel"
-            className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500"
+            className="rounded border border-line px-3 py-1.5 text-sm text-fg-muted hover:border-fg-muted"
             onClick={props.onCancel}
             disabled={props.creating}
           >
@@ -88,7 +88,7 @@ export function NewSessionDialog(props: {
           <button
             type="button"
             data-testid="create-session-confirm"
-            className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => props.onCreate(mode)}
             disabled={props.creating}
           >

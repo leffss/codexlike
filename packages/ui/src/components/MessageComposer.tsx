@@ -11,10 +11,12 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type SlashCommandDef,
+  type SkillDescriptor,
 } from "@codexlike/agent-core";
 
 import {
   applyMentionSelection,
+  applySkillSelection,
   computeMenu,
   handleMenuKey,
   type ComposerMenuState,
@@ -49,16 +51,16 @@ const APPROVAL_PILL_STYLES: Record<
   { pill: string; icon: string }
 > = {
   ask: {
-    pill: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-    icon: "text-sky-400",
+    pill: "border-info-fg/30 bg-info-bg text-info-fg",
+    icon: "text-info-fg",
   },
   assist: {
-    pill: "border-slate-600 bg-slate-800/80 text-slate-300",
-    icon: "text-slate-400",
+    pill: "border-line bg-hover text-fg-muted",
+    icon: "text-fg-muted",
   },
   "full-access": {
-    pill: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-    icon: "text-amber-400",
+    pill: "border-warn-fg/40 bg-warn-bg text-warn-fg",
+    icon: "text-warn-fg",
   },
 };
 
@@ -77,6 +79,9 @@ export function MessageComposer(props: {
   onSend: (text: string) => void;
   /** @引用 菜单候选（工作区文件） */
   workspaceFiles: string[];
+  /** 最新磁盘预览候选；打开技能菜单时重新发现，不沿用运行快照。 */
+  skills?: readonly SkillDescriptor[];
+  onOpenSkills?: () => void;
   /** 无会话 / 未选模型 / 流式回复中时禁用发送 */
   disabled: boolean;
   /** 本轮回复进行中（流式输出 / 工具执行）：按钮切换为「停止」 */
@@ -93,6 +98,7 @@ export function MessageComposer(props: {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** Esc 关闭菜单的签名（value + 光标）：draft 未变化前不再自动弹出 */
   const dismissedRef = useRef<string | null>(null);
+  const skillMenuOpenRef = useRef(false);
 
   const syncMenu = useCallback(
     (text: string, caretIndex: number) => {
@@ -101,17 +107,19 @@ export function MessageComposer(props: {
         return;
       }
       const draft = parseComposerDraft(text, { caretIndex });
-      setMenu(computeMenu(draft, { files: props.workspaceFiles }));
+      const openingSkills = draft.menu === "skills" && !skillMenuOpenRef.current;
+      skillMenuOpenRef.current = draft.menu === "skills";
+      setMenu(computeMenu(draft, { files: props.workspaceFiles, skills: props.skills }));
+      if (openingSkills) props.onOpenSkills?.();
     },
-    [props.workspaceFiles]
+    [props.workspaceFiles, props.skills, props.onOpenSkills]
   );
 
-  // 候选文件列表变化（切会话）时重算当前菜单（value/syncMenu 刻意不入依赖）
+  // 异步候选到达时重算；Esc 关闭后不因刷新而重开。
   useEffect(() => {
     const caret = textareaRef.current?.selectionStart ?? value.length;
-    dismissedRef.current = null;
     syncMenu(value, caret);
-  }, [props.workspaceFiles]);
+  }, [props.workspaceFiles, props.skills]);
 
   function commitText(next: string, caretIndex: number) {
     setValue(next);
@@ -134,8 +142,44 @@ export function MessageComposer(props: {
     dismissedRef.current = null;
   }
 
+  function selectItem(item: ComposerMenuState["items"][number], caretIndex: number) {
+    if (menu === null) return;
+    if (menu.kind === "skills") {
+      const applied = applySkillSelection({ text: value, skillStart: menu.skillStart ?? 0, selectedName: (item as SkillDescriptor).name, caretIndex });
+      commitText(applied.text, applied.caretIndex);
+    } else if (menu.kind === "mentions") {
+      const applied = applyMentionSelection({ text: value, mentionStart: menu.mentionStart ?? 0, selectedPath: item as string, caretIndex });
+      commitText(applied.text, applied.caretIndex);
+    } else {
+      const command = item as SlashCommandDef;
+      if (command.argumentHint === null) {
+        setValue("");
+        setMenu(null);
+        dismissedRef.current = null;
+        if (!props.disabled) props.onSend(`/${command.name}`);
+      } else {
+        commitText(`/${command.name} `, `/${command.name} `.length);
+      }
+    }
+  }
+
+  function openSkills() {
+    dismissedRef.current = null;
+    const caret = textareaRef.current?.selectionStart ?? value.length;
+    if (parseComposerDraft(value, { caretIndex: caret }).menu === "skills") {
+      skillMenuOpenRef.current = false;
+      syncMenu(value, caret);
+      textareaRef.current?.focus();
+      return;
+    }
+    const prefix = value.slice(0, caret);
+    const insertion = `${prefix === "" || /\s$/.test(prefix) ? "" : " "}$`;
+    commitText(prefix + insertion + value.slice(caret), caret + insertion.length);
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (menu !== null) {
+    if (event.nativeEvent.isComposing) return;
+    if (menu !== null && !event.shiftKey) {
       const result = handleMenuKey(menu, event.key);
       if (result.action === "move") {
         event.preventDefault();
@@ -146,35 +190,13 @@ export function MessageComposer(props: {
         event.preventDefault();
         const caret = event.currentTarget.selectionStart ?? value.length;
         dismissedRef.current = `${value.length}:${caret}:${value}`;
+        skillMenuOpenRef.current = false;
         setMenu(null);
         return;
       }
       if (result.action === "select") {
         event.preventDefault();
-        if (menu.kind === "slash-commands") {
-          const command = result.item as SlashCommandDef;
-          if (command.argumentHint === null) {
-            // 无参命令：选中即执行（免二次 Enter）
-            setValue("");
-            setMenu(null);
-            dismissedRef.current = null;
-            if (!props.disabled) {
-              props.onSend(`/${command.name}`);
-            }
-          } else {
-            // 带参命令：回填 `/命令 ` 继续输入参数
-            commitText(`/${command.name} `, `/${command.name} `.length);
-          }
-        } else {
-          const caret = event.currentTarget.selectionStart ?? value.length;
-          const applied = applyMentionSelection({
-            text: value,
-            mentionStart: menu.mentionStart ?? 0,
-            selectedPath: result.item as string,
-            caretIndex: caret,
-          });
-          commitText(applied.text, applied.caretIndex);
-        }
+        selectItem(result.item, event.currentTarget.selectionStart ?? value.length);
         return;
       }
     }
@@ -195,10 +217,10 @@ export function MessageComposer(props: {
     APPROVAL_PILL_STYLES.assist;
 
   return (
-    <div className="border-t border-slate-800 bg-slate-900/60 p-3">
-      {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构，深色配色） */}
+    <div className="border-t border-line bg-surface-muted p-3">
+      {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
       <form
-        className="rounded-2xl border border-slate-700 bg-slate-950/70 shadow-lg transition-colors focus-within:border-slate-500"
+        className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -208,29 +230,45 @@ export function MessageComposer(props: {
           {menu !== null && (
             <ul
               data-testid="composer-menu"
-              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+              role="listbox"
+              aria-label={menu.kind === "skills" ? "下轮技能预览" : "输入补全"}
+              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-xl border border-line bg-surface shadow-xl"
             >
               {menu.items.map((item, index) => {
                 const isCommand = menu.kind === "slash-commands";
                 const command = isCommand ? (item as SlashCommandDef) : null;
-                const path = isCommand ? null : (item as string);
+                const skill = menu.kind === "skills" ? (item as SkillDescriptor) : null;
+                const path = menu.kind === "mentions" ? (item as string) : null;
                 return (
                   <li
-                    key={isCommand ? command!.name : path}
+                    key={command?.name ?? skill?.path ?? path}
+                    role="option"
+                    aria-selected={index === menu.activeIndex}
+                    data-testid={skill ? `composer-skill-${skill.name}` : undefined}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectItem(item, textareaRef.current?.selectionStart ?? value.length)}
                     className={
                       index === menu.activeIndex
-                        ? "bg-sky-800/60 px-3 py-1.5 text-sm text-slate-100"
-                        : "px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800/70"
+                        ? "bg-selected px-3 py-1.5 text-sm text-fg"
+                        : "px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
                     }
                   >
                     {command !== null ? (
                       <span className="flex items-baseline gap-2">
-                        <code className="text-sky-300">/{command.name}</code>
-                        <span className="text-xs text-slate-500">
+                        <code className="text-accent">/{command.name}</code>
+                        <span className="text-xs text-fg-subtle">
                           {command.description}
                           {command.argumentHint !== null
                             ? `（参数：${command.argumentHint}）`
                             : ""}
+                        </span>
+                      </span>
+                    ) : skill !== null ? (
+                      <span className="block" title={skill.path}>
+                        <code className="text-accent">${skill.name}</code>
+                        <span className="ml-2 text-xs text-fg-muted">{skill.description}</span>
+                        <span className="block truncate text-xs text-fg-subtle">
+                          下轮预览 · {skill.scope === "project" ? "项目" : "全局"} · {skill.source} · {skill.path}
                         </span>
                       </span>
                     ) : (
@@ -264,7 +302,7 @@ export function MessageComposer(props: {
             onKeyDown={onKeyDown}
             placeholder={props.hint}
             rows={2}
-            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none"
+            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
         </div>
         {/* 底部工具栏：左审批胶囊，右模型选择 + 圆形动作按钮 */}
@@ -300,6 +338,16 @@ export function MessageComposer(props: {
             <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
           </div>
           <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              data-testid="composer-skills"
+              disabled={props.approvalMode === null}
+              onClick={openSkills}
+              className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
+              title="插入 $技能引用（仅写回输入框，不发送）"
+            >
+              技能
+            </button>
             <div
               className="relative shrink-0"
               title="模型（Provider Profile）：对下一条消息生效"
@@ -308,7 +356,7 @@ export function MessageComposer(props: {
                 data-testid="profile-select"
                 value={props.selectedProfileId}
                 onChange={(event) => props.onSelectProfile(event.target.value)}
-                className="max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-slate-300 focus:outline-none"
+                className="max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-fg-muted focus:outline-none"
               >
                 {props.profiles.length === 0 && (
                   <option value="">未配置模型</option>
@@ -326,7 +374,7 @@ export function MessageComposer(props: {
                 type="button"
                 data-testid="composer-stop"
                 onClick={() => props.onStop?.()}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
                 title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
               >
                 <StopIcon className="h-3 w-3" />
@@ -336,7 +384,7 @@ export function MessageComposer(props: {
                 type="submit"
                 data-testid="composer-send"
                 disabled={props.disabled}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-900 hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
                 title="发送（Enter 发送，Shift+Enter 换行）"
               >
                 <ArrowUpIcon className="h-4 w-4" />

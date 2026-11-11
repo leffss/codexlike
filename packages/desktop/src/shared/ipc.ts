@@ -22,6 +22,7 @@ import type { SubagentSettings } from '../subagents/subagent-settings-store';
 import type { TerminalShell } from '@codexlike/agent-core/node';
 import type { McpServerView } from '../mcp/mcp-service';
 import type { McpServerInput } from '../mcp/mcp-store';
+import type { ThemeName } from '../theme/theme-settings-store';
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
@@ -29,6 +30,7 @@ export type { SearchSettings };
 export type { SubagentSettings };
 export type { TerminalShell };
 export type { McpServerView, McpServerInput };
+export type { ThemeName };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -90,6 +92,11 @@ export const IPC = {
   terminalSettings: {
     get: 'terminal-settings:get',
     set: 'terminal-settings:set',
+  },
+  /** 外观主题偏好（ADR 0006）：light / dark，默认浅色；主进程同步窗口底色与 nativeTheme */
+  themeSettings: {
+    get: 'theme-settings:get',
+    set: 'theme-settings:set',
   },
   /** MCP servers（工单 12）：配置 + 连接状态 + 工具启停 */
   mcp: {
@@ -226,6 +233,12 @@ export interface CodexLikeApi {
     get(): Promise<TerminalShell | null>;
     /** 保存 shell 偏好（git-bash / powershell / cmd），对下一次终端命令即时生效 */
     set(shell: TerminalShell): Promise<TerminalShell>;
+  };
+  themeSettings: {
+    /** 已保存的外观主题；未配置返回 null（UI 以浅色兜底，ADR 0006） */
+    get(): Promise<ThemeName | null>;
+    /** 保存主题偏好（light / dark），立即生效并同步原生窗口底色 */
+    set(theme: ThemeName): Promise<ThemeName>;
   };
   mcp: {
     /** 全部 MCP server：配置 + 连接状态 + 发现到的工具（含启停） */
