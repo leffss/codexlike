@@ -1,18 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
-import type { ProviderProfile } from '@codexlike/agent-core';
+import type { ProviderProfile } from "@codexlike/agent-core";
 
-import { ProviderProfileForm } from '../components/ProviderProfileForm';
-import { McpSettingsSection } from '../components/McpSettingsSection';
+import { ProviderProfileForm } from "../components/ProviderProfileForm";
+import { McpSettingsSection } from "../components/McpSettingsSection";
 
 /** 编辑中态：'new' 新建；其余为正在编辑的 Profile id */
-type Editing = 'new' | string | null;
+type Editing = "new" | string | null;
 
 /** 设置页：Provider Profile 的增删改查 + 搜索源配置（其余设置项随后续工单扩展） */
 export function SettingsPage() {
   const [profiles, setProfiles] = useState<ProviderProfile[] | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState("");
 
   async function refresh() {
     try {
@@ -28,12 +28,12 @@ export function SettingsPage() {
   }, []);
 
   const editingProfile =
-    editing !== null && editing !== 'new'
+    editing !== null && editing !== "new"
       ? (profiles?.find((p) => p.id === editing) ?? null)
       : null;
 
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col gap-4 overflow-y-auto p-6">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
@@ -41,21 +41,22 @@ export function SettingsPage() {
               Provider Profiles
             </h2>
             <p className="text-xs text-slate-500">
-              OpenAI 兼容端点（baseURL + API Key + 模型）；API Key 经系统加密存储，磁盘上无明文
+              OpenAI 兼容端点（baseURL + API Key + 模型）；API Key
+              经系统加密存储，磁盘上无明文
             </p>
           </div>
           {editing === null && (
             <button
               type="button"
               className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600"
-              onClick={() => setEditing('new')}
+              onClick={() => setEditing("new")}
             >
               + 新建 Profile
             </button>
           )}
         </div>
 
-        {loadError !== '' && (
+        {loadError !== "" && (
           <p className="rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-400">
             加载失败：{loadError}
           </p>
@@ -81,7 +82,7 @@ export function SettingsPage() {
                     onSubmit={async (input) => {
                       await window.codexlike.providerProfiles.update(
                         profile.id,
-                        input,
+                        input
                       );
                       setEditing(null);
                       await refresh();
@@ -126,7 +127,7 @@ export function SettingsPage() {
           ))}
         </ul>
 
-        {editing === 'new' && (
+        {editing === "new" && (
           <ProviderProfileForm
             submitLabel="创建"
             onCancel={() => setEditing(null)}
@@ -160,17 +161,19 @@ export function SettingsPage() {
  * 保存后经主进程内存缓存逐次解析，对下一次终端命令即时生效（无需重启会话）。
  */
 function TerminalSettingsSection() {
-  const [shell, setShell] = useState<'git-bash' | 'powershell' | 'cmd'>('git-bash');
+  const [shell, setShell] = useState<"git-bash" | "powershell" | "cmd">(
+    "git-bash"
+  );
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
     try {
       const saved = await window.codexlike.terminalSettings.get();
       // 未配置时默认展示 Git Bash（保存前 CODEXLIKE_SHELL 环境变量兜底）
-      setShell(saved ?? 'git-bash');
+      setShell(saved ?? "git-bash");
       setConfigured(saved !== null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -184,11 +187,11 @@ function TerminalSettingsSection() {
 
   async function save() {
     setSaving(true);
-    setMessage('');
+    setMessage("");
     try {
       await window.codexlike.terminalSettings.set(shell);
       setConfigured(true);
-      setMessage('终端偏好已保存（对下一次终端命令生效）');
+      setMessage("终端偏好已保存（对下一次终端命令生效）");
       setMessageError(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -203,8 +206,10 @@ function TerminalSettingsSection() {
       <div>
         <h2 className="text-base font-medium text-slate-200">终端执行</h2>
         <p className="text-xs text-slate-500">
-          run_terminal_command 工具使用的 shell（默认 Git Bash，POSIX 命令可用）。
-          {configured === false && ' 尚未配置时环境变量 CODEXLIKE_SHELL 可兜底指定。'}
+          run_terminal_command 工具使用的 shell（默认 Git Bash，POSIX
+          命令可用）。
+          {configured === false &&
+            " 尚未配置时环境变量 CODEXLIKE_SHELL 可兜底指定。"}
         </p>
       </div>
 
@@ -235,12 +240,12 @@ function TerminalSettingsSection() {
               className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
               onClick={() => void save()}
             >
-              {saving ? '保存中…' : '保存'}
+              {saving ? "保存中…" : "保存"}
             </button>
-            {message !== '' && (
+            {message !== "" && (
               <p
                 data-testid="terminal-settings-message"
-                className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+                className={`text-xs ${messageError ? "text-red-400" : "text-emerald-400"}`}
               >
                 {message}
               </p>
@@ -259,11 +264,11 @@ function TerminalSettingsSection() {
  */
 function SubagentSettingsSection() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
-  const [providerProfileId, setProviderProfileId] = useState<string>('');
-  const [maxConcurrent, setMaxConcurrent] = useState('3');
+  const [providerProfileId, setProviderProfileId] = useState<string>("");
+  const [maxConcurrent, setMaxConcurrent] = useState("3");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
@@ -277,7 +282,7 @@ function SubagentSettingsSection() {
       const valid =
         settings.providerProfileId !== null &&
         profileList.some((p) => p.id === settings.providerProfileId);
-      setProviderProfileId(valid ? settings.providerProfileId! : '');
+      setProviderProfileId(valid ? settings.providerProfileId! : "");
       setMaxConcurrent(String(settings.maxConcurrent));
       setLoaded(true);
     } catch (error) {
@@ -292,14 +297,14 @@ function SubagentSettingsSection() {
 
   async function save() {
     setSaving(true);
-    setMessage('');
+    setMessage("");
     try {
       const settings = await window.codexlike.subagentSettings.set({
-        providerProfileId: providerProfileId === '' ? null : providerProfileId,
+        providerProfileId: providerProfileId === "" ? null : providerProfileId,
         maxConcurrent: Number(maxConcurrent),
       });
       setMaxConcurrent(String(settings.maxConcurrent));
-      setMessage('子代理设置已保存（对后续会话与下一次委派生效）');
+      setMessage("子代理设置已保存（对后续会话与下一次委派生效）");
       setMessageError(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -314,7 +319,8 @@ function SubagentSettingsSection() {
       <div>
         <h2 className="text-base font-medium text-slate-200">子代理</h2>
         <p className="text-xs text-slate-500">
-          spawn_subagent 委派的子代理使用的模型与并发上限。子代理拥有独立上下文与完整工具集
+          spawn_subagent
+          委派的子代理使用的模型与并发上限。子代理拥有独立上下文与完整工具集
           （不可再委派子代理）；并发上限外的委派将排队等待。
         </p>
       </div>
@@ -363,12 +369,12 @@ function SubagentSettingsSection() {
               className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
               onClick={() => void save()}
             >
-              {saving ? '保存中…' : '保存'}
+              {saving ? "保存中…" : "保存"}
             </button>
-            {message !== '' && (
+            {message !== "" && (
               <p
                 data-testid="subagent-settings-message"
-                className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+                className={`text-xs ${messageError ? "text-red-400" : "text-emerald-400"}`}
               >
                 {message}
               </p>
@@ -382,17 +388,17 @@ function SubagentSettingsSection() {
 
 /** 搜索源配置区（工单 10）：默认 Tavily；key 经 safeStorage 加密存储，改完对进行中的会话即时生效 */
 function SearchSettingsSection() {
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState("");
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
     try {
       const settings = await window.codexlike.searchSettings.get();
       setApiKey(settings.apiKey);
-      setConfigured(settings.apiKey !== '');
+      setConfigured(settings.apiKey !== "");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
       setMessageError(true);
@@ -405,12 +411,16 @@ function SearchSettingsSection() {
 
   async function save(nextKey: string) {
     setSaving(true);
-    setMessage('');
+    setMessage("");
     try {
-      const settings = await window.codexlike.searchSettings.set({ apiKey: nextKey });
+      const settings = await window.codexlike.searchSettings.set({
+        apiKey: nextKey,
+      });
       setApiKey(settings.apiKey);
-      setConfigured(settings.apiKey !== '');
-      setMessage(nextKey === '' ? '已清除搜索源配置' : '搜索源已保存，web_search 可用');
+      setConfigured(settings.apiKey !== "");
+      setMessage(
+        nextKey === "" ? "已清除搜索源配置" : "搜索源已保存，web_search 可用"
+      );
       setMessageError(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -425,8 +435,9 @@ function SearchSettingsSection() {
       <div>
         <h2 className="text-base font-medium text-slate-200">搜索源</h2>
         <p className="text-xs text-slate-500">
-          web_search 工具使用的搜索服务（默认 Tavily，https://tavily.com 注册，免费 1000
-          次/月）；API key 经系统加密存储。配置后无需重启会话即可生效。
+          web_search 工具使用的搜索服务（默认 Tavily，https://tavily.com
+          注册，免费 1000 次/月）；API key
+          经系统加密存储。配置后无需重启会话即可生效。
         </p>
       </div>
 
@@ -436,8 +447,12 @@ function SearchSettingsSection() {
             <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-xs text-sky-300">
               Tavily
             </span>
-            <span className={configured ? 'text-emerald-400' : 'text-amber-400'}>
-              {configured ? '已配置' : '未配置（web_search 将提示先在设置页填写 key）'}
+            <span
+              className={configured ? "text-emerald-400" : "text-amber-400"}
+            >
+              {configured
+                ? "已配置"
+                : "未配置（web_search 将提示先在设置页填写 key）"}
             </span>
           </div>
           <div className="flex gap-2">
@@ -452,27 +467,27 @@ function SearchSettingsSection() {
             <button
               type="button"
               data-testid="search-api-key-save"
-              disabled={saving || apiKey.trim() === ''}
+              disabled={saving || apiKey.trim() === ""}
               className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-50"
               onClick={() => void save(apiKey.trim())}
             >
-              {saving ? '保存中…' : '保存'}
+              {saving ? "保存中…" : "保存"}
             </button>
             {configured && (
               <button
                 type="button"
                 disabled={saving}
                 className="rounded px-3 py-1.5 text-sm text-slate-400 hover:bg-red-950 hover:text-red-400 disabled:opacity-50"
-                onClick={() => void save('')}
+                onClick={() => void save("")}
               >
                 清除
               </button>
             )}
           </div>
-          {message !== '' && (
+          {message !== "" && (
             <p
               data-testid="search-settings-message"
-              className={`text-xs ${messageError ? 'text-red-400' : 'text-emerald-400'}`}
+              className={`text-xs ${messageError ? "text-red-400" : "text-emerald-400"}`}
             >
               {message}
             </p>
