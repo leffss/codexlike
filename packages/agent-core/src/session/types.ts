@@ -113,6 +113,13 @@ export interface StoredMessage {
   mentions?: MentionAttachment[];
   /** 本轮已提交问答；子代理答案同样归属触发它的用户消息。 */
   questionAnswers?: QuestionAnswerSnapshot[];
+  /**
+   * 思考过程全文（票 02，GLOSSARY「思考档位」）：随终态 assistant 消息落库，
+   * 仅为重启/切回后的展示（恢复路径重建思考段）；不进入模型上下文
+   * （composeStoredMessageContent 不读它，provider 层照旧剥离回传）。
+   * 旧数据无此列值时自然缺失（undefined），不做补录迁移（ADR 0011）。
+   */
+  reasoning?: string;
   /** 助手回复被用户中断：content 为已生成的部分文本（UI 中断点标记恢复用） */
   aborted?: boolean;
   /** ISO 8601 */
@@ -170,9 +177,9 @@ export type SessionEvent =
   | { type: "assistant-delta"; messageId: string; delta: string }
   /**
    * 模型思考过程的流式增量（GLOSSARY「思考档位」，OpenAI 兼容端点的 reasoning_content）。
-   * 与正文（assistant-delta）分离累积，仅供运行期展示：不写入 StoredMessage、
-   * 不进入后续请求上下文（provider 层已剥离回传）；终态由
-   * assistant-done / assistant-aborted / error 一并收敛。
+   * 与正文（assistant-delta）分离累积：随终态消息写入 StoredMessage.reasoning
+   * 仅为恢复后展示（票 02，ADR 0011）；不进入后续请求上下文
+   * （provider 层已剥离回传）；终态由 assistant-done / assistant-aborted / error 一并收敛。
    */
   | { type: "assistant-reasoning"; messageId: string; delta: string }
   | { type: "assistant-done"; message: StoredMessage }
@@ -220,7 +227,8 @@ export type SessionEvent =
   /**
    * 子代理思考过程的流式增量（GLOSSARY「思考档位」，思考档位 03）：
    * 与报告文本分离，按 subagentId 归属各自的嵌套卡片（并发不串流）；
-   * 仅运行期展示，不写入持久化、不回传请求历史（provider 层剥离），
+   * 随终态报告写入 spawn_subagent 工具记录的 reasoning 列（票 02，
+   * 仅为恢复后展示）；不回传请求历史（provider 层剥离），
    * 终态由 subagent-report 一并收敛。
    */
   | { type: "subagent-reasoning"; subagentId: string; delta: string }

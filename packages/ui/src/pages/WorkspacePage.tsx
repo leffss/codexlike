@@ -131,6 +131,11 @@ export function WorkspacePage(props: {
   const [fullAccessPending, setFullAccessPending] = useState(false);
   /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
   const [contextWarning, setContextWarning] = useState<string | null>(null);
+  /**
+   * 强制回底信号（票 03 滚动跟随）：发送新 prompt 时递增，
+   * MessageStream 收到后立即贴底并进入跟随态。
+   */
+  const [followSignal, setFollowSignal] = useState(0);
   const currentIdRef = useRef<string | null>(null);
 
   currentIdRef.current = currentId;
@@ -777,6 +782,8 @@ export function WorkspacePage(props: {
         workspaceState.editNewDraft(draft.projectId, { text: "" });
       return;
     }
+    // 发送新 prompt：强制回底并进入跟随（spec 用户故事 6，票 03）
+    setFollowSignal((signal) => signal + 1);
     if (draft) void sendFirst(submission.text, submission.mentionPaths);
     else void send(submission.text, submission.mentionPaths);
   }
@@ -1057,6 +1064,7 @@ export function WorkspacePage(props: {
               streaming={streaming}
               compacting={compacting}
               contentWidthClass={contentWidthClass}
+              followSignal={followSignal}
               emptyHint={
                 profiles.length === 0 ? (
                   <button

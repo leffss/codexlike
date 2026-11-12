@@ -113,7 +113,10 @@ export interface SubagentSegment extends SegmentBase {
   state: "queued" | "running" | "done";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
-  /** 子代理思考过程（与报告文本分开累积，仅运行期展示） */
+  /**
+   * 子代理思考过程（与报告文本分开累积）；运行期由 subagent-reasoning
+   * 事件累积，重启后由落库 reasoning 列重建（票 02，旧记录自然缺失）
+   */
   reasoning?: string;
   report: string | null;
   /** null = 未结束；false = 失败或被中断 */
@@ -272,16 +275,20 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
       continue;
     }
     const message = item.message;
-    segments.push(messageSegment(message, segments));
+    segments.push(...messageSegments(message, segments));
   }
   return segments;
 }
 
-/** 单条持久化消息 → 对应类型的消息段（user 开新轮，assistant 以自身 id 关联响应） */
-function messageSegment(
+/**
+ * 单条持久化消息 → 对应类型的消息段（user 开新轮，assistant 以自身 id 关联响应）。
+ * 带 reasoning 的 assistant 消息重建为思考段 + 正文段（票 02：落盘思考
+ * 恢复为思考段，先于正文——与流式时序一致）；旧数据无思考值时只有正文段。
+ */
+function messageSegments(
   message: StoredMessage,
   segments: MessageSegment[]
-): MessageSegment {
+): MessageSegment[] {
   const base = {
     id: message.id,
     seq: nextSeq(segments),
@@ -294,19 +301,36 @@ function messageSegment(
   };
   switch (message.role) {
     case "user":
-      return { ...base, kind: "user", content: message.content };
-    case "assistant":
-      return {
+      return [{ ...base, kind: "user", content: message.content }];
+    case "assistant": {
+      const restored: MessageSegment[] = [];
+      // 思考段（终态全文）：id 与流式 segmentId 同一命名惯例，恢复与流式同构
+      if (message.reasoning !== undefined && message.reasoning !== "") {
+        restored.push({
+          kind: "thinking",
+          id: `thinking-${message.id}-1`,
+          seq: nextSeq(segments),
+          turnId: base.turnId,
+          responseId: message.id,
+          // 段建立时刻（票 04）：与终态消息同一落库时刻
+          at: base.at,
+          content: message.reasoning,
+        });
+      }
+      restored.push({
         ...base,
+        seq: nextSeq([...segments, ...restored]),
         kind: "assistant",
         content: message.content,
         // 重启恢复：被中断的助手消息仍显示中断点标记
         interrupted: message.aborted === true || undefined,
-      };
+      });
+      return restored;
+    }
     case "error":
-      return { ...base, kind: "error", content: message.content };
+      return [{ ...base, kind: "error", content: message.content }];
     case "compact-summary":
-      return { ...base, kind: "compact-summary", content: message.content };
+      return [{ ...base, kind: "compact-summary", content: message.content }];
   }
 }
 
@@ -338,6 +362,8 @@ function subagentFromToolRecord(
     task,
     state: "done",
     startedAt: null,
+    // 落盘思考重建卡内思考折叠块（票 02）；旧记录自然缺失（undefined）
+    ...(call.reasoning ? { reasoning: call.reasoning } : {}),
     report: call.output,
     ok: !call.isError,
     tools: [],

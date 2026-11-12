@@ -13,6 +13,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -213,8 +214,8 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 300));
     let restored = await segmentOrder(window);
-    // 落库历史不保留运行期思考与段切分（票 02 才落库 reasoning）：
-    // 恢复后过程段（工具卡）收进折叠区，展开后为 user → 工具卡 → 终稿正文
+    // 票 02 起落库历史带 reasoning；票 04 起恢复后正常完成的轮默认收起
+    // 折叠区（过程段=工具卡与重建的思考段整体收进「已工作折叠区」）
     assert(
       JSON.stringify(restored) ===
         JSON.stringify([
@@ -225,7 +226,9 @@ async function main() {
         ]),
       `重启恢复后正常完成的轮应默认收起折叠区：${JSON.stringify(restored)}`
     );
-    await window.getByTestId("worked-history-toggle").click();
+    // 展开折叠区：工具卡 → 思考段（票 02 终态消息位置在工具卡之后）→ 终稿正文；
+    // 运行期的多段思考拼接为终态全文
+    await expandWorkedHistory(window, 0);
     await window.getByTestId("tool-call-card").waitFor({ timeout: 10_000 });
     restored = await segmentOrder(window);
     assert(
@@ -235,9 +238,21 @@ async function main() {
           "message-user",
           "worked-history",
           "tool-call-card",
+          "thinking-block",
           "message-assistant",
         ]),
       `重启恢复后展开折叠区的消息段序列不正确：${JSON.stringify(restored)}`
+    );
+    const restoredThinking = await window
+      .getByTestId("thinking-block")
+      .first()
+      .getByTestId("thinking-content")
+      .textContent();
+    assert(
+      restoredThinking !== null &&
+        restoredThinking.includes("先思考怎么读") &&
+        restoredThinking.includes("再核对一遍"),
+      `恢复后的思考全文应包含两段：${restoredThinking ?? "(空)"}`
     );
     const restoredText = await window
       .getByTestId("message-assistant")

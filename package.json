@@ -33,6 +33,8 @@
     "test:e2e:live-sessions": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:live-sessions",
     "test:e2e:exit": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:exit",
     "test:e2e:width": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:width",
+    "test:e2e:reasoning-recovery": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:reasoning-recovery",
+    "test:e2e:scroll": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:scroll",
     "check:adr": "node scripts/check-adr.mjs",
     "test:e2e:all": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:all"
   },

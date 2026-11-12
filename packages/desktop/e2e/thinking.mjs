@@ -15,6 +15,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -192,11 +193,17 @@ async function main() {
     await effortSelect.selectOption("medium");
     await window.getByTestId("composer-input").fill("读一下 note.txt");
     await window.getByTestId("composer-send").click();
-    // 工具卡片出现 = 第 1 轮运行中（运行中的轮强制展开过程，实时可见）：
-    // 此刻切档（为下一条消息预置）。read_file 断言在轮完成后展开折叠区再验，
-    // 避免与「轮完成即收起」的边沿竞态
-    const toolCard = window.getByTestId("tool-call-card").first();
-    await toolCard.waitFor({ timeout: 20_000 });
+    // 工具调用轮（第 7 个请求）到达 mock 即切档（为下一条消息预置）。
+    // 档位在发送时快照、运行中切换不影响本轮；read_file 卡片断言不依赖
+    // 运行中的短暂可见窗口（票 04：轮完成即收进折叠区），改在完成后展开回看。
+    // 工具往返可能快于轮询粒度（醒来时第 8 个请求已发），以 >=7 为准
+    for (let i = 0; i < 100 && seenBodies.length < 7; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert(
+      seenBodies.length >= 7,
+      `第 7 个请求（工具调用轮）未到达 mock，实际 ${seenBodies.length}`
+    );
     await effortSelect.selectOption("off");
     // 等本轮全部请求到达：第 8 个请求（工具回填后的最终文本轮）才是快照断言对象
     for (let i = 0; i < 100 && seenBodies.length < 8; i++) {
@@ -210,12 +217,12 @@ async function main() {
       .waitFor({ timeout: 20_000 });
     await new Promise((r) => setTimeout(r, 300));
     // 轮完成后工具卡收进已工作折叠区：展开回看，read_file 卡仍完整（票 04）
-    await window.getByTestId("worked-history-toggle").last().click();
+    await expandWorkedHistory(window, 1);
     const restoredToolCard = window.getByTestId("tool-call-card").first();
     await restoredToolCard.waitFor({ timeout: 10_000 });
     assert(
       (await restoredToolCard.getAttribute("data-tool-name")) === "read_file",
-      "本轮 read_file 工具卡片应存在（运行中可见，收起后展开回看仍完整）"
+      "本轮 read_file 工具卡片应存在（展开回看完整）"
     );
     await new Promise((r) => setTimeout(r, 300));
     const secondRound = JSON.parse(seenBodies[7]);

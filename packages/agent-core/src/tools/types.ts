@@ -58,6 +58,12 @@ export interface ToolResult {
   isError: boolean;
   /** 图片附件（截图）：output 文本同时包含路径说明，降级端点仍可工作 */
   images?: ToolResultImage[];
+  /**
+   * 子代理思考过程全文（票 02）：spawn_subagent 延迟 tool-result 专用——
+   * 编排器随最终报告回流思考文本，随工具记录落库（reasoning 列）供恢复展示；
+   * 不回填模型（回填内容只有 output）。其余工具不使用。
+   */
+  reasoning?: string;
 }
 
 /** JSON Schema（draft-07 的 object 子集；声明为交叉类型以允许额外关键字如 additionalProperties） */
@@ -90,6 +96,12 @@ export interface ToolCallRecord {
   /** 截断后的执行输出 */
   output: string;
   isError: boolean;
+  /**
+   * 子代理思考过程全文（票 02）：仅 spawn_subagent 委派记录携带
+   * （子代理终态报告落库时一并写入），恢复路径据此重建子代理卡内思考折叠块；
+   * 不回填模型上下文。旧数据无此列值时自然缺失。
+   */
+  reasoning?: string;
   /** ISO 8601 */
   createdAt: string;
 }

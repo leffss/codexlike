@@ -16,6 +16,9 @@ export interface ReadingPosition {
   scrollTop: number;
   anchorId?: string;
   offset?: number;
+  /** 离开时是否贴底跟随（票 03）：恢复时贴底记忆定位当前最新并跟随；
+   *  旧数据无该字段时按像素位置恢复，行为与既有记忆一致。 */
+  atBottom?: boolean;
 }
 
 export interface SavedQuestionDraft {

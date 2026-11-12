@@ -532,6 +532,9 @@ export function createAgentSession(
         yield { type: "assistant-start", messageId: assistantMessageId };
 
         let accumulated = "";
+        // 思考与正文分离累积（票 02）：随终态 assistant 消息落库（reasoning 字段），
+        // 仅为恢复后展示；不进入对话上下文（context 只 push 正文）
+        let reasoningAccumulated = "";
         let aborted = false;
         try {
           // 工具循环：模型调工具 → 执行 → 结果回填 → 继续生成，直到最终文本（或中断/上限）
@@ -560,8 +563,9 @@ export function createAgentSession(
             }[] = [];
             for await (const part of result.fullStream) {
               if (part.type === "reasoning-delta") {
-                // 思考与正文分离：只作为事件流出（运行期展示），
-                // 不累积进落库正文、不进入对话上下文
+                // 思考与正文分离：作为事件流出（运行期展示）并累积全文
+                // （随终态消息落库，票 02）；不进入对话上下文
+                reasoningAccumulated += part.text;
                 yield {
                   type: "assistant-reasoning",
                   messageId: assistantMessageId,
@@ -791,6 +795,9 @@ export function createAgentSession(
           sessionId: record.id,
           role: "assistant",
           content: accumulated,
+          // 思考全文随终态消息落库（票 02，ADR 0011）：重启/切回后重建思考段；
+          // 模型上下文仍只 push 正文（思考不回传 provider 的行为不变）
+          reasoning: reasoningAccumulated || undefined,
           // 被用户中断的回复：持久化标记，重启恢复后 UI 仍显示中断点
           aborted: aborted || undefined,
           createdAt: now(),

@@ -322,11 +322,11 @@ describe("主会话 reasoning 流（fullStream → 独立会话事件）", () =>
     expect(firstReasoningIndex).toBeLessThan(firstTextIndex);
   });
 
-  it("思考不写入 StoredMessage：落库的 assistant 消息只含正文", async () => {
+  it("思考随终态消息写入 StoredMessage.reasoning（票 02）：content 仍只含正文", async () => {
     const model = scriptedModel([
       {
         kind: "reasoning-text",
-        reasoning: ["内部推理内容"],
+        reasoning: ["内部推理内容", "，继续想"],
         text: ["正文回答"],
       },
     ]);
@@ -339,7 +339,8 @@ describe("主会话 reasoning 流（fullStream → 独立会话事件）", () =>
       ["user", "回答我"],
       ["assistant", "正文回答"],
     ]);
-    expect(JSON.stringify(messages)).not.toContain("内部推理内容");
+    // 思考全文（多个增量拼接）随终态 assistant 消息落库，供恢复后回看
+    expect(messages[1]?.reasoning).toBe("内部推理内容，继续想");
   });
 
   it("思考不进入后续请求上下文：下一轮模型收到的 prompt 不含思考文本", async () => {
@@ -456,12 +457,13 @@ describe("主会话 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
       (event) => event.type === "assistant-reasoning"
     );
     expect(reasoning.map((event) => event.delta)).toEqual(["思考到一半"]);
-    // 思考同样不落库（中断的助手消息只有空正文）
+    // 中断终态同样带思考落库（票 02：重启后中断轮次的过程可回看）
     const messages = persistence.listMessages("session-1");
     expect(messages.map((message) => [message.role, message.content])).toEqual([
       ["user", "想想看"],
       ["assistant", ""],
     ]);
+    expect(messages[1]?.reasoning).toBe("思考到一半");
   });
 
   it("模型错误：reasoning 事件已流出部分保留，error 事件收敛", async () => {
@@ -615,8 +617,10 @@ describe("主会话入口 → 真实 provider 工厂（fetch 替身全链路）"
     const second = JSON.parse(seenBodies[1]!);
     expect(JSON.stringify(second)).not.toContain("真实端点思考");
     expect(JSON.stringify(second)).not.toContain("第二轮思考");
-    // 落库正文与思考分离
+    // 落库：content 与思考分离，思考全文进 reasoning 字段（跨工具轮拼接）
     const messages = persistence.listMessages("session-1");
-    expect(JSON.stringify(messages)).not.toContain("真实端点思考");
+    const assistant = messages.find((message) => message.role === "assistant");
+    expect(assistant?.content).not.toContain("真实端点思考");
+    expect(assistant?.reasoning).toBe("真实端点思考第二轮思考");
   });
 });
