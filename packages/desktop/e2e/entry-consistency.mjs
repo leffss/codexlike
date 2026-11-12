@@ -83,7 +83,10 @@ try {
   );
   await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   await send("入口隔离任务");
-  const originalPath = await window.getByTestId("workspace-path").textContent();
+  const originalPath = await window
+    .getByTestId("workspace-path")
+    .getAttribute("title");
+  assert(originalPath, "工作区提供完整路径提示");
   await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
@@ -102,7 +105,8 @@ try {
   );
   await item("入口隔离任务").click();
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "新建不改变原执行目录"
   );
   console.log("[e2e] 会话侧栏入口与项目草稿保持显式归属通过");
@@ -246,7 +250,8 @@ try {
     .filter({ hasText: longTitle })
     .waitFor();
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "移出及重开不改实际工作区"
   );
   assert(
@@ -346,14 +351,15 @@ try {
     .waitFor();
   await window.keyboard.press("Escape");
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "当前成员被移除后安全导航到幸存独立记录"
   );
   assert(
     readFileSync(join(workspaceDir, "keep.txt"), "utf8") === "保留来源文件",
     "移除来源项目不删除来源文件"
   );
-  const worktree = originalPath.replace("工作区：", "").trim();
+  const worktree = originalPath;
   assert(
     existsSync(join(worktree, ".git")) &&
       existsSync(join(worktree, "keep.txt")),

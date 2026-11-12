@@ -11,7 +11,10 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
-import { WorkspaceModeControl } from "../components/WorkspaceModeControl";
+import {
+  WorkspaceModeSelector,
+  WorkspaceSharingNotice,
+} from "../components/WorkspaceModeControl";
 import type {
   SessionEventEnvelope,
   SessionListItem,
@@ -968,6 +971,7 @@ export function WorkspacePage(props: {
           </header>
           {(current || draft) && (
             <div
+              data-testid="workspace-info"
               className="shrink-0 border-b border-line px-4 py-2 text-xs text-fg-muted"
               style={contentPadding}
             >
@@ -980,16 +984,42 @@ export function WorkspacePage(props: {
                     projects.find((p) => p.id === draft?.projectId)
                       ?.workspacePath
                   }
-                  className="break-all"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1"
                 >
-                  {draft?.workspaceMode === "worktree"
-                    ? "来源目录（发送后使用隔离工作区）："
-                    : "工作区："}
-                  {current?.workspacePath ??
-                    draft?.workspacePath ??
-                    projects.find((p) => p.id === draft?.projectId)
-                      ?.workspacePath ??
-                    "应用专用持久目录（首次发送时分配）"}
+                  <span className="min-w-0 break-all">
+                    {draft?.workspaceMode === "worktree"
+                      ? "来源目录（发送后使用隔离工作区）："
+                      : "工作区："}
+                    {current?.workspacePath ??
+                      draft?.workspacePath ??
+                      projects.find((p) => p.id === draft?.projectId)
+                        ?.workspacePath ??
+                      "应用专用持久目录（首次发送时分配）"}
+                  </span>
+                  {current && !draft && (
+                    <span
+                      data-testid="workspace-mode"
+                      title="首次执行后工作区固定，调整项目归属不会改变目录、分支和历史；不代表文件只读或权限受限。"
+                      className="shrink-0 rounded border border-line bg-surface px-2 py-0.5"
+                    >
+                      {current.workspaceMode === "worktree"
+                        ? "Worktree"
+                        : "本地"}
+                    </span>
+                  )}
+                  {draft && draft.projectId !== null && (
+                    <WorkspaceModeSelector
+                      mode={draft.workspaceMode ?? "local"}
+                      busy={creating}
+                      onModeChange={(workspaceMode) => {
+                        if (!draft.busy)
+                          workspaceState.editNewDraft(draft.projectId, {
+                            workspaceMode,
+                            error: null,
+                          });
+                      }}
+                    />
+                  )}
                 </div>
                 {current?.workspaceOriginPath && (
                   <div data-testid="workspace-origin">
@@ -1100,7 +1130,7 @@ export function WorkspacePage(props: {
             </div>
           )}
           {(draft || current) && (
-            <WorkspaceModeControl
+            <WorkspaceSharingNotice
               target={
                 draft
                   ? {
@@ -1110,16 +1140,6 @@ export function WorkspacePage(props: {
                     }
                   : { sessionId: current!.id }
               }
-              mode={draft?.workspaceMode ?? current?.workspaceMode ?? "local"}
-              draft={draft !== null}
-              busy={creating}
-              onModeChange={(workspaceMode) => {
-                if (draft && !draft.busy)
-                  workspaceState.editNewDraft(draft.projectId, {
-                    workspaceMode,
-                    error: null,
-                  });
-              }}
             />
           )}
           {interaction ? (

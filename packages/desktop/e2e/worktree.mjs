@@ -25,6 +25,10 @@ function git(cwd, ...args) {
 }
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-e2e-worktree-"));
+  const screenshots = mkdtempSync(
+    join(tmpdir(), "codexlike-worktree-screenshots-")
+  );
+  console.log(`[e2e:worktree] 布局截图目录 ${screenshots}`);
   const homeDir = join(root, "nested", "home");
   const repo = join(root, "repo");
   const plain = join(root, "plain");
@@ -93,13 +97,31 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
-    await window.getByTestId("draft-workspace-mode").waitFor({ timeout: 5000 });
+    const workspaceInfo = window.getByTestId("workspace-info");
+    const workspacePath = workspaceInfo.getByTestId("workspace-path");
+    const draftMode = workspaceInfo.getByTestId("draft-workspace-mode");
+    await draftMode.waitFor({ timeout: 5000 });
+    await workspacePath.waitFor();
+    const pathBox = await workspacePath.boundingBox();
+    const composerBox = await window.getByTestId("composer-card").boundingBox();
+    assert(
+      pathBox !== null &&
+        composerBox !== null &&
+        Math.abs(pathBox.x - composerBox.x) <= 1 &&
+        Math.abs(pathBox.width - composerBox.width) <= 1,
+      "顶部工作区路径仍占整列宽，与输入区左右缘对齐"
+    );
+    assert(
+      (await window.getByTestId("workspace-sharing-notice").count()) === 0,
+      "无风险项目草稿不渲染底部提示容器"
+    );
     assert(
       (await window.getByTestId("draft-workspace-mode").inputValue()) ===
         "local",
       "项目草稿默认本地"
     );
-    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+    await window.screenshot({ path: join(screenshots, "project-draft.png") });
+    await draftMode.selectOption("worktree");
     await window.getByTestId("composer-input").fill("隔离写入");
     assert(!existsSync(join(homeDir, "worktrees")), "首次发送前不得创建副本");
     assert(
@@ -153,40 +175,128 @@ async function main() {
       ),
       "显示实际工作区"
     );
+    const fixedMode = workspacePath.getByTestId("workspace-mode");
     assert(
-      (await window.getByTestId("workspace-mode").textContent()).includes(
-        "Worktree"
-      ),
-      "显示工作区模式"
+      (await fixedMode.textContent()).includes("Worktree"),
+      "正式会话模式标签位于顶部路径行内"
+    );
+    const modeTitle = (await fixedMode.getAttribute("title")) ?? "";
+    assert(
+      modeTitle.includes("首次执行后工作区固定") &&
+        /(?:非|不是|不代表|并非)(?:文件)?只读/.test(modeTitle),
+      "固定模式标签解释首次执行后工作区固定且并非只读"
     );
     assert(
       (await window.getByTestId("draft-workspace-mode").count()) === 0,
       "首次执行后模式固定"
     );
+    assert(
+      (await window.getByTestId("workspace-sharing-notice").count()) === 0,
+      "无风险正式会话不渲染底部提示容器"
+    );
+    await window.screenshot({
+      path: join(screenshots, "existing-session.png"),
+    });
 
-    // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
     await window.getByTestId("new-session").click();
+    await window.getByTestId("draft-select-workspace").waitFor();
     assert(
       (await window.getByTestId("draft-workspace-mode").count()) === 0,
       "独立入口不直接提供 Worktree"
     );
+    assert(
+      (await window.getByTestId("workspace-mode").count()) === 0,
+      "独立草稿不显示已固定模式标签"
+    );
+
+    // 只让真实 IPC 检查失败一次；同一正式会话再次发送，靠事件订阅刷新恢复。
+    // 不切换 target、不重挂组件、不新增会话，避免掩盖 effect 订阅回归。
+    await app.evaluate(({ ipcMain }) => {
+      const channel = "sessions:workspace-sharing";
+      const original = ipcMain._invokeHandlers.get(channel);
+      if (!original) throw new Error("未注册工作区共享检查 IPC");
+      globalThis.worktreeSharingOriginal = original;
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, (event, target) => {
+        if (!target?.sessionId) return original(event, target);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, original);
+        throw new Error("E2E 工作区检查故障");
+      });
+    });
+    try {
+      await window
+        .getByTestId("session-item")
+        .filter({ hasText: "隔离写入" })
+        .click();
+      const sharingError = window
+        .getByTestId("workspace-sharing-notice")
+        .getByTestId("workspace-sharing-error");
+      await sharingError.waitFor();
+      const errorText = await sharingError.textContent();
+      assert(
+        errorText.includes("工作区检查失败") &&
+          errorText.includes("E2E 工作区检查故障"),
+        "共享检查失败显示真实 IPC 错误而非静默隐藏"
+      );
+      assert(
+        (await window.getByTestId("workspace-sharing-warning").count()) === 0,
+        "检查失败不误报共享文件风险"
+      );
+      await window.getByTestId("composer-input").fill("检查刷新恢复");
+      await window.getByTestId("composer-send").click();
+      await window
+        .getByTestId("message-assistant")
+        .filter({ hasText: "任务已完成" })
+        .nth(1)
+        .waitFor({ timeout: 15000 });
+      await window.getByTestId("composer-send").waitFor();
+      await window
+        .getByTestId("workspace-sharing-notice")
+        .waitFor({ state: "detached" });
+      assert(
+        (await window.getByTestId("session-item").count()) === 1,
+        "真实发送触发刷新清除检查错误，且不额外创建会话"
+      );
+    } finally {
+      await app.evaluate(({ ipcMain }) => {
+        const channel = "sessions:workspace-sharing";
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, globalThis.worktreeSharingOriginal);
+        delete globalThis.worktreeSharingOriginal;
+      });
+    }
+
+    // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
+    await window.getByTestId("new-session").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("共享等待");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("interaction-panel").waitFor({ timeout: 15000 });
     await projectAction(window);
-    await window.getByTestId("workspace-sharing-warning").waitFor();
+    const sharingWarning = window
+      .getByTestId("workspace-sharing-notice")
+      .getByTestId("workspace-sharing-warning");
+    await sharingWarning.waitFor();
     assert(
-      (
-        await window.getByTestId("workspace-sharing-warning").textContent()
-      ).includes("共享文件"),
-      "同目录独立会话不遗漏"
+      (await sharingWarning.textContent()).includes("共享文件"),
+      "同目录独立会话不遗漏，风险显示在底部提示容器内"
     );
-    await window.getByTestId("draft-workspace-mode").selectOption("worktree");
+    assert(
+      (await workspaceInfo.getByTestId("workspace-sharing-notice").count()) ===
+        0,
+      "顶部工作区信息不包含底部风险提示"
+    );
+    await window.screenshot({ path: join(screenshots, "sharing-warning.png") });
+    await draftMode.selectOption("worktree");
     await window
-      .getByTestId("workspace-sharing-warning")
-      .waitFor({ state: "hidden" });
-    await window.getByTestId("draft-workspace-mode").selectOption("local");
+      .getByTestId("workspace-sharing-notice")
+      .waitFor({ state: "detached" });
+    assert(
+      (await window.getByTestId("workspace-sharing-warning").count()) === 0,
+      "切换 Worktree 后风险与整个底部提示容器一起消失"
+    );
+    await draftMode.selectOption("local");
     await window.getByTestId("workspace-sharing-warning").waitFor();
     await window.getByTestId("composer-input").fill("允许继续并行");
     await window.getByTestId("composer-send").click();
