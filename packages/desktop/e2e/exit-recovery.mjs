@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  selectComposerOption,
   assert,
   assertSemanticOverlay,
   launchApp,
@@ -135,7 +136,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
-    await window.getByTestId("approval-mode-select").selectOption("assist");
+    await selectComposerOption(window, "approval-mode-select", "assist");
     await send(window, "项目慢任务");
     await window
       .getByTestId("tool-call-card")
@@ -188,7 +189,7 @@ async function main() {
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
     await window.getByTestId("composer-input").fill("正式会话未发送输入");
-    await window.getByTestId("thinking-effort-select").selectOption("high");
+    await selectComposerOption(window, "thinking-effort-select", "high");
     const stream = window.getByTestId("message-stream");
     await stream.hover();
     await window.mouse.wheel(0, 800);
@@ -337,8 +338,9 @@ async function main() {
       "退出前最后草稿已持久化"
     );
     assert(
-      (await window.getByTestId("thinking-effort-select").inputValue()) ===
-        "high",
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) === "high",
       "设置重开恢复"
     );
     await projectAction(window);
@@ -412,7 +414,7 @@ async function main() {
 
     // 异常终止：操作系统杀死进程，重启同库归一，不把异常当正常退出保证。
     await projectAction(window);
-    await window.getByTestId("approval-mode-select").selectOption("assist");
+    await selectComposerOption(window, "approval-mode-select", "assist");
     await send(window, "异常慢任务");
     await until(() => held.has("异常慢任务"), "异常任务未执行到等待点");
     const crashCount = model.requestCount();

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   expandWorkedHistory,
@@ -136,7 +137,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await window.getByTestId("new-session").click();
     await window.getByTestId("draft-select-workspace").click();
-    await window.getByTestId("approval-mode-select").selectOption("assist");
+    await selectComposerOption(window, "approval-mode-select", "assist");
     assert(
       (await window.getByTestId("session-item").count()) === 0,
       "首次发送前只有草稿"

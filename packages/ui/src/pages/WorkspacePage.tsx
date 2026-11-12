@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
 } from "react";
 import {
   createWorkspaceState,
@@ -43,10 +44,7 @@ import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
-import {
-  SESSION_CONTENT_WIDTH_CLASS,
-  SESSION_EMPTY_WIDTH_CLASS,
-} from "../lib/content-width";
+import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -147,15 +145,12 @@ export function WorkspacePage(props: {
     currentId === null
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
-  /**
-   * 内容列宽度类单点选择（票 05 容器分档宽度）：空态（消息流为空且未在压缩）
-   * 固定 2xl 档，有内容走容器分档；下发给头部、消息流与输入区共用同一类，
-   * 保证三处左右缘对齐。
-   */
-  const contentWidthClass =
-    displayMessages.length === 0 && compacting !== true
-      ? SESSION_EMPTY_WIDTH_CLASS
-      : SESSION_CONTENT_WIDTH_CLASS;
+  // 新建、加载与已有会话始终使用同一档位；滚动条宽度由消息流实际测量。
+  const contentWidthClass = SESSION_CONTENT_WIDTH_CLASS;
+  const [scrollbarGutter, setScrollbarGutter] = useState(0);
+  const contentPadding = {
+    paddingRight: "calc(1rem + var(--session-scrollbar-gutter, 0px))",
+  };
 
   const listRequestRef = useRef(0);
   const refreshSessions = useCallback(async () => {
@@ -912,319 +907,342 @@ export function WorkspacePage(props: {
           断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
           （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
           不触发断点切换导致内容列跳宽 */}
-      <section className="@container/session flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-line px-4 py-2">
-          {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
-          <div
-            data-testid="session-header-content"
-            className={`${contentWidthClass} flex items-center gap-2`}
+      <section className="@container/session flex min-w-0 flex-1">
+        <div
+          className="flex min-w-0 flex-1 flex-col"
+          style={
+            {
+              "--session-scrollbar-gutter": `${scrollbarGutter}px`,
+            } as CSSProperties
+          }
+        >
+          <header
+            className="shrink-0 border-b border-line px-4 py-2"
+            style={contentPadding}
           >
-            <span
-              data-testid="session-title"
-              className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
-            >
-              {current?.title ??
-                (draft
-                  ? draft.projectId === null
-                    ? "新建独立会话"
-                    : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
-                  : "未选择会话")}
-            </span>
-            <SessionSearch
-              recordsRevision={recordsRevision}
-              onSelect={(id) => void openSession(id)}
-            />
-            <button
-              type="button"
-              data-testid="resources-toggle"
-              disabled={currentId === null}
-              aria-expanded={resourcesOpen}
-              onClick={() => {
-                if (!resourcesOpen) refreshCurrentResources();
-                setResourcesOpen((prev) => !prev);
-              }}
-              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              规范与技能
-            </button>
-            <button
-              type="button"
-              data-testid="changes-toggle"
-              onClick={() => setChangesOpen((prev) => !prev)}
-              disabled={currentId === null}
-              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              {changesOpen ? "收起改动" : "改动"}
-            </button>
-          </div>
-        </header>
-        {(current || draft) && (
-          <div className="border-b border-line px-4 py-2 text-xs text-fg-muted">
+            {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
             <div
-              data-testid="workspace-path"
-              title={
-                current?.workspacePath ??
-                draft?.workspacePath ??
-                projects.find((p) => p.id === draft?.projectId)?.workspacePath
-              }
-              className="break-all"
+              data-testid="session-header-content"
+              className={`${contentWidthClass} flex items-center gap-2`}
             >
-              {draft?.workspaceMode === "worktree"
-                ? "来源目录（发送后使用隔离工作区）："
-                : "工作区："}
-              {current?.workspacePath ??
-                draft?.workspacePath ??
-                projects.find((p) => p.id === draft?.projectId)
-                  ?.workspacePath ??
-                "应用专用持久目录（首次发送时分配）"}
-            </div>
-            {current?.workspaceOriginPath && (
-              <div data-testid="workspace-origin">
-                来源目录：{current.workspaceOriginPath}
+              <span
+                data-testid="session-title"
+                className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
+              >
+                {current?.title ??
+                  (draft
+                    ? draft.projectId === null
+                      ? "新建独立会话"
+                      : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
+                    : "未选择会话")}
+              </span>
+              <div className="shrink-0 whitespace-nowrap">
+                <SessionSearch
+                  recordsRevision={recordsRevision}
+                  onSelect={(id) => void openSession(id)}
+                />
               </div>
-            )}
-            {draft?.projectId === null && (
               <button
                 type="button"
-                data-testid="draft-select-workspace"
-                disabled={creating}
-                onClick={() => void selectDraftWorkspace()}
-                className="ml-3 text-accent"
+                data-testid="resources-toggle"
+                disabled={currentId === null}
+                aria-expanded={resourcesOpen}
+                onClick={() => {
+                  if (!resourcesOpen) refreshCurrentResources();
+                  setResourcesOpen((prev) => !prev);
+                }}
+                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
               >
-                选择已有目录
+                规范与技能
               </button>
-            )}
-            {draft?.workspacePath && (
               <button
                 type="button"
-                data-testid="draft-managed-workspace"
-                disabled={creating}
-                onClick={() =>
-                  workspaceState.editNewDraft(null, {
-                    workspacePath: undefined,
-                  })
-                }
-                className="ml-3 text-accent"
+                data-testid="changes-toggle"
+                onClick={() => setChangesOpen((prev) => !prev)}
+                disabled={currentId === null}
+                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
               >
-                使用专用目录
+                {changesOpen ? "收起改动" : "改动"}
               </button>
-            )}
-            {draft?.error && (
-              <p
-                data-testid="draft-error"
-                role="alert"
-                className="mt-2 text-danger-fg"
-              >
-                {draft.error}
-              </p>
-            )}
-          </div>
-        )}
-        {workspaceState.persistenceError() && (
-          <p
-            role="alert"
-            data-testid="workbench-save-error"
-            className="px-4 text-danger-fg"
-          >
-            工作现场保存失败：{workspaceState.persistenceError()}
-          </p>
-        )}
-        {(draft?.providerProfileId ?? selectedProfileId) &&
-          !profiles.some(
-            (p) => p.id === (draft?.providerProfileId ?? selectedProfileId)
-          ) && (
-            <p
-              role="alert"
-              data-testid="unavailable-profile"
-              className="px-4 text-danger-fg"
+            </div>
+          </header>
+          {(current || draft) && (
+            <div
+              className="shrink-0 border-b border-line px-4 py-2 text-xs text-fg-muted"
+              style={contentPadding}
             >
-              已保存的模型配置不可用，请重新选择模型；不会自动替换。
-            </p>
-          )}
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <MessageStream
-              key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-              sessionId={currentId}
-              questionDraft={(requestId) =>
-                currentId === null
-                  ? undefined
-                  : workspaceState.draft(currentId, requestId)
-              }
-              loading={loading}
-              readingPosition={
-                currentId === null
-                  ? null
-                  : workspaceState.readingPosition(currentId)
-              }
-              onReadingPosition={(position) => {
-                if (currentId !== null)
-                  workspaceState.setReadingPosition(currentId, position);
-              }}
-              items={displayMessages}
-              streaming={streaming}
-              compacting={compacting}
-              contentWidthClass={contentWidthClass}
-              followSignal={followSignal}
-              emptyHint={
-                profiles.length === 0 ? (
+              <div className={contentWidthClass}>
+                <div
+                  data-testid="workspace-path"
+                  title={
+                    current?.workspacePath ??
+                    draft?.workspacePath ??
+                    projects.find((p) => p.id === draft?.projectId)
+                      ?.workspacePath
+                  }
+                  className="break-all"
+                >
+                  {draft?.workspaceMode === "worktree"
+                    ? "来源目录（发送后使用隔离工作区）："
+                    : "工作区："}
+                  {current?.workspacePath ??
+                    draft?.workspacePath ??
+                    projects.find((p) => p.id === draft?.projectId)
+                      ?.workspacePath ??
+                    "应用专用持久目录（首次发送时分配）"}
+                </div>
+                {current?.workspaceOriginPath && (
+                  <div data-testid="workspace-origin">
+                    来源目录：{current.workspaceOriginPath}
+                  </div>
+                )}
+                {draft?.projectId === null && (
                   <button
                     type="button"
-                    className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
-                    onClick={props.onOpenSettings}
+                    data-testid="draft-select-workspace"
+                    disabled={creating}
+                    onClick={() => void selectDraftWorkspace()}
+                    className="ml-3 text-accent"
                   >
-                    前往设置配置 Provider Profile
+                    选择已有目录
                   </button>
-                ) : undefined
-              }
-            />
-            {contextWarning !== null && (
-              <div
-                data-testid="context-warning"
-                className="border-t border-warn-fg/40 bg-warn-bg px-4 py-2 text-xs text-warn-fg"
-              >
-                {contextWarning}
+                )}
+                {draft?.workspacePath && (
+                  <button
+                    type="button"
+                    data-testid="draft-managed-workspace"
+                    disabled={creating}
+                    onClick={() =>
+                      workspaceState.editNewDraft(null, {
+                        workspacePath: undefined,
+                      })
+                    }
+                    className="ml-3 text-accent"
+                  >
+                    使用专用目录
+                  </button>
+                )}
+                {draft?.error && (
+                  <p
+                    data-testid="draft-error"
+                    role="alert"
+                    className="mt-2 text-danger-fg"
+                  >
+                    {draft.error}
+                  </p>
+                )}
               </div>
+            </div>
+          )}
+          {workspaceState.persistenceError() && (
+            <p
+              role="alert"
+              data-testid="workbench-save-error"
+              className="px-4 text-danger-fg"
+            >
+              工作现场保存失败：{workspaceState.persistenceError()}
+            </p>
+          )}
+          {(draft?.providerProfileId ?? selectedProfileId) &&
+            !profiles.some(
+              (p) => p.id === (draft?.providerProfileId ?? selectedProfileId)
+            ) && (
+              <p
+                role="alert"
+                data-testid="unavailable-profile"
+                className="px-4 text-danger-fg"
+              >
+                已保存的模型配置不可用，请重新选择模型；不会自动替换。
+              </p>
             )}
-            {(draft || current) && (
-              <WorkspaceModeControl
-                target={
-                  draft
-                    ? {
-                        projectId: draft.projectId,
-                        workspacePath: draft.workspacePath,
-                        workspaceMode: draft.workspaceMode ?? "local",
-                      }
-                    : { sessionId: current!.id }
-                }
-                mode={draft?.workspaceMode ?? current?.workspaceMode ?? "local"}
-                draft={draft !== null}
-                busy={creating}
-                onModeChange={(workspaceMode) => {
-                  if (draft && !draft.busy)
-                    workspaceState.editNewDraft(draft.projectId, {
-                      workspaceMode,
-                      error: null,
-                    });
-                }}
-              />
-            )}
-            {interaction ? (
-              <InteractionPanel
-                key={interaction.request.id}
-                record={interaction}
-                count={pending.length}
-                draft={workspaceState.draft(
-                  interaction.request.sessionId,
-                  interaction.request.id
-                )}
-                {...workspaceState.submission(
-                  interaction.request.sessionId,
-                  interaction.request.id
-                )}
-                onChange={(action) =>
-                  workspaceState.edit(
-                    interaction.request.sessionId,
-                    interaction.request.id,
-                    action
-                  )
-                }
-                onRespond={(response) =>
-                  void workspaceState.submit(
-                    interaction.request.sessionId,
-                    interaction.request.id,
-                    response,
-                    (sessionId, requestId, payload) =>
-                      window.codexlike.sessions.respondInteraction(
-                        sessionId,
-                        requestId,
-                        payload
-                      )
-                  )
-                }
-                onStop={() => void stop()}
-              />
-            ) : (
-              <MessageComposer
-                key={currentId ?? `draft-${draftProjectId}`}
-                draftValue={
-                  draft?.text ??
-                  (currentId === null ? "" : workspaceState.composer(currentId))
-                }
-                onDraftChange={(text) => {
-                  if (draft)
-                    workspaceState.editNewDraft(draft.projectId, { text });
-                  else if (currentId !== null)
-                    workspaceState.setComposer(currentId, text);
-                }}
-                clearOnSend={false}
-                profiles={profiles}
-                selectedProfileId={
-                  draft?.providerProfileId ?? selectedProfileId
-                }
-                onSelectProfile={(id) =>
-                  draft
-                    ? workspaceState.editNewDraft(draft.projectId, {
-                        providerProfileId: id,
-                      })
-                    : setSelectedProfileId(id)
-                }
-                onSend={handleSubmit}
-                contentWidthClass={contentWidthClass}
-                workspaceFiles={workspaceFiles}
-                skills={resources?.preview.catalog.skills}
-                onOpenSkills={refreshCurrentResources}
-                readOnly={loading || creating}
-                disabled={
-                  (currentId === null && !draft) ||
-                  current?.archivedAt != null ||
-                  creating ||
-                  profiles.length === 0 ||
-                  streaming ||
-                  compacting ||
-                  loading ||
-                  pending.length > 0
-                }
-                streaming={streaming}
-                onStop={() => void stop()}
-                hint={composerHint}
-                approvalMode={
-                  draft?.approvalMode ?? preferences?.approvalMode ?? null
-                }
-                onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-                thinkingEffort={
-                  draft?.thinkingEffort ??
-                  (currentId === null ? null : thinkingEffort)
-                }
-                onSelectThinkingEffort={(effort) =>
-                  draft
-                    ? workspaceState.editNewDraft(draft.projectId, {
-                        thinkingEffort: effort,
-                      })
-                    : setThinkingEffort(effort)
-                }
-              />
-            )}
-          </div>
-          {resourcesOpen && currentId !== null && (
-            <AgentResourcesPanel
-              resources={resources}
-              loading={resourcesLoading}
-              error={resourcesError}
-              onRefresh={refreshCurrentResources}
-              onClose={() => setResourcesOpen(false)}
+          <MessageStream
+            key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+            sessionId={currentId}
+            questionDraft={(requestId) =>
+              currentId === null
+                ? undefined
+                : workspaceState.draft(currentId, requestId)
+            }
+            loading={loading}
+            onScrollbarGutterChange={setScrollbarGutter}
+            readingPosition={
+              currentId === null
+                ? null
+                : workspaceState.readingPosition(currentId)
+            }
+            onReadingPosition={(position) => {
+              if (currentId !== null)
+                workspaceState.setReadingPosition(currentId, position);
+            }}
+            items={displayMessages}
+            streaming={streaming}
+            compacting={compacting}
+            contentWidthClass={contentWidthClass}
+            followSignal={followSignal}
+            emptyHint={
+              profiles.length === 0 ? (
+                <button
+                  type="button"
+                  className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
+                  onClick={props.onOpenSettings}
+                >
+                  前往设置配置 Provider Profile
+                </button>
+              ) : undefined
+            }
+          />
+          {contextWarning !== null && (
+            <div
+              data-testid="context-warning"
+              className="border-t border-warn-fg/40 bg-warn-bg px-4 py-2 text-xs text-warn-fg"
+            >
+              {contextWarning}
+            </div>
+          )}
+          {(draft || current) && (
+            <WorkspaceModeControl
+              target={
+                draft
+                  ? {
+                      projectId: draft.projectId,
+                      workspacePath: draft.workspacePath,
+                      workspaceMode: draft.workspaceMode ?? "local",
+                    }
+                  : { sessionId: current!.id }
+              }
+              mode={draft?.workspaceMode ?? current?.workspaceMode ?? "local"}
+              draft={draft !== null}
+              busy={creating}
+              onModeChange={(workspaceMode) => {
+                if (draft && !draft.busy)
+                  workspaceState.editNewDraft(draft.projectId, {
+                    workspaceMode,
+                    error: null,
+                  });
+              }}
             />
           )}
-          {changesOpen && current !== null && (
-            <ChangesPanel
-              key={current.id}
-              sessionId={current.id}
-              sessionTitle={current.title}
-              selectedProfileId={selectedProfileId}
-              onClose={() => setChangesOpen(false)}
+          {interaction ? (
+            <InteractionPanel
+              key={interaction.request.id}
+              record={interaction}
+              count={pending.length}
+              draft={workspaceState.draft(
+                interaction.request.sessionId,
+                interaction.request.id
+              )}
+              {...workspaceState.submission(
+                interaction.request.sessionId,
+                interaction.request.id
+              )}
+              onChange={(action) =>
+                workspaceState.edit(
+                  interaction.request.sessionId,
+                  interaction.request.id,
+                  action
+                )
+              }
+              onRespond={(response) =>
+                void workspaceState.submit(
+                  interaction.request.sessionId,
+                  interaction.request.id,
+                  response,
+                  (sessionId, requestId, payload) =>
+                    window.codexlike.sessions.respondInteraction(
+                      sessionId,
+                      requestId,
+                      payload
+                    )
+                )
+              }
+              onStop={() => void stop()}
+            />
+          ) : (
+            <MessageComposer
+              key={currentId ?? `draft-${draftProjectId}`}
+              draftValue={
+                draft?.text ??
+                (currentId === null ? "" : workspaceState.composer(currentId))
+              }
+              onDraftChange={(text) => {
+                if (draft)
+                  workspaceState.editNewDraft(draft.projectId, { text });
+                else if (currentId !== null)
+                  workspaceState.setComposer(currentId, text);
+              }}
+              clearOnSend={false}
+              profiles={profiles}
+              selectedProfileId={draft?.providerProfileId ?? selectedProfileId}
+              onSelectProfile={(id) =>
+                draft
+                  ? workspaceState.editNewDraft(draft.projectId, {
+                      providerProfileId: id,
+                    })
+                  : setSelectedProfileId(id)
+              }
+              onSend={handleSubmit}
+              contentWidthClass={contentWidthClass}
+              workspaceFiles={workspaceFiles}
+              skills={resources?.preview.catalog.skills}
+              onOpenSkills={refreshCurrentResources}
+              readOnly={loading || creating}
+              disabled={
+                (currentId === null && !draft) ||
+                current?.archivedAt != null ||
+                creating ||
+                profiles.length === 0 ||
+                streaming ||
+                compacting ||
+                loading ||
+                pending.length > 0
+              }
+              streaming={streaming}
+              onStop={() => void stop()}
+              hint={composerHint}
+              approvalMode={
+                draft?.approvalMode ?? preferences?.approvalMode ?? null
+              }
+              onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+              thinkingEffort={
+                draft?.thinkingEffort ??
+                (currentId === null ? null : thinkingEffort)
+              }
+              onSelectThinkingEffort={(effort) =>
+                draft
+                  ? workspaceState.editNewDraft(draft.projectId, {
+                      thinkingEffort: effort,
+                    })
+                  : setThinkingEffort(effort)
+              }
             />
           )}
         </div>
+        {currentId !== null && (resourcesOpen || changesOpen) && (
+          // 面板共享限宽区域：同时打开时纵向排列，至少为主列保留六成宽度。
+          // 在装配层覆盖面板原固定宽高，面板内部仍各自滚动、独立关闭。
+          <div
+            className={`flex min-h-0 max-w-[40%] shrink-0 flex-col [&>aside]:h-auto [&>aside]:min-h-0 [&>aside]:min-w-0 [&>aside]:w-full [&>aside]:flex-1 ${changesOpen ? "w-[30rem]" : "w-96"}`}
+          >
+            {resourcesOpen && (
+              <AgentResourcesPanel
+                resources={resources}
+                loading={resourcesLoading}
+                error={resourcesError}
+                onRefresh={refreshCurrentResources}
+                onClose={() => setResourcesOpen(false)}
+              />
+            )}
+            {changesOpen && current !== null && (
+              <ChangesPanel
+                key={current.id}
+                sessionId={current.id}
+                sessionTitle={current.title}
+                selectedProfileId={selectedProfileId}
+                onClose={() => setChangesOpen(false)}
+              />
+            )}
+          </div>
+        )}
       </section>
     </div>
   );

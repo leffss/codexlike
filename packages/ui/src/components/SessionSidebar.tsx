@@ -312,13 +312,13 @@ export function SessionSidebar(props: {
         group.archived.some((session) => session.id === props.currentId));
 
     return (
-      <li key={group.key}>
+      <li key={group.key} className="mt-4 first:mt-2">
         <div
           data-testid={
             group.projectId === null ? "standalone-header" : "project-header"
           }
           data-project-id={group.projectId ?? undefined}
-          className="group/header mt-2 flex items-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
+          className="group/header flex items-center rounded-md text-fg hover:bg-hover"
         >
           <button
             type="button"
@@ -327,7 +327,7 @@ export function SessionSidebar(props: {
             }
             title={group.path}
             aria-expanded={expanded}
-            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-semibold"
             onClick={() =>
               group.projectId === null
                 ? setStandaloneCollapsed((prev) => !prev)
@@ -382,26 +382,32 @@ export function SessionSidebar(props: {
           </span>
         </div>
         {expanded && (
-          <ul className="pl-3">
-            {group.active.map((session) => renderSessionItem(session))}
-          </ul>
-        )}
-        {expanded && group.archived.length > 0 && (
-          <div className="pl-4">
-            <button
-              type="button"
-              data-testid="toggle-archived"
-              className="w-full rounded px-2 py-1 text-left text-[11px] text-fg-subtle hover:text-fg-muted"
-              onClick={() =>
-                setExpandedArchived((prev) => toggleKey(prev, group.key))
-              }
-            >
-              {archivedOpen ? "收起" : "展开"}已归档（{group.archived.length}）
-            </button>
-            {archivedOpen && (
-              <ul className="mt-0.5" data-testid="archived-list">
-                {group.archived.map((session) => renderSessionItem(session))}
-              </ul>
+          <div
+            data-testid="group-sessions"
+            className="ml-9 border-l border-line pl-2"
+          >
+            <ul>{group.active.map((session) => renderSessionItem(session))}</ul>
+            {group.archived.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  data-testid="toggle-archived"
+                  className="w-full rounded px-2 py-1 text-left text-[11px] text-fg-subtle hover:text-fg-muted"
+                  onClick={() =>
+                    setExpandedArchived((prev) => toggleKey(prev, group.key))
+                  }
+                >
+                  {archivedOpen ? "收起" : "展开"}已归档（
+                  {group.archived.length}）
+                </button>
+                {archivedOpen && (
+                  <ul className="mt-0.5" data-testid="archived-list">
+                    {group.archived.map((session) =>
+                      renderSessionItem(session)
+                    )}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
         )}

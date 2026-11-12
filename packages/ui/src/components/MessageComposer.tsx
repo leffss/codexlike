@@ -23,6 +23,7 @@ import {
   type ComposerMenuState,
 } from "../lib/composer-menu";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { ComposerSelect } from "./ComposerSelect";
 
 /** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
 const APPROVAL_MODE_OPTIONS: {
@@ -46,25 +47,6 @@ const APPROVAL_MODE_OPTIONS: {
     title: "full-access：全自动执行，且可不受限读写本地任意文件（切换需确认）",
   },
 ];
-
-/** 审批模式 → 底部工具栏胶囊样式：权限越高越暖色（full-access=琥珀） */
-const APPROVAL_PILL_STYLES: Record<
-  ApprovalMode,
-  { pill: string; icon: string }
-> = {
-  ask: {
-    pill: "border-info-fg/30 bg-info-bg text-info-fg",
-    icon: "text-info-fg",
-  },
-  assist: {
-    pill: "border-line bg-hover text-fg-muted",
-    icon: "text-fg-muted",
-  },
-  "full-access": {
-    pill: "border-warn-fg/40 bg-warn-bg text-warn-fg",
-    icon: "text-warn-fg",
-  },
-};
 
 /**
  * 思考档位（GLOSSARY「思考档位」）→ 胶囊选项文案。
@@ -103,33 +85,6 @@ const THINKING_EFFORT_OPTIONS: {
     title: "关：显式请求关闭思考；服务端可能忽略，不保证强制停止",
   },
 ];
-
-/** 思考档位 → 胶囊样式：档位越强越亮（auto=中性、low=成功、medium=信息、high=强调、off=危险） */
-const THINKING_PILL_STYLES: Record<
-  ThinkingEffort,
-  { pill: string; icon: string }
-> = {
-  auto: {
-    pill: "border-line bg-hover text-fg-muted",
-    icon: "text-fg-muted",
-  },
-  low: {
-    pill: "border-ok-fg/30 bg-ok-bg text-ok-fg",
-    icon: "text-ok-fg",
-  },
-  medium: {
-    pill: "border-info-fg/30 bg-info-bg text-info-fg",
-    icon: "text-info-fg",
-  },
-  high: {
-    pill: "border-accent/40 bg-accent/10 text-accent",
-    icon: "text-accent",
-  },
-  off: {
-    pill: "border-danger-fg/30 bg-danger-bg text-danger-fg",
-    icon: "text-danger-fg",
-  },
-};
 
 /**
  * 中栏底部：消息输入区（卡片式 composer：上行输入、下行工具栏）。
@@ -335,16 +290,14 @@ export function MessageComposer(props: {
     }
   }
 
-  const approvalPill =
-    APPROVAL_PILL_STYLES[props.approvalMode ?? "assist"] ??
-    APPROVAL_PILL_STYLES.assist;
-  const thinkingPill =
-    THINKING_PILL_STYLES[props.thinkingEffort ?? "auto"] ??
-    THINKING_PILL_STYLES.auto;
-
   return (
-    // 水平 padding 与消息流（px-4）一致，输入卡片与内容列左右缘对齐（票 05）
-    <div className="border-t border-line bg-surface-muted px-4 py-3">
+    // 补偿消息流原生滚动条占宽，输入卡片与内容列左右缘对齐。
+    <div
+      className="border-t border-line bg-surface-muted px-4 py-3"
+      style={{
+        paddingRight: "calc(1rem + var(--session-scrollbar-gutter, 0px))",
+      }}
+    >
       {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
       <form
         data-testid="composer-card"
@@ -449,75 +402,29 @@ export function MessageComposer(props: {
         {/* 底部工具栏：左审批胶囊 + 思考档位胶囊，右模型选择 + 圆形动作按钮 */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
           <div className="flex items-center gap-2">
-            <div
-              className={`relative shrink-0 rounded-full border ${approvalPill.pill} ${
-                props.approvalMode === null
-                  ? "cursor-not-allowed opacity-50"
-                  : ""
-              }`}
-              title="审批模式：随时切换，只对下一次发送生效"
-            >
-              <ShieldIcon
-                className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${approvalPill.icon}`}
-              />
-              <select
-                data-testid="approval-mode-select"
-                value={props.approvalMode ?? "assist"}
-                disabled={props.readOnly || props.approvalMode === null}
-                onChange={(event) =>
-                  props.onSelectApprovalMode(event.target.value as ApprovalMode)
-                }
-                className="cursor-pointer appearance-none rounded-full bg-transparent py-1 pl-7 pr-5 text-xs focus:outline-none"
-              >
-                {APPROVAL_MODE_OPTIONS.map((option) => (
-                  <option
-                    key={option.value}
-                    value={option.value}
-                    title={option.title}
-                  >
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
-            </div>
-            {/* 思考档位胶囊（GLOSSARY「思考档位」）：审批胶囊旁的胶囊内嵌 select，
-                无会话禁用；运行中允许改选（只对下一条消息生效） */}
-            <div
-              className={`relative shrink-0 rounded-full border ${thinkingPill.pill} ${
-                props.thinkingEffort === null
-                  ? "cursor-not-allowed opacity-50"
-                  : ""
-              }`}
-              title="思考档位：只对下一条发送的消息生效（一次发送内的工具往返保持快照）"
-            >
-              <BrainIcon
-                className={`pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 ${thinkingPill.icon}`}
-              />
-              <select
-                data-testid="thinking-effort-select"
-                aria-label="思考档位"
-                value={props.thinkingEffort ?? "auto"}
-                disabled={props.readOnly || props.thinkingEffort === null}
-                onChange={(event) =>
-                  props.onSelectThinkingEffort(
-                    event.target.value as ThinkingEffort
-                  )
-                }
-                className="cursor-pointer appearance-none rounded-full bg-transparent py-1 pl-7 pr-5 text-xs focus:outline-none"
-              >
-                {THINKING_EFFORT_OPTIONS.map((option) => (
-                  <option
-                    key={option.value}
-                    value={option.value}
-                    title={option.title}
-                  >
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <CaretDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
-            </div>
+            <ComposerSelect
+              testId="approval-mode-select"
+              label="审批模式"
+              value={props.approvalMode ?? "assist"}
+              disabled={props.readOnly || props.approvalMode === null}
+              options={APPROVAL_MODE_OPTIONS}
+              onSelect={props.onSelectApprovalMode}
+              renderIcon={(mode) => (
+                <ShieldIcon
+                  className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
+                />
+              )}
+            />
+            {/* 无会话禁用；运行中允许改选，只对下一条消息生效。 */}
+            <ComposerSelect
+              testId="thinking-effort-select"
+              label="思考档位"
+              value={props.thinkingEffort ?? "auto"}
+              disabled={props.readOnly || props.thinkingEffort === null}
+              options={THINKING_EFFORT_OPTIONS}
+              onSelect={props.onSelectThinkingEffort}
+              renderIcon={() => <BrainIcon className="h-3 w-3" />}
+            />
           </div>
           <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
             <button

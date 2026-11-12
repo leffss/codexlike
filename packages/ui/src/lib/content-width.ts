@@ -15,6 +15,3 @@
  */
 export const SESSION_CONTENT_WIDTH_CLASS =
   "mx-auto w-full @min-[864px]/session:w-[calc(100%_-_6rem)] @min-[864px]/session:max-w-4xl @min-[1280px]/session:w-[calc(100%_-_12rem)] @min-[1280px]/session:max-w-6xl";
-
-/** 空态（未选会话或消息流为空）：内容列固定 2xl（672px）档，聚焦草稿输入。 */
-export const SESSION_EMPTY_WIDTH_CLASS = "mx-auto w-full max-w-2xl";

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -113,7 +114,7 @@ async function main() {
       (await window.getByTestId("new-session-dialog").count()) === 0,
       "不恢复模式弹窗"
     );
-    await window.getByTestId("approval-mode-select").selectOption("assist");
+    await selectComposerOption(window, "approval-mode-select", "assist");
     await window.getByTestId("composer-send").dblclick();
     await window
       .getByTestId("message-assistant")
