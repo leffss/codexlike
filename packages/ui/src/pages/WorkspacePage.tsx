@@ -1061,6 +1061,7 @@ export function WorkspacePage(props: {
                   workspaceState.setReadingPosition(currentId, position);
               }}
               items={displayMessages}
+              streaming={streaming}
               compacting={compacting}
               contentWidthClass={contentWidthClass}
               followSignal={followSignal}

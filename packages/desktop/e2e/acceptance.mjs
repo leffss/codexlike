@@ -22,6 +22,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -181,8 +182,16 @@ async function main() {
     console.log("[e2e] 场景2：apply_patch 真实落盘（i < n → i <= n）");
 
     // assist 档普通命令（node calc.js 非危险）自动放行：无审批卡，直接真实执行
+    // （运行中的轮强制展开过程，卡片实时可见）
     const runCard = cards.filter({ hasText: "run_terminal_command" }).first();
     await runCard.waitFor({ timeout: 20_000 });
+
+    // 轮完成（最终正文渲染；票 04 过程段收进已工作折叠区）后展开回看命令输出
+    await window
+      .getByTestId("message-assistant")
+      .getByText("已修复 sumTo 的边界错误")
+      .waitFor({ timeout: 20_000 });
+    await expandWorkedHistory(window, 0);
     await runCard.getByTestId("tool-call-toggle").click();
     await runCard
       .getByTestId("tool-call-output")
@@ -195,11 +204,6 @@ async function main() {
     console.log(
       "[e2e] 场景2：assist 自动放行 → node calc.js 输出 sumTo(5) = 15"
     );
-
-    await window
-      .getByTestId("message-assistant")
-      .getByText("已修复 sumTo 的边界错误")
-      .waitFor({ timeout: 20_000 });
 
     // 改动面板：calc.js 显示「修改」，Monaco diff 两侧（原侧 bug 行 / 新侧修复行）
     await window.getByTestId("changes-toggle").click();

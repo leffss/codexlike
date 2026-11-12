@@ -12,6 +12,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -94,14 +95,20 @@ async function main() {
     await composer.fill("委派调研一下测试入口");
     await composer.press("Enter");
 
-    // 4) 嵌套卡片：运行中出现 → 完成态 + 报告展开可见
+    // 4) 嵌套卡片：委派后子代理建卡（运行中窗口短，attach 即证明建卡）→
+    //    主轮收尾后过程段收进已工作折叠区、子代理卡完成自动收起一次（票 04）：
+    //    等主轮最终正文再展开折叠区回看完成态卡与报告
     const subagentCard = window.getByTestId("subagent-card");
     await subagentCard.waitFor({ timeout: 20_000 });
-    await subagentCard.waitFor({ state: "visible", timeout: 20_000 });
-    // 完成态（data-subagent-state 变为 done）+ 报告内容可见
+    await window
+      .getByTestId("message-assistant")
+      .getByText("子代理的报告已汇总。")
+      .waitFor({ timeout: 20_000 });
+    await expandWorkedHistory(window, 0);
     await window
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
       .waitFor({ timeout: 20_000 });
+    await window.getByTestId("subagent-toggle").click();
     const reportText = await window
       .getByTestId("subagent-report")
       .textContent();
@@ -156,15 +163,27 @@ async function main() {
     );
     console.log("[e2e] 报告回流主会话上下文（第二轮请求体验证）");
 
-    // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）
+    // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）。
+    // 票 04：完成的轮默认收起折叠区、子代理卡完成自动收起——先展开再断言
     await closeApp(app);
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({
       homeDir,
     });
     app = relaunchedApp;
     await relaunchedWindow
+      .getByTestId("session-item")
+      .first()
+      .waitFor({ timeout: 15_000 });
+    await relaunchedWindow.getByTestId("session-item").first().click();
+    await relaunchedWindow
+      .getByTestId("message-user")
+      .first()
+      .waitFor({ timeout: 10_000 });
+    await expandWorkedHistory(relaunchedWindow, 0);
+    await relaunchedWindow
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
       .waitFor({ timeout: 15_000 });
+    await relaunchedWindow.getByTestId("subagent-toggle").click();
     const restoredReport = await relaunchedWindow
       .getByTestId("subagent-report")
       .textContent();

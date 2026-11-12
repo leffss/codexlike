@@ -18,6 +18,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -95,6 +96,14 @@ async function main() {
     ctx.textRound("旧式正文回答");
   });
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-reasoning-rec-"));
+  /** 票 04：展开会话内全部「已工作折叠区」（完成后过程段默认收起） */
+  const expandAllHistories = async (window) => {
+    const toggles = window.getByTestId("worked-history-toggle");
+    const total = await toggles.count();
+    for (let i = 0; i < total; i++) {
+      await expandWorkedHistory(window, i);
+    }
+  };
   const workspaceDir = join(homeDir, "workspace");
   mkdirSync(workspaceDir);
 
@@ -171,24 +180,15 @@ async function main() {
       .first()
       .click();
     // 切回后：慢速轮的思考段唯一且内容完整（两段拼接、无重复拼接）
-    const slowBlocks = window.getByTestId("thinking-block").filter({
-      hasText: "思考过程",
-    });
-    for (let i = 0; i < 100; i++) {
-      const count = await window.getByTestId("thinking-block").count();
-      const done = await window
-        .getByTestId("message-assistant")
-        .filter({ hasText: "慢速正文收尾" })
-        .count();
-      if (count >= 2 && done === 1) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "慢速正文收尾" })
       .waitFor({ timeout: 20_000 });
+    // 票 04：完成后过程段收进各轮「已工作折叠区」，展开后再交互/计数
+    await expandAllHistories(window);
     // 展开最后一个思考块（慢速轮）：内容含两段、不含重复
     const lastThinking = window.getByTestId("thinking-block").last();
+    await lastThinking.waitFor({ timeout: 10_000 });
     await lastThinking.getByTestId("thinking-toggle").click();
     const slowText = await lastThinking
       .getByTestId("thinking-content")
@@ -219,6 +219,8 @@ async function main() {
       .first()
       .click();
     await window.getByTestId("message-stream").waitFor({ timeout: 20_000 });
+    // 票 04：重启恢复后正常完成的轮默认收起折叠区，展开后回看历史思考段
+    await expandAllHistories(window);
     // 主会话历史思考段：重启恢复，默认收起、可展开回看
     const restoredThinking = window.getByTestId("thinking-block").first();
     await restoredThinking.waitFor({ timeout: 20_000 });
@@ -235,9 +237,10 @@ async function main() {
       (await window.getByTestId("thinking-block").count()) === 2,
       `重启后思考段数量应为 2，实际 ${await window.getByTestId("thinking-block").count()}`
     );
-    // 子代理卡内思考折叠块不空白
+    // 子代理卡内思考折叠块不空白（票 04：卡完成自动收起一次，先展开卡）
     const subagentCard = window.getByTestId("subagent-card").first();
     await subagentCard.waitFor({ timeout: 20_000 });
+    await window.getByTestId("subagent-toggle").first().click();
     const subThinking = subagentCard.getByTestId("subagent-thinking-block");
     await subThinking.waitFor({ timeout: 10_000 });
     await subThinking.getByTestId("subagent-thinking-toggle").click();
