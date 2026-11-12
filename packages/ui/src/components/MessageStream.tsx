@@ -9,14 +9,19 @@ import remarkGfm from "remark-gfm";
 
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { markdownComponents } from "../lib/markdown";
-import type { UiItem } from "../lib/session-view";
+import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
 
-/** 中栏上部：消息流。用户消息、助手 markdown 流式回复、工具卡片、审批卡片、错误提示、压缩摘要卡片。 */
+/**
+ * 中栏上部：消息流（GLOSSARY「消息流」「消息段」）。
+ * 数据层已按事件发生时序排列消息段，本组件按时序如实分派渲染：
+ * 思考段、正文段、工具卡、子代理卡、错误段、状态段、compact 摘要段
+ * 都是序列中的平等成员（保持现有折叠交互与 data-testid）。
+ */
 export function MessageStream(props: {
-  items: UiItem[];
+  items: MessageSegment[];
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
@@ -88,8 +93,10 @@ export function MessageStream(props: {
               />
             ) : item.kind === "subagent" ? (
               <SubagentCard key={`subagent-${item.id}`} subagent={item} />
+            ) : item.kind === "thinking" ? (
+              <ThinkingBlock key={item.id} segment={item} />
             ) : (
-              <MessageBubble key={item.id} message={item} />
+              <MessageBubble key={item.id} segment={item} />
             )
           )}
           {props.compacting === true && (
@@ -107,15 +114,57 @@ export function MessageStream(props: {
   );
 }
 
+/**
+ * 思考段（GLOSSARY「思考档位」）：消息流时序序列中的独立成员——
+ * 默认收起、可展开观察内容、流式进行中带思考指示器；
+ * 与正文段分离，不再提升合并进气泡顶部。
+ */
+function ThinkingBlock(props: { segment: ThinkingSegment }) {
+  const { segment } = props;
+  return (
+    <li>
+      <details
+        data-testid="thinking-block"
+        className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+      >
+        <summary
+          data-testid="thinking-toggle"
+          className="flex cursor-pointer select-none items-center gap-2"
+        >
+          {segment.streaming === true && (
+            <span
+              data-testid="thinking-indicator"
+              className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
+              aria-label="思考中"
+            />
+          )}
+          思考过程（点击展开 / 收起）
+        </summary>
+        <div
+          data-testid="thinking-content"
+          className="mt-2 whitespace-pre-wrap border-t border-line pt-2 text-fg"
+        >
+          {segment.content}
+        </div>
+      </details>
+    </li>
+  );
+}
+
+/** 消息型消息段：用户消息、助手正文、错误提示、本地状态、压缩摘要 */
 function MessageBubble(props: {
-  message: Exclude<
-    UiItem,
-    { kind: "tool-call" } | { kind: "interaction" } | { kind: "subagent" }
+  segment: Extract<
+    MessageSegment,
+    | { kind: "user" }
+    | { kind: "assistant" }
+    | { kind: "error" }
+    | { kind: "status" }
+    | { kind: "compact-summary" }
   >;
 }) {
-  const { message } = props;
+  const { segment } = props;
 
-  if (message.role === "user") {
+  if (segment.kind === "user") {
     return (
       <li
         data-testid="message-user"
@@ -123,35 +172,35 @@ function MessageBubble(props: {
         // 绝对上限 36rem 防止内容列放宽后单段文本行长失控
         className="ml-auto max-w-[min(85%,36rem)] rounded-lg bg-selected px-3 py-2 text-sm whitespace-pre-wrap text-fg"
       >
-        {message.content}
+        {segment.content}
       </li>
     );
   }
 
-  if (message.role === "error") {
+  if (segment.kind === "error") {
     return (
       <li
         data-testid="message-error"
         className="rounded-lg border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg"
       >
-        {message.content}
+        {segment.content}
       </li>
     );
   }
 
-  if (message.role === "status") {
+  if (segment.kind === "status") {
     // 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文
     return (
       <li
         data-testid="message-status"
         className="rounded-lg border border-line bg-surface px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
       >
-        {message.content}
+        {segment.content}
       </li>
     );
   }
 
-  if (message.role === "compact-summary") {
+  if (segment.kind === "compact-summary") {
     // /compact 摘要卡片：被压缩的历史折叠显示，点击展开摘要全文（工单 08）
     return (
       <li data-testid="message-compact-summary">
@@ -165,7 +214,7 @@ function MessageBubble(props: {
               rehypePlugins={[rehypeHighlight]}
               components={markdownComponents}
             >
-              {message.content}
+              {segment.content}
             </ReactMarkdown>
           </div>
         </details>
@@ -176,47 +225,19 @@ function MessageBubble(props: {
   return (
     <li data-testid="message-assistant" className="max-w-full">
       <div className="markdown rounded-lg border border-line bg-surface px-4 py-3 text-sm">
-        {message.reasoning !== undefined && message.reasoning !== "" && (
-          // 思考过程折叠块（GLOSSARY「思考档位」）：与正文分离、默认收起、
-          // 可展开观察流式进度；终态（完成/中断/出错）由消息标志收敛，无残留进行中
-          <details
-            data-testid="thinking-block"
-            className="mb-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
-          >
-            <summary
-              data-testid="thinking-toggle"
-              className="flex cursor-pointer select-none items-center gap-2"
-            >
-              {message.streaming === true && (
-                <span
-                  data-testid="thinking-indicator"
-                  className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
-                  aria-label="思考中"
-                />
-              )}
-              思考过程（点击展开 / 收起）
-            </summary>
-            <div
-              data-testid="thinking-content"
-              className="mt-2 whitespace-pre-wrap border-t border-line pt-2 text-fg"
-            >
-              {message.reasoning}
-            </div>
-          </details>
-        )}
         <div data-testid="assistant-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
             components={markdownComponents}
           >
-            {message.content}
+            {segment.content}
           </ReactMarkdown>
         </div>
-        {message.streaming === true && (
+        {segment.streaming === true && (
           <span className="markdown-cursor" aria-label="正在生成" />
         )}
-        {message.interrupted === true && (
+        {segment.interrupted === true && (
           <p className="mt-2 text-xs text-warn-fg">
             （已中断，以上为部分回复）
           </p>

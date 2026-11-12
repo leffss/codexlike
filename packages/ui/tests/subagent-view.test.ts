@@ -5,12 +5,13 @@ import type { SessionEvent, ToolCallRecord } from "@codexlike/agent-core";
 import {
   applySessionEvent,
   initialTranscript,
-  type UiItem,
+  type MessageSegment,
 } from "../src/lib/session-view";
 
 /**
- * 工单 13：子代理嵌套卡片的状态归并（GLOSSARY「子代理」）。
- * Seam：applySessionEvent 纯函数（流式事件 → UiItem[]）与 initialTranscript（重启恢复）。
+ * 子代理段（GLOSSARY「子代理」「消息段」）：主序列成员 + 卡内嵌套进度。
+ * Seam：applySessionEvent 纯函数（流式事件 → MessageSegment[]）与
+ * initialTranscript（重启恢复）。
  */
 function toolCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   return {
@@ -25,9 +26,13 @@ function toolCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   };
 }
 
-describe("session-view 子代理归并", () => {
-  it("queued → start → 工具进度 → report 全链路：嵌套卡片状态与字段正确迁移", () => {
-    let items: UiItem[] = [];
+function kinds(items: MessageSegment[]): string[] {
+  return items.map((item) => item.kind);
+}
+
+describe("session-view 子代理段归并", () => {
+  it("queued → start → 工具进度 → report 全链路：卡状态与字段正确迁移", () => {
+    let items: MessageSegment[] = [];
     const apply = (event: SessionEvent) => {
       items = applySessionEvent(items, event);
     };
@@ -56,7 +61,7 @@ describe("session-view 子代理归并", () => {
       toolCallId: "delegate-1",
     });
 
-    // 子代理内部工具进度：call（运行中）→ result（完成）
+    // 子代理内部工具进度（卡内嵌套，不是主序列成员）：call（运行中）→ result（完成）
     apply({
       type: "subagent-tool",
       subagentId: "sa-1",
@@ -69,7 +74,8 @@ describe("session-view 子代理归并", () => {
       phase: "result",
       call: toolCall({ id: "sub-c1", toolName: "glob", output: "a.txt" }),
     });
-    const card = items[0] as Extract<UiItem, { kind: "subagent" }>;
+    const card = items[0];
+    if (card?.kind !== "subagent") throw new Error("首段应为子代理段");
     expect(card.tools).toHaveLength(1);
     expect(card.tools[0]).toMatchObject({
       id: "sub-c1",
@@ -95,9 +101,34 @@ describe("session-view 子代理归并", () => {
     expect(items[1]).toMatchObject({ id: "sa-2", state: "queued" });
   });
 
-  it("spawn_subagent 的 tool-call 事件不渲染普通工具卡片（嵌套卡片代替）", () => {
-    let items: UiItem[] = [];
+  it("子代理卡作为消息段按时序出现在主序列：user → 子代理卡 → 后续正文", () => {
+    let items = applySessionEvent([], {
+      type: "user-message",
+      message: {
+        id: "u1",
+        sessionId: "s1",
+        role: "user",
+        content: "委派调研",
+        createdAt: "2026-11-11T08:00:00Z",
+      },
+    });
     items = applySessionEvent(items, {
+      type: "subagent-queued",
+      subagentId: "sa-1",
+      task: "调研 vitest",
+    });
+    items = applySessionEvent(items, {
+      type: "assistant-delta",
+      messageId: "a1",
+      delta: "已派出子代理，先说明计划",
+    });
+    expect(kinds(items)).toEqual(["user", "subagent", "assistant"]);
+    expect(items[1]).toMatchObject({ id: "sa-1", turnId: "u1" });
+    expect(items[2]).toMatchObject({ responseId: "a1", turnId: "u1" });
+  });
+
+  it("spawn_subagent 的 tool-call 事件不渲染普通工具卡（子代理段代替）", () => {
+    const items = applySessionEvent([], {
       type: "tool-call",
       call: toolCall({
         id: "delegate-1",
@@ -108,9 +139,8 @@ describe("session-view 子代理归并", () => {
     expect(items).toHaveLength(0);
   });
 
-  it("spawn_subagent 的 tool-result 按 toolCallId 回填嵌套卡片报告（流式路径兜底）", () => {
-    let items: UiItem[] = [];
-    items = applySessionEvent(items, {
+  it("spawn_subagent 的 tool-result 按 toolCallId 回填子代理段报告（流式路径兜底）", () => {
+    let items = applySessionEvent([], {
       type: "subagent-queued",
       subagentId: "sa-1",
       task: "x",
@@ -136,7 +166,7 @@ describe("session-view 子代理归并", () => {
     });
   });
 
-  it("重启恢复：transcript 中的 spawn_subagent 记录渲染为完成态嵌套卡片（task + 报告）", () => {
+  it("重启恢复：transcript 中的 spawn_subagent 记录渲染为完成态子代理段（task + 报告）", () => {
     const items = initialTranscript([
       {
         kind: "tool-call",
@@ -160,10 +190,10 @@ describe("session-view 子代理归并", () => {
   });
 });
 
-/** 思考档位 03：子代理 reasoning 事件归并（独立折叠思考块，并发不串流） */
+/** 思考档位 03：子代理 reasoning 归并（卡内独立折叠思考，并发不串流） */
 describe("session-view 子代理思考归并（subagent-reasoning）", () => {
-  it("reasoning 增量累积到所属子代理卡片，与报告分离，不串流到其他子代理", () => {
-    let items: UiItem[] = [];
+  it("reasoning 增量累积到所属子代理卡，与报告分离，不串流到其他子代理", () => {
+    let items: MessageSegment[] = [];
     const apply = (event: SessionEvent) => {
       items = applySessionEvent(items, event);
     };
@@ -224,41 +254,52 @@ describe("session-view 子代理思考归并（subagent-reasoning）", () => {
   });
 
   it("未知 subagentId 的 reasoning 事件被忽略（会话切换后迟到的事件）", () => {
-    let items: UiItem[] = [{ id: "m1", role: "assistant", content: "正文" }];
+    let items = applySessionEvent([], {
+      type: "assistant-delta",
+      messageId: "a1",
+      delta: "正文",
+    });
     items = applySessionEvent(items, {
       type: "subagent-reasoning",
       subagentId: "sa-gone",
       delta: "迟到的思考",
     });
     expect(items).toHaveLength(1);
-    expect(items[0]).not.toHaveProperty("reasoning");
+    expect(items[0]).toMatchObject({ kind: "assistant", content: "正文" });
+    const card = items[0];
+    if (card?.kind !== "subagent") return;
+    expect(card.reasoning).toBeUndefined();
   });
 
-  it("reasoning 不混入主会话助手消息（主/子思考互不串流）", () => {
-    let items: UiItem[] = [
-      { id: "a1", role: "assistant", content: "", streaming: true },
-    ];
+  it("主会话思考进序列 thinking 段、子代理思考进卡内（主/子思考互不串流）", () => {
+    let items = applySessionEvent([], {
+      type: "assistant-start",
+      messageId: "a1",
+    });
+    items = applySessionEvent(items, {
+      type: "subagent-queued",
+      subagentId: "sa-1",
+      task: "x",
+    });
+    items = applySessionEvent(items, {
+      type: "assistant-reasoning",
+      messageId: "a1",
+      delta: "主会话思考",
+    });
     items = applySessionEvent(items, {
       type: "subagent-reasoning",
       subagentId: "sa-1",
-      delta: "子代理思考不应进入主消息",
+      delta: "子代理思考",
     });
-    expect(items[0]).toMatchObject({ id: "a1", content: "" });
-    expect((items[0] as { reasoning?: string }).reasoning).toBeUndefined();
-  });
-
-  it("历史加载不重建子代理思考块（重启恢复卡片无 reasoning）", () => {
-    const items = initialTranscript([
-      {
-        kind: "tool-call",
-        call: toolCall({
-          id: "delegate-9",
-          toolName: "spawn_subagent",
-          arguments: '{"task":"x"}',
-          output: "报告",
-        }),
-      },
-    ]);
-    expect((items[0] as { reasoning?: string }).reasoning).toBeUndefined();
+    expect(kinds(items)).toEqual(["subagent", "thinking"]);
+    expect(items[1]).toMatchObject({
+      kind: "thinking",
+      content: "主会话思考",
+      responseId: "a1",
+    });
+    expect(items[0]).toMatchObject({
+      kind: "subagent",
+      reasoning: "子代理思考",
+    });
   });
 });

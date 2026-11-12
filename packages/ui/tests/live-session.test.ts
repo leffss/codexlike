@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { SessionEventEnvelope, SessionView } from "@codexlike/desktop/ipc";
+import { applySessionEvent } from "../src/lib/session-view";
 import { hydrateLiveSession, receiveLiveEvent } from "../src/lib/live-session";
 
 const activity = {
@@ -168,4 +169,84 @@ it("初始现场与订阅缓冲交错仍完整且无重，其他会话和旧执�
     },
   });
   expect(receiveLiveEvent(done, delta(7, "终态后污染", "e2"))).toEqual(done);
+});
+
+it("历史恢复与运行期流式输出形状一致：同一消息段模型、同一归并入口", () => {
+  // 落库历史（user + assistant 完成 + 工具卡）经 initialTranscript 恢复
+  const history = [
+    {
+      kind: "message" as const,
+      message: {
+        id: "u1",
+        sessionId: "a",
+        role: "user" as const,
+        content: "查一下",
+        createdAt: "2026-11-11T08:00:00Z",
+      },
+    },
+    {
+      kind: "tool-call" as const,
+      call: {
+        id: "t1",
+        sessionId: "a",
+        toolName: "read_file",
+        arguments: '{"path":"a.txt"}',
+        output: "内容",
+        isError: false,
+        createdAt: "2026-11-11T08:00:01Z",
+      },
+    },
+    {
+      kind: "message" as const,
+      message: {
+        id: "a1",
+        sessionId: "a",
+        role: "assistant" as const,
+        content: "结论",
+        createdAt: "2026-11-11T08:00:02Z",
+      },
+    },
+  ];
+  const restored = hydrateLiveSession({
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    events: [],
+    activity: { ...activity, running: false, outcome: "completed" },
+    history,
+  });
+  expect(restored.items.map((item) => item.kind)).toEqual([
+    "user",
+    "tool-call",
+    "assistant",
+  ]);
+  expect(restored.items.every((item) => item.seq > 0)).toBe(true);
+
+  // 同一轮的运行期事件流经同一 applySessionEvent 入口，产出同形状段序列
+  const userMessage = history[0]?.message;
+  const toolCallRecord = history[1]?.call;
+  const assistantMessage = history[2]?.message;
+  if (
+    userMessage?.role !== "user" ||
+    toolCallRecord === undefined ||
+    assistantMessage?.role !== "assistant"
+  ) {
+    throw new Error("测试历史构造不完整");
+  }
+  const liveEvents: Parameters<typeof applySessionEvent>[1][] = [
+    { type: "user-message", message: userMessage },
+    { type: "tool-call", call: { ...toolCallRecord, output: "" } },
+    { type: "tool-result", call: toolCallRecord },
+    { type: "assistant-done", message: assistantMessage },
+  ];
+  const live = liveEvents.reduce(
+    (items, event) => applySessionEvent(items, event),
+    [] as ReturnType<typeof applySessionEvent>
+  );
+  expect(live.map((item) => item.kind)).toEqual(
+    restored.items.map((item) => item.kind)
+  );
+  expect(live.map((item) => item.turnId)).toEqual(
+    restored.items.map((item) => item.turnId)
+  );
 });

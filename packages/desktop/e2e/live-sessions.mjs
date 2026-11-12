@@ -222,10 +222,39 @@ async function main() {
       .filter({ hasText: "失败" })
       .waitFor();
     await a.click();
+    // 消息段时序（消息流票 01）：工具调用之后产生的正文独立成段、显示在
+    // 工具卡之后（不再合并回靠前气泡）；中断切回不丢内容，两段正文共同
+    // 构成完整回复
     await window
       .getByTestId("message-assistant")
-      .filter({ hasText: "项目A前半段。后台第二段。A问答之后" })
+      .filter({ hasText: "项目A前半段。后台第二段。" })
       .waitFor();
+    const finalSegment = window
+      .getByTestId("message-assistant")
+      .filter({ hasText: "A问答之后" });
+    await finalSegment.waitFor();
+    const earlyText = await window
+      .getByTestId("message-assistant")
+      .filter({ hasText: "项目A前半段。后台第二段。" })
+      .textContent();
+    assert(
+      earlyText !== null && !earlyText.includes("A问答之后"),
+      "工具卡之后的正文不应合并回靠前气泡"
+    );
+    const order = await window.evaluate(() => {
+      const stream = document.querySelector('[data-testid="message-stream"]');
+      return [...stream.querySelectorAll("ol > li")].map((li) =>
+        li.hasAttribute("data-testid")
+          ? li.dataset.testid
+          : (li.querySelector("[data-testid]")?.dataset.testid ?? null)
+      );
+    });
+    const lastAssistant = order.lastIndexOf("message-assistant");
+    const lastTool = order.lastIndexOf("tool-call-card");
+    assert(
+      lastTool > 0 && lastAssistant > lastTool,
+      `末段正文应显示在全部工具卡之后：${JSON.stringify(order)}`
+    );
     assert(
       (await window.getByTestId("tool-call-card").count()) === 2,
       "审批与问答工具结果无丢失无重复"

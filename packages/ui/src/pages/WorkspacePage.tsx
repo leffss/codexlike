@@ -47,7 +47,11 @@ import {
   SESSION_CONTENT_WIDTH_CLASS,
   SESSION_EMPTY_WIDTH_CLASS,
 } from "../lib/content-width";
-import { mergeInteractions, type UiItem } from "../lib/session-view";
+import {
+  appendLocalSegment,
+  mergeInteractions,
+  type MessageSegment,
+} from "../lib/session-view";
 import {
   formatSessionStatus,
   matchProfilesForModelSwitch,
@@ -83,7 +87,7 @@ export function WorkspacePage(props: {
   const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<UiItem[]>([]);
+  const [messages, setMessages] = useState<MessageSegment[]>([]);
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
@@ -187,14 +191,9 @@ export function WorkspacePage(props: {
 
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        role: "status",
-        content,
-      },
-    ]);
+    setMessages((prev) =>
+      appendLocalSegment(prev, { kind: "status", content })
+    );
   }, []);
 
   /**
@@ -275,13 +274,12 @@ export function WorkspacePage(props: {
           .then(() => refreshSessions());
       } catch (error) {
         if (!isCurrent()) return;
-        setMessages([
-          {
-            id: `load-${request}`,
-            role: "error",
+        setMessages(
+          appendLocalSegment([], {
+            kind: "error",
             content: `读取会话失败：${error instanceof Error ? error.message : String(error)}`,
-          },
-        ]);
+          })
+        );
       } finally {
         if (isCurrent()) {
           loadingRef.current = null;
@@ -354,9 +352,7 @@ export function WorkspacePage(props: {
           // 本地 /status 反馈不属于宿主历史，接续时保留。
           setMessages((prev) => [
             ...live.items,
-            ...prev.filter(
-              (item) => item.kind === undefined && item.role === "status"
-            ),
+            ...prev.filter((item) => item.kind === "status"),
           ]);
           setStreaming(live.activity.running);
           setCompacting(
@@ -535,14 +531,12 @@ export function WorkspacePage(props: {
       if (currentIdRef.current !== currentId) return;
       setStreaming(false);
       void refreshResources(currentId);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          role: "error",
+      setMessages((prev) =>
+        appendLocalSegment(prev, {
+          kind: "error",
           content: `发送失败：${error instanceof Error ? error.message : String(error)}`,
-        },
-      ]);
+        })
+      );
     }
   }
 

@@ -4,14 +4,14 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import { markdownComponents } from "../lib/markdown";
-import type { UiSubagent } from "../lib/session-view";
+import type { SubagentSegment } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 
 /**
  * 子代理嵌套卡片（工单 13，GLOSSARY「子代理」）：
  * 排队（并发上限等待）→ 运行中（当前活动工具 + 已用时）→ 完成（最终报告可展开）。
  */
-export function SubagentCard(props: { subagent: UiSubagent }) {
+export function SubagentCard(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
   const [expanded, setExpanded] = useState(subagent.state === "done");
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -174,7 +174,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
 }
 
 /** 已用时（运行中实时刷新；恢复的卡片无 startedAt 则不显示数字） */
-function formatElapsed(subagent: UiSubagent, now: number): string {
+function formatElapsed(subagent: SubagentSegment, now: number): string {
   if (subagent.startedAt === null) {
     return "";
   }

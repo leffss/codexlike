@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
-import type { UiToolCall } from '../lib/session-view';
-import { summarizeToolCall } from '../lib/tool-summary';
+import type { ToolCallSegment } from "../lib/session-view";
+import { summarizeToolCall } from "../lib/tool-summary";
 
 /** 截图卡片的图片展示：展开时经主进程按 会话+调用 id 读取文件（dataURL） */
-function ScreenshotView(props: { call: UiToolCall }) {
+function ScreenshotView(props: { call: ToolCallSegment }) {
   const { call } = props;
   const [image, setImage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -50,27 +50,25 @@ function ScreenshotView(props: { call: UiToolCall }) {
     );
   }
   return failed ? (
-    <p className="mt-1 text-xs text-fg-subtle">截图文件已不存在（可能在其它数据目录）</p>
+    <p className="mt-1 text-xs text-fg-subtle">
+      截图文件已不存在（可能在其它数据目录）
+    </p>
   ) : (
     <p className="mt-1 text-xs text-fg-subtle">截图加载中…</p>
   );
 }
 
 /** 工具卡片：折叠态显示工具名 + 参数摘要，展开显示完整参数与输出（spec 用户故事 7） */
-export function ToolCallCard(props: { call: UiToolCall }) {
+export function ToolCallCard(props: { call: ToolCallSegment }) {
   const { call } = props;
   const [expanded, setExpanded] = useState(false);
 
-  const statusLabel = call.running
-    ? '运行中'
-    : call.isError
-      ? '失败'
-      : '完成';
+  const statusLabel = call.running ? "运行中" : call.isError ? "失败" : "完成";
   const statusClass = call.running
-    ? 'text-warn-fg'
+    ? "text-warn-fg"
     : call.isError
-      ? 'text-danger-fg'
-      : 'text-ok-fg';
+      ? "text-danger-fg"
+      : "text-ok-fg";
 
   return (
     <li
@@ -92,13 +90,15 @@ export function ToolCallCard(props: { call: UiToolCall }) {
           {summarizeToolCall(call.toolName, call.arguments)}
         </span>
         <span className={`shrink-0 text-xs ${statusClass}`}>{statusLabel}</span>
-        <span className="shrink-0 text-fg-subtle">{expanded ? '▾' : '▸'}</span>
+        <span className="shrink-0 text-fg-subtle">{expanded ? "▾" : "▸"}</span>
       </button>
 
       {expanded && (
         <div className="border-t border-line px-3 py-2">
           <details className="group mb-2" open>
-            <summary className="cursor-pointer text-xs text-fg-subtle">参数</summary>
+            <summary className="cursor-pointer text-xs text-fg-subtle">
+              参数
+            </summary>
             <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-code-bg p-2 font-mono text-xs text-code-fg">
               {prettyJson(call.arguments)}
             </pre>
@@ -108,9 +108,9 @@ export function ToolCallCard(props: { call: UiToolCall }) {
             data-testid="tool-call-output"
             className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-code-bg p-2 font-mono text-xs text-code-fg"
           >
-            {call.output === '' && call.running ? '（执行中…）' : call.output}
+            {call.output === "" && call.running ? "（执行中…）" : call.output}
           </pre>
-          {call.toolName === 'browser_screenshot' && !call.running && (
+          {call.toolName === "browser_screenshot" && !call.running && (
             <ScreenshotView call={call} />
           )}
         </div>
