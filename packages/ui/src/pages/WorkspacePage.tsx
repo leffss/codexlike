@@ -43,6 +43,10 @@ import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
+import {
+  SESSION_CONTENT_WIDTH_CLASS,
+  SESSION_EMPTY_WIDTH_CLASS,
+} from "../lib/content-width";
 import { mergeInteractions, type UiItem } from "../lib/session-view";
 import {
   formatSessionStatus,
@@ -134,6 +138,15 @@ export function WorkspacePage(props: {
     currentId === null
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
+  /**
+   * 内容列宽度类单点选择（票 05 容器分档宽度）：空态（消息流为空且未在压缩）
+   * 固定 2xl 档，有内容走容器分档；下发给头部、消息流与输入区共用同一类，
+   * 保证三处左右缘对齐。
+   */
+  const contentWidthClass =
+    displayMessages.length === 0 && compacting !== true
+      ? SESSION_EMPTY_WIDTH_CLASS
+      : SESSION_CONTENT_WIDTH_CLASS;
 
   const listRequestRef = useRef(0);
   const refreshSessions = useCallback(async () => {
@@ -893,45 +906,55 @@ export function WorkspacePage(props: {
             );
         }}
       />
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b border-line px-4 py-2">
-          <span
-            data-testid="session-title"
-            className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
+      {/* 会话容器（票 05）：内容列宽度分档（@min-[864px]/session 等）以本栏为
+          断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
+          （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
+          不触发断点切换导致内容列跳宽 */}
+      <section className="@container/session flex min-w-0 flex-1 flex-col">
+        <header className="border-b border-line px-4 py-2">
+          {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
+          <div
+            data-testid="session-header-content"
+            className={`${contentWidthClass} flex items-center gap-2`}
           >
-            {current?.title ??
-              (draft
-                ? draft.projectId === null
-                  ? "新建独立会话"
-                  : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
-                : "未选择会话")}
-          </span>
-          <SessionSearch
-            recordsRevision={recordsRevision}
-            onSelect={(id) => void openSession(id)}
-          />
-          <button
-            type="button"
-            data-testid="resources-toggle"
-            disabled={currentId === null}
-            aria-expanded={resourcesOpen}
-            onClick={() => {
-              if (!resourcesOpen) refreshCurrentResources();
-              setResourcesOpen((prev) => !prev);
-            }}
-            className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-          >
-            规范与技能
-          </button>
-          <button
-            type="button"
-            data-testid="changes-toggle"
-            onClick={() => setChangesOpen((prev) => !prev)}
-            disabled={currentId === null}
-            className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-          >
-            {changesOpen ? "收起改动" : "改动"}
-          </button>
+            <span
+              data-testid="session-title"
+              className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
+            >
+              {current?.title ??
+                (draft
+                  ? draft.projectId === null
+                    ? "新建独立会话"
+                    : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
+                  : "未选择会话")}
+            </span>
+            <SessionSearch
+              recordsRevision={recordsRevision}
+              onSelect={(id) => void openSession(id)}
+            />
+            <button
+              type="button"
+              data-testid="resources-toggle"
+              disabled={currentId === null}
+              aria-expanded={resourcesOpen}
+              onClick={() => {
+                if (!resourcesOpen) refreshCurrentResources();
+                setResourcesOpen((prev) => !prev);
+              }}
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
+            >
+              规范与技能
+            </button>
+            <button
+              type="button"
+              data-testid="changes-toggle"
+              onClick={() => setChangesOpen((prev) => !prev)}
+              disabled={currentId === null}
+              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
+            >
+              {changesOpen ? "收起改动" : "改动"}
+            </button>
+          </div>
         </header>
         {(current || draft) && (
           <div className="border-b border-line px-4 py-2 text-xs text-fg-muted">
@@ -1038,6 +1061,7 @@ export function WorkspacePage(props: {
               }}
               items={displayMessages}
               compacting={compacting}
+              contentWidthClass={contentWidthClass}
               emptyHint={
                 profiles.length === 0 ? (
                   <button
@@ -1142,6 +1166,7 @@ export function WorkspacePage(props: {
                     : setSelectedProfileId(id)
                 }
                 onSend={handleSubmit}
+                contentWidthClass={contentWidthClass}
                 workspaceFiles={workspaceFiles}
                 skills={resources?.preview.catalog.skills}
                 onOpenSkills={refreshCurrentResources}
