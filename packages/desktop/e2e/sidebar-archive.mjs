@@ -258,12 +258,67 @@ async function main() {
     await create("独立A");
     await create("独立B");
 
-    // 同一真实项目下两条会话：非当前行显示层级，当前行保留最强高亮。
-    await select("项目次任务");
     const screenshotDir = mkdtempSync(
       join(tmpdir(), "codexlike-sidebar-screenshots-")
     );
-    console.log(`[e2e:sidebar] 层级截图目录 ${screenshotDir}`);
+    console.log(`[e2e:sidebar] 截图目录 ${screenshotDir}`);
+    async function assertSingleLineTitles() {
+      const layouts = await window
+        .getByTestId("session-row")
+        .evaluateAll((rows) =>
+          rows.map((row) => {
+            const label = row.querySelector('[data-testid="session-label"]');
+            const rect = label.getBoundingClientRect();
+            const box = row.getBoundingClientRect();
+            const neighbors = row.querySelectorAll(
+              '[data-testid="worktree-badge"], [data-testid="session-activity"], [data-testid="pin-button"]'
+            );
+            return {
+              width: rect.width,
+              height: box.height,
+              overflow: row.scrollWidth > row.clientWidth + 1,
+              overlap: [...neighbors].some(
+                (node) => rect.right > node.getBoundingClientRect().left + 1
+              ),
+              nowrap: getComputedStyle(label).whiteSpace === "nowrap",
+            };
+          })
+        );
+      for (const layout of layouts)
+        assert(
+          layout.width >= 120 &&
+            layout.height <= 34 &&
+            !layout.overflow &&
+            !layout.overlap &&
+            layout.nowrap,
+          `标题单行且不被图标遮挡：${JSON.stringify(layout)}`
+        );
+    }
+    const longTitle = "验证会话标题在侧栏单行中保留足够的可读空间";
+    await action("独立A", "rename-button");
+    await window.getByTestId("rename-input").fill(longTitle);
+    await window.getByTestId("rename-input").press("Enter");
+    await item(longTitle).waitFor();
+    const titleLayout = await item(longTitle).evaluate((node, title) => {
+      const label = [...node.querySelectorAll("span")].find(
+        (span) => span.textContent === title
+      );
+      const rect = label.getBoundingClientRect();
+      const row = node.closest('[data-testid="session-row"]');
+      return {
+        titleWidth: rect.width,
+        rowWidth: row.getBoundingClientRect().width,
+        rowHeight: row.getBoundingClientRect().height,
+      };
+    }, longTitle);
+    console.log("[e2e:sidebar] 长标题布局", titleLayout);
+    assert(
+      titleLayout.titleWidth >= titleLayout.rowWidth * 0.75,
+      `普通会话标题至少获得行宽的 75%：${JSON.stringify(titleLayout)}`
+    );
+    assert(titleLayout.rowHeight <= 34, "长标题保持单行高度");
+    // 同一真实项目下两条会话：非当前行显示层级，当前行保留最强高亮。
+    await select("项目次任务");
     for (const theme of ["light", "dark"]) {
       if (
         (await window.evaluate(
@@ -280,8 +335,29 @@ async function main() {
         path: join(screenshotDir, `sidebar-${theme}.png`),
       });
       await assertProjectHierarchy(window);
+      await assertSingleLineTitles();
     }
     await window.getByTestId("theme-toggle").click();
+    const originalSize = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].getSize()
+    );
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setSize(1000, 720)
+    );
+    await window.waitForFunction(() => innerWidth <= 1000);
+    await assertSingleLineTitles();
+    await window.screenshot({
+      path: join(screenshotDir, "sidebar-narrow.png"),
+    });
+    await app.evaluate(
+      ({ BrowserWindow }, size) =>
+        BrowserWindow.getAllWindows()[0].setSize(...size),
+      originalSize
+    );
+    await action(longTitle, "rename-button");
+    await window.getByTestId("rename-input").fill("独立A");
+    await window.getByTestId("rename-input").press("Enter");
+    await item("独立A").waitFor();
     await select("独立B");
 
     const aId = await item("独立A").getAttribute("data-session-id");
@@ -316,13 +392,14 @@ async function main() {
     );
 
     await neutral();
-    for (const time of await window.getByTestId("session-time").all()) {
-      assert(await time.isVisible(), "默认显示相对时间");
-      assert((await time.textContent()).trim().length > 0, "相对时间非空");
-      assert(
-        (await time.getAttribute("title")).startsWith("最近使用："),
-        "提供绝对时间提示"
-      );
+    assert(
+      (await window.getByTestId("session-time").count()) === 0,
+      "时间不占用标题行宽度"
+    );
+    for (const label of await window.getByTestId("session-label").all()) {
+      const tooltip = await label.getAttribute("title");
+      assert(tooltip.includes(await label.textContent()), "提示包含完整标题");
+      assert(tooltip.includes("最近使用："), "提示保留最近使用时间");
     }
     for (const pin of await window.getByTestId("pin-button").all())
       await assertAction(pin, false, "默认置顶不可见且不可命中");
@@ -354,18 +431,19 @@ async function main() {
       true,
       "仅悬浮行显示置顶"
     );
-    assert(
-      !(await row(aId).getByTestId("session-time").isVisible()),
-      "悬浮行隐藏时间"
-    );
+    const hoveredTitleWidth = (
+      await row(aId).getByTestId("session-label").boundingBox()
+    ).width;
     await assertAction(
       row(bId).getByTestId("pin-button"),
       false,
       "相邻行不跟随悬浮"
     );
     assert(
-      await row(bId).getByTestId("session-time").isVisible(),
-      "相邻行仍显示时间"
+      (
+        await row(bId).getByTestId("session-label").getAttribute("title")
+      ).includes("最近使用："),
+      "相邻行仍保留时间提示"
     );
     await assertAction(
       header.getByTestId("project-new-session"),
@@ -397,8 +475,11 @@ async function main() {
       "键盘焦点展示置顶"
     );
     assert(
-      !(await row(aId).getByTestId("session-time").isVisible()),
-      "键盘焦点隐藏时间"
+      Math.abs(
+        (await row(aId).getByTestId("session-label").boundingBox()).width -
+          hoveredTitleWidth
+      ) < 1,
+      "键盘焦点与悬停不改变标题宽度"
     );
     await window.getByTestId("project-group").focus();
     await assertAction(
@@ -602,6 +683,7 @@ async function main() {
     const archivedTimes = await timestamps();
     await select("独立A", true);
     await select("独立B", true);
+    await assertSingleLineTitles();
     assert(
       JSON.stringify(await order(group(), true)) ===
         JSON.stringify(archivedOrder),
@@ -638,6 +720,13 @@ async function main() {
 
     await hoverClick(window, row(aId).getByTestId("pin-button"), "置顶按钮");
     assert((await order(group()))[0] === aId, "置顶优先");
+    await neutral();
+    await assertAction(
+      row(aId).getByTestId("pin-button"),
+      true,
+      "已置顶图标默认常显且可取消"
+    );
+    await assertSingleLineTitles();
     await select("独立B");
     assert((await order(group()))[0] === aId, "查看其他会话不越过置顶");
     await hoverClick(window, row(aId).getByTestId("pin-button"), "置顶按钮");
@@ -723,6 +812,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("请求问答");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("interaction-panel").waitFor();
+    await assertSingleLineTitles();
     assert(
       (await records()).find((s) => s.title === "项目任务").lastUsedAt >
         usedBeforeSend,
@@ -820,7 +910,7 @@ async function main() {
     console.log("[e2e] 异步归档中重开菜单，目标行迁移后旧菜单立即失效通过");
 
     console.log(
-      "[e2e] 三类点击稳定排序、时间/计数悬浮与焦点、非当前菜单目标、键盘/边界/外部关闭、归档恢复重开及等待保护通过"
+      "[e2e] 单行标题宽度与窄窗布局、三类点击稳定排序、时间提示与操作悬浮及焦点、非当前菜单目标、键盘/边界/外部关闭、归档恢复重开及等待保护通过"
     );
   } finally {
     if (app) await closeApp(app);

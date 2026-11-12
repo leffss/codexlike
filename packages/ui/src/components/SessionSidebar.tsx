@@ -55,7 +55,7 @@ function FolderIcon(props: { open: boolean }) {
  * 左栏：独立会话分区与显式项目列表（ADR 0010）。
  * 项目组头不依赖会话存在；归属只看 projectId，绝不按目录自动聚合。
  * 组内活跃会话在上、「已归档」子折叠在下。
- * 会话行右侧显示用户最近使用时间；后台输出不改变顺序。
+ * 会话标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
  * 整理操作收进右键菜单，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
@@ -252,44 +252,66 @@ export function SessionSidebar(props: {
               className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 pr-1 text-left text-sm"
               onClick={() => props.onSelect(session.id)}
             >
-              {session.pinned && (
-                <span className="shrink-0 text-[10px] text-accent">置顶</span>
-              )}
-              <span className="truncate" title={session.workspacePath}>
+              <span
+                data-testid="session-label"
+                className="min-w-0 flex-1 truncate"
+                title={`${session.title}\n${relative} · ${absoluteTime}\n${session.workspacePath}`}
+              >
                 {session.title}
               </span>
-              <span className="ml-auto flex shrink-0 items-center gap-1">
-                {session.workspaceMode === "worktree" && (
-                  <span
-                    data-testid="worktree-badge"
-                    title={`托管 Worktree：${session.workspacePath}`}
-                    className="rounded bg-worktree-bg px-1 py-px text-[10px] text-worktree-fg"
+              {session.workspaceMode === "worktree" && (
+                <span
+                  data-testid="worktree-badge"
+                  title={`托管 Worktree：${session.workspacePath}`}
+                  aria-label="worktree"
+                  className="flex shrink-0 items-center text-worktree-fg"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    aria-hidden="true"
                   >
-                    worktree
-                  </span>
-                )}
-                <SessionActivityBadge session={session} />
-              </span>
+                    <circle cx="4" cy="3" r="1.5" />
+                    <circle cx="4" cy="13" r="1.5" />
+                    <circle cx="12" cy="3" r="1.5" />
+                    <path d="M4 4.5v7M12 4.5v1A3.5 3.5 0 0 1 8.5 9H4" />
+                  </svg>
+                  <span className="sr-only">worktree</span>
+                </span>
+              )}
+              <SessionActivityBadge session={session} compact />
             </button>
-            <span className="mr-1 grid w-14 shrink-0 items-center text-center">
-              <span
-                data-testid="session-time"
-                className="col-start-1 row-start-1 text-[10px] text-fg-subtle group-hover/session:invisible group-focus-within/session:invisible"
-                title={absoluteTime}
+            <button
+              type="button"
+              data-testid="pin-button"
+              aria-pressed={session.pinned ?? false}
+              aria-label={session.pinned ? "取消置顶" : "置顶会话"}
+              title={session.pinned ? "取消置顶" : "置顶会话"}
+              className={`mr-1 flex h-6 w-5 shrink-0 items-center justify-center rounded hover:text-accent ${
+                session.pinned
+                  ? "text-accent"
+                  : "pointer-events-none text-fg-muted opacity-0 group-hover/session:pointer-events-auto group-hover/session:opacity-100 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100"
+              }`}
+              onClick={() => props.onPin(session.id, !session.pinned)}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                {relative}
-              </span>
-              <button
-                type="button"
-                data-testid="pin-button"
-                aria-pressed={session.pinned ?? false}
-                title={session.pinned ? "取消置顶" : "置顶会话"}
-                className="pointer-events-none col-start-1 row-start-1 rounded px-1 py-0.5 text-[10px] text-fg-muted opacity-0 hover:text-accent group-hover/session:pointer-events-auto group-hover/session:opacity-100 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100"
-                onClick={() => props.onPin(session.id, !session.pinned)}
-              >
-                {session.pinned ? "取消置顶" : "置顶"}
-              </button>
-            </span>
+                <path d="m6 2 7 7-2 1-2-2-3 2-1-1 2-3-2-2 1-2ZM6 10l-4 4" />
+              </svg>
+            </button>
           </>
         )}
       </li>
