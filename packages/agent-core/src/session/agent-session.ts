@@ -47,6 +47,7 @@ import { describeModelError, isAbortLike } from "./errors";
 import type { SessionPersistence } from "./persistence";
 import {
   createSubagentOrchestrator,
+  SUBAGENT_DELEGATION_POLICY,
   SUBAGENT_TOOL_NAME,
   type SubagentOrchestrator,
   type SubagentsConfig,
@@ -480,13 +481,6 @@ export function createAgentSession(
         // 显式引用全部验证成功后才落库用户消息；正文只进入本轮 system，不污染历史。
         const explicitBody =
           execution?.loadExplicit(extractSkillNames(text)) ?? "";
-        const turnSystemPrompt = [
-          systemPrompt,
-          snapshot?.systemPrompt ?? "",
-          explicitBody,
-        ]
-          .filter(Boolean)
-          .join("\n\n");
         // 工具逐条消息解析（MCP 启停即时生效），资源工具重名必须显式拒绝。
         const toolsByName = new Map(
           resolveSessionTools().map((tool) => [tool.name, tool])
@@ -497,6 +491,17 @@ export function createAgentSession(
           }
           toolsByName.set(tool.name, tool);
         }
+        const turnSystemPrompt = [
+          systemPrompt,
+          snapshot?.systemPrompt ?? "",
+          explicitBody,
+          orchestrator !== null &&
+          toolsByName.get(SUBAGENT_TOOL_NAME) === orchestrator.tool
+            ? SUBAGENT_DELEGATION_POLICY
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
         const modelTools =
           toolsByName.size > 0
             ? toModelTools([...toolsByName.values()])
@@ -710,9 +715,10 @@ export function createAgentSession(
 
               if (
                 orchestrator !== null &&
-                call.toolName === SUBAGENT_TOOL_NAME
+                definition === orchestrator.tool &&
+                executed?.isError === false
               ) {
-                // 委派：占位结果先不落库不回填，本轮末以真实报告回填（见下）
+                // 仅已接受的委派延迟回填；即时失败保留原始错误，按普通结果落库与回填。
                 deferredDelegations.push({ base });
                 continue;
               }

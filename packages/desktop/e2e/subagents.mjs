@@ -1,8 +1,10 @@
 // E2E（工单 13）：spawn_subagent 子代理委派的真实应用冒烟。
 // 路径：建 Profile（本地 mock 按请求特征分流主/子两级）→ 设置页子代理配置区
 // （并发上限改为 2 保存）→ 建会话 → 委派调研 → 嵌套卡片运行→完成、报告可展开 →
-// 断言子代理请求独立上下文（含 task 不含主会话原文）且工具表无 spawn_subagent（防递归）
+// 断言主请求的 system 委派策略与 spawn_subagent 描述契约；子请求独立上下文
+// （含 task、不含主会话原文和主策略）且工具表无 spawn_subagent（防递归）
 // → 主模型第二轮收到报告（回流）→ 重启后嵌套卡片恢复（报告持久化）。
+// mock 固定返回委派调用，只验证提示与链路，不证明真实模型会自主选择委派。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:subagents（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +23,48 @@ import {
 const DELEGATE_TASK = "E2E委派调研任务标记";
 const REPORT_MARKER = "E2E子代理报告标记XYZ";
 const SUBAGENT_SYSTEM_MARK = "CodexLike 的子代理";
+const DELEGATION_POLICY_HEADING = "## 子代理委派策略";
+const MAIN_TASK = "委派调研一下测试入口";
+const DELEGATE_CALL_ID = "call-delegate-1";
+
+// 只提取指定角色的正文，避免工具描述或历史引用碰巧包含标记而误判请求身份。
+function messageText(message) {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  return message.content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function roleText(request, role) {
+  return request.messages
+    .filter((message) => message.role === role)
+    .map(messageText)
+    .join("\n");
+}
+
+function isSubagentRequest(request) {
+  return roleText(request, "system").includes(SUBAGENT_SYSTEM_MARK);
+}
+
+function isMainRequest(request) {
+  return (
+    !isSubagentRequest(request) &&
+    request.messages.some(
+      (message) => message.role === "user" && messageText(message) === MAIN_TASK
+    )
+  );
+}
+
+function hasDelegateReport(request) {
+  return request.messages.some(
+    (message) =>
+      message.role === "tool" &&
+      message.tool_call_id === DELEGATE_CALL_ID &&
+      messageText(message).includes(REPORT_MARKER)
+  );
+}
 
 /**
  * 场景脚本（按请求特征分流三级）：
@@ -32,19 +76,20 @@ const SUBAGENT_SYSTEM_MARK = "CodexLike 的子代理";
 async function main() {
   const { server, port, seenBodies } = await startMockProvider(
     (ctx, { body }) => {
+      const request = JSON.parse(body);
       // 子代理请求：独立上下文（system 为子代理固定指令）
-      if (body.includes(SUBAGENT_SYSTEM_MARK)) {
+      if (isSubagentRequest(request)) {
         ctx.textRound(`${REPORT_MARKER}：调研完成，共 3 个入口。`);
         return;
       }
-      // 主会话第二轮：报告已作为工具结果回填（优先判断——第二轮请求含全部历史原文）
-      if (body.includes(REPORT_MARKER)) {
+      // 主会话第二轮：报告已作为对应调用的工具结果回填。
+      if (isMainRequest(request) && hasDelegateReport(request)) {
         ctx.textRound("子代理的报告已汇总。");
         return;
       }
       // 主会话第一轮：发起 spawn_subagent 委派
-      if (body.includes("委派调研一下测试入口")) {
-        ctx.toolCallRound("call-delegate-1", "spawn_subagent", {
+      if (isMainRequest(request)) {
+        ctx.toolCallRound(DELEGATE_CALL_ID, "spawn_subagent", {
           task: DELEGATE_TASK,
         });
         return;
@@ -92,7 +137,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
     const composer = window.getByTestId("composer-input");
-    await composer.fill("委派调研一下测试入口");
+    await composer.fill(MAIN_TASK);
     await composer.press("Enter");
 
     // 4) 嵌套卡片：委派后子代理建卡（运行中窗口短，attach 即证明建卡）→
@@ -118,38 +163,88 @@ async function main() {
     );
     console.log("[e2e] 嵌套卡片完成，最终报告可见");
 
-    // 5) 子代理请求：独立上下文（含 task、不含主会话原文）+ 工具表无 spawn_subagent
-    const subagentBody = seenBodies.find((body) =>
-      body.includes(SUBAGENT_SYSTEM_MARK)
+    // 5) 解析真实 HTTP body：请求身份不依赖待验证的策略标题或工具存在性。
+    const requests = seenBodies.map((body) => JSON.parse(body));
+    const mainRequests = requests.filter(isMainRequest);
+    const mainFirstRound = mainRequests.find(
+      (request) => !request.messages.some((message) => message.role === "tool")
     );
+    assert(mainFirstRound !== undefined, "未观察到主模型首轮请求");
+    for (const request of mainRequests) {
+      assert(
+        roleText(request, "system").includes(DELEGATION_POLICY_HEADING),
+        "主模型 system 未携带子代理委派策略"
+      );
+      const spawnTool = request.tools?.find(
+        (tool) =>
+          tool.type === "function" && tool.function?.name === "spawn_subagent"
+      );
+      assert(spawnTool !== undefined, "主模型工具表缺少 spawn_subagent");
+      const description = spawnTool.function.description;
+      assert(typeof description === "string", "spawn_subagent 缺少工具描述");
+      // 锁定语义关键词而非整段提示全文；不从 system 或其他工具借词满足契约。
+      const contracts = [
+        ["主动委派复杂任务", [/主动.{0,15}委派/s, /复杂|多模块|跨模块/]],
+        [
+          "同一响应多个调用并行",
+          [/同一(?:个|次|条)?(?:响应|回复).{0,40}(?:多个|多次).{0,40}并行/s],
+        ],
+        ["简单单点任务直接做", [/简单|单点/, /直接/]],
+        [
+          "避免重复调查",
+          [
+            /(?:不要|避免|不应|不再|不得|不).{0,30}重复.{0,30}(?:调查|调研|搜索)/s,
+          ],
+        ],
+      ];
+      for (const [contract, patterns] of contracts) {
+        assert(
+          patterns.every((pattern) => pattern.test(description)),
+          `spawn_subagent 描述缺少契约「${contract}」：${description}`
+        );
+      }
+    }
+    console.log("[e2e] 主请求 system 委派策略 + spawn_subagent 描述契约");
+
+    const subagentRequests = requests.filter(isSubagentRequest);
     assert(
-      subagentBody !== undefined,
+      subagentRequests.length > 0,
       "未观察到子代理模型请求（独立上下文未发生）"
     );
-    assert(
-      subagentBody.includes(DELEGATE_TASK) === true,
-      "子代理请求未携带任务描述"
+    for (const request of subagentRequests) {
+      assert(
+        roleText(request, "user").includes(DELEGATE_TASK),
+        "子代理请求未携带任务描述"
+      );
+      assert(
+        request.messages.every(
+          (message) => !messageText(message).includes(MAIN_TASK)
+        ),
+        "子代理请求不应包含主会话历史"
+      );
+      assert(
+        !roleText(request, "system").includes(DELEGATION_POLICY_HEADING),
+        "子代理 system 不应包含主模型委派策略"
+      );
+      // 子代理 system 本身会提及 spawn_subagent；只检查实际 tools[].function.name。
+      const toolNames = (request.tools ?? [])
+        .filter((tool) => tool.type === "function")
+        .map((tool) => tool.function.name);
+      assert(
+        !toolNames.includes("spawn_subagent"),
+        "子代理工具表不应含 spawn_subagent（防递归）"
+      );
+      assert(
+        toolNames.includes("read_file"),
+        "子代理工具表应含完整工具集（read_file 对照）"
+      );
+    }
+    console.log(
+      "[e2e] 子代理独立上下文 + 主策略隔离 + 防递归（真实请求体验证）"
     );
-    assert(
-      subagentBody.includes("委派调研一下测试入口") === false,
-      "子代理请求不应包含主会话历史"
-    );
-    // 工具表断言按 tools[].function.name 精确匹配（system 提示文本本身含 spawn_subagent 字样）
-    assert(
-      subagentBody.includes('"name":"spawn_subagent"') === false,
-      "子代理工具表不应含 spawn_subagent（防递归）"
-    );
-    assert(
-      subagentBody.includes('"name":"read_file"') === true,
-      "子代理工具表应含完整工具集（read_file 对照）"
-    );
-    console.log("[e2e] 子代理独立上下文 + 防递归（真实请求体验证）");
 
-    // 6) 主模型第二轮：报告作为工具结果回流主会话上下文
-    const mainSecondRound = seenBodies.find(
-      (body) =>
-        body.includes(REPORT_MARKER) && !body.includes(SUBAGENT_SYSTEM_MARK)
-    );
+    // 6) 主模型第二轮：报告作为对应 spawn 调用的工具结果回流主会话上下文。
+    const mainSecondRound = mainRequests.find(hasDelegateReport);
     assert(
       mainSecondRound !== undefined,
       "主模型第二轮未收到子代理报告（回流失败）"

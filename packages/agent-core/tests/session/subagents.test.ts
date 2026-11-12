@@ -160,6 +160,7 @@ interface SubagentHarnessOptions {
   /** 审批模式 */
   approvalMode?: SessionRecord["approvalMode"];
   resources?: () => AgentResourceSnapshot;
+  systemPrompt?: string;
   subTools?: ToolDefinition[];
 }
 
@@ -185,6 +186,7 @@ function makeSubagentSession(options: SubagentHarnessOptions) {
     languageModelFor: (p) => (p.id === subProfile.id ? subModel : mainModel),
     tools: createBuiltinTools(),
     resources: options.resources,
+    systemPrompt: options.systemPrompt,
     subagents: {
       // 子代理可用工具：内置六件（实现侧必须剔除 spawn_subagent 防递归）
       tools: options.subTools ?? createBuiltinTools(),
@@ -198,6 +200,134 @@ function makeSubagentSession(options: SubagentHarnessOptions) {
 }
 
 describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
+  it("内置委派工具启用时仅主模型获得策略，保留原提示与资源且多用户轮不累积", async () => {
+    const { session, mainModel, subModel, persistence } = makeSubagentSession({
+      workspacePath: "C:/work/demo",
+      systemPrompt: "原宿主系统提示",
+      resources: () =>
+        fakeResourceSnapshot("AGENTS.md：共享规范；技能目录 alpha/beta"),
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "policy-delegate",
+              toolName: "spawn_subagent",
+              input: { task: "独立检查测试边界" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+    });
+    await collect(session.sendMessage({ text: "$alpha 检查", profile }));
+    await collect(session.sendMessage({ text: "继续", profile }));
+
+    expect(mainModel.doStreamCalls).toHaveLength(3);
+    for (const request of mainModel.doStreamCalls) {
+      const system = request.prompt.filter(
+        (message) => message.role === "system"
+      );
+      const prompt = JSON.stringify(request.prompt);
+      expect(JSON.stringify(system)).toContain("## 子代理委派策略");
+      expect(prompt.match(/## 子代理委派策略/g)).toHaveLength(1);
+      expect(prompt).toContain("原宿主系统提示");
+      expect(prompt).toContain("AGENTS.md：共享规范；技能目录 alpha/beta");
+      expect(request.tools?.map((tool) => tool.name)).toContain(
+        "spawn_subagent"
+      );
+    }
+    expect(JSON.stringify(mainModel.doStreamCalls[0]?.prompt)).toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(JSON.stringify(mainModel.doStreamCalls[1]?.prompt)).toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(JSON.stringify(mainModel.doStreamCalls[2]?.prompt)).not.toContain(
+      "ALPHA_PRIVATE_BODY"
+    );
+    expect(subModel.doStreamCalls).toHaveLength(1);
+    const child = subModel.doStreamCalls[0]!;
+    expect(JSON.stringify(child.prompt)).toContain("你是 CodexLike 的子代理");
+    expect(JSON.stringify(child.prompt)).toContain(
+      "AGENTS.md：共享规范；技能目录 alpha/beta"
+    );
+    expect(JSON.stringify(child.prompt)).not.toContain("## 子代理委派策略");
+    expect(JSON.stringify(child.prompt)).not.toContain("原宿主系统提示");
+    expect(JSON.stringify(child.prompt)).not.toContain("ALPHA_PRIVATE_BODY");
+    expect(child.tools?.map((tool) => tool.name)).not.toContain(
+      "spawn_subagent"
+    );
+    expect(JSON.stringify(persistence.listMessages("session-1"))).not.toContain(
+      "## 子代理委派策略"
+    );
+    persistence.close();
+  });
+
+  it.each([false, true])(
+    "未配置编排器时不注入策略（宿主同名工具：%s）",
+    async (sameNameTool) => {
+      const persistence = createSqliteSessionStore(":memory:");
+      const record = sessionRecord("C:/work/demo");
+      persistence.insertSession(record);
+      const model = scriptedModel([{ kind: "text", deltas: ["直接回答"] }]);
+      const session = createAgentSession({
+        record,
+        persistence,
+        languageModelFor: () => model,
+        tools: sameNameTool
+          ? [
+              {
+                name: "spawn_subagent",
+                description: "宿主自定义工具，不是内置编排器",
+                parameters: { type: "object", properties: {} },
+                permission: "readonly",
+                async execute() {
+                  return { output: "宿主工具结果", isError: false };
+                },
+              },
+            ]
+          : [],
+      });
+      await collect(session.sendMessage({ text: "你好", profile }));
+      const request = model.doStreamCalls[0]!;
+      expect(
+        request.prompt.filter((message) => message.role === "system")
+      ).toEqual([]);
+      expect(JSON.stringify(request.prompt)).not.toContain("## 子代理委派策略");
+      expect(
+        request.tools?.some((tool) => tool.name === "spawn_subagent")
+      ).toBe(sameNameTool);
+      persistence.close();
+    }
+  );
+
+  it("模型收到的委派工具描述明确适用边界、同轮并行、交付约束和失败回退", async () => {
+    const { session, mainModel, persistence } = makeSubagentSession({
+      workspacePath: "C:/work/demo",
+      main: [{ kind: "text", deltas: ["收到"] }],
+    });
+    await collect(session.sendMessage({ text: "你好", profile }));
+    const tool = mainModel.doStreamCalls[0]?.tools?.find(
+      (tool) => tool.name === "spawn_subagent"
+    );
+    const description =
+      tool?.type === "function" ? tool.description : undefined;
+    expect(description).toContain("复杂多步骤");
+    expect(description).toContain("跨多文件探索优先委派");
+    expect(description).toContain("单点已知查询和小修改直接做");
+    expect(description).toContain("同一响应");
+    expect(description).toContain("依赖");
+    expect(description).toContain("不重复已委派的调查");
+    expect(description).toContain("目标、范围、线索、约束与期望输出");
+    expect(description).toContain("独占文件");
+    expect(description).toContain("不得越权");
+    expect(description).toContain("轮末等待");
+    expect(description).toContain("不是真异步");
+    expect(description).toContain("失败时诚实");
+    persistence.close();
+  });
+
   it("子代理继承本轮规范与目录，正文隔离且任务中的美元引用不自动激活", async () => {
     const { session, mainModel, subModel, persistence } = makeSubagentSession({
       workspacePath: "C:/work/demo",
@@ -800,6 +930,121 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(delegation?.call.output).toContain("写入被用户拒绝");
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
+
+  it.each([false, true])(
+    "空白 task 原始错误进入事件、存储和下一模型轮，修正可成功（同轮有效委派：%s）",
+    async (mixed) => {
+      const { session, mainModel, subModel, persistence } = makeSubagentSession(
+        {
+          workspacePath: "C:/work/demo",
+          main: [
+            {
+              kind: "tool",
+              calls: [
+                ...(mixed
+                  ? [
+                      {
+                        toolCallId: "valid",
+                        toolName: "spawn_subagent",
+                        input: { task: "独立有效任务" },
+                      },
+                    ]
+                  : []),
+                {
+                  toolCallId: "invalid",
+                  toolName: "spawn_subagent",
+                  input: { task: "   " },
+                },
+              ],
+            },
+            {
+              kind: "tool",
+              calls: [
+                {
+                  toolCallId: "corrected",
+                  toolName: "spawn_subagent",
+                  input: { task: "补充完整的修正任务" },
+                },
+              ],
+            },
+            { kind: "text", deltas: ["已收到修正任务报告"] },
+          ],
+          sub: [
+            ...(mixed
+              ? [{ kind: "text" as const, deltas: ["独立有效报告"] }]
+              : []),
+            { kind: "text", deltas: ["修正任务报告"] },
+          ],
+        }
+      );
+      const events = await collect(
+        session.sendMessage({ text: "检查任务", profile })
+      );
+      const error =
+        "工具 spawn_subagent 执行失败：task 必须是非空字符串的任务描述";
+      const expected = [
+        { id: "invalid", output: error, isError: true },
+        { id: "corrected", output: "修正任务报告", isError: false },
+        ...(mixed
+          ? [{ id: "valid", output: "独立有效报告", isError: false }]
+          : []),
+      ];
+      const results = events.flatMap((event) =>
+        event.type === "tool-result" ? [event.call] : []
+      );
+      const stored = persistence.listToolCalls("session-1");
+      expect(results).toHaveLength(expected.length);
+      expect(stored).toHaveLength(expected.length);
+      for (const result of expected) {
+        expect(results.find((call) => call.id === result.id)).toMatchObject(
+          result
+        );
+        expect(stored.find((call) => call.id === result.id)).toMatchObject(
+          result
+        );
+      }
+      expect(mainModel.doStreamCalls).toHaveLength(3);
+      const nextResults = mainModel.doStreamCalls[1]!.prompt.flatMap(
+        (message) => (message.role === "tool" ? message.content : [])
+      );
+      expect(nextResults).toHaveLength(mixed ? 2 : 1);
+      expect(nextResults).toContainEqual(
+        expect.objectContaining({
+          toolCallId: "invalid",
+          toolName: "spawn_subagent",
+          output: { type: "text", value: error },
+        })
+      );
+      if (mixed)
+        expect(nextResults).toContainEqual(
+          expect.objectContaining({
+            toolCallId: "valid",
+            output: { type: "text", value: "独立有效报告" },
+          })
+        );
+      const finalResults = mainModel.doStreamCalls[2]!.prompt.flatMap(
+        (message) => (message.role === "tool" ? message.content : [])
+      );
+      expect(finalResults).toContainEqual(
+        expect.objectContaining({
+          toolCallId: "corrected",
+          output: { type: "text", value: "修正任务报告" },
+        })
+      );
+      expect(subModel.doStreamCalls).toHaveLength(mixed ? 2 : 1);
+      expect(
+        events.filter((event) => event.type === "subagent-queued")
+      ).toHaveLength(mixed ? 2 : 1);
+      expect(
+        events.filter((event) => event.type === "subagent-start")
+      ).toHaveLength(mixed ? 2 : 1);
+      expect(
+        events.filter((event) => event.type === "subagent-report")
+      ).toHaveLength(mixed ? 2 : 1);
+      expect(events.at(-1)?.type).toBe("assistant-done");
+      persistence.close();
+    }
+  );
 
   it("子代理模型失败：失败原因回流为 isError 结果，主会话不崩并继续到最终回复", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
