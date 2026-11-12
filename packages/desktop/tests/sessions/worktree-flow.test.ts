@@ -20,6 +20,7 @@ import {
   createWorktreeService,
 } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
+import { listenMock } from "./mock-server";
 import { createProfileStore } from "../../src/profiles/profile-store";
 
 const { handlers } = vi.hoisted(() => ({
@@ -42,6 +43,9 @@ function invoke(name: string, ...args: unknown[]): any {
   if (!handler) throw new Error(`未注册通道 ${name}`);
   return handler({}, ...args);
 }
+// vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
+// 信号，预算对齐用例上限内（见 workbench-ipc.test.ts 同说明）。
+const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 function git(cwd: string, ...args: string[]) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
@@ -80,18 +84,16 @@ async function setup(hold = false) {
       );
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const mockPort = await listenMock(server);
   cleanups.push(() => {
     server.close();
     server.closeAllConnections();
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("端口未建立");
   await profiles.create({
     name: "Mock",
     model: "mock",
     apiKey: "test",
-    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   function register() {
     const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
@@ -128,7 +130,7 @@ async function setup(hold = false) {
   };
 }
 async function idle(id: string) {
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", id)).running).toBe(false)
   );
 }

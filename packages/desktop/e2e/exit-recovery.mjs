@@ -17,6 +17,7 @@ import {
   launchApp,
   projectAction,
   startMockProvider,
+  untilDraft,
 } from "./helpers.mjs";
 
 const questions = [
@@ -246,6 +247,7 @@ async function main() {
       const original = ipcMain._invokeHandlers.get("workbench:write");
       globalThis.exitWriteGate = {
         fail: true,
+        failed: false,
         hold: false,
         entered: false,
         release: null,
@@ -255,6 +257,7 @@ async function main() {
         const gate = globalThis.exitWriteGate;
         if (gate.fail) {
           gate.fail = false;
+          gate.failed = true;
           throw new Error("模拟磁盘写失败");
         }
         if (gate.hold && entry.value.text === "最后一笔立即退出输入") {
@@ -267,6 +270,13 @@ async function main() {
       });
     });
     await window.getByTestId("composer-input").fill("保存失败仍保留输入");
+    // fill 触发的草稿 write 与 quit 后保存屏障的 flush 赛跑：write 尚未排队
+    // 时 flush 会空跑成功并直接退出，exit-error 永不出现。等注入确定的
+    // failed 信号（失败已被消费、渲染侧 errors 已落账）再触发退出。
+    await until(
+      () => app.evaluate(() => globalThis.exitWriteGate.failed),
+      "写失败注入未被触发"
+    );
     await app.evaluate(({ app }) => {
       app.quit();
     });
@@ -332,11 +342,9 @@ async function main() {
         ) < 4,
       readingTop
     );
-    assert(
-      (await window.getByTestId("composer-input").inputValue()) ===
-        "最后一笔立即退出输入",
-      "退出前最后草稿已持久化"
-    );
+    // 草稿经异步 workbench 读取载入，滚动恢复完成不保证草稿已回填：
+    // 等待到达期望文本（确定信号）而非立即断言。
+    await untilDraft(window, "最后一笔立即退出输入", "退出前最后草稿已持久化");
     assert(
       (await window
         .getByTestId("thinking-effort-select")
@@ -344,17 +352,9 @@ async function main() {
       "设置重开恢复"
     );
     await projectAction(window);
-    assert(
-      (await window.getByTestId("composer-input").inputValue()) ===
-        "项目新建草稿",
-      "项目草稿恢复"
-    );
+    await untilDraft(window, "项目新建草稿", "项目草稿恢复");
     await window.getByTestId("new-session").click();
-    assert(
-      (await window.getByTestId("composer-input").inputValue()) ===
-        "独立新建草稿",
-      "独立草稿恢复"
-    );
+    await untilDraft(window, "独立新建草稿", "独立草稿恢复");
     await select(window, "独立问答");
     await window
       .getByTestId("saved-question-draft")

@@ -2,7 +2,8 @@
  * 本地 HTML fixture 服务（spec Testing Decisions：浏览器工具在本地 fixture 上验证行为，
  * 不依赖外网）。起一个随机端口的 http 服务，提供表单/长文/写 Cookie 三个页面。
  */
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server } from "node:http";
+import { listenSafePort } from "./safe-port";
 
 export interface FixtureServer {
   /** 服务根地址（如 http://127.0.0.1:34567） */
@@ -27,8 +28,12 @@ const FORM_HTML = `<!doctype html>
 
 /** 长文页：正文远超截断上限（browser_read 用；1200 段约 5 万字符） */
 function articleHtml(): string {
-  const paragraph = '这是一段用于验证正文提取与截断行为的填充文本，包含中英文 mix 内容 sample text。';
-  const body = Array.from({ length: 1200 }, (_, index) => `<p>${index} ${paragraph}</p>`).join('\n');
+  const paragraph =
+    "这是一段用于验证正文提取与截断行为的填充文本，包含中英文 mix 内容 sample text。";
+  const body = Array.from(
+    { length: 1200 },
+    (_, index) => `<p>${index} ${paragraph}</p>`
+  ).join("\n");
   return `<!doctype html>
 <html lang="zh">
 <head><meta charset="utf-8"><title>长文测试页</title></head>
@@ -44,41 +49,37 @@ function articleHtml(): string {
 
 export async function startFixtureServer(): Promise<FixtureServer> {
   const server: Server = createServer((request, response) => {
-    const url = request.url ?? '/';
-    if (url === '/form') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    const url = request.url ?? "/";
+    if (url === "/form") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(FORM_HTML);
       return;
     }
-    if (url === '/article') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    if (url === "/article") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(articleHtml());
       return;
     }
-    if (url === '/set-cookie') {
+    if (url === "/set-cookie") {
       response.writeHead(200, {
-        'content-type': 'text/html; charset=utf-8',
-        'set-cookie': 'fixture_sid=abc123; path=/',
+        "content-type": "text/html; charset=utf-8",
+        "set-cookie": "fixture_sid=abc123; path=/",
       });
-      response.end('<!doctype html><html><body>cookie 已写入</body></html>');
+      response.end("<!doctype html><html><body>cookie 已写入</body></html>");
       return;
     }
-    response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    response.end('not found');
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    response.end("not found");
   });
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve());
-  });
-  const address = server.address();
-  if (address === null || typeof address === 'string') {
-    throw new Error('fixture 服务启动失败：未获得监听地址');
-  }
+  const port = await listenSafePort(server);
   return {
-    origin: `http://127.0.0.1:${address.port}`,
+    origin: `http://127.0.0.1:${port}`,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.close((error) =>
+          error === undefined ? resolve() : reject(error)
+        );
       }),
   };
 }

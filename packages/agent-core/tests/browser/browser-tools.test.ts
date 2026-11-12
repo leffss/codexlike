@@ -13,6 +13,7 @@ import type {
   ToolExecutionContext,
 } from "../../src/tools/types";
 import { startFixtureServer, type FixtureServer } from "./fixture-server";
+import { listenSafePort } from "./safe-port";
 
 /**
  * 五件浏览器工具在本地 fixture 上的行为测试（真实 Chromium；spec：
@@ -124,12 +125,10 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
 
   it("navigate 到无法连接的地址返回明确错误，会话不崩（后续调用正常）", async () => {
     const navigate = byName().get("browser_navigate")!;
-    // 探测一个确定未监听的端口（连接拒绝而非被 Chromium 屏蔽的端口）
+    // 探测一个确定未监听的端口（连接拒绝而非被 Chromium 屏蔽的端口）；
+    // 分配到 bad port 会被 Chromium 报 ERR_UNSAFE_PORT，必须换安全端口。
     const probe = createServer();
-    await new Promise<void>((resolve) =>
-      probe.listen(0, "127.0.0.1", () => resolve())
-    );
-    const deadPort = (probe.address() as { port: number }).port;
+    const deadPort = await listenSafePort(probe);
     await new Promise<void>((resolve) => probe.close(() => resolve()));
     const result = await navigate.execute(
       { url: `http://127.0.0.1:${deadPort}/not-reachable` },

@@ -13,6 +13,7 @@ import {
   type SessionSearchResult,
 } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
+import { listenMock } from "./mock-server";
 import { createProfileStore } from "../../src/profiles/profile-store";
 
 const { handlers } = vi.hoisted(() => ({
@@ -35,6 +36,9 @@ async function invoke<T>(name: string, ...args: unknown[]): Promise<T> {
   if (!handler) throw new Error(`未注册通道 ${name}`);
   return handler({}, ...args) as T;
 }
+// vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
+// 信号，预算对齐用例上限内（见 workbench-ipc.test.ts 同说明）。
+const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 
 async function setup() {
   const root = mkdtempSync(join(tmpdir(), "session-search-"));
@@ -63,17 +67,15 @@ async function setup() {
       );
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const mockPort = await listenMock(server);
   cleanup.push(() => {
     server.close();
     server.closeAllConnections();
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("未监听端口");
   const profile = await profiles.create({
     name: "私密配置名称",
     apiKey: "sk-private-search-secret",
-    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
     model: "private-model-config",
   });
   function register() {
@@ -111,7 +113,7 @@ async function setup() {
         ...(projectId === null ? { workspacePath: firstPath } : {}),
         text,
       });
-      await vi.waitFor(async () =>
+      await waitFor(async () =>
         expect(await invoke("sessions:execution", session.id)).toMatchObject({
           running: false,
         })
@@ -190,7 +192,7 @@ it("归档默认排除且可选纳入；重命名、归档、恢复与新消息�
   await invoke("sessions:archive", session.id, false);
   expect(await invoke("sessions:search", "新标题")).toHaveLength(1);
   await invoke("sessions:send", session.id, "后续新增正文", app.profile.id);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(await invoke("sessions:execution", session.id)).toMatchObject({
       running: false,
     })

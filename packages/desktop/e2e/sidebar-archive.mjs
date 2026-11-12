@@ -8,9 +8,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   assert,
   closeApp,
+  hoverClick,
+  hoverFor,
   launchApp,
   projectAction,
   sessionMenu,
@@ -37,14 +40,19 @@ async function appearance(locator) {
     };
   });
 }
+// hover/focus 显隐由 :hover 样式重算驱动（帧时序不定），单次断言会在
+// 重算完成前读到旧态偶发失败；轮询至到达期望态（有界），到不了才报错。
 async function assertAction(locator, shown, message) {
-  const state = await appearance(locator);
-  assert(
-    shown
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const state = await appearance(locator);
+    const reached = shown
       ? state.opacity === 1 && state.pointerEvents !== "none" && state.hit
-      : state.opacity === 0 && state.pointerEvents === "none" && !state.hit,
-    `${message}：${JSON.stringify(state)}`
-  );
+      : state.opacity === 0 && state.pointerEvents === "none" && !state.hit;
+    if (reached) return;
+    assert(Date.now() < deadline, `${message}：${JSON.stringify(state)}`);
+    await delay(50);
+  }
 }
 
 // 用真实文字 Range 测量起点，避免按钮盒子包含箭头/图标时掩盖层级倒置。
@@ -341,7 +349,7 @@ async function main() {
       false,
       "默认隐藏项目移除"
     );
-    await item("独立A").hover();
+    await hoverFor(window, item("独立A"));
     await assertAction(
       row(aId).getByTestId("pin-button"),
       true,
@@ -365,7 +373,7 @@ async function main() {
       false,
       "行悬浮不展示项目操作"
     );
-    await header.hover();
+    await hoverFor(window, header);
     assert(
       !(await header.getByTestId("project-session-count").isVisible()),
       "仅项目头悬浮隐藏计数"
@@ -629,15 +637,11 @@ async function main() {
       "整理和菜单不改最近使用时间"
     );
 
-    await item("独立A").hover();
-    await item("独立A").focus();
-    await row(aId).getByTestId("pin-button").click();
+    await hoverClick(window, row(aId).getByTestId("pin-button"), "置顶按钮");
     assert((await order(group()))[0] === aId, "置顶优先");
     await select("独立B");
     assert((await order(group()))[0] === aId, "查看其他会话不越过置顶");
-    await item("独立A").hover();
-    await item("独立A").focus();
-    await row(aId).getByTestId("pin-button").click();
+    await hoverClick(window, row(aId).getByTestId("pin-button"), "置顶按钮");
     assert((await order(group()))[0] === bId, "取消置顶恢复最近发送顺序");
     await select("独立A");
     assert((await order(group()))[0] === bId, "查看旧会话不改变顺序");
@@ -734,8 +738,11 @@ async function main() {
     const waitingId = await window
       .getByTestId("interaction-panel")
       .getAttribute("data-interaction-id");
-    await item("项目任务").hover();
-    await item("项目任务").locator("..").getByTestId("pin-button").click();
+    await hoverClick(
+      window,
+      item("项目任务").locator("..").getByTestId("pin-button"),
+      "置顶按钮"
+    );
     await window.getByTestId("project-group").click();
     assert(
       (await window

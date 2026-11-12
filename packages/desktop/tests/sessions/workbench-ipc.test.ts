@@ -25,6 +25,7 @@ import {
 } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
+import { listenMock } from "./mock-server";
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -46,6 +47,13 @@ function invoke(name: string, ...args: unknown[]): any {
   if (!handler) throw new Error(`未注册通道 ${name}`);
   return handler({}, ...args);
 }
+/**
+ * vi.waitFor 默认预算 1000ms 远低于用例自身 5s 上限：并行全量跑时
+ * mock 一轮（HTTP/SSE + SQLite 落库 + 资源快照）偶发超 1s，等待条件
+ * 本身都是终态信号（running/messages/请求数），不存在靠更长轮询掩盖的
+ * 竞态——把预算对齐到用例上限之内，消除负载下的假超时。
+ */
+const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 function setup(now?: () => string, beforeResources?: () => void) {
   const root = mkdtempSync(join(tmpdir(), "workbench-ipc-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
@@ -178,18 +186,16 @@ async function provider(
       );
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const mockPort = await listenMock(server);
   cleanup.push(() => {
     server.close();
     server.closeAllConnections();
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("未监听端口");
   const profile = await app.profiles.create({
     name: "默认模型",
     model: "mock",
     apiKey: "test",
-    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   return { profile, requests: () => requests, bodies };
 }
@@ -221,7 +227,7 @@ it("首次发送才分配专用目录和会话；重复请求只执行一遍且�
     join(app.home, "sessions", first.id, "workspace")
   );
   expect(statSync(first.workspacePath).isDirectory()).toBe(true);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(
       (await invoke("sessions:messages", first.id)).filter(
         (item: any) => item.kind === "message"
@@ -251,7 +257,7 @@ it("首次发送才分配专用目录和会话；重复请求只执行一遍且�
     projectId: null,
     workspacePath: app.workspace,
   });
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(
       (await invoke("sessions:list")).every(
         (session: any) => session.status === "idle"
@@ -283,7 +289,7 @@ it("目录与首条消息建立失败可用同一草稿重试，无空会话且�
   expect(await invoke("sessions:list")).toEqual([]);
   expect(readdirSync(blocker)).toEqual([]);
   const record = await invoke("sessions:start", request);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", record.id)).running).toBe(false)
   );
   expect(await invoke("sessions:list")).toHaveLength(1);
@@ -317,7 +323,7 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
     projectId: null,
     text: "询问我",
   });
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(
       (await invoke("sessions:execution", session.id)).waitingForUser
     ).toBe(true)
@@ -343,7 +349,7 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
     state.executionId
   );
   expect(await invoke("sessions:interrupt", session.id)).toBe(true);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(await invoke("sessions:execution", session.id)).toMatchObject({
       executionId: null,
       running: false,
@@ -440,7 +446,7 @@ it("成功首次发送只消费同一意图，失败保留设置；迟到保存�
     ...request,
     text: "重试成功",
   });
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", session.id)).running).toBe(false)
   );
   expect(
@@ -480,7 +486,7 @@ it("首条消息接受后不再解密默认配置，成功重试不重放且新�
     text: "首个意图",
   };
   const first = await invoke("sessions:start", request);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", first.id).running).toBe(false)
   );
   expect((await invoke("sessions:start", request)).id).toBe(first.id);
@@ -501,7 +507,7 @@ it("首条消息接受后不再解密默认配置，成功重试不重放且新�
     projectId: null,
     text: "全新任务",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", second.id).running).toBe(false)
   );
   expect(second.id).not.toBe(first.id);
@@ -537,7 +543,7 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
       "injected consume disk failure"
     );
     const [first] = invoke("sessions:list");
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", first.id).running).toBe(false)
     );
     expect((await invoke("workbench:read", target)).value).toEqual(value);
@@ -560,7 +566,7 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
       projectId: null,
       text: "补偿后新任务",
     });
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", second.id).running).toBe(false)
     );
     expect(second.id).not.toBe(first.id);
@@ -601,7 +607,7 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
     fault.close();
   }
   const [first] = invoke("sessions:list");
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", first.id).running).toBe(false)
   );
   invoke("workbench:write", target, {
@@ -624,7 +630,7 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
     projectId: null,
     text: next.value.text,
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", second.id).running).toBe(false)
   );
   expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
@@ -641,7 +647,7 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
     projectId: null,
     text: "询问",
   });
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(
       (await invoke("sessions:pending-interactions", session.id)).length
     ).toBe(1)
@@ -687,7 +693,7 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
     })
   ).toThrow("问答");
   await invoke("sessions:interrupt", session.id);
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", session.id)).running).toBe(false)
   );
   app.reopen();
@@ -715,7 +721,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     projectId: null,
     text: "将被压缩的问答轮次",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(1)
   );
   const [interaction] = invoke("sessions:pending-interactions", session.id);
@@ -734,7 +740,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     value: { ...original.value, questionDrafts },
   });
   invoke("sessions:interrupt", session.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   for (let round = 0; round < 4; round++) {
@@ -744,7 +750,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
       `后续任务${round}`,
       model.profile.id
     );
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", session.id).running).toBe(false)
     );
   }
@@ -784,7 +790,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     projectId: null,
     text: "另一会话",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", other.id).running).toBe(false)
   );
   for (const invalidDrafts of [
@@ -803,7 +809,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     ).toThrow("问答草稿与会话请求不匹配");
   }
   await invoke("sessions:send", session.id, "压缩后编辑", model.profile.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   expect(model.bodies.at(-1).messages.at(-1).content).toBe("压缩后编辑");
@@ -824,7 +830,7 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
     text: "第一轮",
     thinkingEffort: "high",
   });
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect(
       (await invoke("sessions:pending-interactions", session.id)).length
     ).toBe(1)
@@ -862,7 +868,7 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
       ],
     }
   );
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", session.id)).running).toBe(false)
   );
   expect(
@@ -872,7 +878,7 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
     ["mock", "high"],
   ]);
   await invoke("sessions:send", session.id, "第二轮");
-  await vi.waitFor(async () =>
+  await waitFor(async () =>
     expect((await invoke("sessions:execution", session.id)).running).toBe(false)
   );
   expect(model.bodies[2]).toMatchObject({
@@ -911,12 +917,12 @@ it("执行已占位但Core尚未更新状态时，过时的idle列表也不能�
     projectId: null,
     text: "初始",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   sessionId = record.id;
   await invoke("sessions:send", sessionId, "开始另一轮", model.profile.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", sessionId).running).toBe(false)
   );
   expect(checked).toBe(true);
@@ -931,7 +937,7 @@ it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍�
     projectId: null,
     text: "初始任务",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   const history = invoke("sessions:messages", session.id);
@@ -963,7 +969,7 @@ it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍�
   expect(model.requests()).toBe(1);
   expect(invoke("sessions:archive", session.id, false).archivedAt).toBeNull();
   await invoke("sessions:send", session.id, "恢复后继续", model.profile.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   expect(model.requests()).toBe(2);
@@ -979,7 +985,7 @@ it("独立与项目会话按用户使用排序、置顶优先，重开保留整�
     projectId: project.id,
     text: "项目历史",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", a.id).running).toBe(false)
   );
   clock = "2026-11-11T02:00:00.000Z";
@@ -989,7 +995,7 @@ it("独立与项目会话按用户使用排序、置顶优先，重开保留整�
     workspacePath: app.workspace,
     text: "同目录独立历史",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", b.id).running).toBe(false)
   );
   const ids = () => invoke("sessions:list").map((s: any) => s.id);
@@ -1044,7 +1050,7 @@ it("发送登记最近使用，后台增量与完成不抢走后来查看的会�
     projectId: null,
     text: "A",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", a.id).running).toBe(false)
   );
   clock = "2026-11-11T02:00:00.000Z";
@@ -1053,14 +1059,14 @@ it("发送登记最近使用，后台增量与完成不抢走后来查看的会�
     projectId: null,
     text: "B",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", b.id).running).toBe(false)
   );
   clock = "2026-11-11T03:00:00.000Z";
   await invoke("sessions:send", a.id, "后台工作", model.profile.id);
   try {
     expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([a.id, b.id]);
-    await vi.waitFor(() => expect(model.requests()).toBe(3));
+    await waitFor(() => expect(model.requests()).toBe(3));
     expect(() => invoke("sessions:archive", a.id, true)).toThrow("先停止");
     clock = "2026-11-11T04:00:00.000Z";
     invoke("sessions:mark-used", b.id);
@@ -1068,7 +1074,7 @@ it("发送登记最近使用，后台增量与完成不抢走后来查看的会�
   } finally {
     clock = "2026-11-11T05:00:00.000Z";
     finish();
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", a.id).running).toBe(false)
     );
   }
@@ -1100,7 +1106,7 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
     workspaceOriginPath: app.workspace,
   }).record;
   await invoke("sessions:send", session.id, "保留隔离成果", model.profile.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   const marker = join(worktree.path, "keep.txt");
@@ -1135,7 +1141,7 @@ it("会话移入与移出只改变显式归属，SQLite重开后目录历史与�
     text: "独立历史",
     approvalMode: "assist",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   invoke("sessions:set-pinned", record.id, true);
@@ -1179,7 +1185,7 @@ it("确认移除仅删除显式所属含归档记录，清除现场与首次发�
     projectId: project.id,
     text: "归档历史",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(
       invoke("sessions:list").every(
         (s: any) => !invoke("sessions:execution", s.id).running
@@ -1223,7 +1229,7 @@ it("确认移除仅删除显式所属含归档记录，清除现场与首次发�
     "独立仍可执行",
     model.profile.id
   );
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", standalone.id).running).toBe(false)
   );
   expect(model.requests()).toBe(4);
@@ -1268,7 +1274,7 @@ it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删�
     workspaceMode: "worktree",
     text: "所属隔离成果",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(
       invoke("sessions:list").every(
         (s: any) => !invoke("sessions:execution", s.id).running
@@ -1390,7 +1396,7 @@ it("等待问答或宿主执行占位时不能移出移除，停止后才可整�
     projectId: project.id,
     text: "等待问题",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
   );
   const view = invoke("sessions:view", record.id);
@@ -1400,12 +1406,12 @@ it("等待问答或宿主执行占位时不能移出移除，停止后才可整�
   expect(() => invoke("projects:remove", project.id, true)).toThrow("先停止");
   expect(invoke("sessions:view", record.id)).toEqual(view);
   invoke("sessions:interrupt", record.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   target = { id: record.id, projectId: project.id };
   await invoke("sessions:send", record.id, "再次运行", model.profile.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   expect(reservedChecked).toBe(true);
@@ -1424,7 +1430,7 @@ it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已
     projectId: project.id,
     text: "首轮",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   const available = await app.profiles.list();
@@ -1471,12 +1477,12 @@ it("压缩执行也复用宿主占位，不能在异步生成摘要期间移除�
     projectId: project.id,
     text: "首轮",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   for (let i = 0; i < 3; i++) {
     await invoke("sessions:send", record.id, `后续${i}`, model.profile.id);
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", record.id).running).toBe(false)
     );
   }
@@ -1521,7 +1527,7 @@ it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现�
     text: "原始历史",
   };
   const record = await invoke("sessions:start", request);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
   const before = invoke("sessions:view", record.id);
@@ -1555,7 +1561,7 @@ it("同目录独立会话等待中仍可移除空项目，不能按目录误判�
     workspacePath: app.workspace,
     text: "独立等待",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
   );
   const before = invoke("sessions:view", record.id);
@@ -1565,7 +1571,7 @@ it("同目录独立会话等待中仍可移除空项目，不能按目录误判�
   });
   expect(invoke("sessions:view", record.id)).toEqual(before);
   invoke("sessions:interrupt", record.id);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
 });
@@ -1585,7 +1591,7 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
     workspacePath: app.workspace,
     text: "组合独立",
   });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(
       invoke("sessions:list").every(
         (s: any) => !invoke("sessions:execution", s.id).running
@@ -1697,11 +1703,9 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
   const duplicate = invoke("sessions:start", request);
   const rejected = expect(sending).rejects.toThrow("已移除");
   const duplicateRejected = expect(duplicate).rejects.toThrow("已移除");
-  await vi.waitFor(() =>
-    expect(invoke("sessions:list")[0]?.status).toBe("idle")
-  );
-  await vi.waitFor(() => expect(model.requests()).toBe(1));
-  await vi.waitFor(() =>
+  await waitFor(() => expect(invoke("sessions:list")[0]?.status).toBe("idle"));
+  await waitFor(() => expect(model.requests()).toBe(1));
+  await waitFor(() =>
     expect(
       invoke("sessions:execution", invoke("sessions:list")[0].id).running
     ).toBe(false)

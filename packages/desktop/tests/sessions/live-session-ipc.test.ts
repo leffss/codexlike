@@ -14,6 +14,7 @@ import type { BrowserWindow } from "electron";
 import type { SessionEventEnvelope } from "../../src/shared/ipc";
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
+import { listenMock } from "./mock-server";
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => any>(),
@@ -35,6 +36,9 @@ function invoke(name: string, ...args: unknown[]): any {
   if (!handler) throw new Error(`未注册通道 sessions:${name}`);
   return handler({}, ...args);
 }
+// vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
+// 信号，预算对齐用例上限内（见 workbench-ipc.test.ts 同说明）。
+const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 async function setup() {
   const root = mkdtempSync(join(tmpdir(), "live-session-ipc-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
@@ -80,18 +84,16 @@ async function setup() {
       responses.set(text, res);
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const mockPort = await listenMock(server);
   cleanup.push(() => {
     server.close();
     server.closeAllConnections();
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("无端口");
   const profile = await profiles.create({
     name: "可控模型",
     model: "mock",
     apiKey: "test",
-    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   const delivered: SessionEventEnvelope[] = [];
   const window = {
@@ -113,7 +115,7 @@ async function setup() {
   });
   cleanup.push(async () => {
     for (const session of manager.list()) invoke("interrupt", session.id);
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(
         manager
           .list()
@@ -127,7 +129,7 @@ async function setup() {
     delta: unknown,
     finish: string | null = null
   ) {
-    await vi.waitFor(() => expect(responses.has(text)).toBe(true));
+    await waitFor(() => expect(responses.has(text)).toBe(true));
     const res = responses.get(text)!;
     res.write(
       `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
@@ -165,7 +167,7 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
     },
     "tool_calls"
   );
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("view", a.id).activity.waitingForUser).toBe(true)
   );
   const view = invoke("view", a.id);
@@ -183,7 +185,7 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
     "只存在运行期的思考"
   );
   invoke("interrupt", a.id);
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
   expect(invoke("view", a.id).pendingInteractions).toEqual([]);
   expect(
     invoke("view", a.id).events.find(
@@ -200,7 +202,7 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
   ).toBe(false);
   // 中断终态落库（票 02）：思考全文随终态消息的 reasoning 字段持久化，
   // 消息正文（content，即模型上下文来源）仍不含思考
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(
       invoke("messages", a.id).some(
         (item: any) => item.message?.aborted === true
@@ -223,7 +225,7 @@ it("启动前失败不覆盖上一轮现场与水位，重试仍沿原序号递�
     text: "上一轮",
   });
   await app.frame("上一轮", { content: "上一轮结果" }, "stop");
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
   const before = invoke("view", a.id);
   await expect(
     invoke("send", a.id, "$missing-skill 启动失败", app.profile.id)
@@ -232,7 +234,7 @@ it("启动前失败不覆盖上一轮现场与水位，重试仍沿原序号递�
   await invoke("send", a.id, "重试成功", app.profile.id);
   expect(invoke("view", a.id).sequence).toBeGreaterThan(before.sequence);
   await app.frame("重试成功", { content: "重试结果" }, "stop");
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
 });
 
 it("显式停止立即标记中断，迟到正文不复活现场，继续发送使用新 executionId", async () => {
@@ -243,7 +245,7 @@ it("显式停止立即标记中断，迟到正文不复活现场，继续发送�
     text: "停止任务",
   });
   await app.frame("停止任务", { content: "保留部分" });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(JSON.stringify(invoke("view", a.id))).toContain("保留部分")
   );
   const executionId = invoke("view", a.id).executionId;
@@ -254,12 +256,12 @@ it("显式停止立即标记中断，迟到正文不复活现场，继续发送�
     outcome: "interrupted",
   });
   await app.frame("停止任务", { content: "迟到污染" }, "stop");
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
   expect(JSON.stringify(invoke("view", a.id))).not.toContain("迟到污染");
   await invoke("send", a.id, "继续任务", app.profile.id);
   expect(invoke("view", a.id).executionId).not.toBe(executionId);
   await app.frame("继续任务", { content: "新的现场" }, "stop");
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
   expect(invoke("view", a.id).activity.outcome).toBe("completed");
   expect(JSON.stringify(invoke("view", a.id))).not.toContain("迟到污染");
 });
@@ -273,7 +275,7 @@ it("完成未查看与执行状态分离，旧水位查看不会吞掉后来的�
   });
   const before = invoke("view", a.id);
   await app.frame("读取任务", { content: "完成结果" }, "stop");
-  await vi.waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
+  await waitFor(() => expect(invoke("execution", a.id).running).toBe(false));
   expect(invoke("list")[0].activity).toMatchObject({
     outcome: "completed",
     unread: true,
@@ -305,7 +307,7 @@ it("模型未结束时公开现场包含后台完整增量，快照水位可无�
   });
   await app.frame("任务A", { content: "A第一段" });
   await app.frame("任务B", { content: "B独立输出" });
-  await vi.waitFor(() => {
+  await waitFor(() => {
     expect(
       invoke("view", a.id)
         .events.filter((item: any) => item.event.type === "assistant-delta")
@@ -322,7 +324,7 @@ it("模型未结束时公开现场包含后台完整增量，快照水位可无�
     )
   ).toHaveLength(0);
   await app.frame("任务A", { content: "A第二段" });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("view", a.id).sequence).toBeGreaterThan(snapshot.sequence)
   );
   const next = invoke("view", a.id);
@@ -347,7 +349,7 @@ it("模型未结束时公开现场包含后台完整增量，快照水位可无�
   expect(JSON.stringify(next)).not.toContain("B独立输出");
   await app.frame("任务A", {}, "stop");
   await app.frame("任务B", {}, "stop");
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(
       invoke("execution", a.id).running || invoke("execution", b.id).running
     ).toBe(false)
