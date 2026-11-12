@@ -1,13 +1,13 @@
 // E2E 容器分档宽度（票 05，spec「宽度与布局」用户故事 31–35）：
 // 内容列以会话容器（中栏，而非浏览器视口）为断点三档分宽，
-// 头部 / 消息流 / 输入区共用同一内容列左右缘对齐，
+// 头部 / 消息流共用同一内容列，输入卡片左右各外扩 8px，
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
 // 1) 新建、已有与加载中使用同一三档内容列，工作区信息也与消息流对齐。
 // 2) 窗口内容区 1280px（会话容器 1024px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
 // 3) 窗口内容区 1600px（容器 1344px ≥1280）→ 6xl 档：内容列 1152px；
-//    头部 / 消息流 / 输入区三处左右缘对齐；用户气泡右对齐内容列右缘。
+//    头部 / 消息流左右缘对齐，输入卡片外扩；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
 // 5) 窗口内容区 1000px（容器 744px <864）→ 基础档：内容列回落全宽（<896px）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -120,11 +120,7 @@ async function assertAligned(window, contentTestId, label) {
   await assertViewportLayout(window, label);
   const content = await window.getByTestId(contentTestId).boundingBox();
   assert(content !== null, `${label}：内容列必须可见`);
-  for (const testId of [
-    "session-header-content",
-    "workspace-path",
-    "composer-card",
-  ]) {
+  for (const testId of ["session-header-content", "workspace-path"]) {
     const box = await window.getByTestId(testId).boundingBox();
     assert(box !== null, `${label}：${testId} 必须可见`);
     assert(
@@ -133,6 +129,14 @@ async function assertAligned(window, contentTestId, label) {
       `${label}：${testId} 与消息列左右缘一致，实际 ${JSON.stringify({ box, content })}`
     );
   }
+  const composer = await window.getByTestId("composer-card").boundingBox();
+  assert(composer !== null, `${label}：输入卡片必须可见`);
+  assert(
+    Math.abs(content.x - composer.x - 8) <= 1 &&
+      Math.abs(composer.x + composer.width - content.x - content.width - 8) <=
+        1,
+    `${label}：输入卡片应比消息列左右各宽 8px，实际 ${JSON.stringify({ composer, content })}`
+  );
   return content;
 }
 
@@ -183,15 +187,6 @@ async function main() {
       emptyBox.width > 768 && emptyBox.width <= 896,
       `新建草稿应采用 4xl 内容列（>768 且 ≤896）：实测 ${emptyBox.width}`
     );
-    const composerCard = await window
-      .getByTestId("composer-card")
-      .boundingBox();
-    assert(composerCard !== null, "输入区卡片必须可见");
-    assert(
-      Math.abs(composerCard.width - emptyBox.width) <= 1,
-      `空态下消息流与输入区应共用分档内容列：${composerCard.width} vs ${emptyBox.width}`
-    );
-
     await assertAligned(window, "message-empty", "新建会话");
     const emptyGutter = await window
       .getByTestId("message-stream")
@@ -227,24 +222,8 @@ async function main() {
       `容器放宽后内容列应变宽：${tier6.width} > ${tier4.width}`
     );
 
-    // 三处共用同一内容列：头部内容 / 消息列表 / 输入卡片左右缘对齐
-    const headerBox = await window
-      .getByTestId("session-header-content")
-      .boundingBox();
-    const listBox = await window.getByTestId("message-list").boundingBox();
-    const composerBox = await window.getByTestId("composer-card").boundingBox();
-    for (const [name, box] of [
-      ["头部内容", headerBox],
-      ["消息列表", listBox],
-      ["输入卡片", composerBox],
-    ]) {
-      assert(box !== null, `${name}必须可见`);
-      assert(
-        Math.abs(box.x - tier6.x) <= 1 &&
-          Math.abs(box.width - tier6.width) <= 1,
-        `${name}（x=${box.x}, w=${box.width}）应与消息列（x=${tier6.x}, w=${tier6.width}）左右缘对齐`
-      );
-    }
+    // 头部与消息列对齐，输入卡片左右各外扩 8px。
+    await assertAligned(window, "message-list", "6xl 档");
 
     // 用户气泡限宽右对齐：右缘与 assistant 内容列右缘对齐
     const userBox = await window.getByTestId("message-user").boundingBox();
@@ -433,6 +412,9 @@ async function main() {
       await window.screenshot({
         path: join(screenshots, `both-panels-${width}.png`),
       });
+      await window.getByTestId("theme-toggle").click();
+      await assertAligned(window, "message-list", `${width} 双面板切换主题`);
+      await window.getByTestId("theme-toggle").click();
       await window.getByTestId("changes-close").click();
       await window.getByTestId("changes-panel").waitFor({ state: "hidden" });
       await window.getByTestId("resources-toggle").click();

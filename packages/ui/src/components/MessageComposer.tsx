@@ -291,207 +291,214 @@ export function MessageComposer(props: {
   }
 
   return (
-    // 补偿消息流原生滚动条占宽，输入卡片与内容列左右缘对齐。
+    // 补偿消息流原生滚动条占宽，基准列对齐后输入卡片左右各外扩 8px。
     <div
-      className="border-t border-line bg-surface-muted px-4 py-3"
+      data-testid="composer-region"
+      className="bg-canvas px-4 py-3"
       style={{
         paddingRight: "calc(1rem + var(--session-scrollbar-gutter, 0px))",
       }}
     >
-      {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
-      <form
-        data-testid="composer-card"
-        className={`${contentWidthClass} rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted`}
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <div className="relative">
-          {menu !== null && (
-            <ul
-              data-testid="composer-menu"
-              role="listbox"
-              aria-label={menu.kind === "skills" ? "下轮技能预览" : "输入补全"}
-              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-xl border border-line bg-surface shadow-xl"
-            >
-              {menu.items.map((item, index) => {
-                const isCommand = menu.kind === "slash-commands";
-                const command = isCommand ? (item as SlashCommandDef) : null;
-                const skill =
-                  menu.kind === "skills" ? (item as SkillDescriptor) : null;
-                const path = menu.kind === "mentions" ? (item as string) : null;
-                return (
-                  <li
-                    key={command?.name ?? skill?.path ?? path}
-                    role="option"
-                    aria-selected={index === menu.activeIndex}
-                    data-testid={
-                      skill ? `composer-skill-${skill.name}` : undefined
-                    }
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() =>
-                      selectItem(
-                        item,
-                        textareaRef.current?.selectionStart ?? value.length
-                      )
-                    }
-                    className={
-                      index === menu.activeIndex
-                        ? "bg-selected px-3 py-1.5 text-sm text-fg"
-                        : "px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
-                    }
-                  >
-                    {command !== null ? (
-                      <span className="flex items-baseline gap-2">
-                        <code className="text-accent">/{command.name}</code>
-                        <span className="text-xs text-fg-subtle">
-                          {command.description}
-                          {command.argumentHint !== null
-                            ? `（参数：${command.argumentHint}）`
-                            : ""}
+      <div className={contentWidthClass}>
+        {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
+        <form
+          data-testid="composer-card"
+          className="-mx-2 rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <div className="relative">
+            {menu !== null && (
+              <ul
+                data-testid="composer-menu"
+                role="listbox"
+                aria-label={
+                  menu.kind === "skills" ? "下轮技能预览" : "输入补全"
+                }
+                className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-xl border border-line bg-surface shadow-xl"
+              >
+                {menu.items.map((item, index) => {
+                  const isCommand = menu.kind === "slash-commands";
+                  const command = isCommand ? (item as SlashCommandDef) : null;
+                  const skill =
+                    menu.kind === "skills" ? (item as SkillDescriptor) : null;
+                  const path =
+                    menu.kind === "mentions" ? (item as string) : null;
+                  return (
+                    <li
+                      key={command?.name ?? skill?.path ?? path}
+                      role="option"
+                      aria-selected={index === menu.activeIndex}
+                      data-testid={
+                        skill ? `composer-skill-${skill.name}` : undefined
+                      }
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() =>
+                        selectItem(
+                          item,
+                          textareaRef.current?.selectionStart ?? value.length
+                        )
+                      }
+                      className={
+                        index === menu.activeIndex
+                          ? "bg-selected px-3 py-1.5 text-sm text-fg"
+                          : "px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
+                      }
+                    >
+                      {command !== null ? (
+                        <span className="flex items-baseline gap-2">
+                          <code className="text-accent">/{command.name}</code>
+                          <span className="text-xs text-fg-subtle">
+                            {command.description}
+                            {command.argumentHint !== null
+                              ? `（参数：${command.argumentHint}）`
+                              : ""}
+                          </span>
                         </span>
-                      </span>
-                    ) : skill !== null ? (
-                      <span className="block" title={skill.path}>
-                        <code className="text-accent">${skill.name}</code>
-                        <span className="ml-2 text-xs text-fg-muted">
-                          {skill.description}
+                      ) : skill !== null ? (
+                        <span className="block" title={skill.path}>
+                          <code className="text-accent">${skill.name}</code>
+                          <span className="ml-2 text-xs text-fg-muted">
+                            {skill.description}
+                          </span>
+                          <span className="block truncate text-xs text-fg-subtle">
+                            下轮预览 ·{" "}
+                            {skill.scope === "project" ? "项目" : "全局"} ·{" "}
+                            {skill.source} · {skill.path}
+                          </span>
                         </span>
-                        <span className="block truncate text-xs text-fg-subtle">
-                          下轮预览 ·{" "}
-                          {skill.scope === "project" ? "项目" : "全局"} ·{" "}
-                          {skill.source} · {skill.path}
+                      ) : (
+                        <span
+                          className="block truncate font-mono text-xs"
+                          title={path ?? ""}
+                        >
+                          {path}
                         </span>
-                      </span>
-                    ) : (
-                      <span
-                        className="block truncate font-mono text-xs"
-                        title={path ?? ""}
-                      >
-                        {path}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <textarea
-            ref={textareaRef}
-            readOnly={props.readOnly}
-            data-testid="composer-input"
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value);
-              const caret =
-                event.target.selectionStart ?? event.target.value.length;
-              dismissedRef.current = null;
-              syncMenu(event.target.value, caret);
-            }}
-            onClick={(event) => {
-              const caret = event.currentTarget.selectionStart ?? value.length;
-              syncMenu(value, caret);
-            }}
-            onKeyDown={onKeyDown}
-            placeholder={props.hint}
-            rows={2}
-            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
-          />
-        </div>
-        {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
-          <div className="flex items-center gap-2">
-            <ComposerSelect
-              testId="approval-mode-select"
-              label="审批模式"
-              value={props.approvalMode ?? "assist"}
-              disabled={props.readOnly || props.approvalMode === null}
-              options={APPROVAL_MODE_OPTIONS}
-              onSelect={props.onSelectApprovalMode}
-              renderIcon={(mode) => (
-                <ApprovalModeIcon
-                  mode={mode}
-                  className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
-                />
-              )}
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <textarea
+              ref={textareaRef}
+              readOnly={props.readOnly}
+              data-testid="composer-input"
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value);
+                const caret =
+                  event.target.selectionStart ?? event.target.value.length;
+                dismissedRef.current = null;
+                syncMenu(event.target.value, caret);
+              }}
+              onClick={(event) => {
+                const caret =
+                  event.currentTarget.selectionStart ?? value.length;
+                syncMenu(value, caret);
+              }}
+              onKeyDown={onKeyDown}
+              placeholder={props.hint}
+              rows={2}
+              className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             />
           </div>
-          <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
-            <ComposerSelect
-              testId="profile-select"
-              label="模型"
-              value={props.selectedProfileId}
-              disabled={props.readOnly}
-              options={[
-                ...(props.profiles.length === 0
-                  ? [{ value: "", label: "未配置模型", title: "未配置模型" }]
-                  : []),
-                ...(props.selectedProfileId &&
-                !props.profiles.some(
-                  (profile) => profile.id === props.selectedProfileId
-                )
-                  ? [
-                      {
-                        value: props.selectedProfileId,
-                        label: "已保存的模型不可用",
-                        title: "已保存的模型不可用，请重新选择模型",
-                      },
-                    ]
-                  : []),
-                ...props.profiles.map((profile) => ({
-                  value: profile.id,
-                  label: `${profile.name} · ${profile.model}`,
-                  title: `${profile.name} · ${profile.model}（对下一条消息生效）`,
-                })),
-              ]}
-              onSelect={props.onSelectProfile}
-              className="min-w-0 max-w-56 shrink"
-            />
-            {/* 无会话禁用；运行中允许改选，只对下一条消息生效。 */}
-            <ComposerSelect
-              testId="thinking-effort-select"
-              label="思考档位"
-              value={props.thinkingEffort ?? "auto"}
-              disabled={props.readOnly || props.thinkingEffort === null}
-              options={THINKING_EFFORT_OPTIONS}
-              onSelect={props.onSelectThinkingEffort}
-              renderIcon={() => <BrainIcon className="h-3 w-3" />}
-            />
-            <button
-              type="button"
-              data-testid="composer-skills"
-              disabled={props.readOnly || props.approvalMode === null}
-              onClick={openSkills}
-              className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
-              title="插入 $技能引用（仅写回输入框，不发送）"
-            >
-              技能
-            </button>
-            {props.streaming === true ? (
+          {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
+            <div className="flex items-center gap-2">
+              <ComposerSelect
+                testId="approval-mode-select"
+                label="审批模式"
+                value={props.approvalMode ?? "assist"}
+                disabled={props.readOnly || props.approvalMode === null}
+                options={APPROVAL_MODE_OPTIONS}
+                onSelect={props.onSelectApprovalMode}
+                renderIcon={(mode) => (
+                  <ApprovalModeIcon
+                    mode={mode}
+                    className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
+                  />
+                )}
+              />
+            </div>
+            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+              <ComposerSelect
+                testId="profile-select"
+                label="模型"
+                value={props.selectedProfileId}
+                disabled={props.readOnly}
+                options={[
+                  ...(props.profiles.length === 0
+                    ? [{ value: "", label: "未配置模型", title: "未配置模型" }]
+                    : []),
+                  ...(props.selectedProfileId &&
+                  !props.profiles.some(
+                    (profile) => profile.id === props.selectedProfileId
+                  )
+                    ? [
+                        {
+                          value: props.selectedProfileId,
+                          label: "已保存的模型不可用",
+                          title: "已保存的模型不可用，请重新选择模型",
+                        },
+                      ]
+                    : []),
+                  ...props.profiles.map((profile) => ({
+                    value: profile.id,
+                    label: `${profile.name} · ${profile.model}`,
+                    title: `${profile.name} · ${profile.model}（对下一条消息生效）`,
+                  })),
+                ]}
+                onSelect={props.onSelectProfile}
+                className="min-w-0 max-w-56 shrink"
+              />
+              {/* 无会话禁用；运行中允许改选，只对下一条消息生效。 */}
+              <ComposerSelect
+                testId="thinking-effort-select"
+                label="思考档位"
+                value={props.thinkingEffort ?? "auto"}
+                disabled={props.readOnly || props.thinkingEffort === null}
+                options={THINKING_EFFORT_OPTIONS}
+                onSelect={props.onSelectThinkingEffort}
+                renderIcon={() => <BrainIcon className="h-3 w-3" />}
+              />
               <button
                 type="button"
-                data-testid="composer-stop"
-                onClick={() => props.onStop?.()}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
-                title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+                data-testid="composer-skills"
+                disabled={props.readOnly || props.approvalMode === null}
+                onClick={openSkills}
+                className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
+                title="插入 $技能引用（仅写回输入框，不发送）"
               >
-                <StopIcon className="h-3 w-3" />
+                技能
               </button>
-            ) : (
-              <button
-                type="submit"
-                data-testid="composer-send"
-                disabled={props.disabled}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
-                title="发送（Enter 发送，Shift+Enter 换行）"
-              >
-                <ArrowUpIcon className="h-4 w-4" />
-              </button>
-            )}
+              {props.streaming === true ? (
+                <button
+                  type="button"
+                  data-testid="composer-stop"
+                  onClick={() => props.onStop?.()}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
+                  title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+                >
+                  <StopIcon className="h-3 w-3" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  data-testid="composer-send"
+                  disabled={props.disabled}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
+                  title="发送（Enter 发送，Shift+Enter 换行）"
+                >
+                  <ArrowUpIcon className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

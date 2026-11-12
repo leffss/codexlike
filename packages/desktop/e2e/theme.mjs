@@ -20,6 +20,33 @@ async function bodyBackground(window) {
   return window.evaluate(() => getComputedStyle(document.body).backgroundColor);
 }
 
+async function assertComposerSurface(window, label) {
+  const surface = await window
+    .getByTestId("composer-region")
+    .evaluate((element) => {
+      const region = getComputedStyle(element);
+      const card = document.querySelector('[data-testid="composer-card"]');
+      const stream = getComputedStyle(
+        document.querySelector('[data-testid="message-stream"]')
+      );
+      return {
+        background: region.backgroundColor,
+        streamBackground: stream.backgroundColor,
+        borderTop: region.borderTopWidth,
+        cardBorder: getComputedStyle(card).borderTopWidth,
+      };
+    });
+  assert(
+    surface.background === surface.streamBackground &&
+      surface.borderTop === "0px",
+    `${label}：输入区外围应与消息区同色且没有分隔线，实际 ${JSON.stringify(surface)}`
+  );
+  assert(
+    parseFloat(surface.cardBorder) > 0,
+    `${label}：输入卡片自身边框应保留`
+  );
+}
+
 async function main() {
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-theme-"));
 
@@ -40,6 +67,8 @@ async function main() {
       `浅色下 body 背景应为白色，实际 ${await bodyBackground(window)}`
     );
 
+    await assertComposerSurface(window, "浅色");
+
     // 2) 顶栏快捷切换到深色：data-theme 与背景即时翻转
     await window.getByTestId("theme-toggle").click();
     assert((await themeOf(window)) === "dark", "点击切换后应为深色");
@@ -47,6 +76,7 @@ async function main() {
       (await bodyBackground(window)) === "rgb(15, 23, 42)",
       `深色下 body 背景应为 canvas 色，实际 ${await bodyBackground(window)}`
     );
+    await assertComposerSurface(window, "深色");
     await closeApp(first.app);
 
     // 3) 重启：偏好持久化，仍为深色（无首帧回退——启动即 data-theme=dark）
