@@ -4,13 +4,13 @@
 
 **Blocked by:** 01、02、03、04、05。
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] 全量 e2e 套件一次通过,命令与退出码如实记录(直接运行取退出码,不接管道)
 - [x] spec 38 条用户故事逐条映射到验证方式与结果,记录入本票 Comments
 - [x] 视觉走查:浅/深主题 × 宽/窄容器 × 空态/长会话,截图留档
 - [x] 滚动跟随、思考恢复、折叠区、宽度四组新行为在同会话内组合无冲突
-- [ ] /code-review 两轴审查完成,发现项处理或记录豁免理由
+- [x] /code-review 两轴审查完成,发现项处理或记录豁免理由
 - [x] 任务索引 README 更新各票状态
 - [x] `pnpm typecheck`、`pnpm test`、`pnpm test:e2e:all` 全绿
 
@@ -135,5 +135,19 @@
 ### 5. 状态收口与遗留
 
 - 票 01-05 `**Status:**` 已改 `completed`,README 表格同步(01-05 completed,06 保持 ready-for-agent)。
-- 验收项 5(/code-review 两轴审查)未做,按分工留给协调者随后单独执行;完成后勾选并补记录。
+- 验收项 5(/code-review 两轴审查)已于协调者执行两轴审查后收口:代码级发现(条件性 Hook、回到最新入口 boolean 反向转换、共享时长格式化、`resetCollapseMemory` 零调用者、根 package.json 缺 `test:e2e:worked-history` 单跑脚本)已修复并经 `pnpm typecheck`/`pnpm test`/`pnpm build`/`pnpm test:e2e:all` 复验全绿;豁免项记录见下节第 6 节。票 06 状态随之收口为 `completed`,README 表格同步。
 - 无其他未决项:全量检查一次通过、38 条映射无失败、走查与组合核查无真实缺陷发现。
+
+### 6. code-review 豁免记录(2026-11-12 补,两轴 /code-review 审查发现中"记录豁免理由"的部分;代码级发现已修复,见第 5 节)
+
+**a. 重启恢复路径的轮内时序降级(Spec 轴唯一实质项)**
+
+重启恢复(落盘重建)后的轮内呈现为落库终态形态:工具卡、拼接思考段、终稿正文单段,与流式期的段级交错(思考/正文/工具卡逐段穿插)不完全一致。这是 spec Implementation Decisions 第 6 条「reasoning 持久化:思考文本随终态消息落库」的固有结果——本 spec 未设计轮内段级落库,恢复路径只能从终态消息重建。判定为有据豁免而非缺陷:内容级完整(用户故事 22-25 全部达成,思考/工具/正文重启后均可回看);切回运行中会话(内存事件重放)时时序完整(用户故事 13-16 无此降级)。与 scrollbar-gutter(票 03 协调者裁决,见票 03 Comments)同为有据豁免。若未来要求重启后轮内段级时序保真,需升级为段级持久化(超出本 spec 范围)。
+
+**b. e2e 新场景中 `getByRole("button", { name: "设置" / "返回工作台" })` 裸定位(Standards 轴,判断性意见)**
+
+main 分支既有惯例的延续(smoke.mjs 同写法),目标按钮在场景内唯一且 name 精确匹配。记录在案,后续由 e2e 定位惯例统一收口,不在本票扩散。
+
+**c. `session-view.ts` 各 event case 的 `seq/turnId/responseId` 构造样板(Data Clumps)与 e2e `xpath=..`/`.first()` 导航(Standards 轴,判断性意见)**
+
+reducer 事件构造样板是显式直白成本,抽公共构造器会引入间接层;`xpath=..`/`.first()` 为既有 e2e 导航惯例。重构面大、收益一般,记录在案不动。
