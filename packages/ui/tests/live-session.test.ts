@@ -31,6 +31,47 @@ const snapshot: SessionView = {
   pendingInteractions: [],
   activity,
 };
+it("终态完成时刻由消息提供，快照重放、错过增量与重启恢复保持一致", () => {
+  const message = {
+    id: "m1",
+    sessionId: "a",
+    role: "assistant" as const,
+    content: "最终正文",
+    createdAt: "2026-11-11T08:00:09.000Z",
+  };
+  const terminal: SessionEventEnvelope = {
+    ...delta(3, ""),
+    event: { type: "assistant-done", message },
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  const live = receiveLiveEvent(hydrateLiveSession(snapshot), terminal);
+  const replayed = hydrateLiveSession({
+    ...snapshot,
+    events: [...snapshot.events, terminal],
+    sequence: 3,
+    activity: terminal.activity,
+  });
+  const missed = hydrateLiveSession({
+    ...snapshot,
+    events: [terminal],
+    sequence: 3,
+    activity: terminal.activity,
+  });
+  const restarted = hydrateLiveSession({
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    events: [],
+    history: [{ kind: "message", message }],
+    activity: terminal.activity,
+  });
+  for (const state of [live, replayed, missed, restarted]) {
+    expect(state.items).toMatchObject([
+      { content: "最终正文", completedAt: Date.UTC(2026, 10, 11, 8, 0, 9) },
+    ]);
+  }
+});
+
 it("会话授权由快照恢复并随事件更新，不因等待、停止或旧会话事件清除", () => {
   let state = hydrateLiveSession({ ...snapshot, autoApprove: true });
   expect(state.autoApprove).toBe(true);

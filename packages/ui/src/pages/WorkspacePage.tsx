@@ -883,7 +883,7 @@ export function WorkspacePage(props: {
     current?.archivedAt != null
       ? "已归档 · 历史只读，恢复会话后可继续发送"
       : profiles.length === 0
-        ? "尚未配置模型，请先前往设置页添加 Provider Profile"
+        ? "尚未配置模型，请先前往设置页添加模型"
         : compacting
           ? "正在压缩历史，请稍候…"
           : currentId === null && !draft
@@ -1182,7 +1182,7 @@ export function WorkspacePage(props: {
                   className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
                   onClick={props.onOpenSettings}
                 >
-                  前往设置配置 Provider Profile
+                  前往设置配置模型
                 </button>
               ) : undefined
             }

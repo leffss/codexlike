@@ -38,7 +38,7 @@ export function SettingsPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-medium text-fg">Provider Profiles</h2>
+            <h2 className="text-base font-medium text-fg">模型</h2>
             <p className="text-xs text-fg-muted">
               OpenAI 兼容端点（baseURL + API Key + 模型）；API Key
               经系统加密存储，磁盘上无明文
@@ -51,7 +51,7 @@ export function SettingsPage() {
               data-testid="profile-create"
               onClick={() => setEditing("new")}
             >
-              + 新建 Profile
+              + 新建模型
             </button>
           )}
         </div>
@@ -141,7 +141,7 @@ export function SettingsPage() {
 
         {profiles !== null && profiles.length === 0 && editing === null && (
           <p className="rounded border border-dashed border-line px-4 py-6 text-center text-sm text-fg-subtle">
-            还没有 Provider Profile，点击「新建 Profile」配置第一个模型接入
+            尚未配置模型，点击「新建模型」配置第一个模型接入
           </p>
         )}
       </section>

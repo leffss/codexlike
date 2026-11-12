@@ -49,6 +49,8 @@ export interface AssistantSegment extends SegmentBase {
   content: string;
   /** 流式进行中（流式文本只追加到末尾流态段） */
   streaming?: boolean;
+  /** 正常终态消息的完成时刻（epoch ms），独立于段建立时刻 at。 */
+  completedAt?: number;
   /** 该段被用户中断：content 为部分内容 */
   interrupted?: boolean;
 }
@@ -322,6 +324,8 @@ function messageSegments(
         seq: nextSeq([...segments, ...restored]),
         kind: "assistant",
         content: message.content,
+        // 完成时间沿用终态落库时刻，不取打开历史的当前时间。
+        completedAt: message.aborted === true ? undefined : base.at,
         // 重启恢复：被中断的助手消息仍显示中断点标记
         interrupted: message.aborted === true || undefined,
       });
@@ -432,7 +436,11 @@ export function applySessionEvent(
     }
 
     case "assistant-done":
-      return finalizeResponse(items, event.message, false);
+      return finalizeResponse(
+        items,
+        event.message,
+        event.message.aborted === true
+      );
 
     case "assistant-aborted":
       return finalizeResponse(items, event.message, true);
@@ -653,6 +661,7 @@ function finalizeResponse(
       responseId: message.id,
       at: parseIso(message.createdAt),
       content: message.content,
+      completedAt: interrupted ? undefined : parseIso(message.createdAt),
       interrupted: interrupted || undefined,
     });
   }
@@ -683,6 +692,13 @@ function finalizeResponse(
     next = next.map((item) =>
       item === single ? { ...item, content: message.content } : item
     );
+  }
+  const lastText = textSegments[textSegments.length - 1];
+  if (!interrupted && lastText !== undefined) {
+    next = replaceSegment(next, lastText.id, (item) => ({
+      ...item,
+      completedAt: parseIso(message.createdAt),
+    }));
   }
   return next;
 }

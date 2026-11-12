@@ -58,7 +58,7 @@ try {
   await window.getByTestId("settings-open").click();
   const profiles = window.locator("section").filter({
     has: window.getByRole("heading", {
-      name: "Provider Profiles",
+      name: "模型",
       exact: true,
     }),
   });
@@ -214,6 +214,8 @@ try {
   await item(longTitle).click();
   await command("/archive");
   await item(longTitle).waitFor({ state: "detached" });
+  // 侧栏先刷新；草稿仍需异步保存、加载，等待独立草稿入口出现再断言内容。
+  await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",
     "最后会话归档后回到独立草稿"

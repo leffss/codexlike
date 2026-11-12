@@ -33,6 +33,7 @@ import {
   type ToolSequenceItem,
   type TurnView,
 } from "../lib/turn-view";
+import { AssistantActions } from "./AssistantActions";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -359,6 +360,8 @@ function TurnGroupItem(props: {
           <SegmentView
             key={segment.id}
             segment={segment}
+            showActions={!turn.running}
+            failed={turn.following.some((item) => item.kind === "error")}
             questionDraft={props.questionDraft}
           />
         ))}
@@ -513,6 +516,8 @@ function ToolGroupView(props: {
 /** 单段视图分派（渲染第一层）：按消息段类型选择呈现组件，每段一个 li */
 function SegmentView(props: {
   segment: MessageSegment;
+  showActions?: boolean;
+  failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
 }) {
   const { segment } = props;
@@ -533,7 +538,13 @@ function SegmentView(props: {
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;
   }
-  return <MessageBubble segment={segment} />;
+  return (
+    <MessageBubble
+      segment={segment}
+      showActions={props.showActions}
+      failed={props.failed}
+    />
+  );
 }
 
 /**
@@ -599,6 +610,8 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
 
 /** 消息型消息段：用户消息、助手正文、错误提示、本地状态、压缩摘要 */
 function MessageBubble(props: {
+  showActions?: boolean;
+  failed?: boolean;
   segment: Extract<
     MessageSegment,
     | { kind: "user" }
@@ -689,6 +702,13 @@ function MessageBubble(props: {
           </p>
         )}
       </div>
+      {props.showActions && (
+        <AssistantActions
+          key={segment.content}
+          segment={segment}
+          failed={props.failed}
+        />
+      )}
     </li>
   );
 }

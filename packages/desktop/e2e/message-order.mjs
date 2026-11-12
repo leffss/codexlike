@@ -37,6 +37,9 @@ async function segmentOrder(window) {
 }
 
 async function main() {
+  const finalMarkdown =
+    "**结论：内容正确**\n\n保留 Markdown\n\n```ts\nconst ok = true;\n```";
+  let finishFinal;
   const { server, port, seenBodies } = await startMockProvider(
     (ctx, { index }) => {
       if (index === 1) {
@@ -55,7 +58,9 @@ async function main() {
           delta: { reasoning_content: "再核对一遍" },
           finish_reason: null,
         });
-        ctx.textRound("结论：内容正确");
+        ctx.send({ delta: { content: finalMarkdown }, finish_reason: null });
+        // 显式门控终态，保证测试可观察流式正文与终态时间的分界。
+        finishFinal = () => ctx.finishWith("stop");
         return;
       }
       ctx.textRound("收到");
@@ -88,6 +93,17 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
+    // 从公开事件接口记录终态消息，不通过数据库或 UI 当前时间反推。
+    await window.evaluate(() => {
+      window.messageCompletion = null;
+      window.removeCompletionListener = window.codexlike.onSessionEvent(
+        ({ event }) => {
+          if (event.type === "assistant-done")
+            window.messageCompletion = event.message;
+        }
+      );
+    });
+
     // 发送消息：模型按「思考 → 正文 → 工具 → 思考 → 正文」交错输出
     await window.getByTestId("composer-input").fill("读一下 note.txt");
     await window.getByTestId("composer-send").click();
@@ -99,7 +115,182 @@ async function main() {
       .getByTestId("message-assistant")
       .getByText("结论：内容正确")
       .waitFor({ timeout: 20_000 });
-    await new Promise((r) => setTimeout(r, 300));
+    assert(
+      (await window.getByTestId("assistant-actions").count()) === 0,
+      "整轮流式期间不应显示任何正文操作栏"
+    );
+    assert(typeof finishFinal === "function", "最终回复应已到达终态门控");
+    finishFinal();
+    await window
+      .getByTestId("assistant-completed-at")
+      .waitFor({ timeout: 10_000 });
+    const completedAt = await window
+      .getByTestId("assistant-completed-at")
+      .getAttribute("datetime");
+    const completedLabel = await window
+      .getByTestId("assistant-completed-at")
+      .textContent();
+    const terminalMessage = await window.evaluate(() => {
+      window.removeCompletionListener();
+      return window.messageCompletion;
+    });
+    assert(
+      completedAt === terminalMessage?.createdAt,
+      "完成时间必须来自 assistant-done 的终态消息"
+    );
+    assert(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(completedLabel ?? ""),
+      "完成时间应为完整本地日期与时分秒"
+    );
+
+    // 浅/深主题下的窄窗口布局与截图；独立临时目录保留给人工验收。
+    const screenshots = mkdtempSync(
+      join(tmpdir(), "codexlike-message-actions-screenshots-")
+    );
+    console.log(`[e2e:message-order] 消息操作栏截图目录 ${screenshots}`);
+    const originalTheme = await window.evaluate(
+      () => document.documentElement.dataset.theme
+    );
+    const originalViewport = await window.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    try {
+      await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(900, 720)
+      );
+      await window.waitForFunction(() => window.innerWidth === 900);
+      for (const theme of ["light", "dark"]) {
+        if (
+          (await window.evaluate(
+            () => document.documentElement.dataset.theme
+          )) !== theme
+        ) {
+          await window.getByTestId("theme-toggle").click();
+        }
+        await window.waitForFunction(
+          (expected) => document.documentElement.dataset.theme === expected,
+          theme
+        );
+        await window.getByTestId("assistant-actions").scrollIntoViewIfNeeded();
+        const layout = await window
+          .getByTestId("assistant-actions")
+          .evaluate((element) => {
+            const actions = element.getBoundingClientRect();
+            const copy = element
+              .querySelector('[data-testid="assistant-copy"]')
+              .getBoundingClientRect();
+            const time = element.querySelector("time").getBoundingClientRect();
+            const content = element.parentElement
+              .querySelector('[data-testid="assistant-content"]')
+              .getBoundingClientRect();
+            const stream = element.closest('[data-testid="message-stream"]');
+            const bounds = stream.getBoundingClientRect();
+            const probe = document.createElement("span");
+            probe.style.color = "var(--fg-muted)";
+            element.append(probe);
+            const themed =
+              getComputedStyle(element).color === getComputedStyle(probe).color;
+            probe.remove();
+            return {
+              themed,
+              below: actions.top >= content.bottom,
+              contained: [copy, time].every(
+                (rect) =>
+                  rect.width > 0 &&
+                  rect.height > 0 &&
+                  rect.left >= bounds.left &&
+                  rect.right <= bounds.right &&
+                  rect.top >= bounds.top &&
+                  rect.bottom <= bounds.bottom
+              ),
+              separate:
+                copy.right <= time.left ||
+                time.right <= copy.left ||
+                copy.bottom <= time.top ||
+                time.bottom <= copy.top,
+              noOverflow:
+                stream.scrollWidth <= stream.clientWidth + 1 &&
+                document.documentElement.scrollWidth <= window.innerWidth,
+            };
+          });
+        assert(layout.themed, `${theme} 操作栏应使用主题弱化前景色`);
+        assert(
+          layout.below &&
+            layout.contained &&
+            layout.separate &&
+            layout.noOverflow,
+          `${theme} 窄窗口操作栏应位于正文下方、完整可见、不重叠且无横向溢出：${JSON.stringify(layout)}`
+        );
+        await window.screenshot({
+          path: join(screenshots, `message-actions-${theme}-narrow.png`),
+        });
+      }
+    } finally {
+      await app.evaluate(
+        ({ BrowserWindow }, viewport) =>
+          BrowserWindow.getAllWindows()[0].setContentSize(
+            viewport.width,
+            viewport.height
+          ),
+        originalViewport
+      );
+      if (
+        (await window.evaluate(
+          () => document.documentElement.dataset.theme
+        )) !== originalTheme
+      ) {
+        await window.getByTestId("theme-toggle").click();
+      }
+      await window.waitForFunction(
+        ({ viewport, theme }) =>
+          window.innerWidth === viewport.width &&
+          window.innerHeight === viewport.height &&
+          document.documentElement.dataset.theme === theme,
+        { viewport: originalViewport, theme: originalTheme }
+      );
+    }
+
+    // 真实系统剪贴板读回：当前段原始 Markdown，不含过程正文和界面文案。
+    await app.evaluate(({ clipboard }) => clipboard.writeText("复制前哨兵"));
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor();
+    const firstCopied = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
+
+    // 仅替换外部 Clipboard 边界模拟一次拒绝，重试恢复真实系统写入。
+    await window.evaluate(() => {
+      const clipboard = navigator.clipboard;
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = () => {
+        clipboard.writeText = original;
+        return Promise.reject(
+          new DOMException("测试拒绝剪贴板", "NotAllowedError")
+        );
+      };
+    });
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "复制失败，请重试" })
+      .waitFor();
+    assert(
+      (await window.getByTestId("assistant-copy").textContent()) === "重试复制",
+      "失败应提供明确重试入口"
+    );
+    await app.evaluate(({ clipboard }) => clipboard.writeText("重试前哨兵"));
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor();
+    const retriedCopied = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
 
     // ---- 场景 1：轮完成后过程段收进已工作折叠区（票 04 默认收起）----
     let order = await segmentOrder(window);
@@ -129,6 +320,11 @@ async function main() {
     // 展开回看完整过程
     await collapsedToggle.click();
     await window.getByTestId("worked-history-items").waitFor();
+
+    assert(
+      (await window.getByTestId("assistant-actions").count()) === 1,
+      "展开过程区后仍仅最终正文显示操作栏"
+    );
 
     // ---- 场景 1b：严格 DOM 时序断言（testid 序列，不靠文本过滤）----
     order = await segmentOrder(window);
@@ -198,6 +394,36 @@ async function main() {
     await card.getByText("时序 e2e 预置内容").waitFor({ timeout: 10_000 });
     console.log("[e2e] 思考折叠块与工具卡的折叠交互保持不变");
 
+    // 异步复制尚未完成时离开会话；旧请求完成不得污染重新挂载的反馈。
+    await window.evaluate(() => {
+      const clipboard = navigator.clipboard;
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = () =>
+        new Promise((resolve) => {
+          window.finishPendingCopy = () => {
+            clipboard.writeText = original;
+            resolve();
+          };
+        });
+    });
+    await window.getByTestId("assistant-copy").click();
+    assert(
+      await window.getByTestId("assistant-copy").isDisabled(),
+      "复制进行中应禁止重复请求"
+    );
+    await window.getByTestId("new-session").click();
+    await window
+      .getByTestId("assistant-actions")
+      .waitFor({ state: "detached" });
+    await window.evaluate(() => window.finishPendingCopy());
+    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("assistant-copy").waitFor();
+    assert(
+      (await window.getByTestId("assistant-copy-feedback").textContent()) ===
+        "",
+      "离开后重新打开不应继承旧复制反馈"
+    );
+
     // ---- 场景 3：重启恢复后段形状（同一消息段序列）----
     await closeApp(app);
     const secondLaunch = await launchApp({ homeDir });
@@ -213,6 +439,18 @@ async function main() {
       .first()
       .waitFor({ timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 300));
+    await window.getByTestId("assistant-completed-at").waitFor();
+    assert(
+      (await window
+        .getByTestId("assistant-completed-at")
+        .getAttribute("datetime")) === completedAt,
+      "重启后的完成时间不得改成历史打开时刻"
+    );
+    assert(
+      (await window.getByTestId("assistant-completed-at").textContent()) ===
+        completedLabel,
+      "重启后的本地完成时间显示应一致"
+    );
     let restored = await segmentOrder(window);
     // 票 02 起落库历史带 reasoning；票 04 起恢复后正常完成的轮默认收起
     // 折叠区（过程段=工具卡与重建的思考段整体收进「已工作折叠区」）
@@ -265,7 +503,24 @@ async function main() {
         restoredText.includes("结论：内容正确"),
       `恢复后的终稿正文应完整：${restoredText ?? "(空)"}`
     );
-    console.log("[e2e] 重启恢复后消息段序列与终稿正文完整");
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor();
+    const restoredCopied = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
+    console.log(
+      "[e2e] 主题截图、失败重试反馈、卸载隔离、重启消息段与完成时刻验证通过"
+    );
+    // 系统剪贴板断言最后汇总，环境异常也不阻断其余场景，但仍明确失败。
+    assert(
+      firstCopied === finalMarkdown &&
+        retriedCopied === finalMarkdown &&
+        restoredCopied === terminalMessage.content,
+      `系统剪贴板必须保存当前段原始 Markdown：${JSON.stringify({ firstCopied, retriedCopied, restoredCopied, expectedFinal: finalMarkdown, expectedRestored: terminalMessage.content })}`
+    );
 
     await closeApp(app);
     console.log("[e2e] 消息段时序保真场景通过 ✅");

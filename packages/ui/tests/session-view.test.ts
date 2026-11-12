@@ -60,6 +60,201 @@ function kinds(items: MessageSegment[]): string[] {
   return items.map((item) => item.kind);
 }
 
+describe("正文完成时刻", () => {
+  it.each(["assistant-aborted", "assistant-done"] as const)(
+    "多段正文经 %s 中断后，新轮正常完成不污染旧轮时间与正文",
+    (type) => {
+      let items: MessageSegment[] = [];
+      const events: SessionEvent[] = [
+        { type: "user-message", message: stored({ id: "u1" }) },
+        { type: "assistant-delta", messageId: "a1", delta: "工具前正文" },
+        { type: "tool-call", call: toolRecord() },
+        { type: "tool-result", call: toolRecord() },
+        { type: "assistant-delta", messageId: "a1", delta: "工具后部分正文" },
+      ];
+      for (const event of events) items = applySessionEvent(items, event);
+      const before = textSegments(items);
+      items = applySessionEvent(items, {
+        type,
+        message: stored({
+          id: "a1",
+          role: "assistant",
+          content: "工具前正文工具后部分正文",
+          aborted: true,
+          createdAt: "2026-11-11T08:00:09.000Z",
+        }),
+      });
+      const interrupted = textSegments(items);
+      expect(interrupted).toHaveLength(2);
+      expect(interrupted).toMatchObject([
+        { turnId: "u1", responseId: "a1", content: "工具前正文" },
+        {
+          turnId: "u1",
+          responseId: "a1",
+          content: "工具后部分正文",
+          interrupted: true,
+        },
+      ]);
+      expect(interrupted.map((item) => item.interrupted)).toEqual([
+        undefined,
+        true,
+      ]);
+      for (const item of interrupted) {
+        expect(item.streaming).toBeUndefined();
+        expect(item.completedAt).toBeUndefined();
+      }
+      expect(interrupted.map((item) => [item.id, item.seq, item.at])).toEqual(
+        before.map((item) => [item.id, item.seq, item.at])
+      );
+
+      items = applySessionEvent(items, {
+        type: "user-message",
+        message: stored({ id: "u2", content: "继续" }),
+      });
+      items = applySessionEvent(items, {
+        type: "assistant-delta",
+        messageId: "a2",
+        delta: "新轮正文",
+      });
+      const newText = seg(textSegments(items), 2);
+      expect(newText).toMatchObject({ turnId: "u2", streaming: true });
+      expect(newText.completedAt).toBeUndefined();
+      expect(textSegments(items).slice(0, 2)).toEqual(interrupted);
+      items = applySessionEvent(items, {
+        type: "assistant-done",
+        message: stored({
+          id: "a2",
+          role: "assistant",
+          content: "新轮完整正文",
+          createdAt: "2026-11-11T08:01:19.000Z",
+        }),
+      });
+      expect(textSegments(items)).toEqual([
+        ...interrupted,
+        {
+          ...newText,
+          content: "新轮完整正文",
+          streaming: undefined,
+          completedAt: Date.UTC(2026, 10, 11, 8, 1, 19),
+        },
+      ]);
+    }
+  );
+
+  it.each([false, true])(
+    "中断标记的终态即使经 done 接收也不记成功时间（已有增量=%s）",
+    (withDelta) => {
+      const message = stored({
+        role: "assistant",
+        aborted: true,
+        content: "部分正文",
+      });
+      const items = withDelta
+        ? applySessionEvent([], {
+            type: "assistant-delta",
+            messageId: message.id,
+            delta: "部分",
+          })
+        : [];
+      const result = applySessionEvent(items, {
+        type: "assistant-done",
+        message,
+      });
+      expect(textSegments(result)[0]).toMatchObject({
+        interrupted: true,
+        content: "部分正文",
+      });
+      expect(textSegments(result)[0]?.completedAt).toBeUndefined();
+      expect(
+        textSegments(initialTranscript([{ kind: "message", message }]))[0]
+          ?.completedAt
+      ).toBeUndefined();
+    }
+  );
+
+  it.each(["assistant-aborted", "error"] as const)(
+    "有效终态时间也不能让非成功事件标为完成：%s",
+    (type) => {
+      const message = stored({
+        role: type === "error" ? "error" : "assistant",
+        content: "部分正文",
+      });
+      const live = applySessionEvent(
+        applySessionEvent([], {
+          type: "assistant-delta",
+          messageId: message.id,
+          delta: "部分正文",
+        }),
+        { type, message }
+      );
+      expect(textSegments(live)[0]?.completedAt).toBeUndefined();
+      expect(textSegments(live)[0]?.streaming).toBeUndefined();
+      expect(textSegments(live)[0]?.content).toBe("部分正文");
+    }
+  );
+
+  it.each(["assistant-done", "assistant-aborted", "error"] as const)(
+    "非法时间与非成功终态不产生成功标记：%s",
+    (type) => {
+      const message = stored({
+        role: type === "error" ? "error" : "assistant",
+        createdAt: "非法时间",
+        content: "部分正文",
+      });
+      const live = applySessionEvent(
+        applySessionEvent([], {
+          type: "assistant-delta",
+          messageId: message.id,
+          delta: "部分正文",
+        }),
+        { type, message }
+      );
+      const missed = applySessionEvent([], { type, message });
+      const restored = initialTranscript([{ kind: "message", message }]);
+      for (const items of [live, missed, restored]) {
+        expect(
+          items.every(
+            (item) => !("completedAt" in item) || item.completedAt === undefined
+          )
+        ).toBe(true);
+      }
+    }
+  );
+
+  it("正常终态只给最后正文记录消息完成时刻，不覆盖段建立时刻或合并过程正文", () => {
+    let items = applySessionEvent([], {
+      type: "assistant-delta",
+      messageId: "a1",
+      delta: "过程正文",
+    });
+    items = applySessionEvent(items, { type: "tool-call", call: toolRecord() });
+    items = applySessionEvent(items, {
+      type: "assistant-delta",
+      messageId: "a1",
+      delta: "最终正文",
+    });
+    const before = textSegments(items);
+    items = applySessionEvent(items, {
+      type: "assistant-done",
+      message: stored({
+        id: "a1",
+        role: "assistant",
+        content: "过程正文最终正文",
+        createdAt: "2026-11-11T08:00:09.000Z",
+      }),
+    });
+    const after = textSegments(items);
+    expect(after[0]).not.toHaveProperty("completedAt");
+    expect(after[1]).toMatchObject({
+      content: "最终正文",
+      completedAt: Date.UTC(2026, 10, 11, 8, 0, 9),
+    });
+    expect(after.map((item) => [item.id, item.seq, item.at])).toEqual(
+      before.map((item) => [item.id, item.seq, item.at])
+    );
+  });
+});
+
 describe("initialTranscript（历史恢复 → 消息段时序序列）", () => {
   it("全部项类型映射为段：user 开新轮、assistant 带响应 id、中断标记保留", () => {
     const interaction: InteractionRecord = {

@@ -76,6 +76,23 @@ async function main() {
         );
         return;
       }
+      if (index === 6) {
+        ctx.send({
+          delta: { content: "失败前保留的正文" },
+          finish_reason: null,
+        });
+        ctx.toolCallRound("failed-c1", "read_file", { path: "note.txt" });
+        return;
+      }
+      if (index === 7) {
+        ctx.res.writeHead(401, { "content-type": "application/json" });
+        ctx.res.end(
+          JSON.stringify({
+            error: { message: "测试失败", type: "invalid_api_key" },
+          })
+        );
+        return;
+      }
       ctx.textRound("收到");
     }
   );
@@ -220,12 +237,26 @@ async function main() {
     console.log("[e2e] 折叠区可再次收起（过程段整体隐藏）");
 
     // ---- 场景 3：中断终态强制展开 ----
+    await window.evaluate(() => {
+      window.interruptedMessage = null;
+      window.removeInterruptedListener = window.codexlike.onSessionEvent(
+        ({ event }) => {
+          if (event.type === "assistant-aborted")
+            window.interruptedMessage = event.message;
+        }
+      );
+    });
     await window.getByTestId("composer-input").fill("写一篇长文");
     await window.getByTestId("composer-send").click();
     await window
       .getByTestId("message-assistant")
       .getByText("第0段长文")
       .waitFor({ timeout: 20_000 });
+    const interruptedTurn = window.getByTestId("message-turn").last();
+    assert(
+      (await interruptedTurn.getByTestId("assistant-actions").count()) === 0,
+      "流式部分正文不得提前显示操作栏"
+    );
     await window.getByTestId("composer-stop").click();
     await window
       .getByText("（已中断，以上为部分回复）")
@@ -244,7 +275,63 @@ async function main() {
       await interruptedThinking.isVisible(),
       "强制展开的折叠区内思考过程应可见"
     );
-    console.log("[e2e] 中断终态的轮强制展开过程（思考可见、部分正文保留）");
+    await interruptedTurn.getByTestId("assistant-copy").waitFor();
+    assert(
+      (await interruptedTurn.getByTestId("assistant-completed-at").count()) ===
+        0,
+      "中断正文不能显示成功完成时间"
+    );
+    const partialContent = await interruptedTurn
+      .getByTestId("assistant-content")
+      .textContent();
+    const terminalContent = await window.evaluate(() => {
+      window.removeInterruptedListener();
+      return window.interruptedMessage?.content;
+    });
+    // 当前场景只有一个正文段，终态会用完整消息纠正增量；期望取公开终态原文，
+    // 不把最后一次 delta 或经 Markdown 渲染/trim 后的文本当作原始正文。
+    assert(
+      typeof terminalContent === "string" && terminalContent.length > 0,
+      "必须收到非空中断终态正文"
+    );
+    assert(
+      partialContent === terminalContent,
+      "纯文本场景的可见正文应与中断终态一致"
+    );
+    await interruptedTurn.getByTestId("assistant-copy").click();
+    await interruptedTurn
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor();
+    const copiedContent = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
+    assert(
+      copiedContent === terminalContent,
+      `中断正文应复制当前段原文且不含中断提示：${JSON.stringify({ expected: terminalContent, actual: copiedContent })}`
+    );
+    console.log("[e2e] 中断终态保留过程与可复制正文，不显示成功时间");
+
+    // ---- 场景 4：错误终态保留的正文可复制，不伪装成功 ----
+    await window.getByTestId("composer-input").fill("执行到一半失败");
+    await window.getByTestId("composer-send").click();
+    const failedTurn = window.getByTestId("message-turn").last();
+    await failedTurn.getByTestId("message-error").waitFor({ timeout: 20_000 });
+    await failedTurn.getByTestId("assistant-copy").waitFor();
+    assert(
+      (await failedTurn.getByTestId("assistant-completed-at").count()) === 0,
+      "错误终态不能显示成功时间"
+    );
+    await failedTurn.getByTestId("assistant-copy").click();
+    await failedTurn
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor();
+    assert(
+      (await app.evaluate(({ clipboard }) => clipboard.readText())) ===
+        "失败前保留的正文",
+      "错误正文复制不能混入错误提示或先前轮次内容"
+    );
 
     await closeApp(app);
     console.log("[e2e] 已工作折叠区与轮次分组场景通过 ✅");

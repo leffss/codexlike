@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MessageComposer } from "../src/components/MessageComposer";
 import { AgentResourcesPanel } from "../src/components/AgentResourcesPanel";
 import { WorkspacePage } from "../src/pages/WorkspacePage";
+import { SettingsPage } from "../src/pages/SettingsPage";
 import type { ResourceSnapshotSummary } from "@codexlike/agent-core";
 
 const snapshot: ResourceSnapshotSummary = {
@@ -120,7 +121,74 @@ describe("规范与技能只读面板", () => {
   });
 });
 
+describe("模型配置入口", () => {
+  it("设置页以模型命名配置区和新建入口", () => {
+    const html = renderToStaticMarkup(createElement(SettingsPage));
+    expect(html).toMatch(/<h2[^>]*>模型<\/h2>/);
+    expect(html).toMatch(
+      /<button[^>]*data-testid="profile-create"[^>]*>\+ 新建模型<\/button>/
+    );
+    expect(html).not.toContain("Provider Profile");
+    expect(html).not.toContain("新建 Profile");
+  });
+  it("工作区未配置模型时使用中文提示和设置入口", () => {
+    const html = renderToStaticMarkup(
+      createElement(WorkspacePage, { onOpenSettings: () => {} })
+    );
+    expect(html).toContain("尚未配置模型，请先前往设置页添加模型");
+    expect(html).toContain("前往设置配置模型");
+    expect(html).not.toContain("Provider Profile");
+  });
+});
+
 describe("技能输入入口", () => {
+  it("审批模式分别显示盾牌问号、盾牌勾和警示色解锁图标", () => {
+    const cases = [
+      {
+        mode: "ask",
+        label: "请求批准",
+        shape: 'd="M6.5 6a1.5 1.5 0 0 1 3 0c0 1-1.5 1-1.5 2"',
+      },
+      {
+        mode: "assist",
+        label: "帮我批准",
+        shape: 'd="m5.5 7.5 1.5 1.5 3.5-3.5"',
+      },
+      {
+        mode: "full-access",
+        label: "完全访问",
+        shape: 'd="M6 7V4a3 3 0 0 1 6 0"',
+      },
+    ] as const;
+    const icons: string[] = [];
+    for (const { mode, label, shape } of cases) {
+      const html = renderToStaticMarkup(
+        createElement(MessageComposer, {
+          profiles: [],
+          selectedProfileId: "",
+          onSelectProfile: () => {},
+          onSend: () => {},
+          workspaceFiles: [],
+          disabled: false,
+          hint: "",
+          approvalMode: mode,
+          onSelectApprovalMode: () => {},
+          thinkingEffort: "auto",
+          onSelectThinkingEffort: () => {},
+        })
+      );
+      const trigger = html.match(
+        /<button[^>]*data-testid="approval-mode-select"[^>]*>[\s\S]*?<\/button>/
+      )?.[0];
+      expect(trigger).toContain(label);
+      const icon = trigger?.match(/<svg[\s\S]*?<\/svg>/)?.[0];
+      expect(icon).toContain('aria-hidden="true"');
+      expect(icon).toContain(shape);
+      expect(icon?.includes("text-warn-fg")).toBe(mode === "full-access");
+      icons.push(icon!);
+    }
+    expect(new Set(icons).size).toBe(3);
+  });
   it("普通输入从会话草稿恢复，即使禁用发送仍保留输入内容与停止按钮", () => {
     const html = renderToStaticMarkup(
       createElement(MessageComposer, {

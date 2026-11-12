@@ -100,11 +100,21 @@ async function main() {
     await window.getByTestId("settings-open").click();
     const profiles = window.locator("section").filter({
       has: window.getByRole("heading", {
-        name: "Provider Profiles",
+        name: "模型",
         exact: true,
       }),
     });
-    await window.getByTestId("profile-create").click();
+    await profiles
+      .getByText("尚未配置模型，点击「新建模型」配置第一个模型接入", {
+        exact: true,
+      })
+      .waitFor();
+    assert(
+      (await profiles.getByTestId("profile-create").textContent()).trim() ===
+        "+ 新建模型",
+      "模型配置入口使用中文文案"
+    );
+    await profiles.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称", { exact: true }).fill("Mock");
     await profileForm
@@ -265,7 +275,7 @@ async function main() {
           warning.remove();
           return matches;
         }),
-        `${theme} full-access 只对盾牌图标使用警示色`
+        `${theme} full-access 只对解锁图标使用警示色`
       );
       await modeSelect.click();
       const menu = window.getByTestId("approval-mode-select-listbox");
@@ -279,6 +289,33 @@ async function main() {
           .getAttribute("data-value")) === "full-access",
         "确认后才选中完全访问"
       );
+      for (const [mode, shape] of [
+        ["ask", "M6.5 6a1.5 1.5 0 0 1 3 0c0 1-1.5 1-1.5 2"],
+        ["assist", "m5.5 7.5 1.5 1.5 3.5-3.5"],
+        ["full-access", "M6 7V4a3 3 0 0 1 6 0"],
+      ]) {
+        const icon = menu
+          .getByTestId(`approval-mode-select-option-${mode}`)
+          .locator("svg")
+          .first();
+        assert(
+          (await icon.locator(`path[d="${shape}"]`).count()) === 1,
+          `${mode} 菜单项显示对应的权限图标`
+        );
+        assert(
+          (await icon.getAttribute("aria-hidden")) === "true" &&
+            (await icon.getAttribute("class")).includes("text-warn-fg") ===
+              (mode === "full-access"),
+          "权限图标不重复朗读，且仅完全访问使用警示色"
+        );
+        if (mode === "full-access") {
+          assert(
+            (await icon.innerHTML()) ===
+              (await modeSelect.locator("svg").first().innerHTML()),
+            "菜单项与触发器复用相同的解锁图标"
+          );
+        }
+      }
       await window.screenshot({
         path: join(screenshots, `approval-menu-${theme}.png`),
       });

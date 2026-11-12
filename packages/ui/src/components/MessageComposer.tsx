@@ -410,7 +410,8 @@ export function MessageComposer(props: {
               options={APPROVAL_MODE_OPTIONS}
               onSelect={props.onSelectApprovalMode}
               renderIcon={(mode) => (
-                <ShieldIcon
+                <ApprovalModeIcon
+                  mode={mode}
                   className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
                 />
               )}
@@ -495,20 +496,43 @@ export function MessageComposer(props: {
   );
 }
 
-function ShieldIcon(props: { className?: string }) {
+function ApprovalModeIcon(props: { mode: ApprovalMode; className?: string }) {
   return (
     <svg
       viewBox="0 0 16 16"
       fill="none"
       className={props.className}
       aria-hidden="true"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      <path
-        d="M8 1.5 13 3.4V7c0 3.1-2.1 5.8-5 6.9C5.1 12.8 3 10.1 3 7V3.4L8 1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
+      {props.mode === "full-access" ? (
+        <>
+          <path d="M6 7V4a3 3 0 0 1 6 0" />
+          <rect x="3" y="7" width="10" height="7" rx="1.5" />
+          <path d="M8 10v1" />
+        </>
+      ) : (
+        <>
+          <path d="M8 1.5 13 3.4V7c0 3.1-2.1 5.8-5 6.9C5.1 12.8 3 10.1 3 7V3.4L8 1.5Z" />
+          {props.mode === "ask" ? (
+            <>
+              <path d="M6.5 6a1.5 1.5 0 0 1 3 0c0 1-1.5 1-1.5 2" />
+              <circle
+                cx="8"
+                cy="10.5"
+                r="0.75"
+                fill="currentColor"
+                stroke="none"
+              />
+            </>
+          ) : (
+            <path d="m5.5 7.5 1.5 1.5 3.5-3.5" />
+          )}
+        </>
+      )}
     </svg>
   );
 }

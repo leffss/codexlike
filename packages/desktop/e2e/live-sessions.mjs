@@ -62,7 +62,7 @@ async function main() {
     await window.getByTestId("settings-open").click();
     const profiles = window.locator("section").filter({
       has: window.getByRole("heading", {
-        name: "Provider Profiles",
+        name: "模型",
         exact: true,
       }),
     });
