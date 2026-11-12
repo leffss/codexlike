@@ -302,7 +302,7 @@ async function main() {
     await interruptedTurn
       .getByTestId("assistant-copy-feedback")
       .filter({ hasText: "已复制" })
-      .waitFor();
+      .waitFor({ state: "attached" });
     const copiedContent = await app.evaluate(({ clipboard }) =>
       clipboard.readText()
     );
@@ -326,7 +326,7 @@ async function main() {
     await failedTurn
       .getByTestId("assistant-copy-feedback")
       .filter({ hasText: "已复制" })
-      .waitFor();
+      .waitFor({ state: "attached" });
     assert(
       (await app.evaluate(({ clipboard }) => clipboard.readText())) ===
         "失败前保留的正文",

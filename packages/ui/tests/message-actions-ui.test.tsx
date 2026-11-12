@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => vi.useRealTimers());
 
 import { MessageStream } from "../src/components/MessageStream";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
@@ -31,6 +33,22 @@ function render(items: MessageSegment[], streaming = false): string {
 }
 
 describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌面 E2E 验证）", () => {
+  it("复制入口是有明确名称的 28px 图标按钮，装饰 SVG 不进入无障碍树", () => {
+    const html = render([assistant()]);
+    const button = html.match(
+      /<button[^>]*data-testid="assistant-copy"[^>]*>[\s\S]*?<\/button>/
+    )?.[0];
+    expect(button).toContain('aria-label="复制"');
+    expect(button).toContain('title="复制"');
+    expect(button).toContain("h-7 w-7");
+    expect(button).toContain("border border-line bg-surface-muted");
+    expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
+    expect(button).not.toContain(">复制<");
+    expect(html).toMatch(
+      /<span[^>]*data-testid="assistant-copy-feedback"[^>]*class="sr-only"/
+    );
+  });
+
   it.each(["正文流式", "宿主仍运行", "工具仍运行"])(
     "%s时不显示操作栏，即使较早正文已去除 streaming",
     (phase) => {
@@ -197,7 +215,9 @@ describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌�
     }
   );
 
-  it("最终正文下方显示复制与本地完整完成时间，展开过程正文不重复显示操作栏", () => {
+  it("最终正文下方显示同日短时间与完整 title，展开过程正文不重复显示操作栏", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 11, 17));
     setRememberedOpen("history-actions-turn", true);
     const html = render([
       assistant({
@@ -213,7 +233,9 @@ describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌�
     expect(html).toContain('data-testid="assistant-copy"');
     expect(html).toContain("复制");
     expect(html).toContain("完成于");
-    expect(html).toContain("2026-11-11 16:08:09");
+    expect(html).toContain('title="2026-11-11 16:08:09"');
+    expect(html).toMatch(/<time[^>]*>16:08<\/time>/);
+    expect(html).toContain(new Date(2026, 10, 11, 16, 8, 9).toISOString());
     expect(html).toMatch(/<time[^>]*dateTime="[^"]+"/i);
     expect(html.indexOf('data-testid="assistant-actions"')).toBeGreaterThan(
       html.indexOf("<strong>最终正文</strong>")

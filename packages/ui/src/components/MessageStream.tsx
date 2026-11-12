@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { useCollapseState } from "../lib/collapse-memory";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
+import { useLocalDay } from "../lib/use-local-day";
 import { markdownComponents } from "../lib/markdown";
 import {
   anchorDecisionAfterContentChange,
@@ -75,6 +76,7 @@ export function MessageStream(props: {
   /** 强制回底信号（票 03）：发送新 prompt 时递增，组件立即贴底并进入跟随 */
   followSignal?: number;
 }) {
+  const now = useLocalDay();
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
   const container = useRef<HTMLDivElement>(null);
@@ -280,6 +282,7 @@ export function MessageStream(props: {
               <TurnGroupItem
                 key={turn.turnId}
                 turn={turn}
+                now={now}
                 questionDraft={props.questionDraft}
               />
             ))}
@@ -335,6 +338,7 @@ export function MessageStream(props: {
  */
 function TurnGroupItem(props: {
   turn: TurnView;
+  now: Date;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
 }) {
   const { turn } = props;
@@ -361,6 +365,7 @@ function TurnGroupItem(props: {
             key={segment.id}
             segment={segment}
             showActions={!turn.running}
+            now={props.now}
             failed={turn.following.some((item) => item.kind === "error")}
             questionDraft={props.questionDraft}
           />
@@ -517,6 +522,7 @@ function ToolGroupView(props: {
 function SegmentView(props: {
   segment: MessageSegment;
   showActions?: boolean;
+  now?: Date;
   failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
 }) {
@@ -542,6 +548,7 @@ function SegmentView(props: {
     <MessageBubble
       segment={segment}
       showActions={props.showActions}
+      now={props.now}
       failed={props.failed}
     />
   );
@@ -611,6 +618,7 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
 /** 消息型消息段：用户消息、助手正文、错误提示、本地状态、压缩摘要 */
 function MessageBubble(props: {
   showActions?: boolean;
+  now?: Date;
   failed?: boolean;
   segment: Extract<
     MessageSegment,
@@ -702,10 +710,11 @@ function MessageBubble(props: {
           </p>
         )}
       </div>
-      {props.showActions && (
+      {props.showActions && props.now !== undefined && (
         <AssistantActions
           key={segment.content}
           segment={segment}
+          now={props.now}
           failed={props.failed}
         />
       )}

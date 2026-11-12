@@ -36,6 +36,66 @@ async function segmentOrder(window) {
   });
 }
 
+/** 在渲染进程按当前本地日历重算，重启不能沿用旧短标签。 */
+async function assertCompletedTime(window, iso) {
+  const actual = await window
+    .getByTestId("assistant-completed-at")
+    .evaluate((time) => {
+      const completed = new Date(time.dateTime);
+      const now = new Date();
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(completed);
+      const part = (name) => parts.find((item) => item.type === name).value;
+      const date = `${part("year")}-${part("month")}-${part("day")}`;
+      const hm = `${part("hour")}:${part("minute")}`;
+      const sameYear = completed.getFullYear() === now.getFullYear();
+      const sameDay = completed.toDateString() === now.toDateString();
+      return {
+        iso: time.dateTime,
+        label: time.textContent,
+        title: time.title,
+        expectedLabel: sameDay
+          ? hm
+          : `${sameYear ? date.slice(5) : date} ${hm}`,
+        expectedTitle: `${date} ${hm}:${part("second")}`,
+      };
+    });
+  assert(actual.iso === iso, "完成时间 ISO 必须保持终态消息原值");
+  assert(
+    actual.label === actual.expectedLabel,
+    `短标签应按当前本地日期重算：${JSON.stringify(actual)}`
+  );
+  assert(actual.title === actual.expectedTitle, "title 应显示本地完整日期及秒");
+}
+
+async function assertCopyState(window, name) {
+  const button = window.getByTestId("assistant-copy");
+  assert(
+    (await button.getAttribute("aria-label")) === name,
+    `复制入口名称应为 ${name}`
+  );
+  assert(
+    (await button.getAttribute("title")) === name,
+    `复制入口 title 应为 ${name}`
+  );
+  assert((await button.textContent()) === "", "图标按钮不应残留可见文字");
+  assert(
+    (await button.locator('svg[aria-hidden="true"]').count()) === 1,
+    "图标应从无障碍树隐藏"
+  );
+  assert(
+    (await button.locator("svg rect").count()) === (name === "已复制" ? 0 : 1),
+    "成功显示勾，其他状态显示复制图标"
+  );
+}
+
 async function main() {
   const finalMarkdown =
     "**结论：内容正确**\n\n保留 Markdown\n\n```ts\nconst ok = true;\n```";
@@ -127,9 +187,7 @@ async function main() {
     const completedAt = await window
       .getByTestId("assistant-completed-at")
       .getAttribute("datetime");
-    const completedLabel = await window
-      .getByTestId("assistant-completed-at")
-      .textContent();
+    await assertCompletedTime(window, completedAt);
     const terminalMessage = await window.evaluate(() => {
       window.removeCompletionListener();
       return window.messageCompletion;
@@ -138,10 +196,81 @@ async function main() {
       completedAt === terminalMessage?.createdAt,
       "完成时间必须来自 assistant-done 的终态消息"
     );
+    await assertCopyState(window, "复制");
+
+    // 真实系统剪贴板读回：当前段原始 Markdown，不含过程正文和界面文案。
+    await window.clock.install();
+    await window.clock.pauseAt(new Date(Date.now() + 1000));
+    await app.evaluate(({ clipboard }) => clipboard.writeText("复制前哨兵"));
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor({ state: "attached" });
+    await assertCopyState(window, "已复制");
     assert(
-      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(completedLabel ?? ""),
-      "完成时间应为完整本地日期与时分秒"
+      (await window
+        .getByTestId("assistant-copy-feedback")
+        .getAttribute("class")) === "sr-only",
+      "成功状态只向屏幕阅读器播报"
     );
+    const firstCopied = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
+    // 使用渲染器时钟精确验证两秒边界，避免额外真实等待。
+    await window.clock.runFor(1999);
+    await assertCopyState(window, "已复制");
+    await window.clock.runFor(1);
+    await assertCopyState(window, "复制");
+    assert(
+      (await window.getByTestId("assistant-copy-feedback").textContent()) ===
+        "",
+      "复位后成功反馈清空"
+    );
+
+    // 在成功计时仍未结束时再次复制；后续失败不应被旧成功定时器清空。
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor({ state: "attached" });
+
+    // 仅替换外部 Clipboard 边界模拟一次拒绝，重试恢复真实系统写入。
+    await window.evaluate(() => {
+      const clipboard = navigator.clipboard;
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = () => {
+        clipboard.writeText = original;
+        return Promise.reject(
+          new DOMException("测试拒绝剪贴板", "NotAllowedError")
+        );
+      };
+    });
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "复制失败，请重试" })
+      .waitFor();
+    await assertCopyState(window, "重试复制");
+    assert(
+      await window.getByTestId("assistant-copy-feedback").isVisible(),
+      "失败提示应保持可见"
+    );
+    await window.clock.runFor(2000);
+    await assertCopyState(window, "重试复制");
+    await app.evaluate(({ clipboard }) => clipboard.writeText("重试前哨兵"));
+    await window.getByTestId("assistant-copy").click();
+    await window
+      .getByTestId("assistant-copy-feedback")
+      .filter({ hasText: "已复制" })
+      .waitFor({ state: "attached" });
+    await assertCopyState(window, "已复制");
+    const retriedCopied = await app.evaluate(({ clipboard }) =>
+      clipboard.readText()
+    );
+    await window.clock.runFor(2000);
+    await assertCopyState(window, "复制");
+    await window.clock.resume();
 
     // 浅/深主题下的窄窗口布局与截图；独立临时目录保留给人工验收。
     const screenshots = mkdtempSync(
@@ -194,6 +323,7 @@ async function main() {
             probe.remove();
             return {
               themed,
+              iconSize: copy.width === 28 && copy.height === 28,
               below: actions.top >= content.bottom,
               contained: [copy, time].every(
                 (rect) =>
@@ -216,7 +346,8 @@ async function main() {
           });
         assert(layout.themed, `${theme} 操作栏应使用主题弱化前景色`);
         assert(
-          layout.below &&
+          layout.iconSize &&
+            layout.below &&
             layout.contained &&
             layout.separate &&
             layout.noOverflow,
@@ -242,55 +373,15 @@ async function main() {
       ) {
         await window.getByTestId("theme-toggle").click();
       }
+      // Windows 125% 缩放下原生窗口往返取整可能偏差 1 CSS px（802 → 803）。
       await window.waitForFunction(
         ({ viewport, theme }) =>
-          window.innerWidth === viewport.width &&
-          window.innerHeight === viewport.height &&
+          Math.abs(window.innerWidth - viewport.width) <= 1 &&
+          Math.abs(window.innerHeight - viewport.height) <= 1 &&
           document.documentElement.dataset.theme === theme,
         { viewport: originalViewport, theme: originalTheme }
       );
     }
-
-    // 真实系统剪贴板读回：当前段原始 Markdown，不含过程正文和界面文案。
-    await app.evaluate(({ clipboard }) => clipboard.writeText("复制前哨兵"));
-    await window.getByTestId("assistant-copy").click();
-    await window
-      .getByTestId("assistant-copy-feedback")
-      .filter({ hasText: "已复制" })
-      .waitFor();
-    const firstCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
-    );
-
-    // 仅替换外部 Clipboard 边界模拟一次拒绝，重试恢复真实系统写入。
-    await window.evaluate(() => {
-      const clipboard = navigator.clipboard;
-      const original = clipboard.writeText.bind(clipboard);
-      clipboard.writeText = () => {
-        clipboard.writeText = original;
-        return Promise.reject(
-          new DOMException("测试拒绝剪贴板", "NotAllowedError")
-        );
-      };
-    });
-    await window.getByTestId("assistant-copy").click();
-    await window
-      .getByTestId("assistant-copy-feedback")
-      .filter({ hasText: "复制失败，请重试" })
-      .waitFor();
-    assert(
-      (await window.getByTestId("assistant-copy").textContent()) === "重试复制",
-      "失败应提供明确重试入口"
-    );
-    await app.evaluate(({ clipboard }) => clipboard.writeText("重试前哨兵"));
-    await window.getByTestId("assistant-copy").click();
-    await window
-      .getByTestId("assistant-copy-feedback")
-      .filter({ hasText: "已复制" })
-      .waitFor();
-    const retriedCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
-    );
 
     // ---- 场景 1：轮完成后过程段收进已工作折叠区（票 04 默认收起）----
     let order = await segmentOrder(window);
@@ -407,6 +498,7 @@ async function main() {
         });
     });
     await window.getByTestId("assistant-copy").click();
+    await assertCopyState(window, "复制中");
     assert(
       await window.getByTestId("assistant-copy").isDisabled(),
       "复制进行中应禁止重复请求"
@@ -446,11 +538,7 @@ async function main() {
         .getAttribute("datetime")) === completedAt,
       "重启后的完成时间不得改成历史打开时刻"
     );
-    assert(
-      (await window.getByTestId("assistant-completed-at").textContent()) ===
-        completedLabel,
-      "重启后的本地完成时间显示应一致"
-    );
+    await assertCompletedTime(window, completedAt);
     let restored = await segmentOrder(window);
     // 票 02 起落库历史带 reasoning；票 04 起恢复后正常完成的轮默认收起
     // 折叠区（过程段=工具卡与重建的思考段整体收进「已工作折叠区」）
@@ -507,7 +595,7 @@ async function main() {
     await window
       .getByTestId("assistant-copy-feedback")
       .filter({ hasText: "已复制" })
-      .waitFor();
+      .waitFor({ state: "attached" });
     const restoredCopied = await app.evaluate(({ clipboard }) =>
       clipboard.readText()
     );
