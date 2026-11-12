@@ -7,6 +7,8 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { markdownComponents } from "../lib/markdown";
 import type { UiItem } from "../lib/session-view";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
@@ -23,7 +25,14 @@ export function MessageStream(props: {
   readingPosition?: ReadingPosition | null;
   onReadingPosition?: (position: ReadingPosition) => void;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+  /**
+   * 内容列宽度类（票 05 容器分档宽度）：由 WorkspacePage 单点选择
+   * （空态 2xl / 有内容三档）并同样下发给头部与输入区，保证三处共用对齐。
+   */
+  contentWidthClass?: string;
 }) {
+  const contentWidthClass =
+    props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
   const container = useRef<HTMLDivElement>(null);
   const restored = useRef<string | null | undefined>(undefined);
   useLayoutEffect(() => {
@@ -50,16 +59,24 @@ export function MessageStream(props: {
             scrollTop: event.currentTarget.scrollTop,
           });
       }}
-      className="min-h-0 flex-1 overflow-y-auto bg-canvas px-4 py-4"
+      // overflow-x-hidden：宽内容（表格 / 代码块）由各自容器内聚横向滚动，
+      // 滚动容器自身不出现横向溢出（spec 用户故事 34）
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-canvas px-4 py-4"
       data-testid="message-stream"
     >
       {props.items.length === 0 && props.compacting !== true ? (
-        <div className="flex h-full flex-col items-center justify-center gap-3 text-fg-subtle">
+        <div
+          data-testid="message-empty"
+          className={`${contentWidthClass} flex h-full flex-col items-center justify-center gap-3 text-fg-subtle`}
+        >
           <p className="text-sm">消息流为空</p>
           {props.emptyHint}
         </div>
       ) : (
-        <ol className="mx-auto flex max-w-3xl flex-col gap-4">
+        <ol
+          data-testid="message-list"
+          className={`${contentWidthClass} flex flex-col gap-4`}
+        >
           {props.items.map((item) =>
             item.kind === "tool-call" ? (
               <ToolCallCard key={`tool-${item.id}`} call={item} />
@@ -102,7 +119,9 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-user"
-        className="ml-auto max-w-[85%] rounded-lg bg-selected px-3 py-2 text-sm whitespace-pre-wrap text-fg"
+        // 限宽右对齐气泡（spec 用户故事 33）：相对限宽 85% 保护窄容器，
+        // 绝对上限 36rem 防止内容列放宽后单段文本行长失控
+        className="ml-auto max-w-[min(85%,36rem)] rounded-lg bg-selected px-3 py-2 text-sm whitespace-pre-wrap text-fg"
       >
         {message.content}
       </li>
@@ -144,6 +163,7 @@ function MessageBubble(props: {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
             >
               {message.content}
             </ReactMarkdown>
@@ -188,6 +208,7 @@ function MessageBubble(props: {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
+            components={markdownComponents}
           >
             {message.content}
           </ReactMarkdown>

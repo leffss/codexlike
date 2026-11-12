@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+import { markdownComponents } from "../lib/markdown";
 import type { UiSubagent } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 
@@ -130,6 +131,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
             >
               {subagent.report ?? ""}
             </ReactMarkdown>
