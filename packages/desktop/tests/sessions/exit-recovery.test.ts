@@ -14,6 +14,7 @@ import { registerSessionHandlers } from "../../src/sessions/session-ipc";
 import { createApplicationExit } from "../../src/lifecycle/application-exit";
 import { createProfileStore } from "../../src/profiles/profile-store";
 import { createLiveSessions } from "../../src/sessions/live-sessions";
+import { listenMock } from "./mock-server";
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
@@ -35,6 +36,9 @@ function invoke(name: string, ...args: unknown[]): any {
   if (!handler) throw new Error(`未注册通道 ${name}`);
   return handler({}, ...args);
 }
+// vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
+// 信号，预算对齐用例上限内（见 workbench-ipc.test.ts 同说明）。
+const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 async function setup() {
   const root = mkdtempSync(join(tmpdir(), "exit-recovery-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
@@ -87,18 +91,16 @@ async function setup() {
       responses.set(text, res);
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const mockPort = await listenMock(server);
   cleanup.push(() => {
     server.close();
     server.closeAllConnections();
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("无端口");
   const profile = await profiles.create({
     name: "退出模型",
     model: "mock",
     apiKey: "test",
-    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   const runtime = registerSessionHandlers({
     manager,
@@ -130,7 +132,7 @@ async function setup() {
     delta: unknown,
     finish: string | null = null
   ) {
-    await vi.waitFor(() => expect(responses.has(text)).toBe(true));
+    await waitFor(() => expect(responses.has(text)).toBe(true));
     const res = responses.get(text)!;
     res.write(
       `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
@@ -185,7 +187,7 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
     },
     "tool_calls"
   );
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:view", b.id).activity.waitingForUser).toBe(true)
   );
   const request = invoke("sessions:pending-interactions", b.id)[0].request;
@@ -206,7 +208,7 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
   app.exit.answer(first.id, false);
   expect(app.exit.state().phase).toBe("idle");
   await app.frame("后台慢任务", { content: "取消后继续生成" });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(JSON.stringify(invoke("sessions:view", a.id))).toContain(
       "取消后继续生成"
     )
@@ -295,7 +297,7 @@ it("退出提示期间不提前取消已接收的准备任务，取消退出后�
   app.exit.answer(app.exit.state().id, false);
   const session = await start;
   await app.frame("准备中取消退出", { content: "任务仍正常开始" }, "stop");
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   expect(app.manager.messages(session.id).at(-1)?.content).toBe(
@@ -344,13 +346,13 @@ it("Compact也参与退出确认与中断，退出不替换未完成的压缩历
     text: "第0轮",
   });
   await app.frame("第0轮", { content: "第0轮答复" }, "stop");
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(invoke("sessions:execution", session.id).running).toBe(false)
   );
   for (let i = 1; i < 4; i++) {
     await invoke("sessions:send", session.id, `第${i}轮`, app.profile.id);
     await app.frame(`第${i}轮`, { content: `第${i}轮答复` }, "stop");
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(invoke("sessions:execution", session.id).running).toBe(false)
     );
   }
@@ -358,7 +360,7 @@ it("Compact也参与退出确认与中断，退出不替换未完成的压缩历
   const compact = invoke("sessions:compact", session.id, app.profile.id).catch(
     (error: Error) => error
   );
-  await vi.waitFor(() => expect(app.requests()).toBe(5));
+  await waitFor(() => expect(app.requests()).toBe(5));
   app.exit.request();
   expect(app.exit.state().phase).toBe("confirming");
   const id = app.exit.state().id;

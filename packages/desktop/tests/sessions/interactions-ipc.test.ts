@@ -13,6 +13,7 @@ import {
 
 import { registerSessionHandlers } from "../../src/sessions/session-ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
+import { listenMock } from "./mock-server";
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -129,17 +130,11 @@ describe("统一用户交互 IPC", () => {
         response.end("data: [DONE]\n\n");
       });
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve)
-    );
+    const mockPort = await listenMock(server);
     cleanups.push(() => {
       server.close();
       server.closeAllConnections();
     });
-    const address = server.address();
-    if (address === null || typeof address === "string") {
-      throw new Error("测试 provider 未分配端口");
-    }
     const controller = new AbortController();
     const iterator = session
       .sendMessage({
@@ -147,7 +142,7 @@ describe("统一用户交互 IPC", () => {
         profile: {
           id: "mock",
           name: "Mock",
-          baseURL: `http://127.0.0.1:${address.port}/v1`,
+          baseURL: `http://127.0.0.1:${mockPort}/v1`,
           apiKey: "test",
           model: "mock",
         },
