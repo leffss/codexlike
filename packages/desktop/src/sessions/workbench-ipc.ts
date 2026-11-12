@@ -87,7 +87,9 @@ export function registerWorkbenchHandlers(
         position.scrollTop < 0 ||
         (position.anchorId !== undefined &&
           typeof position.anchorId !== "string") ||
-        (position.offset !== undefined && !Number.isFinite(position.offset)))
+        (position.offset !== undefined && !Number.isFinite(position.offset)) ||
+        (position.atBottom !== undefined &&
+          typeof position.atBottom !== "boolean"))
     )
       throw new Error("阅读位置不合法");
     if (
@@ -157,6 +159,9 @@ export function registerWorkbenchHandlers(
               ...(position.offset === undefined
                 ? {}
                 : { offset: position.offset }),
+              ...(position.atBottom === undefined
+                ? {}
+                : { atBottom: position.atBottom }),
             },
       questionDrafts,
       ...(entry.value.workspacePath === undefined
