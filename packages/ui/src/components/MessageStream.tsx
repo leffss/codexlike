@@ -78,8 +78,9 @@ export function MessageStream(props: {
   const container = useRef<HTMLDivElement>(null);
   const restored = useRef<string | null | undefined>(undefined);
   const followRef = useRef<FollowMode>("following");
-  // 跟随态的渲染镜像（驱动「回到最新」入口可见性，ref 不触发渲染）
-  const [following, setFollowing] = useState(true);
+  // 跟随态的渲染镜像（驱动「回到最新」入口可见性，ref 不触发渲染）：
+  // 直接保存 FollowMode 本身，可见性裁决无需从 boolean 反向转回
+  const [mode, setMode] = useState<FollowMode>("following");
   const pendingIntent = useRef<{ intent: VerticalIntent; at: number } | null>(
     null
   );
@@ -101,10 +102,10 @@ export function MessageStream(props: {
     element.scrollTop = top;
   }
 
-  function commitMode(mode: FollowMode) {
-    if (followRef.current === mode) return;
-    followRef.current = mode;
-    setFollowing(mode === "following");
+  function commitMode(next: FollowMode) {
+    if (followRef.current === next) return;
+    followRef.current = next;
+    setMode(next);
   }
 
   /** TTL 内最近登记的用户纵向意图；过期视为无登记 */
@@ -294,10 +295,7 @@ export function MessageStream(props: {
         )}
       </div>
       {/* 「回到最新」入口：脱离跟随且有消息时可见；点击回底并恢复跟随 */}
-      {backToLatestVisible(
-        following ? "following" : "detached",
-        props.items.length
-      ) && (
+      {backToLatestVisible(mode, props.items.length) && (
         <button
           type="button"
           data-testid="back-to-latest"
@@ -425,9 +423,10 @@ function WorkedHistory(props: {
 }
 
 /**
- * 连续同类工具统计分组（spec 用户故事 29）：组头显示类别与计数
- * （如「read_file × 3」，含失败卡时提示），展开仍由原卡片渲染；
- * 组默认收起（过程区不被重复卡片淹没），开合同样按键记忆。
+ * 连续同类工具统计分组序列的形态分派（spec 用户故事 29）：只做
+ * passthrough / single / group 三形态分派，自身不挂 Hook——提前
+ * return 之后调用 hook 违反 Rules of Hooks，组形态的折叠开合由
+ * ToolGroupView 固定子组件承载。
  */
 function ToolSequenceView(props: {
   item: ToolSequenceItem;
@@ -442,6 +441,18 @@ function ToolSequenceView(props: {
   if (item.kind === "single") {
     return <ToolCallCard call={item.segment} />;
   }
+  return <ToolGroupView item={item} />;
+}
+
+/**
+ * 同名连续工具组（spec 用户故事 29）：组头显示类别与计数
+ * （如「read_file × 3」，含失败卡时提示），展开仍由原卡片渲染；
+ * 组默认收起（过程区不被重复卡片淹没），开合同样按键记忆。
+ */
+function ToolGroupView(props: {
+  item: Extract<ToolSequenceItem, { kind: "group" }>;
+}) {
+  const { item } = props;
   const first = item.segments[0];
   const { open, toggle } = useCollapseState(
     `tool-group-${first?.id ?? ""}`,

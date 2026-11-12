@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useCollapseState } from "../lib/collapse-memory";
 import type { ToolCallSegment } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
+import { formatDurationCn } from "../lib/turn-view";
 
 /** 截图卡片的图片展示：展开时经主进程按 会话+调用 id 读取文件（dataURL） */
 function ScreenshotView(props: { call: ToolCallSegment }) {
@@ -76,7 +77,7 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
       : "text-ok-fg";
   const duration =
     call.endedAt !== undefined && call.startedAt !== undefined
-      ? formatToolDuration(call.endedAt - call.startedAt)
+      ? formatDurationCn(call.endedAt - call.startedAt, true)
       : null;
 
   return (
@@ -146,15 +147,6 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
       )}
     </li>
   );
-}
-
-/** 工具耗时文案：秒级保留一位小数，满分钟走工时格式 */
-function formatToolDuration(durationMs: number): string {
-  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)} 秒`;
-  const seconds = Math.round(durationMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
 }
 
 /** 失败悬停详情：单行化并截断 */

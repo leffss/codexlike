@@ -24,11 +24,6 @@ export function setRememberedOpen(key: string, open: boolean): void {
   remembered.set(key, open);
 }
 
-/** 清空记忆（测试隔离用） */
-export function resetCollapseMemory(): void {
-  remembered.clear();
-}
-
 /**
  * 折叠开合 hook：open 是「记忆值 ?? 默认值」的派生态。
  * toggle 写记忆并触发重渲染；默认值变化（如运行中→完成）对

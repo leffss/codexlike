@@ -21,6 +21,7 @@
     "test:e2e:worktree": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worktree",
     "test:e2e:subagent-thinking": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-thinking",
     "test:e2e:message-order": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:message-order",
+    "test:e2e:worked-history": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worked-history",
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
     "prepare": "husky",
     "test:e2e:projects": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:projects",

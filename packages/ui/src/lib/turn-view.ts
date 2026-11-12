@@ -141,13 +141,25 @@ function turnDuration(cluster: MessageSegment[]): number | null {
   return Math.max(0, max - min);
 }
 
-/** 「已工作 N 秒」摘要行的工时文案（秒四舍五入；满分钟分解为分+秒） */
-export function formatWorkDuration(durationMs: number): string {
+/**
+ * 共享时长文案（工具卡耗时与「已工作 N 秒」工时同源）：满分钟统一
+ * 「N 分 [M 秒]」（秒四舍五入）；60 秒内的秒位呈现按 tenths 切换——
+ * true 保留一位小数（工具卡耗时），false 四舍五入整数（工时摘要）。
+ */
+export function formatDurationCn(durationMs: number, tenths = false): string {
+  if (tenths && durationMs < 60_000) {
+    return `${(durationMs / 1000).toFixed(1)} 秒`;
+  }
   const seconds = Math.round(durationMs / 1000);
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
+}
+
+/** 「已工作 N 秒」摘要行的工时文案（秒四舍五入；满分钟分解为分+秒） */
+export function formatWorkDuration(durationMs: number): string {
+  return formatDurationCn(durationMs);
 }
 
 /** 连续同类工具统计分组的序列条目 */
