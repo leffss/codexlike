@@ -82,7 +82,9 @@ async function main() {
     await window.getByTestId("composer-input").fill("打开 fixture 页并截图");
     await window.getByTestId("composer-send").click();
 
-    // navigate 卡片：真实 Chromium 打开 fixture，输出含页面标题
+    // navigate 卡片：真实 Chromium 打开 fixture，输出含页面标题。
+    // 卡片渲染完成 ≠ 工具执行完成：输出文本要等工具真实跑完（卡片等待
+    // 已按慢工具给 60s，内容等待必须同预算——全量链负载下 20s 偶发不够）。
     const navCard = window.locator(
       '[data-testid="tool-call-card"][data-tool-name="browser_navigate"]'
     );
@@ -90,7 +92,7 @@ async function main() {
     await navCard.getByTestId("tool-call-toggle").click();
     await navCard
       .getByText("已打开「E2E 浏览器页」")
-      .waitFor({ timeout: 20_000 });
+      .waitFor({ timeout: 60_000 });
     console.log("[e2e] browser_navigate 在 Electron 主进程内真实执行");
 
     // screenshot 卡片：输出含保存路径，且卡片内嵌截图图片（IPC 读回 dataURL）
@@ -99,10 +101,10 @@ async function main() {
     );
     await shotCard.waitFor({ timeout: 60_000 });
     await shotCard.getByTestId("tool-call-toggle").click();
-    await shotCard.getByText("整页截图已保存").waitFor({ timeout: 20_000 });
+    await shotCard.getByText("整页截图已保存").waitFor({ timeout: 60_000 });
     await shotCard
       .getByTestId("tool-call-screenshot")
-      .waitFor({ timeout: 20_000 });
+      .waitFor({ timeout: 60_000 });
     console.log("[e2e] 截图卡片内嵌图片渲染（写盘 → toolImage IPC → img）");
 
     // 3) 截图真实落盘到会话数据目录（约定路径）
