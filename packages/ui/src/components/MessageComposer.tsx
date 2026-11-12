@@ -22,6 +22,7 @@ import {
   handleMenuKey,
   type ComposerMenuState,
 } from "../lib/composer-menu";
+import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 
 /** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
 export const APPROVAL_MODE_OPTIONS: {
@@ -172,7 +173,14 @@ export function MessageComposer(props: {
    */
   thinkingEffort: ThinkingEffort | null;
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
+  /**
+   * 内容列宽度类（票 05 容器分档宽度）：与消息流、头部共用同一内容列
+   * （空态 2xl / 有内容三档由 WorkspacePage 单点选择下发）。
+   */
+  contentWidthClass?: string;
 }) {
+  const contentWidthClass =
+    props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
   const [localValue, setLocalValue] = useState("");
   const value = props.draftValue ?? localValue;
   function setValue(next: string) {
@@ -331,10 +339,12 @@ export function MessageComposer(props: {
     THINKING_PILL_STYLES.auto;
 
   return (
-    <div className="border-t border-line bg-surface-muted p-3">
+    // 水平 padding 与消息流（px-4）一致，输入卡片与内容列左右缘对齐（票 05）
+    <div className="border-t border-line bg-surface-muted px-4 py-3">
       {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
       <form
-        className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
+        data-testid="composer-card"
+        className={`${contentWidthClass} rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted`}
         onSubmit={(event) => {
           event.preventDefault();
           submit();
