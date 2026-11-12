@@ -25,3 +25,13 @@
 - 命令与退出码：`pnpm -r run test` → 0（46+20+16 文件 / 671 tests）；`pnpm run typecheck` → 0；`pnpm test:e2e:all` → 0（26 场景，含新增 scroll-following；期间一次 acceptance 侧栏 hover flake「project-session-count 拦截点击」单独复跑通过，与本票无关）。融合后复验：`pnpm run typecheck` → 0、`pnpm -r run test` → 0、scroll-following + message-order + reasoning-recovery + exit-recovery → 0。
 - 偏差 1（验收项 7 部分达成，未勾）：`scrollbar-gutter:stable` 未启用。常驻滚动条槽（Windows 15.2px）使消息列比头部/输入区恒窄一个滚动条宽度，与票 05 width-tiers 的两组断言直接冲突：场景 3 三处左右缘对齐（±1）与场景 5 基础档绝对宽度「容器-32px」（±2）无法同时成立；测槽宽发 CSS 变量同步头部/输入区可救对齐断言但救不了基础档绝对基准。为守住硬约束（现有 e2e 全绿）选择不启用，`MessageStream.tsx` 内留注释。溢出阈值跨越时 15.2px 的单向跳变与旧布局一致，留待规格层仲裁（放宽 width-tiers 基准或 overlay 滚动条方案）。
 - 偏差 2：无其他偏差。<4px 阅读位置断言（exit-recovery、persistent-workbench）全绿未回归。
+
+**协调者裁决（2026-11-12，提交于集成分支）**
+
+接受偏差 1：不启用 `scrollbar-gutter:stable`，验收项 7 按「即时 scrollTop 赋值 + 禁用原生 scroll anchoring 达成，gutter 豁免」关闭。理由：
+
+1. 消息流/头部/输入区三处对齐与分档宽度是**每屏常态属性**；滚动条槽 15.2px 的横向跳变只在溢出阈值跨越时发生一次（单向、与旧布局行为一致），常态属性优先。
+2. CSS 变量同步头部/输入区可救回对齐断言，但需三容器联动测槽宽，复杂度与收益不成比例。
+3. overlay 滚动条（自定义细滚动条）作为后续可选优化记录在案，不阻塞本特性；若未来用户反馈跳动可感知，再按此路实施并同步放宽 width-tiers 基准断言。
+
+票 06 集成验收按本裁决核对；spec 滚动条的「scrollbar-gutter 稳定」表述以本豁免记录为准。
