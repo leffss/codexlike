@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   assert,
   closeApp,
@@ -16,6 +17,7 @@ import {
   projectAction,
   sessionMenu,
   startMockProvider,
+  untilDraft,
 } from "./helpers.mjs";
 
 async function main() {
@@ -71,10 +73,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("独立草稿");
     assert(!existsSync(join(homeDir, "sessions")), "首次发送前不分配专用目录");
     await projectAction(window);
-    assert(
-      (await window.getByTestId("composer-input").inputValue()) === "项目草稿",
-      "项目草稿切换不丢"
-    );
+    await untilDraft(window, "项目草稿", "项目草稿切换不丢");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
@@ -116,6 +115,18 @@ async function main() {
       "失败不删已有文件"
     );
     rmSync(join(homeDir, "sessions"));
+    // Windows 删除竞态：外部句柄（杀毒实时扫描等）尚未释放时文件处于
+    // delete-pending，立即以同名创建目录会 EPERM，被 sessions:start 兜底
+    // 成"无法创建独立会话专用目录"。以同名目录可重建为确定信号后再重发。
+    for (let attempt = 0; ; attempt++) {
+      try {
+        mkdirSync(join(homeDir, "sessions"));
+        break;
+      } catch (error) {
+        if (attempt >= 40) throw error;
+        await delay(50);
+      }
+    }
     await window.getByTestId("composer-send").dblclick();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
