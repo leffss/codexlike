@@ -4,7 +4,7 @@
 
 **Blocked by:** 01(恢复路径输出消息段形状)。
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] SQLite migration 编号顺延,主会话与子代理的思考文本随终态消息落库
 - [x] 重启应用后历史轮次的思考段可展开回看(e2e 场景断言)

@@ -4,11 +4,11 @@
 
 | 票号 | 任务                                                               | 直接阻塞       | 当前状态        |
 | ---- | ------------------------------------------------------------------ | -------------- | --------------- |
-| 01   | [时序消息段模型与按时序渲染](01-timeline-message-segment-model.md) | 无             | ready-for-agent |
-| 02   | [reasoning 落库与恢复](02-reasoning-persistence.md)                | 01             | ready-for-agent |
-| 03   | [滚动跟随状态机](03-scroll-following-state-machine.md)             | 01             | ready-for-agent |
-| 04   | [已工作折叠区与轮次分组](04-worked-history-collapse.md)            | 01(与 03 并行) | ready-for-agent |
-| 05   | [容器分档宽度](05-container-width-tiers.md)                        | 无(与 01 并行) | ready-for-agent |
+| 01   | [时序消息段模型与按时序渲染](01-timeline-message-segment-model.md) | 无             | completed       |
+| 02   | [reasoning 落库与恢复](02-reasoning-persistence.md)                | 01             | completed       |
+| 03   | [滚动跟随状态机](03-scroll-following-state-machine.md)             | 01             | completed       |
+| 04   | [已工作折叠区与轮次分组](04-worked-history-collapse.md)            | 01(与 03 并行) | completed       |
+| 05   | [容器分档宽度](05-container-width-tiers.md)                        | 无(与 01 并行) | completed       |
 | 06   | [集成验收](06-integration-acceptance.md)                           | 01–05          | ready-for-agent |
 
 ## 交付与验收
