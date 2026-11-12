@@ -43,7 +43,7 @@ async function main() {
     app = launchedApp;
 
     // 1) 设置页创建 Profile（本地 mock）
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -58,7 +58,7 @@ async function main() {
     await window.getByText("Mock").first().waitFor();
 
     // 2) 建会话（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
     const composer = window.getByTestId("composer-input");
@@ -167,6 +167,7 @@ async function main() {
     await composer.press("Enter");
     await window
       .getByText("模型已切换：Mock · mock-model")
+      .first()
       .waitFor({ timeout: 5_000 });
     console.log("[e2e] /model：模型切换提示可见");
 

@@ -129,6 +129,7 @@ export function discoverAgentsInstructions(
       const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes, {
         stream: file.bytes > bytes.length,
       });
+      // eslint-disable-next-line no-control-regex -- 字符类需要匹配控制字符本体：这是「拒绝二进制规范文件」的判定依据
       if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text))
         throw new Error("拒绝二进制规范文件");
       return text;

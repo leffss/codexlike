@@ -264,7 +264,6 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
           if (stderr.trim() !== "") {
             output += `${output.endsWith("\n") || output === "" ? "" : "\n"}[stderr]\n${stderr}`;
           }
-          const rawLength = output.length;
           if (output.length > maxOutputLength) {
             output = output.slice(0, maxOutputLength);
             truncated = true;

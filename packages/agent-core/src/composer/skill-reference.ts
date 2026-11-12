@@ -1,7 +1,7 @@
 import { isSkillName } from "../context/skill-name";
 
 const TOKEN_END =
-  /[\s,.;:!?，。；：、！？（）【】《》「」『』“”‘’()\[\]{}<>"'`]/;
+  /[\s,.;:!?，。；：、！？（）【】《》「」『』“”‘’()[\]{}<>"'`]/;
 
 interface SkillReference {
   start: number;
@@ -67,7 +67,7 @@ function* references(text: string): Generator<SkillReference> {
       continue;
     }
     if (inlineTicks !== 0 || text[i] !== "$" || isEscaped(text, i)) continue;
-    if (i > 0 && !/[\s(\[\{（【「『“‘]/.test(text[i - 1]!)) continue;
+    if (i > 0 && !/[\s([{（【「『“‘]/.test(text[i - 1]!)) continue;
     let end = i + 1;
     while (end < text.length && !TOKEN_END.test(text[end]!)) end += 1;
     yield { start: i, end, name: text.slice(i + 1, end) };

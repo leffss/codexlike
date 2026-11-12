@@ -39,7 +39,7 @@ const SCRIPT = [
 
 /** 在设置页配置 Provider Profile + 添加 MCP server 并等待连接 */
 async function setupSettings(window, port) {
-  await window.getByRole("button", { name: "设置", exact: true }).click();
+  await window.getByTestId("settings-open").click();
 
   // Provider Profile（限定表单内点击，工单 10 踩坑：设置页多区多「保存」按钮）
   await window.getByTestId("profile-create").click();
@@ -102,7 +102,7 @@ async function main() {
     await setupSettings(window, port);
 
     // 2) 建会话（显式选择 assist）→ 模型调用 mcp_fake_echo → 自动放行（无审批卡）
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
     await window.getByTestId("composer-input").fill("调用 MCP echo 工具");
@@ -145,7 +145,7 @@ async function main() {
       .getByTestId("session-item")
       .first()
       .waitFor({ timeout: 15_000 });
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window
       .getByTestId("mcp-status-fake")
       .getByText("已连接")
@@ -154,7 +154,7 @@ async function main() {
       "[e2e] 重启后 MCP server 自动重连（配置持久化 + startup 连接）"
     );
 
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await window.getByTestId("session-item").first().click();
     await window.getByTestId("composer-input").fill("重启后再调用一次");
     await window.getByTestId("composer-send").click();

@@ -159,6 +159,7 @@ export function MessageStream(props: {
       return;
     }
     snapToBottom(element);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionId 只作恢复完成 guard：会话切换的滚动由上方恢复 effect 单点负责，补全后切换当帧会叠加 snapToBottom 覆盖恢复的阅读位置
   }, [props.items, props.compacting]);
 
   // 发送新 prompt：强制回底并进入跟随（spec 用户故事 6）。挂载时执行一次

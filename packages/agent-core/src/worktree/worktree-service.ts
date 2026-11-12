@@ -117,7 +117,9 @@ export function createWorktreeService(options: {
           /* 非空则保留 */
         }
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`创建托管 Worktree 失败：${message}`);
+        throw new Error(`创建托管 Worktree 失败：${message}`, {
+          cause: error,
+        });
       }
       const copiedFiles: string[] = [];
       // 包含 ignored/untracked 文件；不能只看 git status（会漏掉用户成果）。
@@ -179,7 +181,8 @@ export function createWorktreeService(options: {
       } catch (error) {
         const removed = await rollback();
         throw new Error(
-          `创建托管 Worktree 失败：${error instanceof Error ? error.message : String(error)}${removed ? "" : `；无法确认可安全回收，已保留目录：${worktreePath}`}`
+          `创建托管 Worktree 失败：${error instanceof Error ? error.message : String(error)}${removed ? "" : `；无法确认可安全回收，已保留目录：${worktreePath}`}`,
+          { cause: error }
         );
       }
       return { path: worktreePath, branch, copiedFiles, rollback };

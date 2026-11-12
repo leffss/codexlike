@@ -188,6 +188,7 @@ export function resolveResourcePath(directory: string, path: string): string {
     !path ||
     isAbsolute(path) ||
     win32.isAbsolute(path) ||
+    // eslint-disable-next-line no-control-regex -- 故意匹配控制字符：路径含控制字符即拒绝（防二进制/注入路径）
     /[\u0000-\u001f:]/.test(path)
   ) {
     throw new Error("资源路径必须为技能目录内的相对路径");
@@ -211,6 +212,7 @@ export function readResourceText(
   } catch {
     throw new Error(`资源不是有效 UTF-8 文本：${file.path}`);
   }
+  // eslint-disable-next-line no-control-regex -- 字符类需要匹配控制字符本体：这是「拒绝二进制资源」的判定依据
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text))
     throw new Error(`拒绝二进制资源：${file.path}`);
   return text;

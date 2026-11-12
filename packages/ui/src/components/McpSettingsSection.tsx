@@ -1,29 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
-import type { McpServerView } from '@codexlike/desktop/ipc';
+import type { McpServerView } from "@codexlike/desktop/ipc";
 
-import {
-  formatEnvText,
-  parseMcpServerForm,
-  type McpServerForm,
-} from '../lib/mcp-form';
+import { parseMcpServerForm, type McpServerForm } from "../lib/mcp-form";
 
 /** 连接状态的中文徽标文案与配色 */
 const STATUS_LABEL: Record<
-  McpServerView['status'],
+  McpServerView["status"],
   { text: string; className: string }
 > = {
-  connected: { text: '已连接', className: 'text-ok-fg' },
-  connecting: { text: '连接中…', className: 'text-info-fg' },
-  failed: { text: '连接失败', className: 'text-danger-fg' },
-  disconnected: { text: '未连接', className: 'text-fg-muted' },
+  connected: { text: "已连接", className: "text-ok-fg" },
+  connecting: { text: "连接中…", className: "text-info-fg" },
+  failed: { text: "连接失败", className: "text-danger-fg" },
+  disconnected: { text: "未连接", className: "text-fg-muted" },
 };
 
 const EMPTY_FORM: McpServerForm = {
-  name: '',
-  command: '',
-  argsText: '',
-  envText: '',
+  name: "",
+  command: "",
+  argsText: "",
+  envText: "",
 };
 
 /**
@@ -34,9 +30,9 @@ export function McpSettingsSection() {
   const [servers, setServers] = useState<McpServerView[] | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<McpServerForm>(EMPTY_FORM);
-  const [formError, setFormError] = useState('');
+  const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
@@ -60,18 +56,18 @@ export function McpSettingsSection() {
       return;
     }
     setBusy(true);
-    setFormError('');
-    setMessage('');
+    setFormError("");
+    setMessage("");
     try {
       const view = await window.codexlike.mcp.addServer(parsed);
       setShowForm(false);
       setForm(EMPTY_FORM);
       setMessage(
-        view.status === 'connected'
+        view.status === "connected"
           ? `已添加并连接「${view.config.name}」，发现 ${view.tools.length} 个工具`
-          : `已添加「${view.config.name}」，但连接失败：${view.error ?? '未知原因'}（可稍后重连）`,
+          : `已添加「${view.config.name}」，但连接失败：${view.error ?? "未知原因"}（可稍后重连）`
       );
-      setMessageError(view.status !== 'connected');
+      setMessageError(view.status !== "connected");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -89,15 +85,15 @@ export function McpSettingsSection() {
   }
 
   async function reconnect(view: McpServerView) {
-    setMessage('');
+    setMessage("");
     try {
       const updated = await window.codexlike.mcp.reconnect(view.config.id);
       setMessage(
-        updated.status === 'connected'
+        updated.status === "connected"
           ? `「${updated.config.name}」已重连，发现 ${updated.tools.length} 个工具`
-          : `「${updated.config.name}」重连失败：${updated.error ?? '未知原因'}`,
+          : `「${updated.config.name}」重连失败：${updated.error ?? "未知原因"}`
       );
-      setMessageError(updated.status !== 'connected');
+      setMessageError(updated.status !== "connected");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
       setMessageError(true);
@@ -117,8 +113,10 @@ export function McpSettingsSection() {
           <h2 className="text-base font-medium text-fg">MCP servers</h2>
           <p className="text-xs text-fg-muted">
             stdio 方式接入第三方工具服务器（Model Context Protocol）；
-            发现的工具以 mcp_ 前缀并入工具注册表，可逐工具启停（对之后的会话消息即时生效）；
-            环境变量经系统加密存储。MCP 工具按命令级权限处理——协作模式下调用会弹审批卡片。
+            发现的工具以 mcp_
+            前缀并入工具注册表，可逐工具启停（对之后的会话消息即时生效）；
+            环境变量经系统加密存储。MCP
+            工具按命令级权限处理——协作模式下调用会弹审批卡片。
           </p>
         </div>
         {!showForm && (
@@ -129,7 +127,7 @@ export function McpSettingsSection() {
             onClick={() => {
               setShowForm(true);
               setForm(EMPTY_FORM);
-              setFormError('');
+              setFormError("");
             }}
           >
             + 添加 server
@@ -137,10 +135,10 @@ export function McpSettingsSection() {
         )}
       </div>
 
-      {message !== '' && (
+      {message !== "" && (
         <p
           data-testid="mcp-settings-message"
-          className={`text-xs ${messageError ? 'text-danger-fg' : 'text-ok-fg'}`}
+          className={`text-xs ${messageError ? "text-danger-fg" : "text-ok-fg"}`}
         >
           {message}
         </p>
@@ -168,7 +166,7 @@ export function McpSettingsSection() {
                     {view.config.name}
                   </p>
                   <p className="truncate font-mono text-xs text-fg-muted">
-                    {view.config.command} {view.config.args.join(' ')}
+                    {view.config.command} {view.config.args.join(" ")}
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-1">
@@ -192,7 +190,7 @@ export function McpSettingsSection() {
                 </div>
               </div>
 
-              {view.error !== null && view.status !== 'connected' && (
+              {view.error !== null && view.status !== "connected" && (
                 <p className="rounded border border-danger-fg/30 bg-danger-bg px-2 py-1.5 text-xs text-danger-fg">
                   {view.error}
                 </p>
@@ -222,14 +220,14 @@ export function McpSettingsSection() {
                             void toggleTool(tool.name, e.target.checked)
                           }
                         />
-                        {tool.enabled ? '已启用' : '已禁用'}
+                        {tool.enabled ? "已启用" : "已禁用"}
                       </label>
                     </li>
                   ))}
                 </ul>
               )}
 
-              {view.status === 'connected' && view.tools.length === 0 && (
+              {view.status === "connected" && view.tools.length === 0 && (
                 <p className="text-xs text-fg-muted">
                   已连接，但该 server 未提供任何工具
                 </p>
@@ -278,7 +276,7 @@ export function McpSettingsSection() {
               data-testid="mcp-form-args"
               rows={2}
               className="rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
-              placeholder={'server.js\n--stdio'}
+              placeholder={"server.js\n--stdio"}
               value={form.argsText}
               onChange={(e) => setForm({ ...form, argsText: e.target.value })}
             />
@@ -289,12 +287,12 @@ export function McpSettingsSection() {
               data-testid="mcp-form-env"
               rows={2}
               className="rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
-              placeholder={'API_TOKEN=xxx\nDEBUG=1'}
+              placeholder={"API_TOKEN=xxx\nDEBUG=1"}
               value={form.envText}
               onChange={(e) => setForm({ ...form, envText: e.target.value })}
             />
           </label>
-          {formError !== '' && (
+          {formError !== "" && (
             <p className="text-xs text-danger-fg">{formError}</p>
           )}
           <div className="flex gap-2">
@@ -306,14 +304,14 @@ export function McpSettingsSection() {
               className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               onClick={() => void addServer()}
             >
-              {busy ? '连接中…' : '保存并连接'}
+              {busy ? "连接中…" : "保存并连接"}
             </button>
             <button
               type="button"
               className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
               onClick={() => {
                 setShowForm(false);
-                setFormError('');
+                setFormError("");
               }}
             >
               取消
@@ -323,9 +321,4 @@ export function McpSettingsSection() {
       )}
     </section>
   );
-}
-
-/** 编辑表单的 env 回显辅助（配置对象 → 文本） */
-export function envTextOf(view: McpServerView): string {
-  return formatEnvText(view.config.env);
 }

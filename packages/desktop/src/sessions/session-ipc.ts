@@ -375,7 +375,8 @@ export function registerSessionHandlers(options: {
           manager.removeUnstarted(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
-              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式会话，可重试）`
+              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式会话，可重试）`,
+              { cause: error }
             );
           }
           if (!project && request.workspacePath === undefined) {
@@ -485,16 +486,17 @@ export function registerSessionHandlers(options: {
     try {
       // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
       // 在这里以异常抛回渲染进程；之后的事件异步推送。
-      const iterator = session
-        .sendMessage({
-          text,
-          profile,
-          mentions,
-          thinkingEffort: effortSnapshot,
-          approvalMode: approvalSnapshot as ApprovalMode,
-          signal: controller.signal,
-        })
-        [Symbol.asyncIterator]();
+      // 先落中间变量再取 [Symbol.asyncIterator]()：对象字面量后直接
+      // 换行接 [ 会被读成索引访问（ASI 陷阱），也触发 no-unexpected-multiline。
+      const execution = session.sendMessage({
+        text,
+        profile,
+        mentions,
+        thinkingEffort: effortSnapshot,
+        approvalMode: approvalSnapshot as ApprovalMode,
+        signal: controller.signal,
+      });
+      const iterator = execution[Symbol.asyncIterator]();
       const first = await iterator.next();
       if (first.done !== true) {
         manager.markUsed(sessionId);

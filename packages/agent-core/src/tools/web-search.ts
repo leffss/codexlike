@@ -77,16 +77,18 @@ export function createTavilySearchSource(
       } catch (error) {
         if (error instanceof Error && error.name === "TimeoutError") {
           throw new Error(
-            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`
+            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`,
+            { cause: error }
           );
         }
         if (error instanceof Error && error.name === "AbortError") {
           throw new Error(
-            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`
+            `搜索请求超时（${Math.round(timeoutMs / 1000)} 秒），请稍后重试`,
+            { cause: error }
           );
         }
         const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`搜索请求发送失败：${reason}`);
+        throw new Error(`搜索请求发送失败：${reason}`, { cause: error });
       }
 
       if (!response.ok) {
@@ -98,7 +100,9 @@ export function createTavilySearchSource(
         body = await response.json();
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`Tavily API 响应不是合法 JSON：${reason}`);
+        throw new Error(`Tavily API 响应不是合法 JSON：${reason}`, {
+          cause: error,
+        });
       }
 
       const rawResults = (body as { results?: unknown }).results;

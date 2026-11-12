@@ -68,7 +68,7 @@ async function main() {
     let window = first.window;
 
     // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -80,7 +80,7 @@ async function main() {
       .getByRole("button", { name: /保存|创建/ })
       .click();
     await window.getByText("Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
     const effortSelect = window.getByTestId("thinking-effort-select");

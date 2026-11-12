@@ -103,7 +103,7 @@ async function main() {
     });
     app = first.app;
     let window = first.window;
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -133,7 +133,7 @@ async function main() {
     console.log("[e2e] 搜索源已配置（真实 safeStorage 加密落盘）");
 
     // 2) 返回工作台 → 新建会话（目录选择器经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await window.getByTestId("new-session").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("approval-mode-select").selectOption("assist");

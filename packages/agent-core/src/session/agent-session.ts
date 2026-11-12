@@ -872,7 +872,7 @@ export function createAgentSession(
           signal?.throwIfAborted();
           summary = result.text.trim();
         } catch (error) {
-          throw new Error(describeModelError(error));
+          throw new Error(describeModelError(error), { cause: error });
         }
         if (summary === "") {
           throw new Error("压缩失败：模型返回了空摘要，请重试");
