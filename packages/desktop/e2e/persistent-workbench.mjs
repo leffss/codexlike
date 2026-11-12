@@ -77,6 +77,14 @@ async function main() {
     await form.getByLabel("模型").fill("second-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Second Mock", { exact: true }).waitFor();
+    const profiles = await window.evaluate(() =>
+      window.codexlike.providerProfiles.list()
+    );
+    const defaultProfileId = profiles.find(
+      (p) => p.name === "Persistent Mock"
+    )?.id;
+    const secondProfileId = profiles.find((p) => p.name === "Second Mock")?.id;
+    assert(defaultProfileId && secondProfileId, "两个模型均已创建并有稳定 ID");
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
@@ -113,9 +121,13 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    await window
-      .getByTestId("profile-select")
-      .selectOption({ label: "Second Mock · second-model" });
+    await selectComposerOption(window, "profile-select", secondProfileId);
+    assert(
+      (await window
+        .getByTestId("profile-select")
+        .getAttribute("data-value")) === secondProfileId,
+      "鼠标切换模型提交 Profile ID"
+    );
     await window.getByTestId("composer-input").fill("正式会话未发送输入");
     await selectComposerOption(window, "thinking-effort-select", "off");
     await selectComposerOption(window, "approval-mode-select", "full-access");
@@ -192,13 +204,13 @@ async function main() {
       "思考真实重启恢复"
     );
     assert(
-      (
-        await window
-          .getByTestId("profile-select")
-          .locator("option:checked")
-          .textContent()
-      ).includes("Second Mock"),
-      "模型真实重启恢复"
+      (await window
+        .getByTestId("profile-select")
+        .getAttribute("data-value")) === secondProfileId &&
+        (await window.getByTestId("profile-select").textContent()).includes(
+          "Second Mock · second-model"
+        ),
+      "模型 ID 与显示名称真实重启恢复"
     );
     await window
       .getByTestId("composer-input")
@@ -223,13 +235,17 @@ async function main() {
         .getAttribute("data-value")) === "ask",
       "新会话不能继承完全访问"
     );
+    await window.waitForFunction(
+      (id) =>
+        document
+          .querySelector('[data-testid="profile-select"]')
+          ?.getAttribute("data-value") === id,
+      defaultProfileId
+    );
     assert(
-      (
-        await window
-          .getByTestId("profile-select")
-          .locator("option:checked")
-          .textContent()
-      ).includes("Persistent Mock"),
+      (await window.getByTestId("profile-select").textContent()).includes(
+        "Persistent Mock · persistent-model"
+      ),
       "新会话采用应用默认而非上一个会话模型"
     );
     assert(model.requestCount() === 2, "切换与重启不自动发送");

@@ -399,7 +399,7 @@ export function MessageComposer(props: {
             className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
         </div>
-        {/* 底部工具栏：左审批胶囊 + 思考档位胶囊，右模型选择 + 圆形动作按钮 */}
+        {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。 */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
           <div className="flex items-center gap-2">
             <ComposerSelect
@@ -415,6 +415,38 @@ export function MessageComposer(props: {
                 />
               )}
             />
+          </div>
+          <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+            <ComposerSelect
+              testId="profile-select"
+              label="模型"
+              value={props.selectedProfileId}
+              disabled={props.readOnly}
+              options={[
+                ...(props.profiles.length === 0
+                  ? [{ value: "", label: "未配置模型", title: "未配置模型" }]
+                  : []),
+                ...(props.selectedProfileId &&
+                !props.profiles.some(
+                  (profile) => profile.id === props.selectedProfileId
+                )
+                  ? [
+                      {
+                        value: props.selectedProfileId,
+                        label: "已保存的模型不可用",
+                        title: "已保存的模型不可用，请重新选择模型",
+                      },
+                    ]
+                  : []),
+                ...props.profiles.map((profile) => ({
+                  value: profile.id,
+                  label: `${profile.name} · ${profile.model}`,
+                  title: `${profile.name} · ${profile.model}（对下一条消息生效）`,
+                })),
+              ]}
+              onSelect={props.onSelectProfile}
+              className="min-w-0 max-w-56 shrink"
+            />
             {/* 无会话禁用；运行中允许改选，只对下一条消息生效。 */}
             <ComposerSelect
               testId="thinking-effort-select"
@@ -425,8 +457,6 @@ export function MessageComposer(props: {
               onSelect={props.onSelectThinkingEffort}
               renderIcon={() => <BrainIcon className="h-3 w-3" />}
             />
-          </div>
-          <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
             <button
               type="button"
               data-testid="composer-skills"
@@ -437,36 +467,6 @@ export function MessageComposer(props: {
             >
               技能
             </button>
-            <div
-              className="relative min-w-0"
-              title="模型（Provider Profile）：对下一条消息生效"
-            >
-              <select
-                data-testid="profile-select"
-                disabled={props.readOnly}
-                value={props.selectedProfileId}
-                onChange={(event) => props.onSelectProfile(event.target.value)}
-                className="w-full max-w-56 cursor-pointer appearance-none truncate bg-transparent py-1 pl-2 pr-6 text-xs text-fg-muted focus:outline-none"
-              >
-                {props.profiles.length === 0 && (
-                  <option value="">未配置模型</option>
-                )}
-                {props.selectedProfileId &&
-                  !props.profiles.some(
-                    (p) => p.id === props.selectedProfileId
-                  ) && (
-                    <option value={props.selectedProfileId}>
-                      已保存的模型不可用
-                    </option>
-                  )}
-                {props.profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name} · {profile.model}
-                  </option>
-                ))}
-              </select>
-              <CaretDownIcon className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60" />
-            </div>
             {props.streaming === true ? (
               <button
                 type="button"
@@ -525,25 +525,6 @@ function BrainIcon(props: { className?: string }) {
         d="M6 2.5a2 2 0 0 0-2 2c-1.1.2-2 1.1-2 2.3 0 .8.4 1.5 1 1.9v.6c0 1.7 1.3 3.2 3 3.2h1V2.5H6ZM10 2.5a2 2 0 0 1 2 2c1.1.2 2 1.1 2 2.3 0 .8-.4 1.5-1 1.9v.6c0 1.7-1.3 3.2-3 3.2H9V2.5h1Z"
         stroke="currentColor"
         strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function CaretDownIcon(props: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      className={props.className}
-      aria-hidden="true"
-    >
-      <path
-        d="M4.5 6.5 8 10l3.5-3.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>

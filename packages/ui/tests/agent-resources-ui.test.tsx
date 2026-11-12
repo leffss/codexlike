@@ -145,6 +145,82 @@ describe("技能输入入口", () => {
     expect(html).toContain("composer-stop");
     expect(html).not.toContain("composer-send");
   });
+  it("按模型、思考档位、技能排列，模型使用不提交表单的 combobox", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageComposer, {
+        profiles: [],
+        selectedProfileId: "",
+        onSelectProfile: () => {},
+        onSend: () => {},
+        workspaceFiles: [],
+        disabled: false,
+        hint: "",
+        approvalMode: "assist",
+        onSelectApprovalMode: () => {},
+        thinkingEffort: "auto",
+        onSelectThinkingEffort: () => {},
+      })
+    );
+    expect(html).toMatch(
+      /<button[^>]*type="button"[^>]*role="combobox"[^>]*aria-label="模型"[^>]*data-testid="profile-select"/
+    );
+    const controls = [
+      "approval-mode-select",
+      "profile-select",
+      "thinking-effort-select",
+      "composer-skills",
+      "composer-send",
+    ];
+    const positions = controls.map((id) => html.indexOf(`data-testid="${id}"`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(html).toContain("未配置模型");
+  });
+  it.each([false, true])(
+    "只读=%s 时保留失效模型提示与选择器禁用规则",
+    (readOnly) => {
+      const html = renderToStaticMarkup(
+        createElement(MessageComposer, {
+          profiles: [
+            {
+              id: "available",
+              name: "可用模型",
+              model: "test-model",
+              baseURL: "http://localhost/v1",
+              apiKey: "",
+            },
+          ],
+          selectedProfileId: "removed",
+          onSelectProfile: () => {},
+          onSend: () => {},
+          workspaceFiles: [],
+          disabled: true,
+          readOnly,
+          streaming: true,
+          hint: "",
+          approvalMode: "assist",
+          onSelectApprovalMode: () => {},
+          thinkingEffort: "high",
+          onSelectThinkingEffort: () => {},
+        })
+      );
+      expect(html).toContain("已保存的模型不可用");
+      expect(html).not.toContain("可用模型 · test-model");
+      expect(html).toContain('data-value="removed"');
+      for (const id of [
+        "profile-select",
+        "thinking-effort-select",
+        "composer-skills",
+      ]) {
+        const button = html.match(
+          new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`)
+        )?.[0];
+        expect(button).toBeDefined();
+        expect(button?.includes('disabled=""')).toBe(readOnly);
+      }
+      expect(html).toContain("composer-stop");
+    }
+  );
   it("提供不提交表单的技能按钮", () => {
     const html = renderToStaticMarkup(
       createElement(MessageComposer, {

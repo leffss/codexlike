@@ -22,7 +22,8 @@ export function ComposerSelect<Value extends string>(props: {
   options: readonly ComposerOption<Value>[];
   disabled?: boolean;
   onSelect: (value: Value) => void;
-  renderIcon: (value: Value) => ReactNode;
+  renderIcon?: (value: Value) => ReactNode;
+  className?: string;
 }) {
   const id = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -178,20 +179,20 @@ export function ComposerSelect<Value extends string>(props: {
         data-value={props.value}
         disabled={props.disabled}
         title={selected?.title}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-surface-muted px-2.5 py-1 text-xs text-fg-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-muted px-2.5 py-1 text-xs text-fg-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg-muted disabled:cursor-not-allowed disabled:opacity-50 ${props.className ?? "shrink-0"}`}
         onKeyDown={onKeyDown}
         onClick={() => {
           setActiveIndex(selectedIndex);
           setOpen(!expanded);
         }}
       >
-        {props.renderIcon(props.value)}
-        <span>{selected?.label}</span>
+        {props.renderIcon?.(props.value)}
+        <span className="min-w-0 truncate">{selected?.label}</span>
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"
           fill="none"
-          className="h-3 w-3 opacity-60"
+          className="h-3 w-3 shrink-0 opacity-60"
         >
           <path
             d="M4.5 6.5 8 10l3.5-3.5"
@@ -229,13 +230,15 @@ export function ComposerSelect<Value extends string>(props: {
                 onPointerMove={() => setActiveIndex(index)}
                 onClick={() => choose(index)}
               >
-                {props.renderIcon(option.value)}
-                <span className="flex-1">{option.label}</span>
+                {props.renderIcon?.(option.value)}
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  {option.label}
+                </span>
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 16 16"
                   fill="none"
-                  className={`h-3 w-3 ${option.value === props.value ? "" : "invisible"}`}
+                  className={`h-3 w-3 shrink-0 ${option.value === props.value ? "" : "invisible"}`}
                 >
                   <path
                     d="m3 8 3 3 7-7"
