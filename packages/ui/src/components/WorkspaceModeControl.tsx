@@ -5,13 +5,42 @@ import type {
   WorkspaceSharingView,
 } from "@codexlike/desktop/ipc";
 
-/** 工作区草稿选择与共享事实提示：正式会话不提供切换入口。 */
-export function WorkspaceModeControl(props: {
-  target: WorkspaceSharingTarget;
+/** 项目草稿的工作区模式选择：首次发送后不再提供切换入口。 */
+export function WorkspaceModeSelector(props: {
   mode: WorkspaceMode;
-  draft: boolean;
   busy: boolean;
   onModeChange: (mode: WorkspaceMode) => void;
+}) {
+  return (
+    <label className="flex flex-wrap items-center gap-2">
+      工作区模式
+      <select
+        data-testid="draft-workspace-mode"
+        aria-label="工作区模式"
+        className="rounded border border-line bg-surface px-2 py-1"
+        disabled={props.busy}
+        value={props.mode}
+        onChange={(event) =>
+          props.onModeChange(
+            event.target.value === "worktree" ? "worktree" : "local"
+          )
+        }
+      >
+        <option value="local">本地 · 项目目录</option>
+        <option value="worktree">Worktree · 独立目录与分支</option>
+      </select>
+      <span>
+        {props.mode === "worktree"
+          ? "首次发送时创建隔离副本"
+          : "首次发送才创建会话"}
+      </span>
+    </label>
+  );
+}
+
+/** 共享检查始终订阅，仅在风险或检查失败时占用提示空间。 */
+export function WorkspaceSharingNotice(props: {
+  target: WorkspaceSharingTarget;
 }) {
   const [sharing, setSharing] = useState<WorkspaceSharingView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,45 +89,18 @@ export function WorkspaceModeControl(props: {
     };
   }, [targetKey]);
 
+  if (!sharing?.runningSessions.length && !error) return null;
+
   return (
-    <div className="border-t border-line px-4 py-2 text-xs text-fg-muted">
-      {props.draft &&
-      "projectId" in props.target &&
-      props.target.projectId !== null ? (
-        <label className="flex items-center gap-2">
-          工作区模式
-          <select
-            data-testid="draft-workspace-mode"
-            aria-label="工作区模式"
-            className="rounded border border-line bg-surface px-2 py-1"
-            disabled={props.busy}
-            value={props.mode}
-            onChange={(event) =>
-              props.onModeChange(
-                event.target.value === "worktree" ? "worktree" : "local"
-              )
-            }
-          >
-            <option value="local">本地 · 项目目录</option>
-            <option value="worktree">Worktree · 独立目录与分支</option>
-          </select>
-          <span>
-            {props.mode === "worktree"
-              ? "首次发送时创建隔离副本"
-              : "首次发送才创建会话"}
-          </span>
-        </label>
-      ) : (
-        <span data-testid="workspace-mode">
-          {props.mode === "worktree" ? "Worktree" : "本地"} ·{" "}
-          {props.draft ? "首次发送才创建会话" : "工作区已固定"}
-        </span>
-      )}
+    <div
+      data-testid="workspace-sharing-notice"
+      className="shrink-0 border-t border-line px-4 py-2 text-xs text-fg-muted"
+    >
       {sharing && sharing.runningSessions.length > 0 && (
         <p
           data-testid="workspace-sharing-warning"
           role="status"
-          className="mt-2 text-warn-fg"
+          className="text-warn-fg"
         >
           共享文件风险：另有 {sharing.runningSessions.length}{" "}
           个会话正在同一实际目录执行或等待回应（
@@ -107,7 +109,11 @@ export function WorkspaceModeControl(props: {
         </p>
       )}
       {error && (
-        <p className="mt-2 text-danger-fg" role="status">
+        <p
+          data-testid="workspace-sharing-error"
+          className="text-danger-fg"
+          role="status"
+        >
           {error}
         </p>
       )}

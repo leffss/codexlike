@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -82,7 +83,10 @@ try {
   );
   await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   await send("入口隔离任务");
-  const originalPath = await window.getByTestId("workspace-path").textContent();
+  const originalPath = await window
+    .getByTestId("workspace-path")
+    .getAttribute("title");
+  assert(originalPath, "工作区提供完整路径提示");
   await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
@@ -101,7 +105,8 @@ try {
   );
   await item("入口隔离任务").click();
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "新建不改变原执行目录"
   );
   console.log("[e2e] 会话侧栏入口与项目草稿保持显式归属通过");
@@ -181,8 +186,8 @@ try {
     .filter({ hasText: "独立会话" })
     .waitFor();
   await window.getByTestId("session-search-toggle").click();
-  await window.getByTestId("thinking-effort-select").selectOption("high");
-  await window.getByTestId("approval-mode-select").selectOption("full-access");
+  await selectComposerOption(window, "thinking-effort-select", "high");
+  await selectComposerOption(window, "approval-mode-select", "full-access");
   await window.getByTestId("full-access-confirm-ok").click();
   await command("/new");
   await window.getByTestId("draft-select-workspace").waitFor();
@@ -191,7 +196,9 @@ try {
     "移出后 /new 不从 Worktree 来源派生项目"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "ask",
     "独立新建不继承完全访问"
   );
   await input().fill("独立入口保留草稿");
@@ -243,7 +250,8 @@ try {
     .filter({ hasText: longTitle })
     .waitFor();
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "移出及重开不改实际工作区"
   );
   assert(
@@ -253,13 +261,15 @@ try {
     "重开仍保留来源"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) ===
-      "full-access",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "full-access",
     "恢复的是该会话明确授权偏好"
   );
   assert(
-    (await window.getByTestId("thinking-effort-select").inputValue()) ===
-      "high",
+    (await window
+      .getByTestId("thinking-effort-select")
+      .getAttribute("data-value")) === "high",
     "会话思考偏好不串用"
   );
   assert(
@@ -341,14 +351,15 @@ try {
     .waitFor();
   await window.keyboard.press("Escape");
   assert(
-    (await window.getByTestId("workspace-path").textContent()) === originalPath,
+    (await window.getByTestId("workspace-path").getAttribute("title")) ===
+      originalPath,
     "当前成员被移除后安全导航到幸存独立记录"
   );
   assert(
     readFileSync(join(workspaceDir, "keep.txt"), "utf8") === "保留来源文件",
     "移除来源项目不删除来源文件"
   );
-  const worktree = originalPath.replace("工作区：", "").trim();
+  const worktree = originalPath;
   assert(
     existsSync(join(worktree, ".git")) &&
       existsSync(join(worktree, "keep.txt")),

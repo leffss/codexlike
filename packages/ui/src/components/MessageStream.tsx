@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
 import { markdownComponents } from "../lib/markdown";
 import {
   anchorDecisionAfterContentChange,
@@ -66,17 +67,17 @@ export function MessageStream(props: {
   readingPosition?: ReadingPosition | null;
   onReadingPosition?: (position: ReadingPosition) => void;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
-  /**
-   * 内容列宽度类（票 05 容器分档宽度）：由 WorkspacePage 单点选择
-   * （空态 2xl / 有内容三档）并同样下发给头部与输入区，保证三处共用对齐。
-   */
+  /** 新建、加载与已有会话共用三档内容列，头部和输入区采用相同规则。 */
   contentWidthClass?: string;
+  /** 真实滚动槽宽度供同列非滚动区域补偿，不能硬编码平台滚动条宽度。 */
+  onScrollbarGutterChange?: (width: number) => void;
   /** 强制回底信号（票 03）：发送新 prompt 时递增，组件立即贴底并进入跟随 */
   followSignal?: number;
 }) {
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
   const container = useRef<HTMLDivElement>(null);
+  useScrollbarGutter(container, props.onScrollbarGutterChange);
   const restored = useRef<string | null | undefined>(undefined);
   const followRef = useRef<FollowMode>("following");
   // 跟随态的渲染镜像（驱动「回到最新」入口可见性，ref 不触发渲染）：
@@ -254,14 +255,11 @@ export function MessageStream(props: {
         }}
         // overflow-x-hidden：宽内容（表格 / 代码块）由各自容器内聚横向滚动，
         // 滚动容器自身不出现横向溢出（spec 用户故事 34）。
-        // scrollbar-gutter:stable 未启用：常驻滚动条槽会使消息列比头部/
-        // 输入区（票 05 三处左右缘对齐）恒窄一个滚动条宽度，且基础档
-        // 「内容列 = 容器 - padding」的宽度断言（width-tiers 场景 5）无法
-        // 同时成立——两票断言冲突，本票保持票 05 绿色，偏差记于票 03。
+        // 稳定预留纵向滚动槽；同列头部和输入区消费实测槽宽保持左右缘一致。
         className="h-full overflow-x-hidden overflow-y-auto bg-canvas px-4 py-4"
         // 禁用原生 scroll anchoring：跟随/恢复由状态机自管，
         // 原生锚点会覆盖恢复值（票 03）
-        style={{ overflowAnchor: "none" }}
+        style={{ overflowAnchor: "none", scrollbarGutter: "stable" }}
         data-testid="message-stream"
       >
         {props.items.length === 0 && props.compacting !== true ? (

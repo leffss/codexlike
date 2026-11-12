@@ -13,6 +13,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   expandWorkedHistory,
@@ -67,6 +68,17 @@ async function main() {
     app = first.app;
     let window = first.window;
 
+    // 无会话时两个选择器必须保持禁用，不因键盘触发弹出菜单。
+    for (const testId of ["approval-mode-select", "thinking-effort-select"]) {
+      const trigger = window.getByTestId(testId);
+      await trigger.waitFor();
+      assert(await trigger.isDisabled(), `${testId} 无会话时禁用`);
+      assert(
+        (await trigger.getAttribute("aria-expanded")) === "false",
+        "禁用时没有展开菜单"
+      );
+    }
+
     // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
@@ -84,16 +96,230 @@ async function main() {
     await prepareDraft(window);
 
     const effortSelect = window.getByTestId("thinking-effort-select");
-    // 胶囊默认自动（select 值 auto），无会话时已被禁用、建会话后可用
     assert(
-      (await effortSelect.inputValue()) === "auto",
+      (await effortSelect.getAttribute("role")) === "combobox",
+      "思考档位应使用共享 combobox 触发器，而非原生 select"
+    );
+    await effortSelect.click();
+    const effortMenu = window.getByTestId("thinking-effort-select-listbox");
+    await effortMenu.waitFor();
+    assert(
+      await effortMenu.evaluate(
+        (element) => element.parentElement === document.body
+      ),
+      "思考档位菜单应通过 portal 挂在 body，避免被 composer 裁切"
+    );
+    assert(
+      (await effortMenu.getAttribute("role")) === "listbox",
+      "菜单暴露 listbox 语义"
+    );
+    assert(
+      (await effortMenu.getByRole("option").count()) === 5,
+      "思考档位保留五个选项"
+    );
+    const menuBox = await effortMenu.boundingBox();
+    const triggerBox = await effortSelect.boundingBox();
+    assert(
+      menuBox.y + menuBox.height <= triggerBox.y,
+      "菜单有空间时优先上展开"
+    );
+    await effortSelect.press("Escape");
+    await effortMenu.waitFor({ state: "hidden" });
+    assert(
+      await effortSelect.evaluate(
+        (element) => element === document.activeElement
+      ),
+      "Escape 保留触发器焦点"
+    );
+    await effortSelect.press("ArrowDown");
+    await effortSelect.press("End");
+    assert(
+      (await effortSelect.getAttribute("data-value")) === "auto",
+      "方向导航不提前提交"
+    );
+    await effortSelect.press("Enter");
+    assert(
+      (await effortSelect.getAttribute("data-value")) === "off",
+      "End + Enter 选择末项"
+    );
+    await effortSelect.press("Space");
+    await effortSelect.press("Home");
+    await effortSelect.press("ArrowDown");
+    await effortSelect.press("Space");
+    assert(
+      (await effortSelect.getAttribute("data-value")) === "low",
+      "Home / ArrowDown / Space 选择低档"
+    );
+    await effortSelect.press("ArrowUp");
+    await effortSelect.press("ArrowUp");
+    await effortSelect.press("Enter");
+    assert(
+      (await effortSelect.getAttribute("data-value")) === "auto",
+      "ArrowUp 可返回自动档"
+    );
+    await effortSelect.press("Enter");
+    await effortSelect.press("Tab");
+    await effortMenu.waitFor({ state: "hidden" });
+    assert(
+      await window
+        .getByTestId("composer-skills")
+        .evaluate((element) => element === document.activeElement),
+      "Tab 关闭并前进到下一控件"
+    );
+    await effortSelect.click();
+    await effortSelect.press("Shift+Tab");
+    assert(
+      await window
+        .getByTestId("approval-mode-select")
+        .evaluate((element) => element === document.activeElement),
+      "Shift+Tab 回到前一控件"
+    );
+    await effortSelect.click();
+    await window.getByTestId("composer-input").click();
+    await effortMenu.waitFor({ state: "hidden" });
+    assert(
+      await window
+        .getByTestId("composer-input")
+        .evaluate((element) => element === document.activeElement),
+      "外点关闭不能抢走输入框焦点"
+    );
+
+    const screenshots = mkdtempSync(
+      join(tmpdir(), "codexlike-composer-select-screenshots-")
+    );
+    console.log(`[e2e:thinking] 选择菜单截图目录 ${screenshots}`);
+    for (const theme of ["light", "dark"]) {
+      if (theme === "dark") await window.getByTestId("theme-toggle").click();
+      for (const [effort] of EFFORT_BODIES) {
+        await selectComposerOption(window, "thinking-effort-select", effort);
+        await window.getByTestId("composer-input").hover();
+        const colors = await effortSelect.evaluate((element) => {
+          const probe = document.createElement("div");
+          probe.style.color = "var(--fg-muted)";
+          probe.style.backgroundColor = "var(--surface-muted)";
+          document.body.append(probe);
+          const actual = getComputedStyle(element);
+          const expected = getComputedStyle(probe);
+          const result = {
+            text: actual.color === expected.color,
+            background: actual.backgroundColor === expected.backgroundColor,
+            icon:
+              getComputedStyle(element.querySelector("svg")).color ===
+              expected.color,
+            radius: parseFloat(actual.borderRadius),
+            height: element.getBoundingClientRect().height,
+          };
+          probe.remove();
+          return result;
+        });
+        assert(
+          colors.text && colors.icon && colors.background,
+          `${theme} ${effort} 档使用中性文字、图标、底色`
+        );
+        assert(
+          colors.radius > 0 && colors.radius < colors.height / 2,
+          "触发器使用小圆角而非胶囊"
+        );
+      }
+      await effortSelect.click();
+      const selection = effortMenu.getByRole("option", { selected: true });
+      assert(
+        (await selection.getAttribute("data-value")) === "off",
+        "选中态跟随受控值"
+      );
+      assert(
+        await selection.evaluate((element) => {
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = "var(--hover)";
+          document.body.append(probe);
+          const matches =
+            getComputedStyle(element).backgroundColor ===
+            getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return matches;
+        }),
+        "选中行使用中性淡底色"
+      );
+      assert(
+        await selection.locator("svg").last().isVisible(),
+        "选中行显示勾选标记"
+      );
+      await window.screenshot({
+        path: join(screenshots, `thinking-menu-${theme}.png`),
+      });
+      await effortSelect.press("Escape");
+    }
+    await window.getByTestId("theme-toggle").click();
+    const originalSize = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].getContentSize()
+    );
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(640, 500)
+    );
+    await effortSelect.click();
+    await effortSelect.press("End");
+    const bounds = await effortMenu.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: innerWidth,
+        height: innerHeight,
+      };
+    });
+    assert(
+      bounds.left >= 0 &&
+        bounds.top >= 0 &&
+        bounds.right <= bounds.width &&
+        bounds.bottom <= bounds.height,
+      "窄矮视口菜单仍保持在视口内"
+    );
+    const lastOption = effortMenu.getByTestId(
+      "thinking-effort-select-option-off"
+    );
+    assert(
+      (await effortSelect.getAttribute("aria-activedescendant")) ===
+        (await lastOption.getAttribute("id")),
+      "End 将 combobox 的活动项指向末项"
+    );
+    assert(
+      await lastOption.evaluate((element) => {
+        const item = element.getBoundingClientRect();
+        const menu = element.parentElement;
+        const viewport = menu.getBoundingClientRect();
+        const top = viewport.top + menu.clientTop;
+        const left = viewport.left + menu.clientLeft;
+        return (
+          item.top >= top &&
+          item.bottom <= top + menu.clientHeight &&
+          item.left >= left &&
+          item.right <= left + menu.clientWidth
+        );
+      }),
+      "窄矮视口末项矩形完整处于菜单可视范围，未被滚动容器裁切"
+    );
+    await window.screenshot({
+      path: join(screenshots, "thinking-menu-narrow.png"),
+    });
+    await effortSelect.press("Escape");
+    await app.evaluate(
+      ({ BrowserWindow }, size) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(size[0], size[1]),
+      originalSize
+    );
+    await selectComposerOption(window, "thinking-effort-select", "auto");
+    // 默认自动，无会话时已被禁用、建会话后可用
+    assert(
+      (await effortSelect.getAttribute("data-value")) === "auto",
       "思考档位胶囊默认值不是 auto"
     );
 
     // ---- 场景 1：五档逐条发送 → 实际请求 body 符合契约 ----
     for (let i = 0; i < EFFORT_BODIES.length; i++) {
       const [effort] = EFFORT_BODIES[i];
-      await effortSelect.selectOption(effort);
+      await selectComposerOption(window, "thinking-effort-select", effort);
       await window
         .getByTestId("composer-input")
         .fill(`第${i + 1}条：档位 ${effort}`);
@@ -190,7 +416,7 @@ async function main() {
     // ---- 场景 3：运行中切档只影响下一条消息 ----
     // 发送 medium 档消息：第 1 轮工具调用 →（运行中把胶囊切到 off）→
     // 回填后的第 2 轮请求仍应是 medium 快照；下一条消息才用 off
-    await effortSelect.selectOption("medium");
+    await selectComposerOption(window, "thinking-effort-select", "medium");
     await window.getByTestId("composer-input").fill("读一下 note.txt");
     await window.getByTestId("composer-send").click();
     // 工具调用轮（第 7 个请求）到达 mock 即切档（为下一条消息预置）。
@@ -204,7 +430,7 @@ async function main() {
       seenBodies.length >= 7,
       `第 7 个请求（工具调用轮）未到达 mock，实际 ${seenBodies.length}`
     );
-    await effortSelect.selectOption("off");
+    await selectComposerOption(window, "thinking-effort-select", "off");
     // 等本轮全部请求到达：第 8 个请求（工具回填后的最终文本轮）才是快照断言对象
     for (let i = 0; i < 100 && seenBodies.length < 8; i++) {
       await new Promise((r) => setTimeout(r, 100));

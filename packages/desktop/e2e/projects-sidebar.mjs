@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -86,13 +87,13 @@ async function main() {
     const projectSession = await window
       .getByTestId("session-item")
       .getAttribute("data-session-id");
-    await window
-      .getByTestId("approval-mode-select")
-      .selectOption("full-access");
+    await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
     await window.getByTestId("new-session").click();
     assert(
-      (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+      (await window
+        .getByTestId("approval-mode-select")
+        .getAttribute("data-value")) === "ask",
       "新草稿不继承完全访问"
     );
     assert(

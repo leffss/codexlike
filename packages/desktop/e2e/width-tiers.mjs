@@ -3,7 +3,7 @@
 // 头部 / 消息流 / 输入区共用同一内容列左右缘对齐，
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
-// 1) 空态（新建草稿未发送）：内容列 2xl（≤672px），消息流与输入区对齐。
+// 1) 新建、已有与加载中使用同一三档内容列，工作区信息也与消息流对齐。
 // 2) 窗口内容区 1280px（会话容器 1024px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
 // 3) 窗口内容区 1600px（容器 1344px ≥1280）→ 6xl 档：内容列 1152px；
@@ -77,10 +77,34 @@ async function assertContentWidth(window, { min, max, label }) {
   return box;
 }
 
+/** 从真实渲染几何验证内容列，不依赖组件树或宽度类实现。 */
+async function assertAligned(window, contentTestId, label) {
+  const content = await window.getByTestId(contentTestId).boundingBox();
+  assert(content !== null, `${label}：内容列必须可见`);
+  for (const testId of [
+    "session-header-content",
+    "workspace-path",
+    "composer-card",
+  ]) {
+    const box = await window.getByTestId(testId).boundingBox();
+    assert(box !== null, `${label}：${testId} 必须可见`);
+    assert(
+      Math.abs(box.x - content.x) <= 1 &&
+        Math.abs(box.width - content.width) <= 1,
+      `${label}：${testId} 与消息列左右缘一致，实际 ${JSON.stringify({ box, content })}`
+    );
+  }
+  return content;
+}
+
 async function main() {
   const { server, port } = await startMockProvider((ctx) => {
     ctx.textRound(WIDE_REPLY);
   });
+  const screenshots = mkdtempSync(
+    join(tmpdir(), "codexlike-width-screenshots-")
+  );
+  console.log(`[e2e:width] 布局截图目录 ${screenshots}`);
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-width-"));
   const workspaceDir = join(homeDir, "workspace");
   mkdirSync(workspaceDir);
@@ -110,12 +134,12 @@ async function main() {
     // 固定窗口内容区 1280×800：会话容器 = 1280 - 256 = 1024px
     await resizeWindow(app, 1280, 800);
 
-    // 场景 1：空态内容列 2xl（672px），消息流空态与输入区卡片同宽对齐
+    // 场景 1：新建草稿与已有会话采用相同 4xl 档，不再单独收窄。
     const emptyBox = await window.getByTestId("message-empty").boundingBox();
     assert(emptyBox !== null, "空态提示必须可见");
     assert(
-      emptyBox.width <= 673,
-      `空态内容列应 ≤672（2xl）：实测 ${emptyBox.width}`
+      emptyBox.width > 768 && emptyBox.width <= 896,
+      `新建草稿应采用 4xl 内容列（>768 且 ≤896）：实测 ${emptyBox.width}`
     );
     const composerCard = await window
       .getByTestId("composer-card")
@@ -123,8 +147,14 @@ async function main() {
     assert(composerCard !== null, "输入区卡片必须可见");
     assert(
       Math.abs(composerCard.width - emptyBox.width) <= 1,
-      `空态下消息流与输入区应共用 2xl 内容列：${composerCard.width} vs ${emptyBox.width}`
+      `空态下消息流与输入区应共用分档内容列：${composerCard.width} vs ${emptyBox.width}`
     );
+
+    await assertAligned(window, "message-empty", "新建会话");
+    const emptyGutter = await window
+      .getByTestId("message-stream")
+      .evaluate((el) => el.offsetWidth - el.clientWidth);
+    await window.screenshot({ path: join(screenshots, "new-session.png") });
 
     // 发送消息 → mock 返回宽表格 + 长代码行
     await window.getByTestId("composer-input").fill("来一个大宽表格");
@@ -224,7 +254,10 @@ async function main() {
 
     // 场景 5：基础档（窗口内容区 1000 → 容器 744px <864）：内容列回落全宽
     await resizeWindow(app, 1000, 800);
-    const expectedFull = 1000 - SIDEBAR_WIDTH - STREAM_PADDING; // 容器全宽 - 消息流水平 padding
+    const gutter = await window
+      .getByTestId("message-stream")
+      .evaluate((el) => el.offsetWidth - el.clientWidth);
+    const expectedFull = 1000 - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
       max: 895,
@@ -234,6 +267,206 @@ async function main() {
       tierBase.width < tier4.width,
       `容器收窄后内容列应变窄：${tierBase.width} < ${tier4.width}`
     );
+
+    await assertAligned(window, "message-list", "基础档已有会话");
+
+    // 真实内容溢出时滚动槽仍保持原宽度，输入区和标题不横跳。
+    await resizeWindow(app, 1280, 600);
+    const beforeScroll = await assertAligned(window, "message-list", "滚动前");
+    const input = window.getByTestId("composer-input");
+    await input.fill("再来一个大宽表格");
+    await window.getByTestId("composer-send").click();
+    await window.getByTestId("message-assistant").nth(1).waitFor();
+    await waitForReplyDone(window);
+    const scrolling = await window
+      .getByTestId("message-stream")
+      .evaluate((el) => ({
+        gutter: el.offsetWidth - el.clientWidth,
+        overflowing: el.scrollHeight > el.clientHeight,
+      }));
+    assert(scrolling.overflowing, "真实长会话应产生纵向滚动");
+    assert(scrolling.gutter === emptyGutter, "出现滚动条不能改变稳定槽宽度");
+    const afterScroll = await assertAligned(window, "message-list", "滚动后");
+    assert(
+      Math.abs(beforeScroll.x - afterScroll.x) <= 1 &&
+        Math.abs(beforeScroll.width - afterScroll.width) <= 1,
+      "出现纵向滚动时内容列不能跳宽"
+    );
+    await window.screenshot({
+      path: join(screenshots, "existing-session.png"),
+    });
+
+    // 独立面板是整个主列的兄弟，外层分档不因面板打开而降档。
+    await resizeWindow(app, 1600, 900);
+    const closed = await assertAligned(window, "message-list", "面板关闭");
+    const headerHeight = (
+      await window.getByTestId("session-header-content").boundingBox()
+    ).height;
+    for (const [toggle, panel] of [
+      ["resources-toggle", "resources-panel"],
+      ["changes-toggle", "changes-panel"],
+    ]) {
+      await window.getByTestId(toggle).click();
+      await window.getByTestId(panel).waitFor();
+      const opened = await assertAligned(window, "message-list", panel);
+      assert(opened.width < closed.width, `${panel} 应占据主列旁边空间`);
+      const panelBox = await window.getByTestId(panel).boundingBox();
+      assert(opened.x + opened.width <= panelBox.x, `${panel} 不能覆盖主列`);
+      const header = await window
+        .getByTestId("session-header-content")
+        .boundingBox();
+      assert(
+        Math.abs(header.height - headerHeight) <= 1,
+        "面板打开后标题操作行不能换行变高"
+      );
+      // 外层仍为 >=1280 档；若错误改用收窄后主列分档，实际宽度会多 96px。
+      const streamWidth = await window
+        .getByTestId("message-stream")
+        .evaluate((el) => el.clientWidth);
+      assert(
+        Math.abs(opened.width - (streamWidth - STREAM_PADDING - 192)) <= 1,
+        "面板打开仍使用外层会话容器的6xl档留白"
+      );
+      await window.screenshot({ path: join(screenshots, `${panel}.png`) });
+      await window.getByTestId(toggle).click();
+      const restored = await assertAligned(
+        window,
+        "message-list",
+        `${panel} 收起`
+      );
+      assert(
+        Math.abs(restored.width - closed.width) <= 1,
+        "收起面板恢复原内容宽度"
+      );
+    }
+
+    // 默认与窄窗口同时打开两个面板，标题仍可见、操作不侵入面板。
+    for (const width of [1280, 1000]) {
+      await resizeWindow(app, width, 800);
+      await window.getByTestId("resources-toggle").click();
+      await window.getByTestId("changes-toggle").click();
+      await window.getByTestId("resources-panel").waitFor();
+      await window.getByTestId("changes-panel").waitFor();
+      const content = await assertAligned(
+        window,
+        "message-list",
+        `${width} 双面板`
+      );
+      const title = await window.getByTestId("session-title").boundingBox();
+      assert(
+        title.width >= 40,
+        `${width} 双面板标题不能被压成零宽：${title.width}`
+      );
+      for (const testId of [
+        "session-search-toggle",
+        "resources-toggle",
+        "changes-toggle",
+      ]) {
+        const button = await window.getByTestId(testId).boundingBox();
+        assert(
+          button.x >= content.x - 1 &&
+            button.x + button.width <= content.x + content.width + 1,
+          `${width} 双面板 ${testId} 不得溢出主列：${JSON.stringify({ button, content })}`
+        );
+      }
+      for (const testId of ["resources-panel", "changes-panel"]) {
+        const panel = await window.getByTestId(testId).boundingBox();
+        assert(
+          panel.height > 100 && panel.x >= content.x + content.width,
+          `${width} 双面板均应可用且不覆盖主列`
+        );
+        const panelHeader = window
+          .getByTestId(testId)
+          .locator("header")
+          .first();
+        for (const button of await panelHeader.locator("button").all()) {
+          const box = await button.boundingBox();
+          assert(
+            box.x >= panel.x && box.x + box.width <= panel.x + panel.width + 1,
+            `${width} ${testId} 内部操作仍在面板边界内`
+          );
+        }
+      }
+      await window.screenshot({
+        path: join(screenshots, `both-panels-${width}.png`),
+      });
+      await window.getByTestId("changes-close").click();
+      await window.getByTestId("changes-panel").waitFor({ state: "hidden" });
+      await window.getByTestId("resources-toggle").click();
+      await window.getByTestId("resources-panel").waitFor({ state: "hidden" });
+    }
+
+    // 同一真实会话通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
+    const session = window.getByTestId("session-item").first();
+    for (const [width, height, min, max] of [
+      [1000, 800, 650, 744],
+      [1280, 800, 769, 896],
+      [1600, 900, 1100, 1152],
+    ]) {
+      await resizeWindow(app, width, height);
+      const existing = await assertAligned(
+        window,
+        "message-list",
+        `${width} 已有`
+      );
+      await window.getByTestId("new-session").click();
+      await window.getByTestId("draft-select-workspace").waitFor();
+      const draft = await assertAligned(
+        window,
+        "message-empty",
+        `${width} 新建`
+      );
+      assert(
+        draft.width >= min && draft.width <= max,
+        `${width} 新建使用相应档位`
+      );
+      assert(Math.abs(existing.width - draft.width) <= 1, "已有转新建不跳宽");
+      await app.evaluate(({ ipcMain }) => {
+        const original = ipcMain._invokeHandlers.get("sessions:view");
+        ipcMain.removeHandler("sessions:view");
+        ipcMain.handle("sessions:view", async (event, ...args) => {
+          ipcMain.removeHandler("sessions:view");
+          ipcMain.handle("sessions:view", original);
+          const result = await original(event, ...args);
+          await new Promise((resolve) => {
+            globalThis.widthViewRelease = resolve;
+          });
+          return result;
+        });
+      });
+      await session.click();
+      await window
+        .getByTestId("draft-select-workspace")
+        .waitFor({ state: "hidden" });
+      await window.waitForFunction(
+        () =>
+          document.querySelector('[data-testid="composer-input"]')?.readOnly ===
+          true
+      );
+      const loading = await assertAligned(
+        window,
+        "message-empty",
+        `${width} 加载中`
+      );
+      assert(Math.abs(existing.width - loading.width) <= 1, "切换加载中不跳宽");
+      await app.evaluate(async () => {
+        const deadline = Date.now() + 5000;
+        while (!globalThis.widthViewRelease) {
+          if (Date.now() >= deadline)
+            throw new Error("sessions:view 加载闸门在5秒内未就绪");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        globalThis.widthViewRelease();
+        delete globalThis.widthViewRelease;
+      });
+      await window.getByTestId("message-list").waitFor();
+      const restored = await assertAligned(
+        window,
+        "message-list",
+        `${width} 加载完成`
+      );
+      assert(Math.abs(existing.width - restored.width) <= 1, "加载完成不跳宽");
+    }
 
     console.log("width-tiers: 全部断言通过");
   } finally {

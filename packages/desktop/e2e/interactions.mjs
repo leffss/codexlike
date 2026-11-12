@@ -16,6 +16,7 @@ import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -308,17 +309,16 @@ async function questionsScenario() {
       const sessionA = window
         .getByTestId("session-item")
         .filter({ hasText: "开始四题混合问答" });
-      await window
-        .getByTestId("approval-mode-select")
-        .selectOption("full-access");
+      await selectComposerOption(window, "approval-mode-select", "full-access");
       await window.getByTestId("full-access-confirm-ok").click();
       await window
         .getByTestId("full-access-confirm-dialog")
         .waitFor({ state: "hidden" });
       await window.waitForFunction(
         () =>
-          document.querySelector('[data-testid="approval-mode-select"]')
-            ?.value === "full-access"
+          document
+            .querySelector('[data-testid="approval-mode-select"]')
+            ?.getAttribute("data-value") === "full-access"
       );
       await send(window, "开始四题混合问答");
       await waitUntil(
@@ -697,7 +697,7 @@ async function queueScenario() {
       // ADR 0010：先草稿，首次发送才建立会话；目录选择不创建项目。
       await window.getByTestId("new-session").click();
       await window.getByTestId("draft-select-workspace").click();
-      await window.getByTestId("approval-mode-select").selectOption("ask");
+      await selectComposerOption(window, "approval-mode-select", "ask");
       await send(window, "同时委派两个子代理，主代理也需要问答");
       const session = window
         .getByTestId("session-item")
@@ -840,7 +840,7 @@ async function cancellationScenario() {
         .getByTestId("session-item")
         .filter({ hasText: "停止问答" });
       let sessionId;
-      await window.getByTestId("approval-mode-select").selectOption("ask");
+      await selectComposerOption(window, "approval-mode-select", "ask");
       const cancelledIds = [];
       for (const [prompt, restart] of [
         ["停止问答", false],

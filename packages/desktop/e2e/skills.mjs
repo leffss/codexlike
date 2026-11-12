@@ -5,6 +5,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -327,7 +328,7 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     assert(seenBodies.length === beforeUnknown, "未知显式技能仍向模型发送请求");
 
-    await window.getByTestId("approval-mode-select").selectOption("ask");
+    await selectComposerOption(window, "approval-mode-select", "ask");
     await window.getByTestId("resources-toggle").click();
     stage = "approval-state";
     await window
