@@ -64,7 +64,7 @@ async function main() {
     const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -77,7 +77,7 @@ async function main() {
       .getByRole("button", { name: /保存|创建/ })
       .click();
     await window.getByText("Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
 
     // ① 流式输出中点停止：本轮立即中断，UI 标记中断点
     await prepareDraft(window, { approvalMode: "assist" });
@@ -92,6 +92,7 @@ async function main() {
 
     await window
       .getByText("（已中断，以上为部分回复）")
+      .first()
       .waitFor({ timeout: 10_000 });
     const partial = await window
       .getByTestId("message-assistant")
@@ -108,7 +109,10 @@ async function main() {
     // ② 中断后继续发新消息：正常完成（上下文含中断前历史）
     await window.getByTestId("composer-input").fill("中断后再问一句");
     await window.getByTestId("composer-send").click();
-    await window.getByText("中断后的新回答。").waitFor({ timeout: 15_000 });
+    await window
+      .getByText("中断后的新回答。")
+      .first()
+      .waitFor({ timeout: 15_000 });
     console.log("[e2e] 中断后继续发新消息：正常完成回复");
 
     // ③ 工具执行中点停止：长命令子进程被杀，结果标记用户中断

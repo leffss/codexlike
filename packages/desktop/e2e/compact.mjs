@@ -76,7 +76,7 @@ async function main() {
     app = launchedApp;
 
     // 1) 设置页创建 Profile
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -91,7 +91,7 @@ async function main() {
     await window.getByText("Mock").first().waitFor();
 
     // 2) 建会话 + 4 轮对话（压缩需超过 3 轮）
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window);
     const composer = window.getByTestId("composer-input");
     for (let i = 1; i <= 4; i += 1) {
@@ -184,7 +184,7 @@ async function main() {
       "压缩后应只剩 3 条用户消息"
     );
     // 折叠态默认不显示摘要全文（details 未展开时内容不可见），展开后可见
-    const summaryFullText = window.getByText(SUMMARY_MARKER);
+    const summaryFullText = window.getByText(SUMMARY_MARKER).first();
     assert(
       (await summaryFullText.isVisible()) === false,
       "摘要卡片折叠态不应显示全文"

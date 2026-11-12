@@ -99,7 +99,7 @@ async function main() {
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
 
     // 准备：设置页创建 Profile → 新建草稿
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Follow Mock");
@@ -111,7 +111,7 @@ async function main() {
       .getByRole("button", { name: /保存|创建/ })
       .click();
     await window.getByText("Follow Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
     // ---- 场景 1：流式输出期间自动贴底跟随 ----

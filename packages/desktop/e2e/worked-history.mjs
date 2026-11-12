@@ -92,7 +92,7 @@ async function main() {
     let window = first.window;
 
     // 准备：设置页创建 Profile → 新建会话
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -104,7 +104,7 @@ async function main() {
       .getByRole("button", { name: /保存|创建/ })
       .click();
     await window.getByText("Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
     // ---- 场景 1：完成后收起（历史只剩最终正文 + 工时摘要行）----
@@ -229,6 +229,7 @@ async function main() {
     await window.getByTestId("composer-stop").click();
     await window
       .getByText("（已中断，以上为部分回复）")
+      .first()
       .waitFor({ timeout: 10_000 });
 
     const interruptToggles = window.getByTestId("worked-history-toggle");

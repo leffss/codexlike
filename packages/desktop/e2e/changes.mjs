@@ -86,7 +86,7 @@ async function main() {
     const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -99,7 +99,7 @@ async function main() {
       .getByRole("button", { name: /保存|创建/ })
       .click();
     await window.getByText("Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
 
     await prepareDraft(window, { approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("创建 e2e-change.txt");
