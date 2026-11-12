@@ -49,7 +49,8 @@ export interface QuestionAnswer {
 }
 
 export type InteractionResponse =
-  | { kind: "approval"; decision: "approve" | "reject" }
+  | { kind: "approval"; decision: "approve"; scope?: "once" | "session" }
+  | { kind: "approval"; decision: "reject"; scope?: never }
   | { kind: "questions"; answers: QuestionAnswer[] };
 
 export interface InteractionRecord {

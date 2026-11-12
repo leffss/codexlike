@@ -144,6 +144,8 @@ export interface AgentSession {
    * 持久化由调用方（SessionManager）负责。
    */
   setApprovalMode(mode: ApprovalMode): void;
+  /** 先持久化再撤销实时会话授权；失败不改变内存。 */
+  revokeAutoApprove(): void;
   /**
    * 响应等待中的审批请求（审批卡片三键）：
    * - approve：本次执行；reject：拒绝并回填模型；always：兼容旧入口，仅批准本次。
@@ -277,7 +279,7 @@ export function createAgentSession(
   const attachToolImages = options.attachToolImages ?? true;
 
   // 审批状态（GLOSSARY「审批模式」）：模式随时可切（只对下一次发送生效）。
-  // 「本会话总是允许」记忆已随三档重构移除（ADR 0004）：审批卡 always 键仅放行本次。
+  // autoApprove 独立实时读取；遗留 always 仅批准本次，会话授权必须来自有效 scope: session 响应。
   // waiter 表（工单 13）：主会话与多个子代理可能并行等待审批，按 requestId 路由。
   let nextApprovalMode =
     options.approvalMode ?? record.approvalMode ?? "assist";
@@ -295,8 +297,19 @@ export function createAgentSession(
     persistence,
     now,
     emit: (event) => events.push(event),
-    waiting(waiting) {
+    autoApprove: () => record.autoApprove === true,
+    autoApproved() {
+      record.autoApprove = true;
+      events.push({
+        type: "session-auto-approve-changed",
+        sessionId: record.id,
+        autoApprove: true,
+      });
+    },
+    waiting(waiting, persisted) {
       record.status = waiting ? "waiting-user" : "streaming";
+      // 批量授权事务已保存状态；提交后只更新内存，避免第二次写库失败造成部分放行。
+      if (persisted) return;
       persistence.updateSession(record.id, {
         status: record.status,
         updatedAt: now(),
@@ -377,6 +390,7 @@ export function createAgentSession(
       sessionId: record.id,
       workspacePath: record.workspacePath,
       approvalMode: () => approvalMode,
+      autoApprove: () => record.autoApprove === true,
       resources: () => currentResources,
       requestInteraction,
       emit: (event) => events.push(event),
@@ -421,6 +435,16 @@ export function createAgentSession(
     setApprovalMode(mode) {
       nextApprovalMode = mode;
       record.approvalMode = mode;
+    },
+
+    revokeAutoApprove() {
+      persistence.updateSession(record.id, { autoApprove: false });
+      record.autoApprove = false;
+      events.push({
+        type: "session-auto-approve-changed",
+        sessionId: record.id,
+        autoApprove: false,
+      });
     },
 
     get pendingInteractions() {
@@ -648,6 +672,7 @@ export function createAgentSession(
                 const command = commandOfToolInput(call.input);
                 const gate = decideApproval({
                   mode: approvalMode,
+                  autoApprove: record.autoApprove === true,
                   permission: definition.permission,
                   toolName: definition.name,
                   command,
@@ -679,8 +704,7 @@ export function createAgentSession(
                       "工具调用被用户拒绝：用户未批准在当前会话执行该命令。可以改用只读工具继续，或向用户说明计划并询问如何调整。";
                     isError = true;
                   } else {
-                    // always 与 approve 同效：新三档下不再写「总是允许」记忆（ADR 0004，
-                    // ask 档「始终询问」、assist 档仅风险命令弹卡且不允许记忆）
+                    // 授权已由交互控制器提交；执行仍沿用本轮冻结的文件访问模式。
                     executed = yield* events.during(
                       runTool(definition, call.input, {
                         workspacePath: record.workspacePath,

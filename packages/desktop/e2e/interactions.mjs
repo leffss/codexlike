@@ -1,12 +1,13 @@
 // 统一用户交互 E2E：真实 Electron + 隔离数据目录 + 本地 OpenAI 兼容 mock。
 // 公开边界：用户界面、sessions IPC、发送给 provider 的真实请求；不读取数据库或组件内部状态。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:interactions（先 build）。
-// 可用 CODEXLIKE_E2E_INTERACTION_CASE=questions|queue|cancel 单独重跑一个场景。
+// 可用 CODEXLIKE_E2E_INTERACTION_CASE=questions|queue|cancel|auto-approve 单独重跑一个场景。
 import { deepStrictEqual } from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -946,10 +947,278 @@ async function cancellationScenario() {
   );
 }
 
+async function autoApproveScenario() {
+  const taskWrite = "自动批准子代理写入";
+  const taskQuestion = "自动批准子代理问答";
+  const children = new Map();
+  let futureRequest;
+  await withScenario(
+    "auto-approve",
+    (ctx, { body }) => {
+      if (body.includes(SUBAGENT_SYSTEM_MARK)) {
+        const task = body.includes(taskWrite) ? taskWrite : taskQuestion;
+        const callId =
+          task === taskWrite ? "auto-child-write" : "auto-child-question";
+        if (toolResult(body, callId) !== undefined)
+          return ctx.textRound(`${task}完成`);
+        children.set(task, ctx);
+        return;
+      }
+      // 真实 user content 会追加持久问答快照；仅首行是本 fixture 的命令标识。
+      const prompt = String(lastUserText(body)).split("\n")[0];
+      if (prompt === "会话自动批准主子队列") {
+        if (toolResult(body, "auto-follow-write") !== undefined)
+          return ctx.textRound("自动批准主子队列完成");
+        if (toolResult(body, "auto-main-write") !== undefined)
+          return ctx.toolCallRound("auto-follow-write", "write_file", {
+            path: "auto-follow.txt",
+            content: "后续自动执行",
+          });
+        ctx.send({
+          delta: {
+            tool_calls: [
+              ["auto-spawn-write", "spawn_subagent", { task: taskWrite }],
+              ["auto-spawn-question", "spawn_subagent", { task: taskQuestion }],
+              [
+                "auto-main-write",
+                "write_file",
+                { path: "auto-main.txt", content: "主代理" },
+              ],
+            ].map(([id, name, args], index) => ({
+              index,
+              id,
+              type: "function",
+              function: { name, arguments: JSON.stringify(args) },
+            })),
+          },
+          finish_reason: null,
+        });
+        ctx.finishWith("tool_calls");
+        return;
+      }
+      const callId = `auto-${prompt}`;
+      if (toolResult(body, callId) !== undefined)
+        return ctx.textRound(`${prompt}完成`);
+      if (prompt === "授权中重启问答") return ask(ctx, callId);
+      if (prompt === "取消立即生效") {
+        futureRequest = ctx;
+        return;
+      }
+      ctx.toolCallRound(callId, "write_file", {
+        path: prompt === "越界仍拒绝" ? "../auto-outside.txt" : `${prompt}.txt`,
+        content: prompt,
+      });
+    },
+    async ({ window, homeDir, seenBodies, launch, close }) => {
+      const item = (title) =>
+        window.getByTestId("session-item").filter({ hasText: title });
+      const pendingPanel = () => window.getByTestId("interaction-panel");
+      const active = () => window.getByTestId("session-auto-approve");
+      const file = (name) => join(homeDir, "workspace", name);
+      async function assertModeUnchanged() {
+        assert(
+          (await window
+            .getByTestId("approval-mode-select")
+            .getAttribute("data-value")) === "ask",
+          "会话自动批准不能切换审批档位为 full-access"
+        );
+      }
+      async function assertAutoFlag(id, expected) {
+        const sessions = await window.evaluate(() =>
+          window.codexlike.sessions.list()
+        );
+        assert(
+          sessions.find((session) => session.id === id)?.autoApprove ===
+            expected,
+          "公开会话快照应保存独立的自动批准状态"
+        );
+      }
+      // 先让另一会话真实卡在审批，验证批量放行不越过会话边界。
+      await prepareDraft(window);
+      await send(window, "隔离会话审批");
+      await pendingPanel().waitFor();
+      const otherId =
+        await item("隔离会话审批").getAttribute("data-session-id");
+      const [otherPending] = await pendingCount(window, otherId, 1);
+      await prepareDraft(window);
+      await send(window, "会话自动批准主子队列");
+      await pendingPanel().waitFor();
+      const sessionId =
+        await item("会话自动批准主子队列").getAttribute("data-session-id");
+      await waitUntil(() => children.size === 2, "两个子代理没有开始请求");
+      children.get(taskWrite).toolCallRound("auto-child-write", "write_file", {
+        path: "auto-child.txt",
+        content: "子代理",
+      });
+      await pendingCount(window, sessionId, 2);
+      ask(children.get(taskQuestion), "auto-child-question");
+      const queued = await pendingCount(window, sessionId, 3);
+      const approvals = queued.filter(
+        (record) => record.request.kind === "approval"
+      );
+      assert(
+        approvals.length === 2 &&
+          approvals.some((record) => record.request.source.kind === "main") &&
+          approvals.some((record) => record.request.source.task === taskWrite),
+        "授权前主代理和子代理的审批必须同时处于等待"
+      );
+      assert(
+        !existsSync(file("auto-main.txt")) &&
+          !existsSync(file("auto-child.txt")),
+        "授权前主子工具不能执行"
+      );
+      await pendingPanel().getByTestId("approval-approve-session").click();
+      await active().waitFor();
+      await waitQuestion(window, 1, 1);
+      await waitUntil(
+        () =>
+          existsSync(file("auto-main.txt")) &&
+          seenBodies.some(
+            (body) => toolResult(body, "auto-child-write") !== undefined
+          ),
+        "会话授权没有同时放行主子审批"
+      );
+      const remaining = await pendingCount(window, sessionId, 1);
+      assert(
+        remaining[0].request.kind === "questions" &&
+          remaining[0].request.source.task === taskQuestion,
+        "自动批准只能消费审批，不能替子代理回答问题"
+      );
+      assert(
+        !seenBodies.some(
+          (body) => toolResult(body, "auto-child-question") !== undefined
+        ),
+        "questions 未回答前不能继续子代理模型"
+      );
+      for (const name of ["auto-main.txt", "auto-child.txt"])
+        assert(existsSync(file(name)), `主子审批写入真实完成：${name}`);
+      await assertAutoFlag(sessionId, true);
+      await assertAutoFlag(otherId, false);
+      const [stillWaiting] = await pendingCount(window, otherId, 1);
+      assert(
+        stillWaiting.request.id === otherPending.request.id &&
+          !existsSync(file("隔离会话审批.txt")),
+        "授权不能消费另一个会话的待审批"
+      );
+      await window.getByTestId("question-option-continue").check();
+      await window.getByTestId("question-submit").click();
+      await waitText(window, "自动批准主子队列完成");
+      assert(
+        existsSync(file("auto-follow.txt")),
+        "问答完成后的后续工具无需审批"
+      );
+      await pendingCount(window, sessionId, 0);
+      await assertModeUnchanged();
+      await assertReadOnlyHistory(window);
+
+      await item("隔离会话审批").click();
+      await pendingPanel().waitFor();
+      assert((await active().count()) === 0, "其他会话不能显示自动批准状态");
+      await pendingPanel().getByTestId("approval-reject").click();
+      await waitText(window, "隔离会话审批完成");
+      assert(!existsSync(file("隔离会话审批.txt")), "既有拒绝仍然阻止写入");
+      await item("会话自动批准主子队列").click();
+      await active().waitFor();
+      await send(window, "越界仍拒绝");
+      await waitText(window, "越界仍拒绝完成");
+      assert(
+        !existsSync(join(homeDir, "auto-outside.txt")),
+        "自动批准不能绕过工作区路径边界"
+      );
+      const outsideResult = seenBodies.find(
+        (body) => toolResult(body, "auto-越界仍拒绝") !== undefined
+      );
+      assert(
+        outsideResult !== undefined &&
+          toolResult(outsideResult, "auto-越界仍拒绝").includes("工作区"),
+        "模型必须收到越界拒绝结果而非伪造成功"
+      );
+      await assertModeUnchanged();
+
+      // 保留授权但在问答等待时真退出；重开只恢复状态，不能恢复执行或回答问题。
+      await send(window, "授权中重启问答");
+      await waitQuestion(window, 1, 1);
+      const beforeRestart = seenBodies.length;
+      await close();
+      writeFileSync(file("auto-main.txt"), "重启不能覆盖这份外部修改");
+      ({ window } = await launch());
+      await item("会话自动批准主子队列").click();
+      await active().waitFor();
+      await window.getByTestId("composer-send").waitFor();
+      await pendingCount(window, sessionId, 0);
+      await window
+        .getByTestId("interaction-history")
+        .filter({ hasText: "已取消" })
+        .waitFor();
+      await assertAutoFlag(sessionId, true);
+      await assertAutoFlag(otherId, false);
+      await assertModeUnchanged();
+      assert(
+        seenBodies.length === beforeRestart,
+        "重启不得重放工具或继续请求模型"
+      );
+      assert(
+        readFileSync(file("auto-main.txt"), "utf8") ===
+          "重启不能覆盖这份外部修改",
+        "重启不能直接重放已批准工具覆盖磁盘成果"
+      );
+      await send(window, "重启后自动执行");
+      await waitText(window, "重启后自动执行完成");
+      assert(
+        existsSync(file("重启后自动执行.txt")),
+        "跨重启保存的授权应作用于新一轮工具"
+      );
+      assert(
+        (await pendingPanel().count()) === 0,
+        "重启后的后续工具无需再次审批"
+      );
+
+      // 模型 HTTP 请求已经开始，但尚未返回工具：撤销必须对即将到来的审批立即生效。
+      await send(window, "取消立即生效");
+      await waitUntil(
+        () => futureRequest !== undefined,
+        "未进入可控的后续工具请求"
+      );
+      await active().getByTestId("session-auto-approve-revoke").click();
+      await active().waitFor({ state: "detached" });
+      await assertAutoFlag(sessionId, false);
+      futureRequest.toolCallRound("auto-取消立即生效", "write_file", {
+        path: "取消立即生效.txt",
+        content: "只批准本次",
+      });
+      await pendingPanel().waitFor();
+      assert(
+        !existsSync(file("取消立即生效.txt")),
+        "撤销后新工具必须等待用户审批"
+      );
+      await pendingPanel().getByTestId("approval-approve").click();
+      await waitText(window, "取消立即生效完成");
+      assert(existsSync(file("取消立即生效.txt")), "批准本次仍可执行当前工具");
+      await assertAutoFlag(sessionId, false);
+      await close();
+      ({ window } = await launch());
+      await item("会话自动批准主子队列").click();
+      await window.getByTestId("composer-send").waitFor();
+      assert((await active().count()) === 0, "撤销状态跨重启保存");
+      await send(window, "撤销后重启审批");
+      await pendingPanel().waitFor();
+      assert(
+        !existsSync(file("撤销后重启审批.txt")),
+        "批准本次不会重新开启会话授权"
+      );
+      await pendingPanel().getByTestId("approval-reject").click();
+      await waitText(window, "撤销后重启审批完成");
+      await assertAutoFlag(sessionId, false);
+      await assertReadOnlyHistory(window);
+    }
+  );
+}
+
 const cases = {
   questions: questionsScenario,
   queue: queueScenario,
   cancel: cancellationScenario,
+  "auto-approve": autoApproveScenario,
 };
 const selected = process.env.CODEXLIKE_E2E_INTERACTION_CASE;
 try {

@@ -84,6 +84,7 @@ export interface SessionManager {
     projectId: string,
     collapsed: boolean
   ): ProjectRecord | null;
+  setProjectPinned(projectId: string, pinned: boolean): ProjectRecord | null;
   setPinned(sessionId: string, pinned: boolean): SessionRecord | null;
   markUsed(sessionId: string): SessionRecord | null;
   removeUnstarted(sessionId: string): void;
@@ -129,6 +130,8 @@ export interface SessionManager {
    * 不改变最近使用时间；不存在返回 null。
    */
   setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
+  /** 撤销本会话自动批准，立即作用后续审批；未知会话抛错。 */
+  revokeAutoApprove(sessionId: string): SessionRecord;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
   cancelInteractions(reason: string): void;
@@ -260,6 +263,7 @@ export function createSessionManager(
         name: basename(path) || path,
         workspacePath: path,
         collapsed: false,
+        pinned: false,
         createdAt: now(),
       };
       persistence.insertProject(project);
@@ -274,6 +278,12 @@ export function createSessionManager(
     },
     setProjectCollapsed(projectId, collapsed) {
       persistence.setProjectCollapsed(projectId, collapsed);
+      return (
+        persistence.listProjects().find((item) => item.id === projectId) ?? null
+      );
+    },
+    setProjectPinned(projectId, pinned) {
+      persistence.setProjectPinned(projectId, pinned);
       return (
         persistence.listProjects().find((item) => item.id === projectId) ?? null
       );
@@ -321,6 +331,7 @@ export function createSessionManager(
         status: "idle",
         // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
         approvalMode,
+        autoApprove: false,
         archivedAt: null,
         pinned: false,
         lastUsedAt: timestamp,
@@ -424,6 +435,17 @@ export function createSessionManager(
       if (next !== null) {
         cache.get(sessionId)?.setApprovalMode(mode);
       }
+      return next;
+    },
+
+    revokeAutoApprove(sessionId) {
+      const cached = cache.get(sessionId);
+      if (cached) {
+        cached.revokeAutoApprove();
+        return { ...cached.record };
+      }
+      const next = patchRecord(sessionId, { autoApprove: false });
+      if (!next) throw new Error(`会话不存在：${sessionId}`);
       return next;
     },
 

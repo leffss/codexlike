@@ -22,7 +22,7 @@ export type SessionStatus =
   "idle" | "streaming" | "waiting-user" | "waiting-approval";
 
 /**
- * 审批模式（GLOSSARY「审批模式」）三档：`readonly` 只读 / `suggest` 协作 / `full` 自主。
+ * 审批模式三档：`ask` 请求批准 / `assist` 帮我批准 / `full-access` 完全访问。
  * 会话级、可随时切换、随会话记录持久化（恢复用）。
  * 定义在 ./approval（工单 04 审批状态机），本文件经 import 引用。
  */
@@ -41,6 +41,8 @@ export interface ProjectRecord {
   workspacePath: string;
   /** 未设置时展开；宿主持久保存。 */
   collapsed?: boolean;
+  /** 未设置等价 false；展示排序由宿主决定。 */
+  pinned?: boolean;
   createdAt: string;
 }
 
@@ -63,8 +65,10 @@ export interface SessionRecord {
   providerProfileId: string | null;
   /** 最近一次发送消息所用的模型标识 */
   model: string | null;
-  /** 审批模式（三档，随时切换、对下一次工具调用立即生效；新建默认 suggest，旧库无此列恢复默认值） */
+  /** 审批模式：切换对下次发送生效，当前轮冻结；新建与旧库默认 assist。 */
   approvalMode: ApprovalMode;
+  /** 本会话自动批准执行审批；未设置等价 false，不改变文件访问边界。 */
+  autoApprove?: boolean;
   status: SessionStatus;
   /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
   archivedAt: string | null;
@@ -79,10 +83,8 @@ export interface SessionRecord {
 }
 
 /**
- * 审批决定记录（approval_decisions 表一行）。
- * 审批卡片三选一（spec）：`allow` 批准一次 / `allow-always` 本会话总是允许 / `deny` 拒绝。
- * `allow-always` 的 subject（命令首词/前缀）即「总是允许」清单——重启恢复后仍生效。
- * 写入方为工单 04 的审批状态机；本工单提供持久化与恢复接口。
+ * 遗留审批决定的兼容类型，不再作为运行时授权来源。
+ * 新审批历史使用 InteractionRecord；会话授权保存为 SessionRecord.autoApprove。
  */
 export interface ApprovalDecisionRecord {
   id: string;
@@ -170,6 +172,11 @@ export interface CompactResult {
  * `user-message → assistant-start → assistant-delta* → assistant-done`
  */
 export type SessionEvent =
+  | {
+      type: "session-auto-approve-changed";
+      sessionId: string;
+      autoApprove: boolean;
+    }
   | { type: "interaction-request"; interaction: InteractionRecord }
   | { type: "interaction-resolved"; interaction: InteractionRecord }
   | { type: "user-message"; message: StoredMessage }

@@ -96,14 +96,16 @@ export interface SubagentsConfig {
 
 /**
  * 会话（agent-session）向编排器提供的端口：审批状态、审批等待注册与事件出口。
- * 子代理审批与主会话共用同一审批模式 / respondApproval 路由
- * （「总是允许」记忆已随三档重构移除，ADR 0004）。
+ * 子代理与主会话共享冻结的审批模式、实时 autoApprove 和交互路由；
+ * 会话授权不改变本轮 ToolContext 的文件访问边界。
  */
 export interface SubagentHostPort {
   sessionId: string;
   workspacePath: string;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
+  /** 实时读取所属会话的审批授权，不改变本轮路径权限。 */
+  autoApprove?(): boolean;
   /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主会话正文。 */
   resources?(): AgentResourceSnapshot | undefined;
   /**
@@ -272,6 +274,7 @@ export function createSubagentOrchestrator(
     const approvalMode = port.approvalMode();
     const gate = decideApproval({
       mode: approvalMode,
+      autoApprove: port.autoApprove?.() ?? false,
       permission: definition.permission,
       toolName: definition.name,
       command,
@@ -309,7 +312,7 @@ export function createSubagentOrchestrator(
           isError: true,
         };
       }
-      // always 与 approve 同效：不再写「总是允许」记忆（ADR 0004）
+      // 授权由主会话交互控制器提交；此处不写遗留命令授权。
     }
     return runTool(definition, input, {
       workspacePath: port.workspacePath,

@@ -4,13 +4,13 @@
  * - `ask` 请求批准：写入、终端命令、联网搜索一律暂停等待用户审批（只读工具放行）；
  * - `assist` 帮我批准：工作区内写入与联网自动放行，终端命令仅危险黑名单命中时审批；
  * - `full-access` 完全访问：全自动，且放开工作区文件边界（可读写本地任意文件）。
- * 「本会话总是允许」记忆机制已随三档语义重构移除（ADR 0004）：非风险命令不再逐条审批，
- * 危险命令与 ask 档不允许记忆（「始终询问」语义），审批卡的 always 键仅放行本次。
+ * autoApprove 是独立实时会话授权，仅跳过执行审批，不放宽文件边界，也不替答问答。
+ * 遗留命令首词授权不再使用；兼容入口 always 仍仅批准一次（会话授权需显式 scope: session）。
  * 本文件浏览器安全（无 Node 内置模块），UI 与主进程共用类型。
  */
 import type { ToolPermission } from "../tools/types";
 
-/** 审批模式（会话级权限档位，可随时切换、对下一次工具调用立即生效） */
+/** 审批模式（会话级权限档位，可随时切换、对下一次发送生效，当前轮冻结） */
 export type ApprovalMode = "ask" | "assist" | "full-access";
 
 /** 全部档位值（IPC 校验、UI 选项、持久化白名单共用；顺序 = 严格 → 宽松） */
@@ -127,7 +127,7 @@ export function isRiskyCommand(command: string): boolean {
 /**
  * 审批状态机（纯函数）：给定模式与工具权限类别，决定本次工具调用的门。
  * - readonly 工具（read_file/glob/grep）任何模式下放行；
- * - ask 请求批准：write / network / command 一律暂停等待审批（「始终询问」，不因记忆跳过）；
+ * - 未开启 autoApprove 时，ask 对 write / network / command 暂停等待审批；
  * - assist 帮我批准：write（工作区内写入）与 network（联网搜索）自动放行；
  *   command 仅 isRiskyCommand 命中时弹审批，其余自动放行；
  * - full-access 完全访问：全放行（文件边界放开见 ADR 0004）。
@@ -135,6 +135,8 @@ export function isRiskyCommand(command: string): boolean {
  */
 export function decideApproval(input: {
   mode: ApprovalMode;
+  /** 实时会话授权，与本轮冻结的模式分离；只跳过执行审批。 */
+  autoApprove?: boolean;
   permission: ToolPermission;
   toolName: string;
   /** run_terminal_command 的 command 参数 */
@@ -142,7 +144,11 @@ export function decideApproval(input: {
 }): ApprovalGate {
   const { mode, permission } = input;
 
-  if (permission === "readonly" || mode === "full-access") {
+  if (
+    input.autoApprove ||
+    permission === "readonly" ||
+    mode === "full-access"
+  ) {
     return { kind: "auto" };
   }
 

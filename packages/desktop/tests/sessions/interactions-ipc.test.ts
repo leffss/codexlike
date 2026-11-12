@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createAgentResourceSnapshot,
+  createBuiltinTools,
   createSessionManager,
   createSqliteSessionStore,
   createWorktreeService,
@@ -35,7 +36,8 @@ afterEach(() => {
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-interaction-ipc-"));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const persistence = createSqliteSessionStore(":memory:");
+  const dbPath = join(root, "sessions.sqlite");
+  let persistence = createSqliteSessionStore(dbPath);
   cleanups.push(() => persistence.close());
   const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
     createAgentResourceSnapshot({
@@ -44,8 +46,12 @@ function setup() {
       compatibleGlobalDir: join(root, "compatible"),
       findGitRoot: () => null,
     });
-  const manager = createSessionManager({ persistence, resourcesFor });
-  const session = manager.create({ workspacePath: root });
+  const manager = createSessionManager({
+    persistence,
+    resourcesFor,
+    tools: createBuiltinTools(),
+  });
+  const session = manager.create({ workspacePath: root, approvalMode: "ask" });
   registerSessionHandlers({
     manager,
     profiles: createProfileStore({
@@ -63,7 +69,19 @@ function setup() {
     }),
     resourcesFor,
   });
-  return { session, manager };
+  return {
+    session,
+    manager,
+    reopen() {
+      persistence.close();
+      persistence = createSqliteSessionStore(dbPath);
+      return createSessionManager({
+        persistence,
+        resourcesFor,
+        tools: createBuiltinTools(),
+      });
+    },
+  };
 }
 
 function invoke(name: string, ...args: unknown[]) {
@@ -73,6 +91,167 @@ function invoke(name: string, ...args: unknown[]) {
 }
 
 describe("统一用户交互 IPC", () => {
+  it("撤销自动批准仅接受有效会话标识且幂等，不提供直接启用IPC", () => {
+    const { session } = setup();
+    for (const id of ["", null, 1, {}])
+      expect(() => invoke("sessions:revoke-auto-approve", id)).toThrow(
+        "参数不合法"
+      );
+    expect(() => invoke("sessions:revoke-auto-approve", "missing")).toThrow();
+    expect(invoke("sessions:revoke-auto-approve", session.id)).toMatchObject({
+      id: session.id,
+      autoApprove: false,
+    });
+    expect(invoke("sessions:revoke-auto-approve", session.id)).toMatchObject({
+      autoApprove: false,
+    });
+    expect(invoke("sessions:view", session.id)).toMatchObject({
+      autoApprove: false,
+    });
+    expect(handlers.has("sessions:set-auto-approve")).toBe(false);
+  });
+  it("项目置顶 IPC 校验参数且保持项目原有列表顺序", () => {
+    const { manager, session } = setup();
+    const project = manager.addProject(session.record.workspacePath);
+    expect(invoke("projects:set-pinned", project.id, true)).toMatchObject({
+      id: project.id,
+      pinned: true,
+    });
+    expect(invoke("projects:list")).toMatchObject([
+      { id: project.id, pinned: true },
+    ]);
+    expect(invoke("projects:set-pinned", project.id, false)).toMatchObject({
+      pinned: false,
+    });
+    for (const args of [
+      ["", true],
+      [project.id, "true"],
+      [null, true],
+    ]) {
+      expect(() => invoke("projects:set-pinned", ...args)).toThrow(
+        "参数不合法"
+      );
+    }
+    expect(invoke("projects:set-pinned", "missing", true)).toBeNull();
+  });
+  it("会话授权拒绝非法和跨会话响应，重复不能重启授权，重开存储仍恢复授权与置顶", async () => {
+    const { session, manager, reopen } = setup();
+    const other = manager.create({
+      workspacePath: session.record.workspacePath,
+    });
+    const project = manager.addProject(session.record.workspacePath);
+    invoke("projects:set-pinned", project.id, true);
+    let calls = 0;
+    const server = createServer((_request, response) => {
+      calls += 1;
+      const delta =
+        calls === 1
+          ? {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "approval-call",
+                  type: "function",
+                  function: {
+                    name: "run_terminal_command",
+                    arguments: JSON.stringify({ command: "git --version" }),
+                  },
+                },
+              ],
+            }
+          : { content: "完成" };
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, delta, finish_reason: calls === 1 ? "tool_calls" : "stop" }] })}\n\n`
+      );
+      response.end("data: [DONE]\n\n");
+    });
+    const port = await listenMock(server);
+    cleanups.push(() => {
+      server.close();
+      server.closeAllConnections();
+    });
+    const controller = new AbortController();
+    const iterator = session
+      .sendMessage({
+        text: "检查 git",
+        profile: {
+          id: "mock",
+          name: "Mock",
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          apiKey: "test",
+          model: "mock",
+        },
+        signal: controller.signal,
+      })
+      [Symbol.asyncIterator]();
+    try {
+      let requestId = "";
+      for (let index = 0; index < 20; index += 1) {
+        const next = await iterator.next();
+        if (next.done) break;
+        if (next.value.type === "interaction-request") {
+          requestId = next.value.interaction.request.id;
+          break;
+        }
+      }
+      expect(requestId).not.toBe("");
+      const approval = {
+        kind: "approval",
+        decision: "approve",
+        scope: "session",
+      };
+      for (const response of [
+        { ...approval, scope: "global" },
+        { ...approval, decision: "reject" },
+      ])
+        expect(() =>
+          invoke(
+            "sessions:respond-interaction",
+            session.id,
+            requestId,
+            response
+          )
+        ).toThrow();
+      expect(
+        invoke("sessions:respond-interaction", other.id, requestId, approval)
+      ).toBe(false);
+      expect(
+        manager.list().find((record) => record.id === other.id)?.autoApprove
+      ).not.toBe(true);
+      expect(
+        invoke("sessions:respond-interaction", session.id, requestId, approval)
+      ).toBe(true);
+      expect(invoke("sessions:view", session.id)).toMatchObject({
+        autoApprove: true,
+      });
+      expect(
+        invoke("sessions:respond-interaction", session.id, requestId, approval)
+      ).toBe(false);
+      while (!(await iterator.next()).done) {
+        /* 排空本轮。 */
+      }
+      const restored = reopen();
+      expect(
+        restored.list().find((record) => record.id === session.id)
+      ).toMatchObject({ autoApprove: true, approvalMode: "ask" });
+      expect(restored.projects()).toMatchObject([
+        { id: project.id, pinned: true },
+      ]);
+      expect(
+        restored.list().find((record) => record.id === other.id)?.autoApprove
+      ).not.toBe(true);
+      restored.revokeAutoApprove(session.id);
+      expect(
+        reopen()
+          .list()
+          .find((record) => record.id === session.id)
+      ).toMatchObject({ autoApprove: false });
+    } finally {
+      controller.abort();
+      await iterator.return?.();
+    }
+  });
   it("仅合法响应能恢复所属会话，重复提交和跨会话响应均不消费请求", async () => {
     const { session, manager } = setup();
     const other = manager.create({

@@ -72,6 +72,7 @@ export function SessionSidebar(props: {
   onRename: (id: string, title: string) => void;
   onArchive: (id: string, archived: boolean) => void;
   onPin: (id: string, pinned: boolean) => void;
+  onPinProject: (id: string, pinned: boolean) => void;
   onCollapseProject: (id: string, collapsed: boolean) => void;
   onRemoveProject?: (id: string) => void;
 }) {
@@ -296,6 +297,7 @@ export function SessionSidebar(props: {
   }
 
   function renderGroup(group: (typeof groups)[number]) {
+    const project = props.projects.find((item) => item.id === group.projectId);
     // 折叠只改变导航显示，不改变当前查看或待处理交互。
     const containsCurrent =
       props.currentId !== null &&
@@ -339,6 +341,14 @@ export function SessionSidebar(props: {
             </span>
             <FolderIcon open={expanded} />
             <span className="truncate">{group.name}</span>
+            {project?.pinned && (
+              <span
+                data-testid="project-pinned"
+                className="shrink-0 text-[10px] text-accent"
+              >
+                置顶
+              </span>
+            )}
           </button>
           <span className="mr-1 grid shrink-0 items-center">
             <span
@@ -354,6 +364,19 @@ export function SessionSidebar(props: {
             </span>
             {group.projectId !== null && (
               <span className="pointer-events-none col-start-1 row-start-1 flex justify-end gap-0.5 opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
+                <button
+                  type="button"
+                  data-testid="project-pin"
+                  aria-pressed={project?.pinned ?? false}
+                  title={project?.pinned ? "取消项目置顶" : "置顶项目"}
+                  aria-label={project?.pinned ? "取消项目置顶" : "置顶项目"}
+                  className="rounded px-1 py-0.5 text-[10px] text-fg-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+                  onClick={() =>
+                    props.onPinProject(group.projectId!, !project?.pinned)
+                  }
+                >
+                  {project?.pinned ? "取消置顶" : "置顶"}
+                </button>
                 <button
                   type="button"
                   data-testid="project-new-session"

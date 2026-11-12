@@ -64,6 +64,22 @@ afterEach(() => {
 });
 
 describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
+  it("项目默认未置顶，管理器切换置顶但保留创建顺序和折叠状态", () => {
+    const directory = mkdtempSync(join(tmpdir(), "project-pin-"));
+    tempDirs.push(directory);
+    const persistence = createSqliteSessionStore(":memory:");
+    const manager = createSessionManager({ persistence });
+    const project = manager.addProject(directory);
+    expect(project.pinned).toBe(false);
+    manager.setProjectCollapsed(project.id, true);
+    expect(manager.setProjectPinned(project.id, true)).toMatchObject({
+      pinned: true,
+      collapsed: true,
+    });
+    expect(manager.projects().map((p) => p.id)).toEqual([project.id]);
+    expect(manager.setProjectPinned("missing", true)).toBeNull();
+    persistence.close();
+  });
   it("create 落库并默认以工作区目录名作为标题；list 按 updatedAt 倒序", async () => {
     const persistence = createSqliteSessionStore(":memory:");
     const manager = createSessionManager({

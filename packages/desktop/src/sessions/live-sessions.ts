@@ -78,6 +78,7 @@ export function createLiveSessions(manager: SessionManager) {
         "tool-result",
         "interaction-resolved",
         "approval-resolved",
+        "session-auto-approve-changed",
         "subagent-report",
         "subagent-tool",
       ].includes(event.type)
@@ -133,10 +134,12 @@ export function createLiveSessions(manager: SessionManager) {
     return envelope;
   }
   function view(id: string): SessionView | null {
-    if (!manager.list().some((record) => record.id === id)) return null;
+    const record = manager.list().find((record) => record.id === id);
+    if (!record) return null;
     const live = sessions.get(id);
     return {
       sessionId: id,
+      autoApprove: record.autoApprove ?? false,
       executionId: live?.executionId ?? null,
       sequence: live?.sequence ?? 0,
       history: live?.history ?? manager.transcript(id),

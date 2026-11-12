@@ -60,6 +60,7 @@ export const IPC = {
     add: "projects:add",
     remove: "projects:remove",
     setCollapsed: "projects:set-collapsed",
+    setPinned: "projects:set-pinned",
   },
   providerProfiles: {
     list: "provider-profiles:list",
@@ -105,6 +106,7 @@ export const IPC = {
     toolImage: "sessions:tool-image",
     /** 审批模式切换（三档）：落库并只对下一次发送生效 */
     setApprovalMode: "sessions:set-approval-mode",
+    revokeAutoApprove: "sessions:revoke-auto-approve",
     /** 旧审批响应兼容入口，转发统一交互；always 仅批准本次。 */
     respondApproval: "sessions:respond-approval",
     /** 当前等待审批的请求（切回会话时恢复审批卡片）；无等待返回 null */
@@ -193,6 +195,7 @@ export type SessionListItem = SessionRecord & { activity?: SessionActivity };
 
 export interface SessionView {
   sessionId: string;
+  autoApprove?: boolean;
   executionId: string | null;
   sequence: number;
   history: TranscriptItem[];
@@ -265,6 +268,10 @@ export interface CodexLikeApi {
       projectId: string,
       confirmed: boolean
     ): Promise<ProjectRemoval | null>;
+    setPinned(
+      projectId: string,
+      pinned: boolean
+    ): Promise<ProjectRecord | null>;
     setCollapsed(
       projectId: string,
       collapsed: boolean
@@ -361,6 +368,8 @@ export interface CodexLikeApi {
      * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
      */
     toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
+    /** 仅撤销持久会话授权；启用只能来自有效的执行审批响应。 */
+    revokeAutoApprove(sessionId: string): Promise<SessionRecord>;
     /** 切换审批模式（ask / assist / full-access），只对下一次发送生效；会话不存在返回 null */
     setApprovalMode(
       sessionId: string,

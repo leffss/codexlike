@@ -12,6 +12,7 @@ import {
 
 export interface LiveSession {
   sessionId: string;
+  autoApprove: boolean;
   executionId: string | null;
   sequence: number;
   activity: SessionActivity;
@@ -45,6 +46,7 @@ export function receiveLiveEvent(
     state.activity.outcome === "interrupted" &&
     [
       "compact-finished",
+      "session-auto-approve-changed",
       "assistant-aborted",
       "tool-result",
       "interaction-resolved",
@@ -60,6 +62,10 @@ export function receiveLiveEvent(
     return state;
   return {
     sessionId: state.sessionId,
+    autoApprove:
+      envelope.event.type === "session-auto-approve-changed"
+        ? envelope.event.autoApprove
+        : state.autoApprove,
     executionId: envelope.executionId,
     sequence: envelope.sequence,
     activity: envelope.activity,
@@ -77,6 +83,7 @@ export function hydrateLiveSession(
     items = applyLiveEvent(items, envelope.event);
   let state: LiveSession = {
     sessionId: view.sessionId,
+    autoApprove: view.autoApprove ?? false,
     executionId: view.executionId,
     sequence: view.sequence,
     activity: view.activity,

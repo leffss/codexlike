@@ -36,6 +36,7 @@ export interface SessionPersistence {
   removeProject(projectId: string): string[];
   isRemovedCreationRequest(requestId: string): boolean;
   setProjectCollapsed(projectId: string, collapsed: boolean): void;
+  setProjectPinned(projectId: string, pinned: boolean): void;
   insertSession(record: SessionRecord): void;
   /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
   removeUnstartedSession(id: string): void;
@@ -52,6 +53,12 @@ export interface SessionPersistence {
     interaction: InteractionRecord,
     snapshot?: QuestionAnswerSnapshot
   ): boolean;
+  /** 有效 pending 审批才能授予会话权限；同事务结算该会话全部 pending 审批，问答不变。 */
+  approveSessionInteraction(
+    sessionId: string,
+    requestId: string,
+    resolvedAt: string
+  ): InteractionRecord[] | null;
   /**
    * /compact 落地（工单 08）：单事务内把会话消息历史整体替换（摘要 + 保留轮次），
    * 并追加 compact 记录；pruneToolCallsBefore 同时清理该会话中更早的工具调用记录
@@ -78,9 +85,9 @@ export interface SessionPersistence {
   insertToolCall(call: ToolCallRecord): void;
   /** 指定会话的工具调用记录，按写入顺序 */
   listToolCalls(sessionId: string): ToolCallRecord[];
-  /** 「本会话总是允许」记忆（命令首词；重复写入幂等） */
+  /** 遗留命令首词记录（兼容旧数据；不参与运行时授权；重复写入幂等）。 */
   insertApproval(sessionId: string, commandWord: string): void;
-  /** 指定会话的「总是允许」记忆（命令首词集合；恢复会话时读回） */
+  /** 读取遗留命令首词记录，仅用于兼容与历史检查，不恢复为授权。 */
   listApprovals(sessionId: string): string[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
@@ -171,6 +178,7 @@ interface SessionRow {
   model: string | null;
   status: string;
   approval_mode: string;
+  auto_approve: number;
   workspace_mode: string;
   workspace_origin_path: string | null;
   archived_at: string | null;
@@ -279,6 +287,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   }
 
   const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all();
+  if (!sessionColumns.some((column) => column.name === "auto_approve"))
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0"
+    );
   if (!sessionColumns.some((column) => column.name === "project_id"))
     db.exec(
       "ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id)"
@@ -293,6 +305,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     db.exec(
       "ALTER TABLE projects ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0"
     );
+  if (!projectColumns.some((column) => column.name === "pinned"))
+    db.exec(
+      "ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+    );
   if (!sessionColumns.some((column) => column.name === "pinned"))
     db.exec(
       "ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
@@ -300,10 +316,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   if (!sessionColumns.some((column) => column.name === "last_used_at"))
     db.exec("ALTER TABLE sessions ADD COLUMN last_used_at TEXT");
   const insertSession = db.prepare(
-    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
-    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ? WHERE id = ?"
+    "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ?, auto_approve = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
     "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -368,6 +384,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      autoApprove: row.auto_approve === 1,
       pinned: row.pinned === 1,
       lastUsedAt: row.last_used_at ?? row.created_at,
     };
@@ -418,8 +435,14 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     searchSessions: createSessionSearch(db),
     insertProject(record) {
       db.prepare(
-        "INSERT INTO projects (id, name, workspace_path, created_at) VALUES (?, ?, ?, ?)"
-      ).run(record.id, record.name, record.workspacePath, record.createdAt);
+        "INSERT INTO projects (id, name, workspace_path, created_at, pinned) VALUES (?, ?, ?, ?, ?)"
+      ).run(
+        record.id,
+        record.name,
+        record.workspacePath,
+        record.createdAt,
+        record.pinned ? 1 : 0
+      );
     },
     isRemovedCreationRequest(requestId) {
       return (
@@ -475,6 +498,12 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         projectId
       );
     },
+    setProjectPinned(projectId, pinned) {
+      db.prepare("UPDATE projects SET pinned = ? WHERE id = ?").run(
+        pinned ? 1 : 0,
+        projectId
+      );
+    },
     listProjects() {
       return db
         .prepare("SELECT * FROM projects ORDER BY created_at, rowid")
@@ -484,6 +513,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           name: String(row.name),
           workspacePath: String(row.workspace_path),
           collapsed: row.collapsed === 1,
+          pinned: row.pinned === 1,
           createdAt: String(row.created_at),
         }));
     },
@@ -504,7 +534,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.projectId ?? null,
         record.creationRequestId ?? null,
         record.pinned ? 1 : 0,
-        record.lastUsedAt ?? record.createdAt
+        record.lastUsedAt ?? record.createdAt,
+        record.autoApprove ? 1 : 0
       );
     },
     removeUnstartedSession(id) {
@@ -535,6 +566,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         next.pinned ? 1 : 0,
         next.lastUsedAt ?? next.createdAt,
         next.projectId ?? null,
+        next.autoApprove ? 1 : 0,
         id
       );
     },
@@ -603,6 +635,52 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         );
         db.exec("COMMIT");
         return true;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+
+    approveSessionInteraction(sessionId, requestId, resolvedAt) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const records = db
+          .prepare(
+            "SELECT record FROM interactions WHERE session_id = ? ORDER BY created_at, rowid"
+          )
+          .all(sessionId)
+          .map((row) => JSON.parse(String(row.record)) as InteractionRecord);
+        const pending = records.filter(
+          (record) =>
+            record.status === "pending" && record.request.kind === "approval"
+        );
+        if (
+          !pending.some((record) => record.request.id === requestId) ||
+          !db.prepare("SELECT id FROM sessions WHERE id = ?").get(sessionId)
+        ) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        const waiting = records.some(
+          (record) =>
+            record.status === "pending" && record.request.kind === "questions"
+        );
+        db.prepare(
+          "UPDATE sessions SET auto_approve = 1, status = ?, updated_at = ? WHERE id = ?"
+        ).run(waiting ? "waiting-user" : "streaming", resolvedAt, sessionId);
+        const settled = pending.map((record): InteractionRecord => ({
+          ...record,
+          status: "resolved",
+          resolvedAt,
+          response: { kind: "approval", decision: "approve", scope: "session" },
+        }));
+        const update = db.prepare(
+          "UPDATE interactions SET record = ? WHERE id = ? AND session_id = ?"
+        );
+        for (const record of settled)
+          update.run(JSON.stringify(record), record.request.id, sessionId);
+        db.exec("COMMIT");
+        return settled;
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;

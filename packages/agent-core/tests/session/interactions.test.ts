@@ -1,7 +1,8 @@
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { APICallError } from "ai";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createWriteFileTool } from "../../src/tools/write-file";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +10,7 @@ import type { ToolDefinition } from "../../src/tools/types";
 import type { InteractionRecord } from "../../src/interaction/types";
 import { describe, expect, it } from "vitest";
 
+import { createInteractionController } from "../../src/interaction/controller";
 import { createSessionManager } from "../../src/session/manager";
 import { createSqliteSessionStore } from "../../src/session/persistence";
 import type { SessionEvent } from "../../src/session/types";
@@ -100,6 +102,587 @@ async function collect(iterable: AsyncIterable<SessionEvent>) {
 }
 
 describe("用户交互公开 seam", () => {
+  it("会话授权与全部当前审批同事务落库，失败回滚且不处理问答或其他会话", () => {
+    const directory = mkdtempSync(join(tmpdir(), "approval-atomic-"));
+    const path = join(directory, "session.db");
+    const store = createSqliteSessionStore(path);
+    const manager = createSessionManager({ persistence: store });
+    const session = manager.create({ workspacePath: "C:/work" });
+    const other = manager.create({ workspacePath: "C:/other" });
+    const pending = (
+      id: string,
+      sessionId = session.id
+    ): InteractionRecord => ({
+      request: {
+        id,
+        sessionId,
+        turnId: "turn",
+        toolCallId: id,
+        source: { kind: "main" },
+        createdAt: "2026-01-01",
+        kind: "approval",
+        toolName: "write",
+        command: "write",
+        commandWord: "write",
+      },
+      status: "pending",
+      response: null,
+      resolvedAt: null,
+      cancelReason: null,
+    });
+    store.insertInteraction(pending("a"));
+    store.insertInteraction(pending("b"));
+    store.insertInteraction({
+      ...pending("q"),
+      request: { ...pending("q").request, kind: "questions", questions },
+    });
+    store.insertInteraction(pending("other", other.id));
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      `CREATE TRIGGER fail_batch BEFORE UPDATE ON interactions WHEN OLD.id = 'b' BEGIN SELECT RAISE(ABORT, '批量失败'); END;`
+    );
+    expect(() =>
+      store.approveSessionInteraction(session.id, "a", "2026-01-02")
+    ).toThrow("批量失败");
+    expect(
+      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+    ).toBe(false);
+    expect(store.listInteractions(session.id).map((i) => i.status)).toEqual([
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    raw.exec("DROP TRIGGER fail_batch");
+    expect(
+      store.approveSessionInteraction(session.id, "other", "2026-01-02")
+    ).toBeNull();
+    expect(
+      store.approveSessionInteraction(session.id, "q", "2026-01-02")
+    ).toBeNull();
+    const settled = store.approveSessionInteraction(
+      session.id,
+      "a",
+      "2026-01-02"
+    );
+    expect(settled?.map((i) => i.response)).toEqual([
+      { kind: "approval", decision: "approve", scope: "session" },
+      { kind: "approval", decision: "approve", scope: "session" },
+    ]);
+    expect(
+      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+    ).toBe(true);
+    expect(store.listInteractions(session.id)[2]?.status).toBe("pending");
+    expect(store.listInteractions(other.id)[0]?.status).toBe("pending");
+    store.updateSession(session.id, { autoApprove: false });
+    expect(
+      store.approveSessionInteraction(session.id, "a", "2026-01-03")
+    ).toBeNull();
+    expect(
+      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+    ).toBe(false);
+    raw.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  it("控制器先持久化再批量更新内存和事件，失败不唤醒且审批并发入队不遗漏", async () => {
+    const store = createSqliteSessionStore(":memory:");
+    const session = createSessionManager({ persistence: store }).create({
+      workspacePath: "C:/work",
+    });
+    let fail = true;
+    let autoApprove = false;
+    const seen: string[] = [];
+    const controller = createInteractionController({
+      persistence: {
+        ...store,
+        approveSessionInteraction(...args) {
+          if (fail) throw new Error("保存失败");
+          return store.approveSessionInteraction(...args);
+        },
+      },
+      now: () => "2026-01-02",
+      waiting() {},
+      answered() {},
+      autoApprove: () => autoApprove,
+      autoApproved() {
+        expect(store.listSessions()[0]?.autoApprove).toBe(true);
+        autoApprove = true;
+        seen.push("authorized");
+      },
+      emit(event) {
+        if (event.type === "interaction-resolved") {
+          expect(autoApprove).toBe(true);
+          seen.push(event.interaction.request.id);
+        }
+      },
+    });
+    const request = (id: string) => ({
+      kind: "approval" as const,
+      id,
+      sessionId: session.id,
+      turnId: "turn",
+      toolCallId: id,
+      source: { kind: "main" as const },
+      createdAt: "2026-01-01",
+      toolName: "write",
+      command: "write",
+      commandWord: "write",
+    });
+    const a = controller.request(request("a"));
+    const b = controller.request({
+      ...request("b"),
+      source: { kind: "subagent", subagentId: "sub", task: "写入" },
+    });
+    const q = controller.request({
+      ...request("q"),
+      kind: "questions",
+      questions,
+    });
+    for (const input of [
+      { kind: "approval", decision: "reject", scope: "session" },
+      { kind: "approval", decision: "approve", scope: "bad" },
+    ]) {
+      expect(() => controller.respond("a", input)).toThrow();
+    }
+    const grant = { kind: "approval", decision: "approve", scope: "session" };
+    expect(() => controller.respond("a", grant)).toThrow("保存失败");
+    expect(autoApprove).toBe(false);
+    expect(seen).toEqual([]);
+    expect(controller.pending).toHaveLength(3);
+    fail = false;
+    expect(controller.respond("a", grant)).toBe(true);
+    expect(controller.respond("a", grant)).toBe(false);
+    expect(controller.pending.map((r) => r.request.id)).toEqual(["q"]);
+    expect(seen).toEqual(["authorized", "a", "b"]);
+    expect((await a).response).toEqual(grant);
+    expect((await b).response).toEqual(grant);
+    // 即使审批门先读到 false、随后授权再入队，也必须立即结算。
+    expect((await controller.request(request("late"))).response).toEqual(grant);
+    controller.cancel("结束");
+    expect((await q).status).toBe("cancelled");
+    store.close();
+  });
+  it("有效审批开启会话授权：当前轮后续与后轮自动批准，撤销即时恢复询问且不改变工具路径模式", async () => {
+    const persistence = createSqliteSessionStore(":memory:");
+    const modes: unknown[] = [];
+    const tool: ToolDefinition = {
+      name: "write",
+      permission: "write",
+      description: "写入",
+      parameters: { type: "object" },
+      async execute(_input, context) {
+        modes.push(context.approvalMode);
+        return { output: "完成", isError: false };
+      },
+    };
+    const call = (id: string): Call => ({
+      toolCallId: id,
+      toolName: "write",
+      input: {},
+    });
+    const model = modelFor(
+      [call("a"), call("b")],
+      "完成",
+      [call("c")],
+      "完成",
+      [call("d"), call("e")],
+      "完成"
+    );
+    const manager = createSessionManager({
+      persistence,
+      tools: [tool],
+      languageModelFor: () => model,
+    });
+    const session = manager.create({
+      workspacePath: "C:/work",
+      approvalMode: "ask",
+    });
+    expect(session.record.autoApprove).toBe(false);
+    const events: SessionEvent[] = [];
+    let firstId = "";
+    for await (const event of session.sendMessage({ text: "开始", profile })) {
+      events.push(event);
+      if (event.type === "interaction-request") {
+        firstId = event.interaction.request.id;
+        expect(
+          session.respondInteraction(firstId, {
+            kind: "approval",
+            decision: "approve",
+            scope: "session",
+          })
+        ).toBe(true);
+        expect(session.record.autoApprove).toBe(true);
+      }
+    }
+    expect(events.filter((e) => e.type === "interaction-request")).toHaveLength(
+      1
+    );
+    expect(
+      events.find((e) => e.type === "session-auto-approve-changed")
+    ).toEqual({
+      type: "session-auto-approve-changed",
+      sessionId: session.id,
+      autoApprove: true,
+    });
+    expect(
+      (await collect(session.sendMessage({ text: "后轮", profile }))).some(
+        (e) => e.type === "interaction-request"
+      )
+    ).toBe(false);
+    expect(manager.revokeAutoApprove(session.id).autoApprove).toBe(false);
+    expect(
+      session.respondInteraction(firstId, {
+        kind: "approval",
+        decision: "approve",
+        scope: "session",
+      })
+    ).toBe(false);
+    expect(session.record.autoApprove).toBe(false);
+    let count = 0;
+    for await (const event of session.sendMessage({
+      text: "撤销后",
+      profile,
+    })) {
+      if (event.type === "interaction-request") {
+        count++;
+        session.respondInteraction(event.interaction.request.id, {
+          kind: "approval",
+          decision: "approve",
+          scope: "once",
+        });
+      }
+    }
+    expect(count).toBe(2);
+    expect(modes).toEqual(["ask", "ask", "ask", "ask", "ask"]);
+    expect(persistence.listApprovals(session.id)).toEqual([]);
+    persistence.close();
+  });
+  it("主子代理排队审批全部放行而问答仍等待，实时授权不改变本轮冻结模式", async () => {
+    const store = createSqliteSessionStore(":memory:");
+    const modes: unknown[] = [];
+    const write: ToolDefinition = {
+      name: "write",
+      permission: "write",
+      description: "写入",
+      parameters: { type: "object" },
+      async execute(_input, context) {
+        modes.push(context.approvalMode);
+        return { output: "完成", isError: false };
+      },
+    };
+    const call = (id: string): Call => ({
+      toolName: "write",
+      toolCallId: id,
+      input: {},
+    });
+    const main = modelFor(
+      [
+        ...["写入一", "写入二", "问答"].map((task) => ({
+          toolName: "spawn_subagent",
+          toolCallId: task,
+          input: { task },
+        })),
+        call("main-a"),
+        call("main-b"),
+      ],
+      "汇总"
+    );
+    const sub = new MockLanguageModelV4({
+      doStream: async (options) => {
+        const prompt = JSON.stringify(options.prompt);
+        if (options.prompt.some((m) => m.role === "tool"))
+          return stream("完成");
+        return stream(
+          prompt.includes("问答") ? [ask] : [call("sub-a"), call("sub-b")]
+        );
+      },
+    });
+    const manager = createSessionManager({
+      persistence: store,
+      tools: [write],
+      languageModelFor: () => main,
+      subagents: {
+        tools: [write],
+        languageModelFor: () => sub,
+        settings: () => ({ maxConcurrent: 3 }),
+        resolveProfile: async () => profile,
+      },
+    });
+    const session = manager.create({
+      workspacePath: "C:/work",
+      approvalMode: "ask",
+    });
+    let count = 0;
+    for await (const event of session.sendMessage({ text: "并行", profile })) {
+      if (event.type === "interaction-request" && ++count === 4) {
+        const pending = session.pendingInteractions;
+        expect(
+          pending.filter((r) => r.request.kind === "approval")
+        ).toHaveLength(3);
+        manager.setApprovalMode(session.id, "full-access");
+        session.respondInteraction(
+          pending.find((r) => r.request.kind === "approval")!.request.id,
+          { kind: "approval", decision: "approve", scope: "session" }
+        );
+        expect(session.pendingInteractions).toHaveLength(1);
+        expect(session.pendingInteractions[0]?.request.kind).toBe("questions");
+        session.respondInteraction(
+          session.pendingInteractions[0]!.request.id,
+          answer
+        );
+      }
+    }
+    expect(count).toBe(4);
+    expect(modes).toEqual(["ask", "ask", "ask", "ask", "ask", "ask"]);
+    expect(
+      store
+        .listInteractions(session.id)
+        .filter((r) => r.request.kind === "approval")
+    ).toHaveLength(3);
+    expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(1);
+    expect(session.record.autoApprove).toBe(true);
+    store.close();
+  });
+  it("授权保存失败不执行工具；撤销保存失败保留授权，成功撤销在本轮立即发事件并重新询问", async () => {
+    const store = createSqliteSessionStore(":memory:");
+    let failGrant = true;
+    let failRevoke = true;
+    let executed = 0;
+    const write: ToolDefinition = {
+      name: "write",
+      permission: "write",
+      description: "写入",
+      parameters: { type: "object" },
+      async execute() {
+        executed++;
+        return { output: "完成", isError: false };
+      },
+    };
+    const model = modelFor(
+      ["a", "b"].map((id) => ({
+        toolName: "write",
+        toolCallId: id,
+        input: {},
+      })),
+      "完成"
+    );
+    const persistence = {
+      ...store,
+      approveSessionInteraction(
+        ...args: Parameters<typeof store.approveSessionInteraction>
+      ) {
+        if (failGrant) throw new Error("授权保存失败");
+        return store.approveSessionInteraction(...args);
+      },
+      updateSession(...args: Parameters<typeof store.updateSession>) {
+        if (args[1].autoApprove === false && failRevoke)
+          throw new Error("撤销保存失败");
+        return store.updateSession(...args);
+      },
+    };
+    const manager = createSessionManager({
+      persistence,
+      tools: [write],
+      languageModelFor: () => model,
+    });
+    const session = manager.create({
+      workspacePath: "C:/work",
+      approvalMode: "ask",
+    });
+    const other = manager.create({
+      workspacePath: "C:/other",
+      approvalMode: "ask",
+    });
+    let count = 0;
+    const changes: boolean[] = [];
+    for await (const event of session.sendMessage({ text: "执行", profile })) {
+      if (event.type === "session-auto-approve-changed")
+        changes.push(event.autoApprove);
+      if (event.type === "interaction-request") {
+        const id = event.interaction.request.id;
+        const response = {
+          kind: "approval",
+          decision: "approve",
+          scope: "session",
+        };
+        if (++count === 1) {
+          expect(other.respondInteraction(id, response)).toBe(false);
+          expect(() => session.respondInteraction(id, response)).toThrow(
+            "授权保存失败"
+          );
+          expect(executed).toBe(0);
+          expect(session.record.autoApprove).toBe(false);
+          expect(session.pendingInteractions).toHaveLength(1);
+          failGrant = false;
+          session.respondInteraction(id, response);
+        } else session.respondApproval(id, "always");
+      }
+      if (event.type === "tool-result" && executed === 1) {
+        expect(() => manager.revokeAutoApprove(session.id)).toThrow(
+          "撤销保存失败"
+        );
+        expect(session.record.autoApprove).toBe(true);
+        expect(
+          store.listSessions().find((s) => s.id === session.id)?.autoApprove
+        ).toBe(true);
+        failRevoke = false;
+        expect(manager.revokeAutoApprove(session.id).autoApprove).toBe(false);
+      }
+    }
+    expect(count).toBe(2);
+    expect(changes).toEqual([true, false]);
+    expect(executed).toBe(2);
+    expect(other.record.autoApprove).toBe(false);
+    expect(session.record.autoApprove).toBe(false);
+    store.close();
+  });
+  it("批量授权事务已保存会话等待状态，不在提交后额外写库导致部分放行", async () => {
+    const store = createSqliteSessionStore(":memory:");
+    let committed = false;
+    let executed = false;
+    const manager = createSessionManager({
+      persistence: {
+        ...store,
+        approveSessionInteraction(...args) {
+          const result = store.approveSessionInteraction(...args);
+          committed = result !== null;
+          return result;
+        },
+        updateSession(...args) {
+          if (committed) throw new Error("提交后不应再次保存等待状态");
+          store.updateSession(...args);
+        },
+      },
+      tools: [
+        {
+          name: "write",
+          permission: "write",
+          description: "写入",
+          parameters: { type: "object" },
+          async execute() {
+            executed = true;
+            return { output: "完成", isError: false };
+          },
+        },
+      ],
+      languageModelFor: () =>
+        modelFor([{ toolName: "write", toolCallId: "a", input: {} }], "完成"),
+    });
+    const session = manager.create({
+      workspacePath: "C:/work",
+      approvalMode: "ask",
+    });
+    for await (const event of session.sendMessage({ text: "授权", profile })) {
+      if (event.type === "interaction-request") {
+        expect(
+          session.respondInteraction(event.interaction.request.id, {
+            kind: "approval",
+            decision: "approve",
+            scope: "session",
+          })
+        ).toBe(true);
+        expect(store.listSessions()[0]?.status).toBe("streaming");
+        committed = false;
+      }
+    }
+    expect(executed).toBe(true);
+    store.close();
+  });
+  it("自动批准跨重启保留但不重放pending，不提升真实文件访问边界", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "approval-restart-"));
+    const workspace = join(directory, "workspace");
+    mkdirSync(workspace);
+    const outside = join(directory, "outside.txt");
+    const path = join(directory, "session.db");
+    const store = createSqliteSessionStore(path);
+    const model = modelFor(
+      [
+        {
+          toolCallId: "first",
+          toolName: "write_file",
+          input: { path: outside, content: "不应写入" },
+        },
+      ],
+      "完成"
+    );
+    const manager = createSessionManager({
+      persistence: store,
+      tools: [createWriteFileTool()],
+      languageModelFor: () => model,
+    });
+    const session = manager.create({
+      workspacePath: workspace,
+      approvalMode: "ask",
+    });
+    for await (const event of session.sendMessage({ text: "授权", profile })) {
+      if (event.type === "interaction-request")
+        session.respondInteraction(event.interaction.request.id, {
+          kind: "approval",
+          decision: "approve",
+          scope: "session",
+        });
+    }
+    expect(existsSync(outside)).toBe(false);
+    expect(store.listToolCalls(session.id)[0]?.isError).toBe(true);
+    const historical = store.listInteractions(session.id)[0]!;
+    store.insertInteraction({
+      ...historical,
+      request: { ...historical.request, id: "leftover" },
+      status: "pending",
+      response: null,
+      resolvedAt: null,
+    });
+    manager.setApprovalMode(session.id, "assist");
+    session.cancelInteractions("停止");
+    expect(session.record.autoApprove).toBe(true);
+    store.close();
+    const reopened = createSqliteSessionStore(path);
+    const restoredModel = modelFor(
+      [
+        {
+          toolCallId: "second",
+          toolName: "write_file",
+          input: { path: outside, content: "仍不可越界" },
+        },
+      ],
+      "完成"
+    );
+    const restored = createSessionManager({
+      persistence: reopened,
+      tools: [createWriteFileTool()],
+      languageModelFor: () => restoredModel,
+    });
+    expect(restoredModel.doStreamCalls).toHaveLength(0);
+    expect(
+      restored.interactions(session.id).find((r) => r.request.id === "leftover")
+        ?.status
+    ).toBe("cancelled");
+    expect(restored.get(session.id)?.record.autoApprove).toBe(true);
+    expect(
+      restored.get(session.id)?.respondInteraction("leftover", {
+        kind: "approval",
+        decision: "approve",
+        scope: "session",
+      })
+    ).toBe(false);
+    const events = await collect(
+      restored.get(session.id)!.sendMessage({ text: "新轮", profile })
+    );
+    expect(events.some((e) => e.type === "interaction-request")).toBe(false);
+    expect(existsSync(outside)).toBe(false);
+    expect(reopened.listToolCalls(session.id).every((c) => c.isError)).toBe(
+      true
+    );
+    expect(
+      restored.create({ workspacePath: workspace }).record.autoApprove
+    ).toBe(false);
+    // 未缓存会话也可撤销，返回新记录供空闲UI同步。
+    const uncached = createSessionManager({ persistence: reopened });
+    expect(uncached.revokeAutoApprove(session.id).autoApprove).toBe(false);
+    expect(uncached.get(session.id)?.record.autoApprove).toBe(false);
+    reopened.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
   it("主工具落库失败时仍向消费者发送子代理问答取消终态", async () => {
     const store = createSqliteSessionStore(":memory:");
     let release!: () => void;

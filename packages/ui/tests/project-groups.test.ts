@@ -34,8 +34,8 @@ it("显式项目在没有会话时仍显示，独立分区不伪造成项目", (
       group.active.length,
     ])
   ).toEqual([
-    [null, "独立会话", 0],
     ["project", "项目", 0],
+    [null, "独立会话", 0],
   ]);
 });
 it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所属分区", () => {
@@ -52,11 +52,11 @@ it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所�
     ],
     [project]
   );
-  expect(groups[0]!.active.map((item) => item.id)).toEqual([
+  expect(groups[1]!.active.map((item) => item.id)).toEqual([
     "standalone",
     "detached",
   ]);
-  expect(groups[1]!.active.map((item) => item.id)).toEqual(["local"]);
+  expect(groups[0]!.active.map((item) => item.id)).toEqual(["local"]);
 });
 it("各分区分别保留归档历史并按时间排序，不丢失空项目", () => {
   const groups = groupSessionsByProject(
@@ -71,7 +71,25 @@ it("各分区分别保留归档历史并按时间排序，不丢失空项目", (
     ],
     [project]
   );
-  expect(groups[0]!.active.map((item) => item.id)).toEqual(["recent", "old"]);
-  expect(groups[0]!.archived.map((item) => item.id)).toEqual(["archived"]);
-  expect(groups[1]!.active).toEqual([]);
+  expect(groups[1]!.active.map((item) => item.id)).toEqual(["recent", "old"]);
+  expect(groups[1]!.archived.map((item) => item.id)).toEqual(["archived"]);
+  expect(groups[0]!.active).toEqual([]);
+});
+it("置顶项目在普通项目前，同类保持输入顺序，取消置顶恢复创建顺序且不改变输入", () => {
+  const projects = [
+    { ...project, id: "a" },
+    { ...project, id: "b", pinned: true },
+    { ...project, id: "c" },
+    { ...project, id: "d", pinned: true },
+  ];
+  expect(
+    groupSessionsByProject([], projects).map((group) => group.key)
+  ).toEqual(["b", "d", "a", "c", "standalone"]);
+  expect(projects.map((item) => item.id)).toEqual(["a", "b", "c", "d"]);
+  expect(
+    groupSessionsByProject(
+      [],
+      projects.map((item) => ({ ...item, pinned: false }))
+    ).map((group) => group.key)
+  ).toEqual(["a", "b", "c", "d", "standalone"]);
 });

@@ -121,14 +121,13 @@ async function assertProjectHierarchy(window) {
       guide.height > 0,
     `展开会话使用淡色竖向引导线：${JSON.stringify(guide)}`
   );
-  const headerBox = await project.getByTestId("project-header").boundingBox();
+  const projectBox = await project.boundingBox();
   const standaloneBox = await window
     .getByTestId("standalone-header")
-    .locator("..")
     .boundingBox();
   assert(
-    headerBox.y - (standaloneBox.y + standaloneBox.height) >= 16,
-    "项目与前一个分区之间保留至少 16px 间距"
+    standaloneBox.y - (projectBox.y + projectBox.height) >= 16,
+    "项目排在独立分区之前，两者保留至少 16px 间距"
   );
   const selected = project.getByTestId("session-row").filter({
     has: window.getByTestId("session-item").filter({ hasText: "项目次任务" }),

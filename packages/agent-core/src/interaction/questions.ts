@@ -110,7 +110,9 @@ export function parseInteractionResponse(
 ): InteractionResponse {
   const response = object(
     input,
-    request.kind === "approval" ? ["kind", "decision"] : ["kind", "answers"],
+    request.kind === "approval"
+      ? ["kind", "decision", "scope"]
+      : ["kind", "answers"],
     "交互响应"
   );
   if (response.kind !== request.kind)
@@ -118,7 +120,24 @@ export function parseInteractionResponse(
   if (request.kind === "approval") {
     if (response.decision !== "approve" && response.decision !== "reject")
       throw new Error("审批决定必须是 approve 或 reject");
-    return { kind: "approval", decision: response.decision };
+    if (response.decision === "reject") {
+      if (Object.hasOwn(response, "scope"))
+        throw new Error("拒绝审批不能指定 scope");
+      return { kind: "approval", decision: "reject" };
+    }
+    if (
+      Object.hasOwn(response, "scope") &&
+      response.scope !== "once" &&
+      response.scope !== "session"
+    )
+      throw new Error("审批 scope 必须是 once 或 session");
+    return {
+      kind: "approval",
+      decision: "approve",
+      ...(response.scope === undefined
+        ? {}
+        : { scope: response.scope as "once" | "session" }),
+    };
   }
   const answers = array(
     response.answers,

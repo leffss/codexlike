@@ -12,8 +12,12 @@ export function createInteractionController(options: {
   persistence: SessionPersistence;
   now(): string;
   emit(event: SessionEvent): void;
-  waiting(waiting: boolean): void;
+  waiting(waiting: boolean, persisted?: boolean): void;
   answered(snapshot: QuestionAnswerSnapshot): void;
+  /** 所属会话实时授权；不参与冻结的审批模式/路径权限。 */
+  autoApprove?(sessionId: string): boolean;
+  /** 仅在授权事务提交后更新会话内存并发布状态事件。 */
+  autoApproved?(sessionId: string): void;
 }) {
   const waiters = new Map<
     string,
@@ -70,6 +74,26 @@ export function createInteractionController(options: {
         cancelReason: null,
       };
       options.persistence.insertInteraction(record);
+      // 审批门读取与入队之间可能已获得授权；入队边界再次检查，不自动回答问答。
+      if (
+        request.kind === "approval" &&
+        !signal?.aborted &&
+        options.autoApprove?.(request.sessionId)
+      ) {
+        const resolved: InteractionRecord = {
+          ...record,
+          status: "resolved",
+          resolvedAt: options.now(),
+          response: { kind: "approval", decision: "approve", scope: "session" },
+        };
+        if (!options.persistence.settleInteraction(resolved))
+          throw new Error("审批请求已失效，未执行工具");
+        options.emit({
+          type: "interaction-resolved",
+          interaction: structuredClone(resolved),
+        });
+        return Promise.resolve(resolved);
+      }
       return new Promise((resolve) => {
         const onAbort = () => cancel(request.id, "本轮已中断");
         waiters.set(request.id, {
@@ -90,6 +114,37 @@ export function createInteractionController(options: {
       const waiter = waiters.get(id);
       if (!waiter) return false;
       const response = parseInteractionResponse(waiter.record.request, input);
+      if (
+        response.kind === "approval" &&
+        response.decision === "approve" &&
+        response.scope === "session"
+      ) {
+        const sessionId = waiter.record.request.sessionId;
+        const records = options.persistence.approveSessionInteraction(
+          sessionId,
+          id,
+          options.now()
+        );
+        if (!records) return false;
+        // 同步事务返回后不再 await：全部更新内存，再通知，最后一起唤醒。
+        const completed = records.flatMap((record) => {
+          const pending = waiters.get(record.request.id);
+          if (!pending || pending.record.request.sessionId !== sessionId)
+            return [];
+          waiters.delete(record.request.id);
+          pending.dispose();
+          return [{ record, waiter: pending }];
+        });
+        options.autoApproved?.(sessionId);
+        options.waiting(waiters.size > 0, true);
+        for (const { record } of completed)
+          options.emit({
+            type: "interaction-resolved",
+            interaction: structuredClone(record),
+          });
+        for (const { record, waiter } of completed) waiter.resolve(record);
+        return true;
+      }
       return finish(
         id,
         {

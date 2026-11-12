@@ -32,6 +32,8 @@ const api: CodexLikeApi = {
     remove: (id, confirmed) =>
       ipcRenderer.invoke(IPC.projects.remove, id, confirmed),
     add: (workspacePath) => ipcRenderer.invoke(IPC.projects.add, workspacePath),
+    setPinned: (id, pinned) =>
+      ipcRenderer.invoke(IPC.projects.setPinned, id, pinned),
     setCollapsed: (id, collapsed) =>
       ipcRenderer.invoke(IPC.projects.setCollapsed, id, collapsed),
   },
@@ -93,6 +95,8 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
     toolImage: (sessionId, toolCallId) =>
       ipcRenderer.invoke(IPC.sessions.toolImage, sessionId, toolCallId),
+    revokeAutoApprove: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.revokeAutoApprove, sessionId),
     setApprovalMode: (sessionId, mode) =>
       ipcRenderer.invoke(IPC.sessions.setApprovalMode, sessionId, mode),
     respondApproval: (sessionId, requestId, decision) =>

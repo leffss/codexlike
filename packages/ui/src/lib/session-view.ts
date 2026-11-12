@@ -392,6 +392,10 @@ export function applySessionEvent(
         content: event.message.content,
       });
 
+    case "session-auto-approve-changed":
+      // 授权状态由会话控制区展示，不生成历史消息段。
+      return items;
+
     case "assistant-start":
       // 段由首个 delta / reasoning / 终态事件惰性建立：start 只是响应开始的标记
       return items;

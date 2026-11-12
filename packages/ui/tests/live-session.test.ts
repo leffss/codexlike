@@ -31,6 +31,40 @@ const snapshot: SessionView = {
   pendingInteractions: [],
   activity,
 };
+it("会话授权由快照恢复并随事件更新，不因等待、停止或旧会话事件清除", () => {
+  let state = hydrateLiveSession({ ...snapshot, autoApprove: true });
+  expect(state.autoApprove).toBe(true);
+  const revoke: SessionEventEnvelope = {
+    ...delta(3, ""),
+    event: {
+      type: "session-auto-approve-changed",
+      sessionId: "a",
+      autoApprove: false,
+    },
+  };
+  expect(
+    receiveLiveEvent(state, { ...revoke, sessionId: "b" }).autoApprove
+  ).toBe(true);
+  state = receiveLiveEvent(state, revoke);
+  expect(state.autoApprove).toBe(false);
+  expect(
+    receiveLiveEvent(state, {
+      ...revoke,
+      event: {
+        type: "session-auto-approve-changed",
+        sessionId: "a",
+        autoApprove: true,
+      },
+    }).autoApprove
+  ).toBe(false);
+  const restored = hydrateLiveSession({
+    ...snapshot,
+    autoApprove: true,
+    activity: { ...activity, running: false, outcome: "interrupted" },
+  });
+  expect(restored.autoApprove).toBe(true);
+  expect(receiveLiveEvent(restored, revoke).autoApprove).toBe(false);
+});
 it("Compact启动和终态按水位接续并原子替换历史，切换快照与旧执行事件不重复不污染", () => {
   const start: SessionEventEnvelope = {
     ...delta(3, "", "compact-1"),

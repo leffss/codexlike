@@ -184,6 +184,11 @@ export function registerSessionHandlers(options: {
       return manager.setProjectCollapsed(id, collapsed);
     }
   );
+  ipcMain.handle(IPC.projects.setPinned, (_e, id: unknown, pinned: unknown) => {
+    if (typeof id !== "string" || !id.trim() || typeof pinned !== "boolean")
+      throw new Error("项目 setPinned：参数不合法");
+    return manager.setProjectPinned(id, pinned);
+  });
   ipcMain.handle(IPC.sessions.setPinned, (_e, id: unknown, pinned: unknown) => {
     if (typeof id !== "string" || typeof pinned !== "boolean")
       throw new Error("setPinned：参数不合法");
@@ -713,6 +718,12 @@ export function registerSessionHandlers(options: {
       return listWorkspaceFiles(record.workspacePath);
     }
   );
+
+  ipcMain.handle(IPC.sessions.revokeAutoApprove, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== "string" || !sessionId.trim())
+      throw new Error("revokeAutoApprove：参数不合法");
+    return manager.revokeAutoApprove(sessionId);
+  });
 
   ipcMain.handle(
     IPC.sessions.setApprovalMode,

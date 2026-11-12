@@ -11,6 +11,7 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
+import { SessionAutoApproveStatus } from "../components/SessionAutoApproveStatus";
 import {
   WorkspaceModeSelector,
   WorkspaceSharingNotice,
@@ -87,6 +88,13 @@ export function WorkspacePage(props: {
   const liveRef = useRef<LiveSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [revoking, setRevoking] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const revokingRef = useRef(new Set<string>());
+  const [revokeErrors, setRevokeErrors] = useState<
+    Record<string, string | null>
+  >({});
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageSegment[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -162,6 +170,36 @@ export function WorkspacePage(props: {
     if (listRequestRef.current === request) setSessions(list);
     return list;
   }, []);
+
+  async function revokeAutoApprove(id: string) {
+    if (revokingRef.current.has(id)) return;
+    revokingRef.current.add(id);
+    setRevoking(new Set(revokingRef.current));
+    setRevokeErrors((errors) => ({ ...errors, [id]: null }));
+    try {
+      const record = await window.codexlike.sessions.revokeAutoApprove(id);
+      // 落盘成功才更新，按原会话标识归并，切换查看不会改错会话。
+      listRequestRef.current += 1;
+      setSessions((list) =>
+        list.map((session) =>
+          session.id === id ? { ...session, ...record } : session
+        )
+      );
+      if (liveRef.current?.sessionId === id)
+        liveRef.current = {
+          ...liveRef.current,
+          autoApprove: record.autoApprove ?? false,
+        };
+    } catch (error) {
+      setRevokeErrors((errors) => ({
+        ...errors,
+        [id]: `取消自动批准失败：${String(error)}`,
+      }));
+    } finally {
+      revokingRef.current.delete(id);
+      setRevoking(new Set(revokingRef.current));
+    }
+  }
 
   /** 最新请求胜出；同时校验会话与请求代数，防止 A→B→A 的旧结果串线。 */
   const refreshResources = useCallback(async (sessionId: string) => {
@@ -260,6 +298,13 @@ export function WorkspacePage(props: {
         if (!view) throw new Error("会话不存在或已损坏");
         const live = hydrateLiveSession(view, buffer.events);
         liveRef.current = live;
+        setSessions((list) =>
+          list.map((session) =>
+            session.id === id
+              ? { ...session, autoApprove: live.autoApprove }
+              : session
+          )
+        );
         workspaceState.reconcile(
           id,
           live.items.flatMap((item) =>
@@ -388,8 +433,20 @@ export function WorkspacePage(props: {
           void refreshContextWarning(sessionId);
         }
       }
+      if (event.type === "session-auto-approve-changed") {
+        // 废弃事件之前发起的列表查询，避免旧快照覆盖已持久化的授权状态。
+        listRequestRef.current += 1;
+        setSessions((list) =>
+          list.map((session) =>
+            session.id === sessionId
+              ? { ...session, autoApprove: event.autoApprove }
+              : session
+          )
+        );
+      }
       if (
         event.type === "user-message" ||
+        event.type === "session-auto-approve-changed" ||
         event.type === "compact-start" ||
         event.type === "compact-finished" ||
         event.type === "assistant-done" ||
@@ -896,6 +953,15 @@ export function WorkspacePage(props: {
               pushLocalStatus(`置顶失败：${String(error)}`)
             );
         }}
+        onPinProject={(id, pinned) => {
+          void window.codexlike.projects
+            .setPinned(id, pinned)
+            .then(() => window.codexlike.projects.list())
+            .then(setProjects)
+            .catch((error: unknown) =>
+              pushLocalStatus(`项目置顶失败：${String(error)}`)
+            );
+        }}
         onCollapseProject={(id, collapsed) => {
           void window.codexlike.projects
             .setCollapsed(id, collapsed)
@@ -1140,6 +1206,14 @@ export function WorkspacePage(props: {
                     }
                   : { sessionId: current!.id }
               }
+            />
+          )}
+          {current && (
+            <SessionAutoApproveStatus
+              autoApprove={current.autoApprove ?? false}
+              busy={revoking.has(current.id)}
+              error={revokeErrors[current.id] ?? null}
+              onRevoke={() => void revokeAutoApprove(current.id)}
             />
           )}
           {interaction ? (

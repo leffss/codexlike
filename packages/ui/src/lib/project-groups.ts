@@ -15,6 +15,17 @@ export function groupSessionsByProject(
   projects: ProjectRecord[]
 ): ProjectGroup[] {
   const groups: ProjectGroup[] = [
+    ...[...projects]
+      .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false))
+      .map((project) => ({
+        key: project.id,
+        projectId: project.id,
+        name: project.name,
+        path: project.workspacePath,
+        createdAt: project.createdAt,
+        active: [],
+        archived: [],
+      })),
     {
       key: "standalone",
       projectId: null,
@@ -24,15 +35,6 @@ export function groupSessionsByProject(
       active: [],
       archived: [],
     },
-    ...projects.map((project) => ({
-      key: project.id,
-      projectId: project.id,
-      name: project.name,
-      path: project.workspacePath,
-      createdAt: project.createdAt,
-      active: [],
-      archived: [],
-    })),
   ];
   for (const group of groups) {
     const members = sessions

@@ -22,6 +22,7 @@ function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
     projectId: null,
     workspaceOriginPath: null,
     approvalMode: "assist",
+    autoApprove: false,
     archivedAt: null,
     pinned: false,
     lastUsedAt: overrides.createdAt ?? "2026-11-10T08:00:00.000Z",
@@ -59,6 +60,45 @@ afterEach(() => {
 });
 
 describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
+  it("项目置顶跨重启保存且不改变创建顺序，旧项目幂等补列默认关闭", () => {
+    const path = tempDbPath();
+    const raw = new DatabaseSync(path);
+    raw.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, workspace_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+      INSERT INTO projects VALUES ('old', '旧项目', '/old', '2026-01-01');`);
+    raw.close();
+    const store = createSqliteSessionStore(path);
+    expect(store.listProjects()[0]?.pinned).toBe(false);
+    store.insertProject({
+      id: "new",
+      name: "新项目",
+      workspacePath: "/new",
+      createdAt: "2026-01-02",
+    });
+    store.setProjectPinned("new", true);
+    expect(store.listProjects().map((p) => p.id)).toEqual(["old", "new"]);
+    store.close();
+    const reopened = createSqliteSessionStore(path);
+    expect(reopened.listProjects().map((p) => p.pinned)).toEqual([false, true]);
+    reopened.setProjectPinned("new", false);
+    expect(reopened.listProjects()[1]?.pinned).toBe(false);
+    reopened.close();
+  });
+  it("自动批准默认关闭、独立于遗留命令授权，更新后跨重启保留", () => {
+    const path = tempDbPath();
+    const first = createSqliteSessionStore(path);
+    first.insertSession(sessionRecord());
+    first.insertApproval("session-1", "git");
+    expect(first.listSessions()[0]?.autoApprove).toBe(false);
+    first.updateSession("session-1", { autoApprove: true });
+    first.close();
+    const reopened = createSqliteSessionStore(path);
+    expect(reopened.listSessions()[0]?.autoApprove).toBe(true);
+    reopened.insertSession(sessionRecord({ id: "new" }));
+    expect(
+      reopened.listSessions().find((s) => s.id === "new")?.autoApprove
+    ).toBe(false);
+    reopened.close();
+  });
   it("插入的会话与消息可原样读回（内存库）", () => {
     const store = createSqliteSessionStore(":memory:");
 

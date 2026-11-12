@@ -1,5 +1,7 @@
 # 完全访问档放开工作区文件边界
 
+> 会话授权记忆约束已由 [ADR 0012](0012-persistent-session-auto-approval.md) 部分替代；`full-access` 的文件访问含义保持不变。
+
 审批模式从 `readonly / suggest / full` 重构为 `ask 请求批准 / assist 帮我批准 / full-access 完全访问`（GLOSSARY「审批模式」）。其中 `full-access` 明确承诺「可不受限地访问互联网和本地电脑文件」，这推翻了 spec「审批与安全」的原决定——`resolveInWorkspace` 对文件工具的强制工作区边界不再适用于该档。
 
 **决定**：新增 `resolvePath(workspacePath, target, mode)`（`packages/agent-core/src/tools/workspace.ts`）——`full-access` 档下绝对路径原样解析、相对路径仍以工作区为基准，跳过边界断言；其余档位走原 `resolveInWorkspace`（realpath 防 `..` 与符号链接逃逸，不变）。当前审批模式经 `ToolExecutionContext.approvalMode` 传入工具执行器，与审批门（`decideApproval`）同步读取同一会话状态。工作区外的 git-service / worktree-service 仍强制边界（宿主侧服务，不随会话档位变化）。

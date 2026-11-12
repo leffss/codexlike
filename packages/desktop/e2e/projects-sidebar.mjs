@@ -235,7 +235,107 @@ async function main() {
     rmSync(root, { recursive: true, force: true });
   }
 }
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+// 复用原生目录选择的 E2E 接缝；项目创建、置顶与取消全部经过真实 UI。
+async function projectPinningScenario() {
+  const root = mkdtempSync(join(tmpdir(), "codexlike-project-pinning-"));
+  const homeDir = join(root, "home");
+  const workspaces = [join(root, "Alpha"), join(root, "Beta")];
+  for (const workspace of workspaces) mkdirSync(workspace);
+  let app;
+  try {
+    let window;
+    ({ app, window } = await launchApp({
+      homeDir,
+      workspaceDir: workspaces[0],
+    }));
+    for (const workspace of workspaces) {
+      await app.evaluate((_electron, directory) => {
+        process.env.CODEXLIKE_TEST_WORKSPACE = directory;
+      }, workspace);
+      await window.getByTestId("add-project").click();
+      await window
+        .getByTestId("project-group")
+        .and(window.locator(`[title=${JSON.stringify(workspace)}]`))
+        .waitFor();
+    }
+    const header = (id) =>
+      window
+        .getByTestId("project-header")
+        .and(window.locator(`[data-project-id="${id}"]`));
+    const normalOrder = await window
+      .getByTestId("project-header")
+      .evaluateAll((nodes) => nodes.map((node) => node.dataset.projectId));
+    assert(normalOrder.length === 2, "真实 UI 创建两个空项目");
+    const pinnedId = normalOrder[1];
+    async function waitOrder(ids) {
+      await window.waitForFunction((expected) => {
+        const headers = [
+          ...document.querySelectorAll(
+            '[data-testid="project-header"], [data-testid="standalone-header"]'
+          ),
+        ];
+        return (
+          JSON.stringify(
+            headers.map((node) => node.dataset.projectId ?? "standalone")
+          ) === JSON.stringify([...expected, "standalone"])
+        );
+      }, ids);
+    }
+    async function assertPinned(expected) {
+      await header(pinnedId)
+        .getByTestId("project-pin")
+        .and(window.locator(`[aria-pressed="${expected}"]`))
+        .waitFor();
+      assert(
+        (await header(pinnedId).getByTestId("project-pinned").count()) ===
+          Number(expected),
+        "项目置顶标识与按钮状态一致"
+      );
+      assert(
+        (await header(pinnedId)
+          .getByTestId("project-group")
+          .getAttribute("aria-expanded")) === "true",
+        "置顶按钮不触发项目折叠"
+      );
+      assert(
+        (await window.getByTestId("session-item").count()) === 0,
+        "置顶操作不能创建会话"
+      );
+    }
+    await waitOrder(normalOrder);
+    await projectAction(window, "project-pin", header(pinnedId));
+    await assertPinned(true);
+    await waitOrder([pinnedId, normalOrder[0]]);
+    await closeApp(app);
+    app = null;
+    ({ app, window } = await launchApp({ homeDir }));
+    await assertPinned(true);
+    await waitOrder([pinnedId, normalOrder[0]]);
+    await projectAction(window, "project-pin", header(pinnedId));
+    await assertPinned(false);
+    await waitOrder(normalOrder);
+    await closeApp(app);
+    app = null;
+    ({ app, window } = await launchApp({ homeDir }));
+    await assertPinned(false);
+    await waitOrder(normalOrder);
+    console.log(
+      "[e2e] 项目置顶→普通项目→独立分区、取消恢复原序、两次真重启持久通过"
+    );
+  } finally {
+    if (app) await closeApp(app);
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  }
+}
+
+main()
+  .then(projectPinningScenario)
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
