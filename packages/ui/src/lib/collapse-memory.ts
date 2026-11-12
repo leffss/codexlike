@@ -26,19 +26,25 @@ export function setRememberedOpen(key: string, open: boolean): void {
 
 /**
  * 折叠开合 hook：open 是「记忆值 ?? 默认值」的派生态。
- * toggle 写记忆并触发重渲染；默认值变化（如运行中→完成）对
+ * toggle/setOpen 写记忆并触发重渲染；默认值变化（如运行中→完成）对
  * 未手动操作过的键立即生效（完成即收起，用户故事 17），
  * 已手动操作过的键不被覆盖（autoCollapse 边沿规则）。
+ *
+ * setOpen 供受控 <details> 的 onToggle 同步用：原生开合改的是 DOM 态，
+ * 渲染态不重算就找不到用户这次操作（toggle 只能取反，写不了事件事实）。
  */
 export function useCollapseState(
   key: string,
   defaultOpen: boolean
-): { open: boolean; toggle: () => void } {
+): { open: boolean; toggle: () => void; setOpen: (open: boolean) => void } {
   const [, render] = useReducer((tick: number) => tick + 1, 0);
   const open = remembered.get(key) ?? defaultOpen;
-  const toggle = () => {
-    setRememberedOpen(key, !open);
+  const setOpen = (next: boolean) => {
+    setRememberedOpen(key, next);
     render();
   };
-  return { open, toggle };
+  const toggle = () => {
+    setOpen(!open);
+  };
+  return { open, toggle, setOpen };
 }
