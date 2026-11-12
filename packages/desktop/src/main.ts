@@ -5,6 +5,7 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  Menu,
   nativeTheme,
   safeStorage,
   type IpcMainInvokeEvent,
@@ -49,6 +50,7 @@ import {
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
+import { registerWindowControls } from "./window/window-controls";
 import { sessionScreenshotDir } from "./sessions/screenshots";
 import {
   createSubagentSettingsStore,
@@ -99,6 +101,7 @@ function createMainWindow(theme: ThemeName | null): BrowserWindow {
     width: 1280,
     height: 800,
     title: "CodexLike",
+    frame: false,
     backgroundColor: WINDOW_BACKGROUND[theme ?? "light"],
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -107,6 +110,8 @@ function createMainWindow(theme: ThemeName | null): BrowserWindow {
       sandbox: false, // preload 需要 require('electron') 的 contextBridge
     },
   });
+
+  registerWindowControls(win);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
@@ -333,6 +338,7 @@ function registerThemeSettingsHandlers(options: {
 }
 
 void app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   // ADR 0010：新管理数据独立初始化，旧 codexlike.db 与用户文件原样保留，不迁移不删除。
   const persistence = createSqliteSessionStore(
     join(dataDir(), "session-workbench.db")

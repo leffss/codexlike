@@ -33,6 +33,7 @@ import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
 import type { ExitState } from "../lifecycle/application-exit";
 export type { ExitState };
+export type WindowState = { maximized: boolean };
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
@@ -48,6 +49,13 @@ export type { ThemeName };
  * 主→渲染：会话事件流（`session:events` channel，按会话 ID 多路复用）。
  */
 export const IPC = {
+  windowControls: {
+    getState: "window-controls:get-state",
+    minimize: "window-controls:minimize",
+    toggleMaximize: "window-controls:toggle-maximize",
+    close: "window-controls:close",
+    stateChanged: "window-controls:state-changed",
+  },
   application: {
     exitState: "application:exit-state",
     exitChanged: "application:exit-changed",
@@ -247,6 +255,13 @@ export interface SessionExecutionState {
 
 /** `window.codexlike` 的完整 API 形状 */
 export interface CodexLikeApi {
+  windowControls: {
+    getState(): Promise<WindowState>;
+    minimize(): Promise<void>;
+    toggleMaximize(): Promise<void>;
+    close(): Promise<void>;
+    onStateChanged(listener: (state: WindowState) => void): () => void;
+  };
   application: {
     exitState(): Promise<ExitState>;
     answerExit(id: string, confirmed: boolean): Promise<void>;

@@ -208,9 +208,7 @@ async function main() {
     await window.getByTestId("session-search-input").fill("长历史");
 
     // 关闭按钮入口：即使项目折叠/正在搜索/当前非执行会话也提示，取消不提前停止。
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].close()
-    );
+    await window.getByTestId("window-close").click();
     await window.getByTestId("exit-confirm").waitFor();
     await assertSemanticOverlay(
       window.getByTestId("exit-confirm").locator("../..")
@@ -300,9 +298,7 @@ async function main() {
     );
     const count = model.requestCount();
     const done = exited(app);
-    await app.evaluate(({ app }) => {
-      app.quit();
-    });
+    await window.getByTestId("window-close").click();
     await window.getByTestId("exit-confirm").click();
     await window
       .getByTestId("exit-progress")

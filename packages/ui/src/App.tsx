@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import type { WindowState } from "@codexlike/desktop/ipc";
 import { createWorkspaceState } from "./lib/workspace-state";
+import { subscribeWindowState } from "./lib/window-state";
 import { ApplicationExit } from "./components/ApplicationExit";
+import { WindowControls } from "./components/WindowControls";
 
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -8,21 +11,34 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 
 type View = "workspace" | "settings";
 
-/** 顶栏：品牌 / 视图切换 / 主题快捷切换 */
+/** 同一行标题栏：品牌空白区拖动，右侧主题 / 设置 / 窗口按钮不可拖动。 */
 function Header(props: { view: View; onSwitch: (view: View) => void }) {
   const { theme, setTheme } = useTheme();
+  const api =
+    typeof window === "undefined"
+      ? undefined
+      : window.codexlike?.windowControls;
+  const [windowState, setWindowState] = useState<WindowState>({
+    maximized: false,
+  });
+  useEffect(() => {
+    if (api) return subscribeWindowState(api, setWindowState);
+  }, [api]);
 
   return (
-    <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold tracking-wide text-fg">
+    <header
+      data-testid="window-titlebar"
+      className={`${api ? "window-titlebar-drag" : ""} flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2`}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        <span className="shrink-0 text-sm font-semibold tracking-wide text-fg">
           CodexLike
         </span>
-        <span className="text-xs text-fg-subtle">
+        <span className="hidden truncate text-xs text-fg-subtle sm:block">
           本地 AI coding agent 工作台
         </span>
       </div>
-      <nav className="flex items-center gap-1">
+      <nav className="window-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
         <button
           type="button"
           data-testid="theme-toggle"
@@ -78,6 +94,7 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
             设置
           </button>
         )}
+        <WindowControls api={api} state={windowState} />
       </nav>
     </header>
   );

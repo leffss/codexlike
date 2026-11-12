@@ -4,12 +4,12 @@
 
 ## 运行方式
 
-- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按下表顺序依次跑 29 个场景，任一失败即停）。
+- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按下表顺序依次跑 30 个场景，任一失败即停）。
 - 单跑：根目录 `pnpm test:e2e:<场景名>`（同样先 build）。场景名列与下表一一对应。
 - 链外：`pnpm test:e2e:packaged` 需要 `CODEXLIKE_PACKAGED_EXE` 指向打包产物 exe（冷启动冒烟，不进 all 链）。
 - 定位器规范：场景文件受 `pnpm check:e2e-locators`（pre-commit）约束，见 CODING_STANDARDS.md「E2E 定位器」。
 
-## 场景索引（29 个，按 test:e2e:all 链序）
+## 场景索引（30 个，按 test:e2e:all 链序）
 
 | #   | 场景名             | 文件                       | 一行断言要点                                                                                                                 |
 | --- | ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -42,6 +42,7 @@
 | 27  | width              | `width-tiers.mjs`          | 容器分档宽度：会话容器（非视口）三档分宽、内容列对齐、用户消息限宽右对齐、宽表格/代码块内聚滚动                              |
 | 28  | reasoning-recovery | `reasoning-recovery.mjs`   | reasoning 落库与恢复（ADR 0011）：思考随终态落 SQLite，重启可回看，切走切回不重复不丢失，旧会话无空思考块                    |
 | 29  | scroll             | `scroll-following.mjs`     | 滚动跟随状态机：流式贴底、上翻脱离不夺滚动权、回到最新恢复跟随、阅读位置记忆含贴底与否                                       |
+| 30  | window             | `window-controls.mjs`      | 自绘标题栏：菜单移除、原生最小化/最大化/还原、状态同步、设置/窄窗/主题及关闭保存                                             |
 
 链外（不进 test:e2e:all）：
 

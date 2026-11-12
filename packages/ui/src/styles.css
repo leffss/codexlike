@@ -166,6 +166,18 @@ body {
   color: var(--fg);
 }
 
+/* 仅有窗口能力时启用拖动；退出冻结层的 inert 同时禁用原生拖动命中。 */
+.window-titlebar-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.window-no-drag,
+.window-no-drag *,
+[inert] .window-titlebar-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版） */
 .markdown > :first-child {
   margin-top: 0;
