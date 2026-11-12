@@ -24,6 +24,7 @@ import {
   type VerticalIntent,
 } from "../lib/scroll-follow";
 import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
+import { thinkingSummary } from "../lib/thinking-summary";
 import {
   formatWorkDuration,
   groupConsecutiveTools,
@@ -526,35 +527,59 @@ function SegmentView(props: {
 
 /**
  * 思考段（GLOSSARY「思考档位」）：消息流时序序列中的独立成员——
- * 默认收起、可展开观察内容、流式进行中带思考指示器；
- * 与正文段分离，不再提升合并进气泡顶部。
+ * 流式进行中默认展开实时可见，思考结束自动收起，收起后的卡片
+ * 以一行摘要回看（thinkingSummary 纯函数）；与正文段分离。
+ *
+ * 受控 <details open>：内容在收起态仍留在 DOM（e2e 以 textContent
+ * 回读收起块全文）；onToggle 只在事件事实与渲染值不一致时写记忆——
+ * React 写 open 属性也会触发 toggle 事件，若不区分会把「流式默认展开」
+ * 误记为手动展开，导致思考结束时不能自动收起。
  */
 function ThinkingBlock(props: { segment: ThinkingSegment }) {
   const { segment } = props;
+  const streaming = segment.streaming === true;
+  const { open, setOpen } = useCollapseState(segment.id, streaming);
+  const summary = thinkingSummary(segment.content);
   return (
     <li>
       <details
         data-testid="thinking-block"
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== open) {
+            setOpen(event.currentTarget.open);
+          }
+        }}
         className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
       >
         <summary
           data-testid="thinking-toggle"
           className="flex cursor-pointer select-none items-center gap-2"
         >
-          {segment.streaming === true && (
+          {streaming && (
             <span
               data-testid="thinking-indicator"
-              className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
+              className="generating-spinner shrink-0"
               aria-label="思考中"
             />
           )}
-          思考过程（点击展开 / 收起）
+          <span
+            data-testid="thinking-summary"
+            className="min-w-0 flex-1 truncate"
+          >
+            {streaming ? "思考中" : "已思考"}
+            {summary !== "" && ` · ${summary}`}
+          </span>
+          <span className="shrink-0 text-fg-subtle">{open ? "▾" : "▸"}</span>
         </summary>
         <div
           data-testid="thinking-content"
           className="mt-2 whitespace-pre-wrap border-t border-line pt-2 text-fg"
         >
           {segment.content}
+          {streaming && (
+            <span className="generating-spinner ml-1" aria-hidden="true" />
+          )}
         </div>
       </details>
     </li>
@@ -645,7 +670,7 @@ function MessageBubble(props: {
           </ReactMarkdown>
         </div>
         {segment.streaming === true && (
-          <span className="markdown-cursor" aria-label="正在生成" />
+          <span className="generating-spinner" aria-label="正在生成" />
         )}
         {segment.interrupted === true && (
           <p className="mt-2 text-xs text-warn-fg">

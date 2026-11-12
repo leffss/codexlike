@@ -1,7 +1,7 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /* 主题块用纯属性选择器（与 dark 块对称）：Tailwind v4 构建会吞掉 :root 前缀的自定义属性块 */
-[data-theme='light'] {
+[data-theme="light"] {
   color-scheme: light;
 
   /* 表面 */
@@ -62,7 +62,7 @@
   --hl-tag: #116329;
 }
 
-[data-theme='dark'] {
+[data-theme="dark"] {
   color-scheme: dark;
 
   --canvas: #0f172a;
@@ -157,8 +157,8 @@ body,
 
 body {
   font-family:
-    'Segoe UI',
-    'Microsoft YaHei',
+    "Segoe UI",
+    "Microsoft YaHei",
     system-ui,
     -apple-system,
     sans-serif;
@@ -220,7 +220,7 @@ body {
 }
 
 .markdown code {
-  font-family: 'Cascadia Code', Consolas, monospace;
+  font-family: "Cascadia Code", Consolas, monospace;
   font-size: 0.875em;
 }
 
@@ -332,19 +332,20 @@ body {
   font-weight: 600;
 }
 
-/* 流式回复进行中的光标 */
-.markdown-cursor {
+/* 流式进行中的转圈加载图标：正文尾部「正在生成」、思考块流式指示器共用 */
+.generating-spinner {
   display: inline-block;
-  width: 7px;
-  height: 1em;
-  margin-left: 2px;
+  width: 0.9em;
+  height: 0.9em;
   vertical-align: text-bottom;
-  background-color: var(--accent);
-  animation: markdown-cursor-blink 1s steps(2, start) infinite;
+  border: 1.5px solid var(--accent);
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  animation: generating-spinner-rotate 0.8s linear infinite;
 }
 
-@keyframes markdown-cursor-blink {
+@keyframes generating-spinner-rotate {
   to {
-    visibility: hidden;
+    transform: rotate(360deg);
   }
 }
