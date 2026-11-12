@@ -53,14 +53,68 @@ export async function sessionMenu(window, item) {
   return menu;
 }
 
-/** 先悬浮指定项目头，再点击显现的操作，不以 force 绕过命中检查。 */
+/**
+ * 强制悬浮生效：Chromium 对静止鼠标 + 侧栏持续重渲染（IPC 事件流）下的
+ * :hover 重算不确定，且 Playwright 的 click/hover 重试不重发 mousemove——
+ * :hover 一旦失效，悬浮操作永远显示不出（实测被 project-session-count
+ * 持续拦截 30s 超时）。先位移再归位，用两次 mousemove 强制浏览器重算。
+ */
+export async function hoverFor(window, locator) {
+  const box = await locator.boundingBox();
+  assert(box, "悬浮目标不可见");
+  await window.mouse.move(box.x - 6, box.y + box.height / 2);
+  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/** 元素中心点当前是否真实命中自身或子孙（悬浮显隐已生效的确定信号）。 */
+export function hitAtCenter(node) {
+  const rect = node.getBoundingClientRect();
+  const hit = document.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2
+  );
+  return hit === node || node.contains(hit);
+}
+
+/**
+ * 草稿载入走异步 workbench 读取：切换/重启后立即断言输入框文本会与载入
+ * 赛跑。等待到达期望文本（确定信号），而非立即断言。
+ */
+export async function untilDraft(window, expected, message) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    if ((await window.getByTestId("composer-input").inputValue()) === expected)
+      return;
+    assert(Date.now() < deadline, message);
+    await delay(50);
+  }
+}
+
+/**
+ * 悬浮依赖型按钮的确定点击：强制 :hover 重算 → 轮询按钮真实可命中 →
+ * 立即坐标点击。全程不给"重渲染干掉 :hover + 默认态元素持续拦截"留窗口。
+ */
+export async function hoverClick(window, locator, message = "悬浮按钮") {
+  const deadline = Date.now() + 5000;
+  while (!(await locator.evaluate(hitAtCenter))) {
+    assert(Date.now() < deadline, `${message} 未在预期内可命中`);
+    await hoverFor(window, locator);
+    await delay(50);
+  }
+  const box = await locator.boundingBox();
+  assert(box, `${message} 无可点击位置`);
+  await window.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/**
+ * 先悬浮指定项目头，再点击显现的操作，不以 force 绕过命中检查。
+ */
 export async function projectAction(
   window,
   action = "project-new-session",
   header = window.getByTestId("project-header")
 ) {
-  await header.hover();
-  await header.getByTestId(action).click();
+  await hoverClick(window, header.getByTestId(action), `悬浮操作 ${action}`);
 }
 
 /** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
@@ -247,13 +301,40 @@ function createChatContext(res, port) {
 }
 
 /**
+ * WHATWG fetch bad port 列表（undici 与 Chromium 一致拒绝访问，报
+ * "fetch failed, cause: bad port"）。本机 TCP 动态端口范围若覆盖其中端口
+ * （6666/10080 等），listen(0) 会偶发分配到：单跑命中概率低，全量链上
+ * 累计启动几十个 mock 必撞——撞上就换端口重听。
+ */
+const BAD_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+  540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723,
+  2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697,
+  10080,
+]);
+
+/** listen(0) 分配安全端口：撞 bad port 就关闭重听。 */
+async function listenSafePort(server) {
+  for (;;) {
+    const port = await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+    });
+    if (!BAD_PORTS.has(port)) return port;
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+/**
  * 本地 OpenAI 兼容 mock 骨架：
  * - POST …/chat/completions → 收集请求体后交给 onChat(ctx)，ctx 含应答工具集与
  *   { body, index（第几个请求，从 1 起）, port }；onChat 必须自行应答（工具/文本/JSON/404）。
  * - 其余 method/path 交给 onOther(req, res)，返回 true 表示已处理，否则骨架回 404。
  * 返回 { server, port, seenBodies, requestCount() }。
  */
-export function startMockProvider(onChat, onOther) {
+export async function startMockProvider(onChat, onOther) {
   let requestCount = 0;
   const seenBodies = [];
   const server = http.createServer((req, res) => {
@@ -281,16 +362,13 @@ export function startMockProvider(onChat, onOther) {
       res.end("not found");
     }
   });
-  return new Promise((resolveServer) => {
-    server.listen(0, "127.0.0.1", () => {
-      resolveServer({
-        server,
-        port: server.address().port,
-        seenBodies,
-        requestCount: () => requestCount,
-      });
-    });
-  });
+  const port = await listenSafePort(server);
+  return {
+    server,
+    port,
+    seenBodies,
+    requestCount: () => requestCount,
+  };
 }
 
 /**
