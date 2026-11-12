@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -82,7 +83,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-session").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
-    await window.getByTestId("thinking-effort-select").selectOption("high");
+    await selectComposerOption(window, "thinking-effort-select", "high");
     await projectAction(window);
     await closeApp(app);
     app = null;
@@ -104,8 +105,9 @@ async function main() {
         "独立新建草稿"
     );
     assert(
-      (await window.getByTestId("thinking-effort-select").inputValue()) ===
-        "high",
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) === "high",
       "独立草稿设置重开恢复"
     );
     await window.getByTestId("composer-send").click();
@@ -115,10 +117,8 @@ async function main() {
       .getByTestId("profile-select")
       .selectOption({ label: "Second Mock · second-model" });
     await window.getByTestId("composer-input").fill("正式会话未发送输入");
-    await window.getByTestId("thinking-effort-select").selectOption("off");
-    await window
-      .getByTestId("approval-mode-select")
-      .selectOption("full-access");
+    await selectComposerOption(window, "thinking-effort-select", "off");
+    await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
     const stream = window.getByTestId("message-stream");
     await stream.hover();
@@ -133,7 +133,7 @@ async function main() {
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
     await window.getByTestId("composer-input").fill("项目会话独立输入");
-    await window.getByTestId("thinking-effort-select").selectOption("low");
+    await selectComposerOption(window, "thinking-effort-select", "low");
     await window
       .getByTestId("session-item")
       .filter({ hasText: "独立新建草稿" })
@@ -153,13 +153,15 @@ async function main() {
       "正式草稿隔离"
     );
     assert(
-      (await window.getByTestId("thinking-effort-select").inputValue()) ===
-        "off",
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) === "off",
       "会话思考隔离"
     );
     assert(
-      (await window.getByTestId("approval-mode-select").inputValue()) ===
-        "full-access",
+      (await window
+        .getByTestId("approval-mode-select")
+        .getAttribute("data-value")) === "full-access",
       "显式权限记忆"
     );
     await closeApp(app);
@@ -184,8 +186,9 @@ async function main() {
       "正式草稿真实重启恢复"
     );
     assert(
-      (await window.getByTestId("thinking-effort-select").inputValue()) ===
-        "off",
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) === "off",
       "思考真实重启恢复"
     );
     assert(
@@ -208,13 +211,16 @@ async function main() {
       "发送失败不清空正式输入"
     );
     assert(
-      (await window.getByTestId("approval-mode-select").inputValue()) ===
-        "full-access",
+      (await window
+        .getByTestId("approval-mode-select")
+        .getAttribute("data-value")) === "full-access",
       "权限真实重启恢复"
     );
     await window.getByTestId("new-session").click();
     assert(
-      (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+      (await window
+        .getByTestId("approval-mode-select")
+        .getAttribute("data-value")) === "ask",
       "新会话不能继承完全访问"
     );
     assert(

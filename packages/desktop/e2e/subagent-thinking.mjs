@@ -13,6 +13,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   expandWorkedHistory,
@@ -127,8 +128,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
-    const effortSelect = window.getByTestId("thinking-effort-select");
-    await effortSelect.selectOption("high");
+    await selectComposerOption(window, "thinking-effort-select", "high");
     await window.getByTestId("composer-input").fill("委派调研读取笔记");
     await window.getByTestId("composer-send").click();
 
@@ -145,7 +145,7 @@ async function main() {
       subFirst.model === "mock-sub",
       `第 2 个请求应是子代理（mock-sub），实际 ${subFirst.model}`
     );
-    await effortSelect.selectOption("off");
+    await selectComposerOption(window, "thinking-effort-select", "off");
     console.log("[e2e] 子代理运行中已把档位切到 off（只对下一条消息生效）");
 
     // 5) 等全部 4 个请求到达（子代理第二轮 + 主会话第二轮）

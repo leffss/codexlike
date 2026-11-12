@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -181,8 +182,8 @@ try {
     .filter({ hasText: "独立会话" })
     .waitFor();
   await window.getByTestId("session-search-toggle").click();
-  await window.getByTestId("thinking-effort-select").selectOption("high");
-  await window.getByTestId("approval-mode-select").selectOption("full-access");
+  await selectComposerOption(window, "thinking-effort-select", "high");
+  await selectComposerOption(window, "approval-mode-select", "full-access");
   await window.getByTestId("full-access-confirm-ok").click();
   await command("/new");
   await window.getByTestId("draft-select-workspace").waitFor();
@@ -191,7 +192,9 @@ try {
     "移出后 /new 不从 Worktree 来源派生项目"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "ask",
     "独立新建不继承完全访问"
   );
   await input().fill("独立入口保留草稿");
@@ -253,13 +256,15 @@ try {
     "重开仍保留来源"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) ===
-      "full-access",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "full-access",
     "恢复的是该会话明确授权偏好"
   );
   assert(
-    (await window.getByTestId("thinking-effort-select").inputValue()) ===
-      "high",
+    (await window
+      .getByTestId("thinking-effort-select")
+      .getAttribute("data-value")) === "high",
     "会话思考偏好不串用"
   );
   assert(

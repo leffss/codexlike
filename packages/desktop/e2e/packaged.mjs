@@ -46,7 +46,9 @@ try {
     "冷启动新建不能产生空历史"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "ask",
     "产物新会话默认必须为 ask"
   );
   assert(!existsSync(join(homeDir, "sessions")), "未发送不得创建专用工作区");

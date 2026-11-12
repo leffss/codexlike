@@ -16,6 +16,16 @@ export function assert(condition, message) {
   }
 }
 
+/** 真实打开受控选择器并点击 portal 选项，不绕过用户交互或风险确认。 */
+export async function selectComposerOption(window, testId, value) {
+  const trigger = window.getByTestId(testId);
+  await trigger.click();
+  const menu = window.getByTestId(`${testId}-listbox`);
+  await menu.waitFor();
+  await menu.getByTestId(`${testId}-option-${value}`).click();
+  await menu.waitFor({ state: "hidden" });
+}
+
 /**
  * 展开第 index 个「已工作折叠区」（票 04）并等其内容渲染，幂等可重试：
  * 轮运行中折叠区强制展开，若恰在轮完成瞬间点击会被记为手动收起——
@@ -150,11 +160,13 @@ export async function prepareDraft(
     "首次发送前不能增加空历史"
   );
   assert(
-    (await window.getByTestId("approval-mode-select").inputValue()) === "ask",
+    (await window
+      .getByTestId("approval-mode-select")
+      .getAttribute("data-value")) === "ask",
     "新会话从 ask 开始"
   );
   if (approvalMode !== "ask")
-    await window.getByTestId("approval-mode-select").selectOption(approvalMode);
+    await selectComposerOption(window, "approval-mode-select", approvalMode);
 }
 
 /** OpenAI 兼容 SSE 单帧（chat.completion.chunk 包装） */

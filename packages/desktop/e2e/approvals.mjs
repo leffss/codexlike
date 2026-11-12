@@ -7,6 +7,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import {
+  selectComposerOption,
   assert,
   closeApp,
   launchApp,
@@ -61,8 +62,9 @@ async function send(window, text) {
 async function waitMode(window, mode) {
   await window.waitForFunction(
     (expected) =>
-      document.querySelector('[data-testid="approval-mode-select"]')?.value ===
-      expected,
+      document
+        .querySelector('[data-testid="approval-mode-select"]')
+        ?.getAttribute("data-value") === expected,
     mode
   );
 }
@@ -167,17 +169,122 @@ async function main() {
       .getByText("帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问")
       .waitFor();
 
-    await modeSelect.selectOption("full-access");
+    await modeSelect.press("ArrowDown");
+    await modeSelect.press("End");
+    await modeSelect.press("Enter");
     const dialog = window.getByTestId("full-access-confirm-dialog");
     await dialog.waitFor();
-    await dialog.getByTestId("full-access-confirm-cancel").click();
+    await waitMode(window, "assist");
+    assert(
+      (await modeSelect.getAttribute("aria-expanded")) === "false",
+      "风险确认打开前选择菜单已关闭"
+    );
+    const cancel = dialog.getByTestId("full-access-confirm-cancel");
+    const confirm = dialog.getByTestId("full-access-confirm-ok");
+    assert(
+      await cancel.evaluate((element) => element === document.activeElement),
+      "键盘选择完全访问后应自动聚焦风险确认的取消按钮"
+    );
+    assert(
+      (await dialog.getAttribute("role")) === "dialog" &&
+        (await dialog.getAttribute("aria-modal")) === "true",
+      "风险确认具备模态对话框语义"
+    );
+    await window.keyboard.press("Shift+Tab");
+    assert(
+      await confirm.evaluate((element) => element === document.activeElement),
+      "Shift+Tab 在对话框首尾循环"
+    );
+    await window.keyboard.press("Tab");
+    assert(
+      await cancel.evaluate((element) => element === document.activeElement),
+      "Tab 不能落到背景选择器"
+    );
+    await window.keyboard.press("Enter");
     await dialog.waitFor({ state: "hidden" });
     await waitMode(window, "assist");
-    await modeSelect.selectOption("full-access");
+    assert(
+      await modeSelect.evaluate(
+        (element) => element === document.activeElement
+      ),
+      "取消风险确认后焦点恢复到审批模式触发器"
+    );
+    assert(
+      (await modeSelect.getAttribute("aria-expanded")) === "false",
+      "确认中的 Enter 不能重开背景菜单"
+    );
+    await window.keyboard.press("ArrowDown");
+    await window.keyboard.press("End");
+    await window.keyboard.press("Enter");
     await dialog.waitFor();
-    await dialog.getByTestId("full-access-confirm-ok").click();
+    await window.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    assert(
+      await modeSelect.evaluate(
+        (element) => element === document.activeElement
+      ),
+      "Escape 取消后恢复触发器焦点"
+    );
+    await selectComposerOption(window, "approval-mode-select", "full-access");
+    await dialog.waitFor();
+    assert(
+      await cancel.evaluate((element) => element === document.activeElement),
+      "鼠标选择同样自动聚焦取消"
+    );
+    await window.keyboard.press("Tab");
+    assert(
+      await confirm.evaluate((element) => element === document.activeElement),
+      "Tab 可访问风险确认按钮"
+    );
+    await window.keyboard.press("Enter");
     await dialog.waitFor({ state: "hidden" });
     await waitMode(window, "full-access");
+    const screenshots = mkdtempSync(
+      join(tmpdir(), "codexlike-approval-select-screenshots-")
+    );
+    console.log(`[e2e:approvals] 选择菜单截图目录 ${screenshots}`);
+    for (const theme of ["light", "dark"]) {
+      if (theme === "dark") await window.getByTestId("theme-toggle").click();
+      await window.getByTestId("composer-input").hover();
+      assert(
+        await modeSelect.evaluate((element) => {
+          const neutral = document.createElement("div");
+          neutral.style.color = "var(--fg-muted)";
+          neutral.style.backgroundColor = "var(--surface-muted)";
+          const warning = document.createElement("div");
+          warning.style.color = "var(--warn-fg)";
+          document.body.append(neutral, warning);
+          const actual = getComputedStyle(element);
+          const matches =
+            actual.color === getComputedStyle(neutral).color &&
+            actual.backgroundColor ===
+              getComputedStyle(neutral).backgroundColor &&
+            getComputedStyle(element.querySelector("svg")).color ===
+              getComputedStyle(warning).color;
+          neutral.remove();
+          warning.remove();
+          return matches;
+        }),
+        `${theme} full-access 只对盾牌图标使用警示色`
+      );
+      await modeSelect.click();
+      const menu = window.getByTestId("approval-mode-select-listbox");
+      assert(
+        (await menu.getByRole("option").count()) === 3,
+        "审批模式保留三个选项"
+      );
+      assert(
+        (await menu
+          .getByRole("option", { selected: true })
+          .getAttribute("data-value")) === "full-access",
+        "确认后才选中完全访问"
+      );
+      await window.screenshot({
+        path: join(screenshots, `approval-menu-${theme}.png`),
+      });
+      await modeSelect.press("Escape");
+    }
+    await window.getByTestId("theme-toggle").click();
 
     const historyCount = await window
       .getByTestId("interaction-history")
@@ -208,7 +315,7 @@ async function main() {
     await waitHistory(window, "已批准");
     console.log("[e2e] 重启恢复审批档位和只读批准历史");
 
-    await window.getByTestId("approval-mode-select").selectOption("ask");
+    await selectComposerOption(window, "approval-mode-select", "ask");
     await waitMode(window, "ask");
     await send(window, "写一个文件试试");
     const denyPanel = window.getByTestId("interaction-panel");

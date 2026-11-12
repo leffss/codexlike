@@ -47,6 +47,106 @@ async function assertAction(locator, shown, message) {
   );
 }
 
+// 用真实文字 Range 测量起点，避免按钮盒子包含箭头/图标时掩盖层级倒置。
+async function textAppearance(locator, text) {
+  return locator.evaluate((node, text) => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let label;
+    while ((label = walker.nextNode())) {
+      if (label.textContent.trim() !== text) continue;
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const style = getComputedStyle(label.parentElement);
+      return {
+        x: range.getBoundingClientRect().left,
+        weight: Number(style.fontWeight),
+        color: style.color,
+      };
+    }
+    throw new Error(`找不到文字：${text}`);
+  }, text);
+}
+
+async function assertProjectHierarchy(window) {
+  const project = window.getByTestId("project-header").locator("..");
+  const heading = await textAppearance(
+    project.getByTestId("project-group"),
+    "项目"
+  );
+  const child = await textAppearance(
+    project.getByTestId("session-item").filter({ hasText: "项目任务" }),
+    "项目任务"
+  );
+  assert(
+    child.x >= heading.x + 8,
+    `子会话文字应明显位于项目文字右侧：${JSON.stringify({ heading, child })}`
+  );
+  assert(heading.weight >= 600, "项目名称使用清晰的半粗字重");
+  const colors = await window.getByTestId("session-list").evaluate((node) => {
+    const probe = document.createElement("span");
+    node.append(probe);
+    const result = {};
+    for (const token of ["fg", "line", "selected"]) {
+      probe.style.color = `var(--${token})`;
+      result[token] = getComputedStyle(probe).color;
+    }
+    probe.remove();
+    return result;
+  });
+  assert(heading.color === colors.fg, "项目名称使用主题主前景色");
+  assert(child.color !== heading.color, "非当前会话保持较弱的前景层级");
+  const guide = await project.getByTestId("group-sessions").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      width: Number.parseFloat(style.borderLeftWidth),
+      color: style.borderLeftColor,
+      style: style.borderLeftStyle,
+      height: node.getBoundingClientRect().height,
+    };
+  });
+  // Windows 125% DPI 下 1px CSS 边框可能计算为 0.8px，验证可见细线而非精确整数。
+  assert(
+    guide.width > 0 &&
+      guide.width <= 1.5 &&
+      guide.color === colors.line &&
+      guide.style === "solid" &&
+      guide.height > 0,
+    `展开会话使用淡色竖向引导线：${JSON.stringify(guide)}`
+  );
+  const headerBox = await project.getByTestId("project-header").boundingBox();
+  const standaloneBox = await window
+    .getByTestId("standalone-header")
+    .locator("..")
+    .boundingBox();
+  assert(
+    headerBox.y - (standaloneBox.y + standaloneBox.height) >= 16,
+    "项目与前一个分区之间保留至少 16px 间距"
+  );
+  const selected = project.getByTestId("session-row").filter({
+    has: window.getByTestId("session-item").filter({ hasText: "项目次任务" }),
+  });
+  assert(
+    (await selected
+      .getByTestId("session-item")
+      .getAttribute("aria-current")) === "page",
+    "当前项目会话保持选中语义"
+  );
+  assert(
+    (await selected.evaluate(
+      (node) => getComputedStyle(node).backgroundColor
+    )) === colors.selected,
+    "当前会话仍使用主题选中底色"
+  );
+  for (const locator of [project, project.getByTestId("project-header")]) {
+    assert(
+      (await locator.evaluate(
+        (node) => getComputedStyle(node).backgroundColor
+      )) === "rgba(0, 0, 0, 0)",
+      "项目组及项目头默认透明，不引入大块底色"
+    );
+  }
+}
+
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-sidebar-"));
   const homeDir = join(root, "home");
@@ -150,6 +250,33 @@ async function main() {
     await create("项目次任务", true);
     await create("独立A");
     await create("独立B");
+
+    // 同一真实项目下两条会话：非当前行显示层级，当前行保留最强高亮。
+    await select("项目次任务");
+    const screenshotDir = mkdtempSync(
+      join(tmpdir(), "codexlike-sidebar-screenshots-")
+    );
+    console.log(`[e2e:sidebar] 层级截图目录 ${screenshotDir}`);
+    for (const theme of ["light", "dark"]) {
+      if (
+        (await window.evaluate(
+          () => document.documentElement.dataset.theme
+        )) !== theme
+      )
+        await window.getByTestId("theme-toggle").click();
+      await window.waitForFunction(
+        (theme) => document.documentElement.dataset.theme === theme,
+        theme
+      );
+      await neutral();
+      await window.screenshot({
+        path: join(screenshotDir, `sidebar-${theme}.png`),
+      });
+      await assertProjectHierarchy(window);
+    }
+    await window.getByTestId("theme-toggle").click();
+    await select("独立B");
+
     const aId = await item("独立A").getAttribute("data-session-id");
     const bId = await item("独立B").getAttribute("data-session-id");
     const projectId = await window
