@@ -82,13 +82,26 @@ async function main() {
     await window.getByTestId("composer-input").fill("打开 fixture 页并截图");
     await window.getByTestId("composer-send").click();
 
-    // navigate 卡片：真实 Chromium 打开 fixture，输出含页面标题。
-    // 卡片渲染完成 ≠ 工具执行完成：输出文本要等工具真实跑完（卡片等待
-    // 已按慢工具给 60s，内容等待必须同预算——全量链负载下 20s 偶发不够）。
+    // navigate 卡片渲染即证明工具链路真实启动（轮运行中「已工作折叠区」
+    // 默认展开，卡片可见）。工具卡是过程段——轮完成即自动收起移出 DOM
+    // （票 04），输出文本只存在于"工具完成→轮收起"的亚秒窗口内，与
+    // 收起竞态的断言永远可能错过。改为：等轮完成（composer-send 恢复
+    // 为空闲确定信号），点击折叠区 toggle 写入持久展开记忆，再对两张
+    // 卡片做输出断言。
     const navCard = window.locator(
       '[data-testid="tool-call-card"][data-tool-name="browser_navigate"]'
     );
     await navCard.waitFor({ timeout: 60_000 });
+    await window.getByTestId("composer-send").waitFor({ timeout: 60_000 });
+    await window
+      .locator('[data-testid="worked-history"][data-open="false"]')
+      .waitFor({ timeout: 10_000 });
+    await window.getByTestId("worked-history-toggle").click();
+    await window
+      .locator('[data-testid="worked-history"][data-open="true"]')
+      .waitFor({ timeout: 10_000 });
+
+    // navigate 卡片：真实 Chromium 打开 fixture，输出含页面标题
     await navCard.getByTestId("tool-call-toggle").click();
     await navCard
       .getByText("已打开「E2E 浏览器页」")
@@ -99,7 +112,6 @@ async function main() {
     const shotCard = window.locator(
       '[data-testid="tool-call-card"][data-tool-name="browser_screenshot"]'
     );
-    await shotCard.waitFor({ timeout: 60_000 });
     await shotCard.getByTestId("tool-call-toggle").click();
     await shotCard.getByText("整页截图已保存").waitFor({ timeout: 60_000 });
     await shotCard
