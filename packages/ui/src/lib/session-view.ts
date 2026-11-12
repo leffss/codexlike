@@ -29,6 +29,12 @@ interface SegmentBase {
   turnId: string;
   /** 共享响应 id：同一模型响应产生的思考/正文段共享此 id，关联不靠嵌套 */
   responseId: string | null;
+  /**
+   * 段建立时刻（epoch ms）：呈现层「已工作 N 秒」工时的数据来源。
+   * 历史恢复取自落库 createdAt，运行期由 reducer 尾部追加时记录；
+   * 整段替换保持原值（封闭集：时间不是更新维度）。
+   */
+  at?: number;
 }
 
 /** 用户消息段（GLOSSARY「轮次」的起点：每个用户段开启新轮次） */
@@ -85,6 +91,10 @@ export interface ToolCallSegment extends SegmentBase {
   isError: boolean;
   /** tool-call 事件已到、tool-result 未到 */
   running?: boolean;
+  /** 执行开始时刻（epoch ms，运行期 tool-call 事件打点；历史恢复缺省） */
+  startedAt?: number;
+  /** 执行结束时刻（epoch ms，运行期 tool-result 事件打点；历史恢复缺省） */
+  endedAt?: number;
 }
 
 /**
@@ -232,6 +242,7 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
         seq: nextSeq(segments),
         turnId: deriveTurnId(segments, item.interaction.request.id),
         responseId: null,
+        at: parseIso(item.interaction.request.createdAt),
         interaction: item.interaction,
       });
       continue;
@@ -248,12 +259,15 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
         seq: nextSeq(segments),
         turnId: deriveTurnId(segments, call.id),
         responseId: null,
+        at: parseIso(call.createdAt),
         sessionId: call.sessionId,
         toolName: call.toolName,
         arguments: call.arguments,
         output: call.output,
         isError: call.isError,
         running: false,
+        // 恢复的记录只有单一时刻：无执行耗时（呈现层省略），at 即发生时刻
+        startedAt: parseIso(call.createdAt),
       });
       continue;
     }
@@ -276,6 +290,7 @@ function messageSegment(
       message.role === "user" ? message.id : deriveTurnId(segments, message.id),
     // 历史 assistant 消息以自身 id 作为响应 id（思考/正文段关联键）
     responseId: message.role === "assistant" ? message.id : null,
+    at: parseIso(message.createdAt),
   };
   switch (message.role) {
     case "user":
@@ -318,6 +333,7 @@ function subagentFromToolRecord(
     seq: nextSeq(segments),
     turnId: deriveTurnId(segments, call.id),
     responseId: null,
+    at: parseIso(call.createdAt),
     toolCallId: call.id,
     task,
     state: "done",
@@ -346,6 +362,7 @@ export function applySessionEvent(
         seq: nextSeq(items),
         turnId: event.message.id,
         responseId: null,
+        at: nowEpoch(),
         content: event.message.content,
       });
 
@@ -378,6 +395,7 @@ export function applySessionEvent(
         seq: nextSeq(items),
         turnId: deriveTurnId(items, messageId),
         responseId: messageId,
+        at: nowEpoch(),
         content: delta,
         streaming: true,
       });
@@ -406,12 +424,14 @@ export function applySessionEvent(
         seq: nextSeq(items),
         turnId: deriveTurnId(items, event.call.id),
         responseId: lastResponseId(items),
+        at: nowEpoch(),
         sessionId: event.call.sessionId,
         toolName: event.call.toolName,
         arguments: event.call.arguments,
         output: "",
         isError: false,
         running: true,
+        startedAt: nowEpoch(),
       });
 
     case "tool-result":
@@ -441,18 +461,21 @@ export function applySessionEvent(
         )
       ) {
         // 当前执行错过 tool-call（切会话后迟到）：由 tool-result 补齐终态卡
+        // （开始时刻未观察，耗时不可知，仅记录结束时刻）
         return append(items, {
           kind: "tool-call",
           id: event.call.id,
           seq: nextSeq(items),
           turnId: deriveTurnId(items, event.call.id),
           responseId: lastResponseId(items),
+          at: nowEpoch(),
           sessionId: event.call.sessionId,
           toolName: event.call.toolName,
           arguments: event.call.arguments,
           output: event.call.output,
           isError: event.call.isError,
           running: false,
+          endedAt: nowEpoch(),
         });
       }
       return replaceSegment(items, event.call.id, (item) =>
@@ -462,6 +485,7 @@ export function applySessionEvent(
               output: event.call.output,
               isError: event.call.isError,
               running: false,
+              endedAt: nowEpoch(),
             }
           : item
       );
@@ -479,6 +503,7 @@ export function applySessionEvent(
         seq: nextSeq(items),
         turnId: deriveTurnId(items, event.subagentId),
         responseId: null,
+        at: nowEpoch(),
         toolCallId: "",
         task: event.task,
         state: "queued",
@@ -565,6 +590,7 @@ export function applySessionEvent(
           seq: nextSeq(items),
           turnId: deriveTurnId(items, event.message.id),
           responseId: null,
+          at: nowEpoch(),
           content: event.message.content,
         }
       );
@@ -595,6 +621,7 @@ function finalizeResponse(
       seq: nextSeq(next),
       turnId: deriveTurnId(next, message.id),
       responseId: message.id,
+      at: parseIso(message.createdAt),
       content: message.content,
       interrupted: interrupted || undefined,
     });
@@ -677,13 +704,15 @@ export function appendLocalSegment(
   items: MessageSegment[],
   message: { kind: "status" | "error"; content: string }
 ): MessageSegment[] {
-  const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const at = nowEpoch();
+  const id = `local-${at}-${Math.random().toString(36).slice(2, 8)}`;
   return append(items, {
     kind: message.kind,
     id,
     seq: nextSeq(items),
     turnId: deriveTurnId(items, id),
     responseId: null,
+    at,
     content: message.content,
   });
 }
@@ -714,6 +743,7 @@ export function mergeInteractions(
           ? previous.turnId
           : deriveTurnId(next, interaction.request.id),
       responseId: null,
+      at: previous?.at ?? parseIso(interaction.request.createdAt) ?? undefined,
       interaction,
     };
     next =
@@ -727,4 +757,16 @@ export function mergeInteractions(
 /** 子代理开跑时间的记录基准（卡内「已用时」的计算起点） */
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** 运行期尾部追加的打点基准（epoch ms；呈现层工时计算用） */
+function nowEpoch(): number {
+  return Date.now();
+}
+
+/** ISO 8601 → epoch ms；非法/缺失返回 undefined（段自然缺时间数据） */
+function parseIso(iso: string | undefined): number | undefined {
+  if (iso === undefined) return undefined;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? undefined : ms;
 }

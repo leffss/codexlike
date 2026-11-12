@@ -7,21 +7,33 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+import { useCollapseState } from "../lib/collapse-memory";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { markdownComponents } from "../lib/markdown";
 import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
+import {
+  formatWorkDuration,
+  groupConsecutiveTools,
+  groupTurns,
+  type ToolSequenceItem,
+  type TurnView,
+} from "../lib/turn-view";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
 
 /**
- * 中栏上部：消息流（GLOSSARY「消息流」「消息段」）。
- * 数据层已按事件发生时序排列消息段，本组件按时序如实分派渲染：
- * 思考段、正文段、工具卡、子代理卡、错误段、状态段、compact 摘要段
- * 都是序列中的平等成员（保持现有折叠交互与 data-testid）。
+ * 中栏上部：消息流（GLOSSARY「消息流」「消息段」「轮次」「已工作折叠区」）。
+ * 渲染三层（ADR 0011 呈现分层）：单段视图按类型分派 → 轮次聚合呈现
+ * （细分隔线 + 轮间距，不加 agent 名头/头像）→ 轮内以最终正文为界切分，
+ * 之前的过程段在轮完成后收进「已工作 N 秒」折叠区，之后的段跟随显示；
+ * 运行中的轮与中断、失败终态的轮强制展开过程（切分规则见 turn-view 纯函数，
+ * 开合是渲染层内存态，见 collapse-memory）。
  */
 export function MessageStream(props: {
   items: MessageSegment[];
+  /** 宿主执行态：最后一轮在执行期间保持强制展开（工具间隙不闪收，票 04） */
+  streaming?: boolean;
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
@@ -51,6 +63,9 @@ export function MessageStream(props: {
     element.scrollTop = props.readingPosition?.scrollTop ?? 0;
     restored.current = props.sessionId;
   }, [props.sessionId, props.loading, props.items, props.readingPosition]);
+  const turns = groupTurns(props.items, {
+    lastTurnRunning: props.streaming === true,
+  });
   return (
     <div
       ref={container}
@@ -82,23 +97,13 @@ export function MessageStream(props: {
           data-testid="message-list"
           className={`${contentWidthClass} flex flex-col gap-4`}
         >
-          {props.items.map((item) =>
-            item.kind === "tool-call" ? (
-              <ToolCallCard key={`tool-${item.id}`} call={item} />
-            ) : item.kind === "interaction" ? (
-              <InteractionHistory
-                key={`interaction-${item.id}`}
-                record={item.interaction}
-                draft={props.questionDraft?.(item.id)}
-              />
-            ) : item.kind === "subagent" ? (
-              <SubagentCard key={`subagent-${item.id}`} subagent={item} />
-            ) : item.kind === "thinking" ? (
-              <ThinkingBlock key={item.id} segment={item} />
-            ) : (
-              <MessageBubble key={item.id} segment={item} />
-            )
-          )}
+          {turns.map((turn) => (
+            <TurnGroupItem
+              key={turn.turnId}
+              turn={turn}
+              questionDraft={props.questionDraft}
+            />
+          ))}
           {props.compacting === true && (
             <li
               data-testid="compacting-indicator"
@@ -112,6 +117,202 @@ export function MessageStream(props: {
       )}
     </div>
   );
+}
+
+/**
+ * 轮次分组呈现单位（GLOSSARY「轮次」）：细分隔线 + 轮间距，
+ * 不加 agent 名头/头像（票 04）；轮内依次为用户消息段、
+ * 已工作折叠区（有过程段时）、跟随区。
+ */
+function TurnGroupItem(props: {
+  turn: TurnView;
+  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+}) {
+  const { turn } = props;
+  return (
+    <li
+      data-testid="message-turn"
+      data-turn-id={turn.turnId}
+      // 细分隔线 + 轮间距：首轮无线，其后各轮顶部细分隔线（外层 gap-4 提供基本轮间距）
+      className="[&:not(:first-child)]:border-t [&:not(:first-child)]:border-line [&:not(:first-child)]:pt-4"
+    >
+      <ol className="flex flex-col gap-3">
+        {turn.user !== null && (
+          <SegmentView
+            key={turn.user.id}
+            segment={turn.user}
+            questionDraft={props.questionDraft}
+          />
+        )}
+        {turn.history.length > 0 && (
+          <WorkedHistory turn={turn} questionDraft={props.questionDraft} />
+        )}
+        {turn.following.map((segment) => (
+          <SegmentView
+            key={segment.id}
+            segment={segment}
+            questionDraft={props.questionDraft}
+          />
+        ))}
+      </ol>
+    </li>
+  );
+}
+
+/**
+ * 已工作折叠区（GLOSSARY「已工作折叠区」）：轮内最终正文之前的过程段
+ * （思考、工具卡、中间正文）在轮完成后默认收起，摘要行显示工时；
+ * 运行中与中断、失败终态由默认值强制展开；用户手动开合按键记忆
+ * （默认值变化不覆盖已记忆的键——轮完成自动收起只作用于未操作过的折叠区）。
+ */
+function WorkedHistory(props: {
+  turn: TurnView;
+  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+}) {
+  const { turn } = props;
+  const { open, toggle } = useCollapseState(
+    `history-${turn.turnId}`,
+    turn.historyDefaultOpen
+  );
+  return (
+    <li
+      data-testid="worked-history"
+      data-turn-id={turn.turnId}
+      data-open={open ? "true" : "false"}
+      data-duration-ms={turn.durationMs ?? ""}
+    >
+      <button
+        type="button"
+        data-testid="worked-history-toggle"
+        aria-expanded={open}
+        onClick={toggle}
+        className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs text-fg-muted hover:bg-hover"
+      >
+        {turn.running && (
+          <span
+            data-testid="worked-history-indicator"
+            className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
+            aria-label="工作中"
+          />
+        )}
+        <span data-testid="worked-history-summary">
+          {turn.running ? "工作中" : "已工作"}
+          {turn.durationMs !== null &&
+            ` ${formatWorkDuration(turn.durationMs)}`}
+          {" · "}
+          {turn.history.length} 个过程段
+        </span>
+        <span className="flex-1" />
+        <span className="text-fg-subtle">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <ol
+          data-testid="worked-history-items"
+          className="mt-3 flex flex-col gap-3"
+        >
+          {groupConsecutiveTools(turn.history).map((item) => (
+            <ToolSequenceView
+              key={
+                item.kind === "group"
+                  ? `group-${item.segments[0]?.id}`
+                  : `single-${item.segment.id}`
+              }
+              item={item}
+              questionDraft={props.questionDraft}
+            />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+/**
+ * 连续同类工具统计分组（spec 用户故事 29）：组头显示类别与计数
+ * （如「read_file × 3」，含失败卡时提示），展开仍由原卡片渲染；
+ * 组默认收起（过程区不被重复卡片淹没），开合同样按键记忆。
+ */
+function ToolSequenceView(props: {
+  item: ToolSequenceItem;
+  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+}) {
+  const { item } = props;
+  if (item.kind === "passthrough") {
+    return (
+      <SegmentView segment={item.segment} questionDraft={props.questionDraft} />
+    );
+  }
+  if (item.kind === "single") {
+    return <ToolCallCard call={item.segment} />;
+  }
+  const first = item.segments[0];
+  const { open, toggle } = useCollapseState(
+    `tool-group-${first?.id ?? ""}`,
+    false
+  );
+  return (
+    <li
+      data-testid="tool-call-group"
+      data-tool-name={item.toolName}
+      data-count={item.segments.length}
+    >
+      <button
+        type="button"
+        data-testid="tool-call-group-toggle"
+        aria-expanded={open}
+        onClick={toggle}
+        className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs hover:bg-hover"
+      >
+        <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-accent">
+          {item.toolName}
+        </span>
+        <span className="text-fg-muted">× {item.segments.length}</span>
+        {item.hasError && (
+          <span data-testid="tool-call-group-error" className="text-danger-fg">
+            含失败
+          </span>
+        )}
+        <span className="flex-1" />
+        <span className="text-fg-subtle">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <ol
+          data-testid="tool-call-group-items"
+          className="mt-2 flex flex-col gap-2"
+        >
+          {item.segments.map((call) => (
+            <ToolCallCard key={call.id} call={call} />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+/** 单段视图分派（渲染第一层）：按消息段类型选择呈现组件，每段一个 li */
+function SegmentView(props: {
+  segment: MessageSegment;
+  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+}) {
+  const { segment } = props;
+  if (segment.kind === "tool-call") {
+    return <ToolCallCard call={segment} />;
+  }
+  if (segment.kind === "interaction") {
+    return (
+      <InteractionHistory
+        record={segment.interaction}
+        draft={props.questionDraft?.(segment.id)}
+      />
+    );
+  }
+  if (segment.kind === "subagent") {
+    return <SubagentCard subagent={segment} />;
+  }
+  if (segment.kind === "thinking") {
+    return <ThinkingBlock segment={segment} />;
+  }
+  return <MessageBubble segment={segment} />;
 }
 
 /**

@@ -16,6 +16,29 @@ export function assert(condition, message) {
   }
 }
 
+/**
+ * 展开第 index 个「已工作折叠区」（票 04）并等其内容渲染，幂等可重试：
+ * 轮运行中折叠区强制展开，若恰在轮完成瞬间点击会被记为手动收起——
+ * 这里以「toggle 展开 + 内容可见」为准，边沿竞态自动重试。
+ */
+export async function expandWorkedHistory(window, index = 0) {
+  const toggle = window.getByTestId("worked-history-toggle").nth(index);
+  const items = toggle.locator("xpath=..").getByTestId("worked-history-items");
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if ((await toggle.getAttribute("aria-expanded")) === "true") {
+      try {
+        await items.waitFor({ state: "visible", timeout: 500 });
+        return;
+      } catch {
+        // 运行中展开 → 完成自动收起的边沿：落回重试
+      }
+    }
+    await toggle.click().catch(() => {});
+    await delay(150);
+  }
+  throw new Error(`无法展开第 ${index} 个已工作折叠区`);
+}
+
 /** 操作指定行的 portal 菜单；右键不应隐式切换当前会话。 */
 export async function sessionMenu(window, item) {
   const id = await item.getAttribute("data-session-id");

@@ -747,3 +747,72 @@ describe("交互记录段（mergeInteractions）", () => {
     expect(state).toHaveLength(0);
   });
 });
+
+describe("段时刻打点（已工作折叠区工时与工具耗时的数据来源）", () => {
+  it("运行期尾部追加的段都带 at（epoch ms）", () => {
+    const before = Date.now();
+    const state = applySessionEvent(
+      applySessionEvent([], {
+        type: "user-message",
+        message: stored({ id: "u1", role: "user" }),
+      }),
+      { type: "assistant-delta", messageId: "a1", delta: "你好" }
+    );
+    const after = Date.now();
+    for (const item of state) {
+      expect(typeof item.at).toBe("number");
+      expect(item.at).toBeGreaterThanOrEqual(before);
+      expect(item.at).toBeLessThanOrEqual(after);
+    }
+  });
+
+  it("工具卡打点：call 记 startedAt，result 补 endedAt 且原值不变", () => {
+    const seeded = applySessionEvent(
+      applySessionEvent([], {
+        type: "user-message",
+        message: stored({ id: "u1", role: "user" }),
+      }),
+      {
+        type: "tool-call",
+        call: toolRecord({
+          id: "c1",
+          arguments: "{}",
+          output: "",
+        }),
+      }
+    );
+    const startedAt = seg(seeded, 1).at;
+    const final = applySessionEvent(seeded, {
+      type: "tool-result",
+      call: toolRecord({ id: "c1", output: "结果" }),
+    });
+    const card = final.find((item) => item.id === "c1");
+    expect(card).toEqual(
+      expect.objectContaining({
+        kind: "tool-call",
+        running: false,
+        startedAt,
+        endedAt: expect.any(Number),
+      })
+    );
+  });
+
+  it("历史恢复的段 at 取自落库 createdAt", () => {
+    const items = initialTranscript([
+      {
+        kind: "message",
+        message: stored({
+          id: "u1",
+          role: "user",
+          createdAt: "2026-11-11T08:00:00.000Z",
+        }),
+      },
+      {
+        kind: "tool-call",
+        call: toolRecord({ createdAt: "2026-11-11T08:00:02.000Z" }),
+      },
+    ]);
+    expect(items[0]?.at).toBe(Date.parse("2026-11-11T08:00:00.000Z"));
+    expect(items[1]?.at).toBe(Date.parse("2026-11-11T08:00:02.000Z"));
+  });
+});
