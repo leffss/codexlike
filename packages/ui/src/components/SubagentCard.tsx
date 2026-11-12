@@ -189,8 +189,9 @@ function formatElapsed(subagent: SubagentSegment, now: number): string {
 }
 
 /**
- * 子代理思考折叠块（思考档位 03）：与主会话思考块同构——默认收起、
- * 流式运行中带思考指示器；与报告文本分离，仅运行期展示（历史恢复不重建）。
+ * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主会话思考块
+ * 同构——默认收起、流式运行中带思考指示器；与报告文本分离，
+ * 重启后由落盘 reasoning 重建（旧记录自然缺失，不渲染空块）。
  */
 function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
   const { reasoning, streaming } = props;
