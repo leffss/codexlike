@@ -132,16 +132,7 @@ async function main() {
       .locator("header nav")
       .getByRole("button", { name: "设置", exact: true })
       .click();
-    await window
-      .locator("section")
-      .filter({
-        has: window.getByRole("heading", {
-          name: "Provider Profiles",
-          exact: true,
-        }),
-      })
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Skills Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);

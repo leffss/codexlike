@@ -41,7 +41,7 @@ async function setupSettings(window, port) {
   await window.getByRole("button", { name: "设置", exact: true }).click();
 
   // Provider Profile（限定表单内点击，工单 10 踩坑：设置页多区多「保存」按钮）
-  await window.getByRole("button", { name: "+ 新建 Profile" }).click();
+  await window.getByTestId("profile-create").click();
   const profileForm = window.locator("form");
   await profileForm.getByLabel("名称").fill("Mock");
   await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);

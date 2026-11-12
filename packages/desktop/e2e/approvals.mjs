@@ -102,9 +102,7 @@ async function main() {
         exact: true,
       }),
     });
-    await profiles
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称", { exact: true }).fill("Mock");
     await profileForm

@@ -1,5 +1,4 @@
 import type {
-  SessionEvent,
   SessionManager,
   TranscriptItem,
 } from "@codexlike/agent-core/node";
@@ -62,7 +61,7 @@ export function createLiveSessions(manager: SessionManager) {
   function accept(
     id: string,
     executionId: string,
-    event: SessionEvent
+    event: SessionEventEnvelope["event"]
   ): SessionEventEnvelope | null {
     const live = sessions.get(id);
     if (!live || live.executionId !== executionId || live.terminalAt > 0)
@@ -71,6 +70,7 @@ export function createLiveSessions(manager: SessionManager) {
     if (
       live.stopped &&
       ![
+        "compact-finished",
         "assistant-aborted",
         "assistant-done",
         "error",
@@ -94,7 +94,16 @@ export function createLiveSessions(manager: SessionManager) {
         message: { ...event.message, aborted: true },
       };
     live.sequence += 1;
-    if (
+    if (event.type === "compact-start") {
+      live.activity.operation = "compact";
+    } else if (event.type === "compact-finished") {
+      if (live.stopped) event = { ...event, outcome: "interrupted" };
+      live.activity = { ...idle(), outcome: event.outcome };
+      live.terminalAt = live.sequence;
+      // 同一个终态信封携带权威历史，切换中的客户端无需另一次有竞态的查询。
+      live.history = event.history;
+      live.events = [];
+    } else if (
       event.type === "assistant-done" ||
       event.type === "assistant-aborted" ||
       event.type === "error"
@@ -156,12 +165,6 @@ export function createLiveSessions(manager: SessionManager) {
       unread: false,
     };
   }
-  function invalidate(id: string) {
-    const live = sessions.get(id);
-    if (!live) return;
-    live.history = manager.transcript(id);
-    live.events = [];
-  }
   return {
     begin,
     accept,
@@ -169,7 +172,6 @@ export function createLiveSessions(manager: SessionManager) {
     activity,
     markViewed,
     stop,
-    invalidate,
     forget(id: string) {
       sessions.delete(id);
     },

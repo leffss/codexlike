@@ -86,7 +86,7 @@ async function main() {
 
     // 1) 设置页：建主 Profile（mock-main）与子代理独立 Profile（mock-sub）
     await window.getByRole("button", { name: "设置", exact: true }).click();
-    await window.getByRole("button", { name: "+ 新建 Profile" }).click();
+    await window.getByTestId("profile-create").click();
     let profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
@@ -95,7 +95,7 @@ async function main() {
     await profileForm.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Mock").first().waitFor();
 
-    await window.getByRole("button", { name: "+ 新建 Profile" }).click();
+    await window.getByTestId("profile-create").click();
     profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("MockSub");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);

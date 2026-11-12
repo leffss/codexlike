@@ -16,6 +16,25 @@ export function assert(condition, message) {
   }
 }
 
+/** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
+export async function assertSemanticOverlay(dialog) {
+  const colors = await dialog.evaluate((element) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--overlay)";
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      actual: getComputedStyle(element.parentElement).backgroundColor,
+      expected,
+    };
+  });
+  assert(
+    colors.actual === colors.expected,
+    `遮罩必须遵循主题overlay：${JSON.stringify(colors)}`
+  );
+}
+
 /** 正常退出走票08确认/保存屏障；兜底只清理本次启动的进程树，不能误杀其他会话。 */
 export async function closeApp(app) {
   if (!app) return;

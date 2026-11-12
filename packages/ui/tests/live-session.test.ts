@@ -30,6 +30,65 @@ const snapshot: SessionView = {
   pendingInteractions: [],
   activity,
 };
+it("Compact启动和终态按水位接续并原子替换历史，切换快照与旧执行事件不重复不污染", () => {
+  const start: SessionEventEnvelope = {
+    ...delta(3, "", "compact-1"),
+    event: { type: "compact-start" },
+    activity: { ...activity, operation: "compact" },
+  };
+  const finished: SessionEventEnvelope = {
+    ...delta(4, "", "compact-1"),
+    activity: {
+      ...activity,
+      running: false,
+      outcome: "completed",
+      unread: true,
+    },
+    event: {
+      type: "compact-finished",
+      outcome: "completed",
+      history: [
+        {
+          kind: "message",
+          message: {
+            id: "summary",
+            sessionId: "a",
+            role: "compact-summary",
+            content: "权威摘要",
+            createdAt: "2026-11-11T09:00:00Z",
+          },
+        },
+      ],
+    },
+  };
+  const running = receiveLiveEvent(hydrateLiveSession(snapshot), start);
+  expect(running.executionId).toBe("compact-1");
+  expect(running.activity.operation).toBe("compact");
+  const done = receiveLiveEvent(running, finished);
+  expect(done.items).toMatchObject([{ id: "summary", content: "权威摘要" }]);
+  expect(done.activity.running).toBe(false);
+  expect(receiveLiveEvent(done, finished)).toEqual(done);
+  expect(
+    receiveLiveEvent(done, {
+      ...finished,
+      sequence: 5,
+      executionId: "old-compact",
+    })
+  ).toEqual(done);
+  expect(receiveLiveEvent(done, delta(6, "旧正文"))).toEqual(done);
+  const switched = hydrateLiveSession(
+    {
+      ...snapshot,
+      executionId: "compact-1",
+      sequence: 3,
+      events: [start],
+      activity: start.activity,
+    },
+    [finished]
+  );
+  expect(switched).toEqual(done);
+});
+
 it("在停止清理期间切回仍接收中断终态，不能残留流式标记", () => {
   const stopped = hydrateLiveSession({
     ...snapshot,

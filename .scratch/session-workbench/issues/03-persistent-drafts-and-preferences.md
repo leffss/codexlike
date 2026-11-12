@@ -59,3 +59,7 @@
 - `test:e2e:projects`、`test:e2e`（smoke）通过；合并后 `test:e2e:live-sessions`、`test:e2e:worktree`、`test:e2e:sidebar` 组合通过。专项 persistence 已加入 desktop `test:e2e:all` 链。
 - 最终提交钩子首次运行遇既有04 `worktree-service` 复制失败重试用例 5000ms 超时（5018ms，无断言失败），正常阻止提交；独立重跑该文件10测试通过（该用例1692ms），不改04实现、不绕钩子，随后正常重试提交。
 - 未执行完整 `test:e2e:all`、`dist` 或 packaged；完整运行中退出由08负责，完整发布打包由09负责。
+
+## 审查修复追踪（2026-11-12）
+
+独立审查发现两处草稿边界缺陷并已修复：Compact 裁掉问答轮次后旧草稿校验永久失败阻断保存/退出（改为按同会话持久交互记录校验，只读草稿保留）；首次发送已执行但草稿消费落盘/解密失败时重试不补偿、新文本被吞（移除 post-start 解密，补偿消费不重放、不清空失败后编辑的新文本）。红绿与真实 Electron 保存屏障退出回归见 [review-fixes.md](../review-fixes.md) §1、§2。

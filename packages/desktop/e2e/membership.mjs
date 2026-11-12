@@ -8,7 +8,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  assertSemanticOverlay,
+  closeApp,
+  launchApp,
+  startMockProvider,
+} from "./helpers.mjs";
 
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-membership-"));
@@ -39,16 +45,7 @@ async function main() {
     await window.getByTestId("add-project").click();
     await window.getByTestId("project-group").waitFor();
     await window.getByTestId("settings-open").click();
-    await window
-      .locator("section")
-      .filter({
-        has: window.getByRole("heading", {
-          name: "Provider Profiles",
-          exact: true,
-        }),
-      })
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Membership Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
@@ -76,6 +73,7 @@ async function main() {
     await create("待移动");
     await window.getByTestId("composer-input").fill("保留当前草稿");
     await window.getByTestId("session-membership").click();
+    await assertSemanticOverlay(window.getByTestId("membership-dialog"));
     await window
       .getByTestId("membership-target")
       .selectOption({ label: "项目" });
@@ -101,6 +99,7 @@ async function main() {
     await create("当前所属", true);
     await window.getByTestId("project-remove").click();
     await window.getByTestId("project-removal-dialog").waitFor();
+    await assertSemanticOverlay(window.getByTestId("project-removal-dialog"));
     assert(
       (
         await window.getByTestId("project-removal-dialog").textContent()

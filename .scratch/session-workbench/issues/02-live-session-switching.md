@@ -57,3 +57,7 @@
 - 整合票05后再次通过 `pnpm typecheck`、`pnpm build`、UI 98 测试、Desktop `live-session-ipc` + `workbench-ipc` 15 测试，以及真实 Electron `test:e2e:live-sessions`、`test:e2e:sidebar`、interactions(queue)。`sidebar` 验证最近使用/置顶/折叠、归档查看恢复、三入口导航、等待保护；`markViewed` 不影响票05排序。
 - 正常提交 hooks 自动运行 `check:adr`、`lint-staged`、`typecheck`、`pnpm test`：功能提交阶段 Core 416 + Desktop 90 + UI 98，共604测试通过；Windows 符号链接用例命中既有 EPERM 跳过分支，不声称该分支已验证。
 - **未验边界**：未运行 `pnpm dist`、打包冷启动、全量 E2E 或 interactions 的 questions/cancel 场景；后两场景旧新建前置仍由相应后续票适配。跨重启执行终态归08，草稿/偏好持久化归03，侧栏完整排序归05；本票不声称这些票已完成。
+
+## 审查修复追踪（2026-11-12）
+
+独立审查发现 Compact 未走本票统一运行现场（execution running 而 view/list 分叉、切换后停止入口丢失）。修复将 Compact 并入与 send 共用的占位/现场起点/中断清理，并新增 `compact-start`/`compact-finished` 统一序号信封（终态携权威历史）；宿主、UI 纯逻辑与真实 Electron 切换/停止/后台完成/退出回归见 [review-fixes.md](../review-fixes.md) §3。

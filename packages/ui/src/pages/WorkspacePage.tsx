@@ -255,6 +255,9 @@ export function WorkspacePage(props: {
         );
         setMessages(live.items);
         setStreaming(live.activity.running);
+        setCompacting(
+          live.activity.running && live.activity.operation === "compact"
+        );
         void window.codexlike.sessions
           .markViewed(id, live.sequence)
           .then(() => refreshSessions());
@@ -327,6 +330,15 @@ export function WorkspacePage(props: {
           const live = receiveLiveEvent(previous, { ...envelope });
           if (live === previous) return;
           liveRef.current = live;
+          if (event.type === "compact-finished") {
+            workspaceState.reconcile(
+              sessionId,
+              live.items.flatMap((item) =>
+                item.kind === "interaction" ? [item.interaction] : []
+              ),
+              workspaceState.version()
+            );
+          }
           // 本地 /status 反馈不属于宿主历史，接续时保留。
           setMessages((prev) => [
             ...live.items,
@@ -335,6 +347,9 @@ export function WorkspacePage(props: {
             ),
           ]);
           setStreaming(live.activity.running);
+          setCompacting(
+            live.activity.running && live.activity.operation === "compact"
+          );
           if (!live.activity.running)
             void window.codexlike.sessions
               .markViewed(sessionId, live.sequence)
@@ -344,6 +359,7 @@ export function WorkspacePage(props: {
           event.type === "assistant-start" ||
           event.type === "tool-result" ||
           (event.type === "subagent-tool" && event.phase === "result") ||
+          event.type === "compact-finished" ||
           event.type === "assistant-done" ||
           event.type === "assistant-aborted" ||
           event.type === "error"
@@ -351,6 +367,7 @@ export function WorkspacePage(props: {
           void refreshResources(sessionId);
         }
         if (
+          event.type === "compact-finished" ||
           event.type === "assistant-done" ||
           event.type === "assistant-aborted" ||
           event.type === "error"
@@ -361,6 +378,8 @@ export function WorkspacePage(props: {
       }
       if (
         event.type === "user-message" ||
+        event.type === "compact-start" ||
+        event.type === "compact-finished" ||
         event.type === "assistant-done" ||
         event.type === "assistant-aborted" ||
         event.type === "error" ||
@@ -657,24 +676,7 @@ export function WorkspacePage(props: {
             current!.id,
             selectedProfileId
           );
-          await refreshSessions();
-          // 重拉时间线：被压缩历史折叠为摘要卡片 + 最近 3 轮原文
-          const snapshotVersion = workspaceState.version();
-          const view = await window.codexlike.sessions.view(compactSessionId);
-          if (!compactIsCurrent()) return;
-          if (!view) throw new Error("会话不存在或已损坏");
-          const live = hydrateLiveSession(view);
-          liveRef.current = live;
-          workspaceState.reconcile(
-            compactSessionId,
-            live.items.flatMap((item) =>
-              item.kind === "interaction" ? [item.interaction] : []
-            ),
-            snapshotVersion
-          );
-          setMessages(live.items);
-          // 压缩后用量下降，告警随之重估（大概率消失）
-          await refreshContextWarning(compactSessionId);
+          // 历史与运行状态由同序号终态事件更新；IPC回包只提供本地命令反馈。
           if (!compactIsCurrent()) return;
           pushLocalStatus(
             `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`

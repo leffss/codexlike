@@ -45,16 +45,7 @@ async function main() {
       "真进程重开仍为空项目"
     );
     await window.getByTestId("settings-open").click();
-    await window
-      .locator("section")
-      .filter({
-        has: window.getByRole("heading", {
-          name: "Provider Profiles",
-          exact: true,
-        }),
-      })
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Workbench Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);

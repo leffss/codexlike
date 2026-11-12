@@ -38,9 +38,7 @@ export function SettingsPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-medium text-fg">
-              Provider Profiles
-            </h2>
+            <h2 className="text-base font-medium text-fg">Provider Profiles</h2>
             <p className="text-xs text-fg-muted">
               OpenAI 兼容端点（baseURL + API Key + 模型）；API Key
               经系统加密存储，磁盘上无明文
@@ -50,6 +48,7 @@ export function SettingsPage() {
             <button
               type="button"
               className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover"
+              data-testid="profile-create"
               onClick={() => setEditing("new")}
             >
               + 新建 Profile
@@ -501,9 +500,7 @@ function SearchSettingsSection() {
             <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
               Tavily
             </span>
-            <span
-              className={configured ? "text-ok-fg" : "text-warn-fg"}
-            >
+            <span className={configured ? "text-ok-fg" : "text-warn-fg"}>
               {configured
                 ? "已配置"
                 : "未配置（web_search 将提示先在设置页填写 key）"}

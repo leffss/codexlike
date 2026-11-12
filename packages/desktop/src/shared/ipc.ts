@@ -168,12 +168,22 @@ export interface SessionEventEnvelope {
   executionId: string;
   /** 会话内单调递增，跨执行不重置；快照含 <= sequence 的全部事件。 */
   sequence: number;
-  event: SessionEvent;
+  event:
+    | SessionEvent
+    | { type: "compact-start" }
+    | {
+        type: "compact-finished";
+        outcome: "completed" | "failed" | "interrupted";
+        history: TranscriptItem[];
+        error?: string;
+      };
   activity: SessionActivity;
 }
 
 /** 当前进程的执行/查看状态，不参与最近使用排序，不持久化思考内容。 */
 export interface SessionActivity {
+  /** 仅活动期间用于恢复正确入口；省略表示普通消息执行或空闲。 */
+  operation?: "compact";
   running: boolean;
   waitingForUser: boolean;
   outcome: "completed" | "failed" | "interrupted" | null;

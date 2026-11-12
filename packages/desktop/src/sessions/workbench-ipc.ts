@@ -105,24 +105,20 @@ export function registerWorkbenchHandlers(
       throw new Error("问答草稿不合法");
     const questionDrafts: WorkbenchValue["questionDrafts"] = {};
     const history =
-      checked.kind === "session" ? manager.transcript(checked.sessionId) : [];
+      checked.kind === "session" ? manager.interactions(checked.sessionId) : [];
     for (const [id, draft] of Object.entries(questions)) {
-      const item = history.find(
-        (item) =>
-          item.kind === "interaction" && item.interaction.request.id === id
-      );
+      const item = history.find((item) => item.request.id === id);
       if (
-        item?.kind !== "interaction" ||
-        item.interaction.request.kind !== "questions" ||
+        item?.request.kind !== "questions" ||
         !Number.isSafeInteger(draft?.index) ||
         draft.index < 0 ||
-        draft.index >= item.interaction.request.questions.length ||
+        draft.index >= item.request.questions.length ||
         !draft.answers ||
         typeof draft.answers !== "object"
       )
         throw new Error("问答草稿与会话请求不匹配");
       const answers: typeof draft.answers = {};
-      for (const question of item.interaction.request.questions) {
+      for (const question of item.request.questions) {
         const answer = draft.answers[question.id];
         if (
           !answer ||
@@ -190,11 +186,13 @@ export function registerWorkbenchHandlers(
   });
   return {
     read,
-    async started(
+    started(
       projectId: string | null,
       requestId: string,
       sessionId: string,
-      preferences: WorkbenchValue["preferences"]
+      preferences: WorkbenchValue["preferences"],
+      defaultProfileId: string,
+      acceptedText?: string
     ) {
       // 首次发送可能已完成且记录刚被用户移除；不能初始化悬挂工作现场。
       if (!manager.list().some((session) => session.id === sessionId)) return;
@@ -212,23 +210,27 @@ export function registerWorkbenchHandlers(
             preferences,
           },
         });
-      const profile = (await profiles.list())[0];
+      // 使用启动前已解析的默认模型，不在首条消息接受后再解密配置。
       // 仅消费对应意图；草稿写入没有 await，读取后同步替换。
       const latest = manager.readWorkbench(key);
       if (latest?.value.requestId === requestId)
         manager.writeWorkbench(key, {
           revision: latest.revision + 1,
-          value: {
-            text: "",
-            requestId: randomUUID(),
-            questionDrafts: {},
-            readingPosition: null,
-            preferences: {
-              providerProfileId: profile?.id ?? "",
-              thinkingEffort: "auto",
-              approvalMode: "ask",
-            },
-          },
+          // 补偿时草稿可能已编辑；只轮换意图，不能把未执行的新文本当成旧任务清空。
+          value:
+            acceptedText !== undefined && latest.value.text !== acceptedText
+              ? { ...latest.value, requestId: randomUUID() }
+              : {
+                  text: "",
+                  requestId: randomUUID(),
+                  questionDrafts: {},
+                  readingPosition: null,
+                  preferences: {
+                    providerProfileId: defaultProfileId,
+                    thinkingEffort: "auto",
+                    approvalMode: "ask",
+                  },
+                },
         });
     },
   };

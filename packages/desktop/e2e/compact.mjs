@@ -39,6 +39,22 @@ async function sendAndAwait(window, composer, text, targetAssistantCount) {
  * 全部请求体由骨架记录（seenBodies，注入上下文的真实证据）。
  */
 async function main() {
+  let holdCompact = true;
+  let heldSummary;
+  const finishSummary = (ctx) =>
+    ctx.respondJson({
+      id: "chatcmpl-e2e-compact",
+      object: "chat.completion",
+      created: 0,
+      model: "mock-model",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: SUMMARY_MARKER },
+          finish_reason: "stop",
+        },
+      ],
+    });
   const { server, port, seenBodies } = await startMockProvider(
     (ctx, { body }) => {
       const isStream =
@@ -47,19 +63,8 @@ async function main() {
         ctx.textRound("收到。");
         return;
       }
-      ctx.respondJson({
-        id: "chatcmpl-e2e-compact",
-        object: "chat.completion",
-        created: 0,
-        model: "mock-model",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: SUMMARY_MARKER },
-            finish_reason: "stop",
-          },
-        ],
-      });
+      if (holdCompact) heldSummary = () => finishSummary(ctx);
+      else finishSummary(ctx);
     }
   );
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-compact-"));
@@ -72,7 +77,7 @@ async function main() {
 
     // 1) 设置页创建 Profile
     await window.getByRole("button", { name: "设置", exact: true }).click();
-    await window.getByRole("button", { name: "+ 新建 Profile" }).click();
+    await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
@@ -93,6 +98,38 @@ async function main() {
       await sendAndAwait(window, composer, `第${i}轮问题`, i);
     }
 
+    // 挂起Compact后A→B→A：停止入口恢复，停止不改历史；再后台完成同样更新。
+    await window.getByTestId("new-session").click();
+    await sendAndAwait(window, composer, "会话B", 1);
+    const chooseA = () =>
+      window
+        .getByTestId("session-item")
+        .filter({ hasText: "第1轮问题" })
+        .click();
+    const chooseB = () =>
+      window.getByTestId("session-item").filter({ hasText: "会话B" }).click();
+    await chooseA();
+    await composer.fill("/compact");
+    await composer.press("Enter");
+    await window.getByTestId("compacting-indicator").waitFor();
+    await chooseB();
+    await chooseA();
+    await window.getByTestId("compacting-indicator").waitFor();
+    await window.getByTestId("composer-stop").click();
+    await window
+      .getByTestId("compacting-indicator")
+      .waitFor({ state: "hidden" });
+    assert(
+      (await window.getByTestId("message-user").count()) === 4,
+      "停止Compact不裁旧历史"
+    );
+    assert(
+      (await window.getByTestId("message-compact-summary").count()) === 0,
+      "停止Compact不生成摘要"
+    );
+    heldSummary?.();
+    heldSummary = undefined;
+
     // 3) /compact：命令菜单出现 /compact，选中执行
     await composer.fill("/comp");
     const menu = window.getByTestId("composer-menu");
@@ -103,6 +140,21 @@ async function main() {
     );
     await composer.press("Enter");
 
+    await window.getByTestId("compacting-indicator").waitFor();
+    await chooseB();
+    await chooseA();
+    await window.getByTestId("compacting-indicator").waitFor();
+    await window.waitForFunction(async () => {
+      const session = (await window.codexlike.sessions.list()).find(
+        (s) => s.title === "第1轮问题"
+      );
+      const view = await window.codexlike.sessions.view(session.id);
+      return view.activity.running && view.activity.operation === "compact";
+    });
+    assert(typeof heldSummary === "function", "压缩请求已进入模型闸门");
+    heldSummary();
+    heldSummary = undefined;
+    holdCompact = false;
     // 摘要卡片出现（被压缩历史折叠为一张卡片）
     const summaryCard = window.getByTestId("message-compact-summary");
     await summaryCard.waitFor({ timeout: 20_000 });
@@ -185,8 +237,38 @@ async function main() {
     );
     console.log("[e2e] 压缩后继续对话：请求体 = 摘要 + 最近 3 轮 + 新消息");
 
-    // 6) 重启应用：摘要卡片仍可见（持久化恢复）
-    await closeApp(app);
+    // 6) 挂起Compact时退出：取消保留执行；确认等flush再停止，不重放摘要请求。
+    holdCompact = true;
+    await composer.fill("/compact");
+    await composer.press("Enter");
+    await window.getByTestId("compacting-indicator").waitFor();
+    await chooseB();
+    await app.evaluate(({ app }) => app.quit());
+    await window.getByTestId("exit-cancel").click();
+    await chooseA();
+    await window.getByTestId("compacting-indicator").waitFor();
+    const requestsBeforeExit = seenBodies.length;
+    const exited = new Promise((resolve) =>
+      app.process().once("exit", resolve)
+    );
+    await app.evaluate(({ app }) => app.quit());
+    await window.getByTestId("exit-confirm").click();
+    let timeout;
+    try {
+      await Promise.race([
+        exited,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Compact确认退出未排空")),
+            10_000
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    app = null;
+    // 重启应用：原摘要卡片仍可见，中止的再次Compact没有改写历史。
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({
       homeDir,
     });
@@ -199,7 +281,10 @@ async function main() {
       (await relaunchedWindow.getByTestId("message-user").count()) === 4,
       "重启后用户消息应为压缩后的 4 条"
     );
-    console.log("[e2e] 重启后摘要卡片仍可见（持久化验证）");
+    assert(seenBodies.length === requestsBeforeExit, "重启不重放Compact或消息");
+    console.log(
+      "[e2e] Compact切换、停止、后台完成、退出取消/确认及重启零重放通过"
+    );
 
     await closeApp(app);
     console.log("[e2e] 工单 08 compact 冒烟通过 ✅");

@@ -10,7 +10,12 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { assert, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  assertSemanticOverlay,
+  launchApp,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const questions = [
   {
@@ -204,6 +209,9 @@ async function main() {
       BrowserWindow.getAllWindows()[0].close()
     );
     await window.getByTestId("exit-confirm").waitFor();
+    await assertSemanticOverlay(
+      window.getByTestId("exit-confirm").locator("../..")
+    );
     assert(!childDisconnected, "确认前子代理没有被停止");
     await window.getByTestId("exit-cancel").click();
     held

@@ -54,14 +54,12 @@ function setup(now?: () => string, beforeResources?: () => void) {
   mkdirSync(workspace);
   let store = createSqliteSessionStore(join(home, "session-workbench.db"));
   cleanup.push(() => store.close());
-  const profiles = createProfileStore({
-    dir: home,
-    safeStorage: {
-      isEncryptionAvailable: async () => true,
-      encryptString: async (text) => Buffer.from(text),
-      decryptString: async (bytes) => bytes.toString(),
-    },
-  });
+  const safeStorage = {
+    isEncryptionAvailable: async () => true,
+    encryptString: async (text: string) => Buffer.from(text),
+    decryptString: async (bytes: Buffer) => bytes.toString(),
+  };
+  const profiles = createProfileStore({ dir: home, safeStorage });
   const worktrees = createWorktreeService({
     worktreesDir: join(home, "worktrees"),
   });
@@ -92,6 +90,7 @@ function setup(now?: () => string, beforeResources?: () => void) {
     home,
     workspace,
     profiles,
+    safeStorage,
     worktrees,
     get manager() {
       return manager;
@@ -458,6 +457,182 @@ it("成功首次发送只消费同一意图，失败保留设置；迟到保存�
   expect((await invoke("workbench:read", target)).value.text).toBe("");
 });
 
+it("首条消息接受后不再解密默认配置，成功重试不重放且新文本取得新意图", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const target = { kind: "new", projectId: null };
+  const saved = await invoke("workbench:read", target);
+  invoke("workbench:write", target, {
+    revision: 1,
+    value: { ...saved.value, text: "首个意图" },
+  });
+  let reads = 0;
+  const decrypt = vi
+    .spyOn(app.safeStorage, "decryptString")
+    .mockImplementation(async (bytes) => {
+      if (++reads > 2)
+        throw new Error("injected keychain unavailable after start");
+      return bytes.toString();
+    });
+  const request = {
+    requestId: saved.value.requestId,
+    projectId: null,
+    text: "首个意图",
+  };
+  const first = await invoke("sessions:start", request);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", first.id).running).toBe(false)
+  );
+  expect((await invoke("sessions:start", request)).id).toBe(first.id);
+  decrypt.mockRestore();
+  const next = await invoke("workbench:read", target);
+  expect(next.value.requestId).not.toBe(request.requestId);
+  expect(next.value.preferences).toEqual({
+    providerProfileId: model.profile.id,
+    thinkingEffort: "auto",
+    approvalMode: "ask",
+  });
+  invoke("workbench:write", target, {
+    revision: next.revision + 1,
+    value: { ...next.value, text: "全新任务" },
+  });
+  const second = await invoke("sessions:start", {
+    requestId: next.value.requestId,
+    projectId: null,
+    text: "全新任务",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", second.id).running).toBe(false)
+  );
+  expect(second.id).not.toBe(first.id);
+  expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
+    "首个意图",
+    "全新任务",
+  ]);
+});
+
+it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放并允许下一个新任务", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const target = { kind: "new", projectId: null };
+  const saved = await invoke("workbench:read", target);
+  const value = {
+    ...saved.value,
+    text: "已接收任务",
+    preferences: { ...saved.value.preferences, thinkingEffort: "high" },
+  };
+  invoke("workbench:write", target, { revision: 1, value });
+  const request = {
+    requestId: value.requestId,
+    projectId: null,
+    text: value.text,
+    ...value.preferences,
+  };
+  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  try {
+    fault.exec(
+      `CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state WHEN OLD.key = '${workbenchKey(target as { kind: "new"; projectId: null })}' BEGIN SELECT RAISE(ABORT, 'injected consume disk failure'); END`
+    );
+    await expect(invoke("sessions:start", request)).rejects.toThrow(
+      "injected consume disk failure"
+    );
+    const [first] = invoke("sessions:list");
+    await vi.waitFor(() =>
+      expect(invoke("sessions:execution", first.id).running).toBe(false)
+    );
+    expect((await invoke("workbench:read", target)).value).toEqual(value);
+    fault.exec("DROP TRIGGER fail_consume");
+    app.reopen();
+    expect((await invoke("sessions:start", request)).id).toBe(first.id);
+    const consumed = await invoke("workbench:read", target);
+    expect(consumed.value.requestId).not.toBe(value.requestId);
+    expect(consumed.value.text).toBe("");
+    expect(
+      (await invoke("workbench:read", { kind: "session", sessionId: first.id }))
+        .value.preferences.thinkingEffort
+    ).toBe("high");
+    invoke("workbench:write", target, {
+      revision: consumed.revision + 1,
+      value: { ...consumed.value, text: "补偿后新任务" },
+    });
+    const second = await invoke("sessions:start", {
+      requestId: consumed.value.requestId,
+      projectId: null,
+      text: "补偿后新任务",
+    });
+    await vi.waitFor(() =>
+      expect(invoke("sessions:execution", second.id).running).toBe(false)
+    );
+    expect(second.id).not.toBe(first.id);
+    expect((await invoke("sessions:start", request)).id).toBe(first.id);
+    expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
+      "已接收任务",
+      "补偿后新任务",
+    ]);
+  } finally {
+    fault.close();
+  }
+});
+
+it("补偿已接受意图不能清空失败后编辑的新文本，而应保存为新的可发送意图", async () => {
+  const app = setup();
+  const model = await provider(app);
+  const target = { kind: "new", projectId: null } as const;
+  const saved = await invoke("workbench:read", target);
+  invoke("workbench:write", target, {
+    revision: 1,
+    value: { ...saved.value, text: "首个已接受任务" },
+  });
+  const request = {
+    requestId: saved.value.requestId,
+    projectId: null,
+    text: "首个已接受任务",
+  };
+  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  try {
+    fault.exec(
+      "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"
+    );
+    await expect(invoke("sessions:start", request)).rejects.toThrow(
+      "injected consume failure"
+    );
+    fault.exec("DROP TRIGGER fail_consume");
+  } finally {
+    fault.close();
+  }
+  const [first] = invoke("sessions:list");
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", first.id).running).toBe(false)
+  );
+  invoke("workbench:write", target, {
+    revision: 2,
+    value: { ...saved.value, text: "失败后准备的不同任务" },
+  });
+  expect(
+    (
+      await invoke("sessions:start", {
+        ...request,
+        text: "失败后准备的不同任务",
+      })
+    ).id
+  ).toBe(first.id);
+  const next = await invoke("workbench:read", target);
+  expect(next.value.text).toBe("失败后准备的不同任务");
+  expect(next.value.requestId).not.toBe(request.requestId);
+  const second = await invoke("sessions:start", {
+    requestId: next.value.requestId,
+    projectId: null,
+    text: next.value.text,
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", second.id).running).toBe(false)
+  );
+  expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
+    "首个已接受任务",
+    "失败后准备的不同任务",
+  ]);
+});
+
 it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟到保存与伪造问答", async () => {
   const app = setup();
   await provider(app, true);
@@ -530,6 +705,108 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
     (await invoke("workbench:read", { kind: "new", projectId: null })).value
       .preferences.approvalMode
   ).toBe("ask");
+});
+
+it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重开不复活授权且拒绝跨会话请求", async () => {
+  const app = setup();
+  const model = await provider(app, true);
+  const session = await invoke("sessions:start", {
+    requestId: "compact-question-draft",
+    projectId: null,
+    text: "将被压缩的问答轮次",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(1)
+  );
+  const [interaction] = invoke("sessions:pending-interactions", session.id);
+  const target = { kind: "session", sessionId: session.id };
+  const original = await invoke("workbench:read", target);
+  const questionDrafts = {
+    [interaction.request.id]: {
+      index: 0,
+      answers: {
+        q: { selectedOptionIds: [], text: "保留未提交回答", skipped: false },
+      },
+    },
+  };
+  invoke("workbench:write", target, {
+    revision: 1,
+    value: { ...original.value, questionDrafts },
+  });
+  invoke("sessions:interrupt", session.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", session.id).running).toBe(false)
+  );
+  for (let round = 0; round < 4; round++) {
+    await invoke(
+      "sessions:send",
+      session.id,
+      `后续任务${round}`,
+      model.profile.id
+    );
+    await vi.waitFor(() =>
+      expect(invoke("sessions:execution", session.id).running).toBe(false)
+    );
+  }
+  await invoke("sessions:compact", session.id, model.profile.id);
+  expect(
+    invoke("sessions:messages", session.id).some(
+      (item: any) =>
+        item.kind === "message" &&
+        item.message.id === interaction.request.turnId
+    )
+  ).toBe(false);
+  expect(
+    invoke("workbench:write", target, {
+      revision: 2,
+      value: { ...original.value, questionDrafts, text: "压缩后编辑" },
+    }).accepted
+  ).toBe(true);
+  app.reopen();
+  expect((await invoke("workbench:read", target)).value).toMatchObject({
+    text: "压缩后编辑",
+    questionDrafts,
+  });
+  expect(invoke("sessions:messages", session.id)).toContainEqual(
+    expect.objectContaining({
+      kind: "interaction",
+      interaction: expect.objectContaining({ status: "cancelled" }),
+    })
+  );
+  expect(
+    invoke("sessions:respond-interaction", session.id, interaction.request.id, {
+      kind: "questions",
+      answers: [],
+    })
+  ).toBe(false);
+  const other = await invoke("sessions:start", {
+    requestId: "other-draft",
+    projectId: null,
+    text: "另一会话",
+  });
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", other.id).running).toBe(false)
+  );
+  for (const invalidDrafts of [
+    questionDrafts,
+    { forged: Object.values(questionDrafts)[0] },
+  ]) {
+    expect(() =>
+      invoke(
+        "workbench:write",
+        { kind: "session", sessionId: other.id },
+        {
+          revision: 3,
+          value: { ...original.value, questionDrafts: invalidDrafts },
+        }
+      )
+    ).toThrow("问答草稿与会话请求不匹配");
+  }
+  await invoke("sessions:send", session.id, "压缩后编辑", model.profile.id);
+  await vi.waitFor(() =>
+    expect(invoke("sessions:execution", session.id).running).toBe(false)
+  );
+  expect(model.bodies.at(-1).messages.at(-1).content).toBe("压缩后编辑");
 });
 
 it("实际模型请求使用发送快照，中途偏好只影响下一次；缺失配置不静默替换", async () => {
@@ -1203,10 +1480,26 @@ it("压缩执行也复用宿主占位，不能在异步生成摘要期间移除�
       expect(invoke("sessions:execution", record.id).running).toBe(false)
     );
   }
+  const beforeCompact = invoke("sessions:view", record.id);
   const compacting = invoke("sessions:compact", record.id, model.profile.id);
   await ready;
   try {
     expect(invoke("sessions:execution", record.id).running).toBe(true);
+    const view = invoke("sessions:view", record.id);
+    expect(view.activity).toMatchObject({
+      running: true,
+      operation: "compact",
+      outcome: null,
+    });
+    expect(view.executionId).toBe(
+      invoke("sessions:execution", record.id).executionId
+    );
+    expect(view.executionId).not.toBe(beforeCompact.executionId);
+    expect(view.sequence).toBeGreaterThan(beforeCompact.sequence);
+    expect(view.events.map((envelope: any) => envelope.event.type)).toEqual([
+      "compact-start",
+    ]);
+    expect(invoke("sessions:list")[0].activity).toEqual(view.activity);
     expect(() => invoke("sessions:set-project", record.id, null)).toThrow(
       "先停止"
     );
@@ -1359,7 +1652,7 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
   expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
 });
 
-it("首次发送成功后的03草稿消费仍在等待时移除项目，旧requestId不得返回删除记录或回滚磁盘", async () => {
+it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requestId不得返回删除记录或回滚磁盘", async () => {
   const app = setup();
   const model = await provider(app);
   const git = (...args: string[]) =>
@@ -1376,19 +1669,30 @@ it("首次发送成功后的03草稿消费仍在等待时移除项目，旧reque
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  vi.spyOn(app.profiles, "list")
-    .mockResolvedValueOnce(available)
-    .mockResolvedValueOnce(available)
-    .mockImplementationOnce(async () => {
-      await gate;
-      return available;
-    });
+  const draftTarget = { kind: "new", projectId: project.id } as const;
+  const draft = await invoke("workbench:read", draftTarget);
   const request = {
-    requestId: "consume-removed",
+    requestId: draft.value.requestId,
     projectId: project.id,
     workspaceMode: "worktree",
     text: "已执行过不能回滚",
   };
+  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  try {
+    fault.exec(
+      "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"
+    );
+    await expect(invoke("sessions:start", request)).rejects.toThrow(
+      "injected consume failure"
+    );
+    fault.exec("DROP TRIGGER fail_consume");
+  } finally {
+    fault.close();
+  }
+  vi.spyOn(app.profiles, "list").mockImplementationOnce(async () => {
+    await gate;
+    return available;
+  });
   const sending = invoke("sessions:start", request);
   const duplicate = invoke("sessions:start", request);
   const rejected = expect(sending).rejects.toThrow("已移除");

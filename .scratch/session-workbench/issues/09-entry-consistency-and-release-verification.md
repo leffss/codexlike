@@ -97,3 +97,7 @@
 - 未测试操作系统关机事件、renderer 崩溃导致无法应答保存屏障的恢复UI；硬杀前未落盘瞬态不保证恢复。已落库异常重启及零工具重放由 exit E2E 覆盖。
 - 未做超大历史性能压力、非ASCII完整大小写折叠、安装向导/卸载器手动走查或代码签名；SQL 子串搜索与未签名 Windows 发行边界不变。
 - 实现者的差异核对与测试不是独立代码审查；主协调者将在集成后另行 code-review。规格用户故事和验收原文未删减。
+
+## 审查修复追踪（2026-11-12）
+
+独立审查 Standards 轴指出本票新增 E2E 的 Profile 按钮使用 section+heading+getByRole 定位、退出/归属弹窗遮罩硬编码 `bg-black/40`。已为真实按钮添加 `profile-create` testid 并统一 22 个脚本定位；遮罩改语义 token `bg-overlay` 并以真实计算色值断言。Spec 轴 P1/P2 修复与本分支最终完整检查表见 [review-fixes.md](../review-fixes.md)。

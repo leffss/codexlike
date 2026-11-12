@@ -65,7 +65,7 @@ async function main() {
     app = launched.app;
     const window = launched.window;
     await window.getByRole("button", { name: "设置", exact: true }).click();
-    await window.getByRole("button", { name: "+ 新建 Profile" }).click();
+    await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);

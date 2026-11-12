@@ -10,8 +10,25 @@ async function main() {
   const workspaceDir = join(root, "project");
   mkdirSync(workspaceDir);
   const model = await startMockProvider((ctx, { body }) => {
-    const lastUser = JSON.parse(body)
-      .messages.filter((m) => m.role === "user")
+    const request = JSON.parse(body);
+    if (!request.stream) {
+      ctx.respondJson({
+        id: "draft-compact",
+        object: "chat.completion",
+        created: 0,
+        model: "persistent-model",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "已压缩旧问答任务" },
+            finish_reason: "stop",
+          },
+        ],
+      });
+      return;
+    }
+    const lastUser = request.messages
+      .filter((m) => m.role === "user")
       .at(-1)?.content;
     if (lastUser === "提问草稿验收")
       ctx.toolCallRound("persistent-question", "ask_user_question", {
@@ -38,16 +55,7 @@ async function main() {
     let window;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window.getByTestId("settings-open").click();
-    await window
-      .locator("section")
-      .filter({
-        has: window.getByRole("heading", {
-          name: "Provider Profiles",
-          exact: true,
-        }),
-      })
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Persistent Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
@@ -55,16 +63,7 @@ async function main() {
     await form.getByLabel("模型").fill("persistent-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Persistent Mock", { exact: true }).waitFor();
-    await window
-      .locator("section")
-      .filter({
-        has: window.getByRole("heading", {
-          name: "Provider Profiles",
-          exact: true,
-        }),
-      })
-      .getByRole("button", { name: "+ 新建 Profile", exact: true })
-      .click();
+    await window.getByTestId("profile-create").click();
     await form.getByLabel("名称").fill("Second Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
     await form.getByLabel("API Key").fill("test-second");
@@ -261,8 +260,94 @@ async function main() {
       "失效请求不能重新提交或授权"
     );
     assert(model.requestCount() === 3, "问答重启不自动请求模型");
+    for (let round = 0; round < 4; round++) {
+      await window.getByTestId("composer-input").fill(`问答后继续${round}`);
+      await window.getByTestId("composer-send").click();
+      await window.waitForFunction(async (text) => {
+        const sessions = await window.codexlike.sessions.list();
+        const session = sessions.find((s) => s.title === "提问草稿验收");
+        const view = await window.codexlike.sessions.view(session.id);
+        const history = await window.codexlike.sessions.messages(session.id);
+        return (
+          !view.activity.running &&
+          history.some(
+            (item) => item.kind === "message" && item.message.content === text
+          )
+        );
+      }, `问答后继续${round}`);
+    }
+    await window.getByTestId("composer-input").fill("/compact");
+    await window.getByTestId("composer-input").press("Enter");
+    await window.getByTestId("message-compact-summary").waitFor();
+    await window.getByTestId("saved-question-draft").waitFor();
+    assert(
+      (await window.getByTestId("saved-question-draft").textContent()).includes(
+        "尚未提交的问答文本"
+      ),
+      "Compact后只读草稿不丢失"
+    );
+    await window.getByTestId("composer-input").fill("Compact后保存并退出");
+    await window.waitForFunction(async () => {
+      const session = (await window.codexlike.sessions.list()).find(
+        (s) => s.title === "提问草稿验收"
+      );
+      return (
+        (
+          await window.codexlike.workbench.read({
+            kind: "session",
+            sessionId: session.id,
+          })
+        ).value.text === "Compact后保存并退出"
+      );
+    });
+    // 不使用closeApp的强杀兜底作为验收：必须经保存屏障正常退出。
+    const exited = new Promise((resolve) =>
+      app.process().once("exit", resolve)
+    );
+    await app.evaluate(({ app }) => app.quit());
+    let timeout;
+    try {
+      await Promise.race([
+        exited,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Compact后flush阻塞退出")),
+            10_000
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    app = null;
+    ({ app, window } = await launchApp({ homeDir, workspaceDir }));
+    await window
+      .getByTestId("session-item")
+      .filter({ hasText: "提问草稿验收" })
+      .click();
+    await window.getByTestId("saved-question-draft").waitFor();
+    await window.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="composer-input"]')?.value ===
+        "Compact后保存并退出"
+    );
+    await window.getByTestId("composer-send").click();
+    await window.waitForFunction(async () => {
+      const session = (await window.codexlike.sessions.list()).find(
+        (s) => s.title === "提问草稿验收"
+      );
+      return (
+        !(await window.codexlike.sessions.execution(session.id)).running &&
+        (await window.codexlike.sessions.messages(session.id)).some(
+          (item) =>
+            item.kind === "message" &&
+            item.message.content === "Compact后保存并退出"
+        )
+      );
+    });
+    assert(model.requestCount() === 9, "Compact与显式继续之外没有重放请求");
     console.log(
-      "[e2e] 两类新建/正式草稿、独立偏好、滚动、三次真实进程重启恢复通过"
+      "[e2e] 草稿、偏好、阅读、真实重启及Compact→编辑→flush→正常退出→继续发送通过"
     );
   } finally {
     if (app) await closeApp(app);

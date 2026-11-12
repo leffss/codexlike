@@ -19,6 +19,7 @@ import { createAgentSession, type AgentSession } from "./agent-session";
 import type { ApprovalMode } from "./approval";
 import type { SessionPersistence } from "./persistence";
 import type { SessionSearchResult } from "./search";
+import { workbenchKey } from "./workbench-state";
 import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
@@ -109,6 +110,10 @@ export interface SessionManager {
   search(query: string, includeArchived?: boolean): SessionSearchResult[];
   /** 指定会话的消息历史（读持久层，不实例化会话对象） */
   messages(sessionId: string): StoredMessage[];
+  /** 持久交互记录不随上下文压缩消失；仅用于历史与草稿归属校验，不恢复等待。 */
+  interactions(
+    sessionId: string
+  ): import("../interaction/types").InteractionRecord[];
   /** 指定会话的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
   transcript(sessionId: string): TranscriptItem[];
   /** 惰性恢复会话对象；不存在返回 null；同 id 返回缓存实例 */
@@ -336,9 +341,14 @@ export function createSessionManager(
       return persistence.listMessages(sessionId);
     },
 
+    interactions: (sessionId) => persistence.listInteractions(sessionId),
+
     transcript(sessionId) {
       const messages = persistence.listMessages(sessionId);
       const turnIds = new Set(messages.map((message) => message.id));
+      const savedDrafts =
+        persistence.readWorkbench(workbenchKey({ kind: "session", sessionId }))
+          ?.value.questionDrafts ?? {};
       const items: TranscriptItem[] = [
         ...persistence
           .listMessages(sessionId)
@@ -348,7 +358,13 @@ export function createSessionManager(
           .map((call): TranscriptItem => ({ kind: "tool-call", call })),
         ...persistence
           .listInteractions(sessionId)
-          .filter((interaction) => turnIds.has(interaction.request.turnId))
+          // 压缩只裁模型上下文；有未提交文本的终态问答仍供用户只读查看。
+          .filter(
+            (interaction) =>
+              turnIds.has(interaction.request.turnId) ||
+              (interaction.status === "cancelled" &&
+                Object.hasOwn(savedDrafts, interaction.request.id))
+          )
           .map((interaction): TranscriptItem => ({
             kind: "interaction",
             interaction,

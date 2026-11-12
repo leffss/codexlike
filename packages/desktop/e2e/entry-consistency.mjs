@@ -54,9 +54,7 @@ try {
       exact: true,
     }),
   });
-  await profiles
-    .getByRole("button", { name: "+ 新建 Profile", exact: true })
-    .click();
+  await window.getByTestId("profile-create").click();
   const form = window.locator("form");
   await form.getByLabel("名称", { exact: true }).fill("Entry Mock");
   await form

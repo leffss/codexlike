@@ -18,7 +18,17 @@ export interface LiveSession {
   items: UiItem[];
 }
 
-/** 信封只按单调水位接续；新执行必须由 user-message 开启，旧执行不能越界。 */
+function applyLiveEvent(
+  items: UiItem[],
+  event: SessionEventEnvelope["event"]
+): UiItem[] {
+  if (event.type === "compact-start") return items;
+  if (event.type === "compact-finished")
+    return initialTranscript(event.history);
+  return applySessionEvent(items, event);
+}
+
+/** 信封只按单调水位接续；新执行必须由明确起点开启，旧执行不能越界。 */
 export function receiveLiveEvent(
   state: LiveSession,
   envelope: SessionEventEnvelope
@@ -28,10 +38,13 @@ export function receiveLiveEvent(
     envelope.sequence <= state.sequence
   )
     return state;
-  const starts = envelope.event.type === "user-message";
+  const starts =
+    envelope.event.type === "user-message" ||
+    envelope.event.type === "compact-start";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [
+      "compact-finished",
       "assistant-aborted",
       "tool-result",
       "interaction-resolved",
@@ -50,7 +63,7 @@ export function receiveLiveEvent(
     executionId: envelope.executionId,
     sequence: envelope.sequence,
     activity: envelope.activity,
-    items: applySessionEvent(state.items, envelope.event),
+    items: applyLiveEvent(state.items, envelope.event),
   };
 }
 
@@ -61,7 +74,7 @@ export function hydrateLiveSession(
 ): LiveSession {
   let items = initialTranscript(view.history);
   for (const envelope of view.events)
-    items = applySessionEvent(items, envelope.event);
+    items = applyLiveEvent(items, envelope.event);
   let state: LiveSession = {
     sessionId: view.sessionId,
     executionId: view.executionId,

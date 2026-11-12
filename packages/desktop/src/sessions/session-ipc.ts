@@ -111,6 +111,25 @@ export function registerSessionHandlers(options: {
     }
   }
 
+  // 消息与Compact共用占位、现场起点及中断清理，避免两套运行状态分叉。
+  function beginExecution(sessionId: string) {
+    management.assertCanExecute(sessionId);
+    const executionId = randomUUID();
+    executions.set(sessionId, executionId);
+    const rollbackLive = liveSessions.begin(sessionId, executionId);
+    const controller = interrupts.begin(sessionId);
+    return {
+      executionId,
+      controller,
+      rollbackLive,
+      end() {
+        interrupts.end(sessionId, controller);
+        if (executions.get(sessionId) === executionId)
+          executions.delete(sessionId);
+      },
+    };
+  }
+
   ipcMain.handle(IPC.projects.list, () => manager.projects());
   ipcMain.handle(IPC.projects.add, (_e: IpcMainInvokeEvent, path: unknown) => {
     if (typeof path !== "string" || !path.trim())
@@ -222,7 +241,37 @@ export function registerSessionHandlers(options: {
     const previous = manager
       .list()
       .find((session) => session.creationRequestId === request.requestId);
-    if (previous && manager.messages(previous.id).length) return previous;
+    if (previous && manager.messages(previous.id).length) {
+      const task = (async () => {
+        const draft = manager.readWorkbench(
+          workbenchKey({ kind: "new", projectId: request.projectId })
+        );
+        if (draft?.value.requestId === request.requestId) {
+          // 首条消息是已接受意图的凭证。消费落盘失败可以补偿，绝不再发首条。
+          const available = await profiles.list();
+          await resumeAcceptedStart();
+          const saved = manager.readWorkbench(
+            workbenchKey({ kind: "session", sessionId: previous.id })
+          );
+          workbench.started(
+            request.projectId,
+            request.requestId,
+            previous.id,
+            saved?.value.preferences ?? draft.value.preferences,
+            available[0]?.id ?? "",
+            manager
+              .messages(previous.id)
+              .find((message) => message.role === "user")?.content
+          );
+        }
+        const current = manager.list().find((item) => item.id === previous.id);
+        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        return current;
+      })();
+      starts.set(request.requestId, task);
+      void task.finally(() => starts.delete(request.requestId)).catch(() => {});
+      return task;
+    }
     if (previous) manager.removeUnstarted(previous.id);
     const task = (async () => {
       const effort = parseThinkingEffort(request.thinkingEffort);
@@ -303,7 +352,7 @@ export function registerSessionHandlers(options: {
           request.mentionPaths,
           effort
         );
-        await workbench.started(
+        workbench.started(
           request.projectId,
           request.requestId,
           session.id,
@@ -311,7 +360,8 @@ export function registerSessionHandlers(options: {
             providerProfileId: profile.id,
             thinkingEffort: effort,
             approvalMode: approval,
-          }
+          },
+          available[0]?.id ?? ""
         );
         const current = manager.list().find((item) => item.id === session.id);
         if (!current) throw new Error("原会话已移除，请新建会话后发送");
@@ -430,12 +480,8 @@ export function registerSessionHandlers(options: {
     await resumeAcceptedStart();
     assertOpen();
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
-    management.assertCanExecute(sessionId);
-    const executionId = randomUUID();
-    executions.set(sessionId, executionId);
-    const rollbackLive = liveSessions.begin(sessionId, executionId);
-    // 本条消息流的中断通道：停止按钮经 sessions:interrupt 打断
-    const controller = interrupts.begin(sessionId);
+    const { executionId, controller, rollbackLive, end } =
+      beginExecution(sessionId);
     try {
       // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
       // 在这里以异常抛回渲染进程；之后的事件异步推送。
@@ -470,17 +516,13 @@ export function registerSessionHandlers(options: {
           })
           .finally(() => {
             // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
-            interrupts.end(sessionId, controller);
-            if (executions.get(sessionId) === executionId)
-              executions.delete(sessionId);
+            end();
           })
       );
     } catch (error) {
       // 启动失败：注销中断登记后再抛回渲染进程
       rollbackLive();
-      interrupts.end(sessionId, controller);
-      if (executions.get(sessionId) === executionId)
-        executions.delete(sessionId);
+      end();
       throw error;
     }
   }
@@ -618,22 +660,37 @@ export function registerSessionHandlers(options: {
           }
           await resumeAcceptedStart();
           assertOpen();
-          // 沿票07唯一占位保护整理操作，不另建执行锁。
-          management.assertCanExecute(sessionId);
-          const executionId = randomUUID();
-          executions.set(sessionId, executionId);
-          const controller = interrupts.begin(sessionId);
+          const { executionId, controller, end } = beginExecution(sessionId);
+          emit({ sessionId, executionId, event: { type: "compact-start" } });
           try {
             const result = await session.compact({
               profile,
               signal: controller.signal,
             });
-            liveSessions.invalidate(sessionId);
+            emit({
+              sessionId,
+              executionId,
+              event: {
+                type: "compact-finished",
+                outcome: "completed",
+                history: manager.transcript(sessionId),
+              },
+            });
             return { compactedMessages: result.compactedMessages };
+          } catch (error) {
+            emit({
+              sessionId,
+              executionId,
+              event: {
+                type: "compact-finished",
+                outcome: controller.signal.aborted ? "interrupted" : "failed",
+                history: manager.transcript(sessionId),
+                error: error instanceof Error ? error.message : String(error),
+              },
+            });
+            throw error;
           } finally {
-            interrupts.end(sessionId, controller);
-            if (executions.get(sessionId) === executionId)
-              executions.delete(sessionId);
+            end();
           }
         })()
       )
