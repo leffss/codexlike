@@ -299,15 +299,28 @@ export function MessageStream(props: {
         <button
           type="button"
           data-testid="back-to-latest"
+          aria-label="回到最新"
+          title="回到最新"
           onClick={() => {
             const element = container.current;
             if (!element) return;
             commitMode("following");
             snapToBottom(element);
           }}
-          className="absolute bottom-4 right-4 z-10 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-fg-muted shadow-sm hover:border-accent hover:text-accent"
+          className="absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-surface text-fg-muted shadow-sm hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          回到最新
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14m-6-6 6 6 6-6" />
+          </svg>
         </button>
       )}
     </div>
