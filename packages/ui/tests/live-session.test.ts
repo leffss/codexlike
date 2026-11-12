@@ -250,3 +250,83 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
     restored.items.map((item) => item.turnId)
   );
 });
+
+it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运行中会话不重复、不丢失；重启后由落盘重建", () => {
+  const reasoningEnvelope = (
+    sequence: number,
+    delta: string
+  ): SessionEventEnvelope => ({
+    sessionId: "a",
+    executionId: "e1",
+    sequence,
+    activity,
+    event: { type: "assistant-reasoning", messageId: "m1", delta },
+  });
+  // 运行中会话切走再切回：view = 执行起点快照（不含本轮）+ 内存事件重放
+  const switchedBack = hydrateLiveSession({
+    ...snapshot,
+    history: [],
+    events: [
+      reasoningEnvelope(1, "第一段思考"),
+      reasoningEnvelope(2, "，第二段"),
+    ],
+  });
+  // 思考不丢失：两段增量归并为一个思考段（同一响应的流态追加）
+  const thinking = switchedBack.items.filter(
+    (item) => item.kind === "thinking"
+  );
+  expect(thinking).toHaveLength(1);
+  expect(thinking[0]).toMatchObject({ content: "第一段思考，第二段" });
+  // 不重复：落盘历史不含本轮（执行起点快照），重放不与快照重复
+  expect(
+    switchedBack.items.filter(
+      (item) => item.kind === "thinking" && item.content.includes("第一段思考")
+    )
+  ).toHaveLength(1);
+
+  // 重启后：内存事件缓冲消失，落盘终态消息（带 reasoning）经 transcript 恢复
+  const restarted = hydrateLiveSession({
+    sessionId: "a",
+    executionId: null,
+    sequence: 0,
+    history: [
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          sessionId: "a",
+          role: "user",
+          content: "会话内的问题",
+          createdAt: "2026-11-11T08:00:00Z",
+        },
+      },
+      {
+        kind: "message",
+        message: {
+          id: "m1",
+          sessionId: "a",
+          role: "assistant",
+          content: "终态正文",
+          reasoning: "第一段思考，第二段",
+          createdAt: "2026-11-11T08:00:01Z",
+        },
+      },
+    ],
+    events: [],
+    pendingInteractions: [],
+    activity: { ...activity, running: false, outcome: "completed" },
+  });
+  expect(restarted.items.map((item) => item.kind)).toEqual([
+    "user",
+    "thinking",
+    "assistant",
+  ]);
+  expect(restarted.items[1]).toMatchObject({
+    content: "第一段思考，第二段",
+    responseId: "m1",
+  });
+  const restoredThinking = restarted.items[1];
+  if (restoredThinking?.kind !== "thinking")
+    throw new Error("恢复后的第二段应为思考段");
+  expect(restoredThinking.streaming).toBeUndefined();
+});

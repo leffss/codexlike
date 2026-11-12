@@ -21,7 +21,8 @@ interface LiveExecution {
 
 /** 宿主保存当前执行日志；历史只在执行起点取一次，避免轮末落库与增量重复。
  * 同步采样水位及事件，renderer 先订阅、后读取、仅接续水位之后事件。
- * 日志限于最后一次执行且仅在内存，运行期思考不进入 SQLite。
+ * 日志限于最后一次执行且仅在内存；思考随终态消息/委派记录落 SQLite（票 02），
+ * 重启后走 transcript 恢复，与这里的内存重放互不重复。
  */
 export function createLiveSessions(manager: SessionManager) {
   const sessions = new Map<string, LiveExecution>();

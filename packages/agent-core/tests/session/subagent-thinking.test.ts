@@ -566,7 +566,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     expect(new Set(reasoning.map((event) => event.delta)).size).toBe(2);
   });
 
-  it("思考不落库：子代理工具调用记录与消息表均不含 reasoning 文本", async () => {
+  it("思考随 spawn_subagent 记录落库（票 02）：报告与思考分离、消息表不含思考", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { session, persistence } = makeSubagentThinkingSession({
       workspacePath: workspace,
@@ -574,7 +574,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
       sub: [
         {
           kind: "reasoning-text",
-          reasoning: ["不应落库的思考内容XYZ"],
+          reasoning: ["子代理的思考全文", "（第二段）"],
           text: ["调研报告"],
         },
       ],
@@ -584,11 +584,15 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
       session.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
     );
 
-    const storedJson = JSON.stringify({
-      messages: persistence.listMessages("session-1"),
-      toolCalls: persistence.listToolCalls("session-1"),
-    });
-    expect(storedJson).not.toContain("不应落库的思考内容XYZ");
+    const calls = persistence.listToolCalls("session-1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.toolName).toBe("spawn_subagent");
+    // 报告（output）与思考（reasoning）分离；思考全文多段拼接
+    expect(calls[0]?.output).toBe("调研报告");
+    expect(calls[0]?.reasoning).toBe("子代理的思考全文（第二段）");
+    // 消息表不含子代理思考（主会话 assistant 正文不混入）
+    const messagesJson = JSON.stringify(persistence.listMessages("session-1"));
+    expect(messagesJson).not.toContain("子代理的思考全文");
   });
 
   it("主会话中断联动取消：只有思考尚无正文的子代理也能终止，已流出 reasoning 保留且收敛", async () => {

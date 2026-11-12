@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   created_at TEXT NOT NULL,
   mentions TEXT,
-  aborted INTEGER
+  aborted INTEGER,
+  reasoning TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_created
   ON messages(session_id, created_at);
@@ -140,6 +141,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   arguments TEXT NOT NULL,
   output TEXT NOT NULL,
   is_error INTEGER NOT NULL,
+  reasoning TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session_created
@@ -187,6 +189,7 @@ interface MessageRow {
   mentions: string | null;
   aborted: number | null;
   question_answers: string | null;
+  reasoning: string | null;
 }
 
 interface CompactRow {
@@ -204,6 +207,7 @@ interface ToolCallRow {
   arguments: string;
   output: string;
   is_error: number;
+  reasoning: string | null;
   created_at: string;
 }
 
@@ -263,6 +267,16 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   if (!messageColumns.some((column) => column.name === "question_answers")) {
     db.exec("ALTER TABLE messages ADD COLUMN question_answers TEXT");
   }
+  // 旧库迁移（票 02，ADR 0011）：messages 无 reasoning 列——思考随终态消息落库，
+  // 旧数据自然缺失（读回 undefined），不做补录迁移
+  if (!messageColumns.some((column) => column.name === "reasoning")) {
+    db.exec("ALTER TABLE messages ADD COLUMN reasoning TEXT");
+  }
+  // 旧库迁移（票 02）：tool_calls 无 reasoning 列——子代理思考随委派记录落库
+  const toolCallColumns = db.prepare("PRAGMA table_info(tool_calls)").all();
+  if (!toolCallColumns.some((column) => column.name === "reasoning")) {
+    db.exec("ALTER TABLE tool_calls ADD COLUMN reasoning TEXT");
+  }
 
   const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all();
   if (!sessionColumns.some((column) => column.name === "project_id"))
@@ -292,7 +306,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     "UPDATE sessions SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
-    "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO messages (id, session_id, role, content, created_at, mentions, aborted, question_answers, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listSessionsStmt = db.prepare(
     "SELECT * FROM sessions ORDER BY pinned DESC, COALESCE(last_used_at, created_at) DESC, created_at DESC, id DESC"
@@ -313,7 +327,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     "SELECT * FROM compact_records WHERE session_id = ? ORDER BY created_at, rowid"
   );
   const insertToolCallStmt = db.prepare(
-    "INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listToolCallsStmt = db.prepare(
     "SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at, rowid"
@@ -359,7 +373,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     };
   }
 
-  /** 写入一条消息（含 @引用 与中断标记列；insertMessage 与 replaceHistory 共用） */
+  /** 写入一条消息（含 @引用、中断标记与思考列；insertMessage 与 replaceHistory 共用） */
   function insertMessage(message: StoredMessage): void {
     insertMessageStmt.run(
       message.id,
@@ -373,7 +387,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       message.aborted === true ? 1 : 0,
       message.questionAnswers?.length
         ? JSON.stringify(message.questionAnswers)
-        : null
+        : null,
+      message.reasoning || null
     );
   }
 
@@ -658,6 +673,10 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           if (row.aborted === 1) {
             message.aborted = true;
           }
+          // 思考全文（票 02）：空串归一为缺失（恢复侧不产生空思考段）
+          if (row.reasoning) {
+            message.reasoning = row.reasoning;
+          }
           return message;
         }
       );
@@ -683,6 +702,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         call.arguments,
         call.output,
         call.isError ? 1 : 0,
+        call.reasoning || null,
         call.createdAt
       );
     },
@@ -696,6 +716,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           arguments: row.arguments,
           output: row.output,
           isError: row.is_error === 1,
+          // 子代理思考全文（票 02）：空串归一为缺失（不产生空思考）
+          ...(row.reasoning ? { reasoning: row.reasoning } : {}),
           createdAt: row.created_at,
         })
       );
