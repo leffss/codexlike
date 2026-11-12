@@ -68,7 +68,8 @@ export function AssistantActions(props: {
   return (
     <div
       data-testid="assistant-actions"
-      className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-muted"
+      // 将 sr-only 反馈的绝对定位约束在消息内，避免越过消息流撑大根文档。
+      className="relative mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-muted"
     >
       <button
         type="button"

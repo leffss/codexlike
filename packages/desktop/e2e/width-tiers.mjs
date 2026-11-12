@@ -77,8 +77,47 @@ async function assertContentWidth(window, { min, max, label }) {
   return box;
 }
 
+/** 文档不承担滚动，消息区和输入区始终留在窗口内容区内。 */
+async function assertViewportLayout(window, label) {
+  const layout = await window.evaluate(() => {
+    const rect = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const { top, bottom, height } = element.getBoundingClientRect();
+      return { top, bottom, height };
+    };
+    const root = document.scrollingElement;
+    return {
+      viewportHeight: innerHeight,
+      scrollHeight: root.scrollHeight,
+      clientHeight: root.clientHeight,
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+      titlebar: rect('[data-testid="window-titlebar"]'),
+      stream: rect('[data-testid="message-stream"]'),
+      composer: rect('[data-testid="composer-card"]'),
+    };
+  });
+  const details = `${label}：${JSON.stringify(layout)}`;
+  assert(
+    layout.scrollHeight <= layout.clientHeight + 1 &&
+      layout.scrollWidth <= layout.clientWidth + 1,
+    `根文档不应产生额外滚动条，${details}`
+  );
+  if (layout.stream && layout.composer) {
+    assert(layout.stream.height > 0, `消息区不能被压扁，${details}`);
+    assert(
+      layout.stream.top >= layout.titlebar.bottom - 1 &&
+        layout.stream.bottom <= layout.composer.top + 1 &&
+        layout.composer.bottom <= layout.viewportHeight + 1,
+      `消息区和输入区应在标题栏下方且不重叠、不越出视口，${details}`
+    );
+  }
+}
+
 /** 从真实渲染几何验证内容列，不依赖组件树或宽度类实现。 */
 async function assertAligned(window, contentTestId, label) {
+  await assertViewportLayout(window, label);
   const content = await window.getByTestId(contentTestId).boundingBox();
   assert(content !== null, `${label}：内容列必须可见`);
   for (const testId of [
@@ -114,10 +153,13 @@ async function main() {
     const first = await launchApp({ homeDir });
     app = first.app;
     const window = first.window;
+    await window.getByTestId("settings-open").waitFor();
+    await assertViewportLayout(window, "冷启动");
 
     // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
+    await assertViewportLayout(window, "设置页");
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
@@ -270,6 +312,7 @@ async function main() {
 
     await assertAligned(window, "message-list", "基础档已有会话");
 
+    // 两轮回复在低窗口内溢出：复制反馈的 sr-only 元素不得越过消息流撑大文档。
     // 真实内容溢出时滚动槽仍保持原宽度，输入区和标题不横跳。
     await resizeWindow(app, 1280, 600);
     const beforeScroll = await assertAligned(window, "message-list", "滚动前");
