@@ -1,19 +1,18 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StdioClientTransport,
   getDefaultEnvironment,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 
-
-import type { ToolDefinition, ToolResult } from '../tools/types';
+import type { ToolDefinition, ToolResult } from "../tools/types";
 
 import type {
   McpDiscoveredTool,
   McpServerConfig,
   McpServerState,
-} from './types';
+} from "./types";
 
-export type { McpServerConfig, McpServerState } from './types';
+export type { McpServerConfig, McpServerState } from "./types";
 
 /** 默认工具调用超时：30 秒（spec「工具执行带超时」） */
 export const MCP_DEFAULT_CALL_TIMEOUT_MS = 30_000;
@@ -55,9 +54,9 @@ export interface McpManager {
 function normalizeSegment(value: string): string {
   const normalized = value
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return normalized === '' ? 'server' : normalized;
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized === "" ? "server" : normalized;
 }
 
 interface Connection {
@@ -71,34 +70,34 @@ interface Entry {
   connection: Connection | null;
   /** 最后一次成功发现到的工具（断线后保留，支撑惰性重连） */
   tools: McpDiscoveredTool[];
-  status: McpServerState['status'];
+  status: McpServerState["status"];
   error: string | null;
 }
 
 /** 把 CallToolResult 的 content 转为模型可读的纯文本输出（参数 unknown：SDK 泛型形态随版本变，结构窄化在此收口） */
 function contentToOutput(raw: unknown): { output: string; isError: boolean } {
   const result =
-    typeof raw === 'object' && raw !== null
+    typeof raw === "object" && raw !== null
       ? (raw as { content?: unknown; isError?: unknown })
       : {};
   const isError = result.isError === true;
   const parts = Array.isArray(result.content) ? result.content : [];
   const texts = parts
     .filter(
-      (part): part is { type: 'text'; text: string } =>
-        typeof part === 'object' &&
+      (part): part is { type: "text"; text: string } =>
+        typeof part === "object" &&
         part !== null &&
-        (part as { type?: unknown }).type === 'text' &&
-        typeof (part as { text?: unknown }).text === 'string',
+        (part as { type?: unknown }).type === "text" &&
+        typeof (part as { text?: unknown }).text === "string"
     )
     .map((part) => part.text);
   if (texts.length > 0) {
-    return { output: texts.join('\n'), isError };
+    return { output: texts.join("\n"), isError };
   }
   return {
     output: isError
-      ? 'MCP 工具返回了错误（无文本内容）'
-      : 'MCP 工具没有返回文本内容',
+      ? "MCP 工具返回了错误（无文本内容）"
+      : "MCP 工具没有返回文本内容",
     isError,
   };
 }
@@ -115,7 +114,12 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   function entryOf(serverId: string): Entry {
     let entry = entries.get(serverId);
     if (entry === undefined) {
-      entry = { connection: null, tools: [], status: 'disconnected', error: null };
+      entry = {
+        connection: null,
+        tools: [],
+        status: "disconnected",
+        error: null,
+      };
       entries.set(serverId, entry);
     }
     return entry;
@@ -124,7 +128,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   /** spawn 子进程并完成 initialize + tools/list；任何失败抛中文错误 */
   async function establish(
     config: McpServerConfig,
-    entry: Entry,
+    entry: Entry
   ): Promise<Connection> {
     const transport = new StdioClientTransport({
       command: config.command,
@@ -133,15 +137,15 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       env: { ...getDefaultEnvironment(), ...config.env },
     });
     const client = new Client(
-      { name: 'codexlike', version: '0.1.0' },
-      { capabilities: {} },
+      { name: "codexlike", version: "0.1.0" },
+      { capabilities: {} }
     );
 
     // server 进程退出/崩溃：清理活动连接但保留最后已知工具（调用时惰性重连）
     transport.onclose = () => {
       if (entry.connection?.client === client) {
         entry.connection = null;
-        entry.status = 'disconnected';
+        entry.status = "disconnected";
         entry.error = `MCP server「${config.name}」进程已退出，将在下次工具调用时自动重连`;
       }
     };
@@ -158,25 +162,25 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         originalName: tool.name,
         name: `mcp_${serverName}_${normalizeSegment(tool.name)}`,
         description:
-          tool.description && tool.description.trim() !== ''
+          tool.description && tool.description.trim() !== ""
             ? tool.description
             : `MCP server「${config.name}」提供的工具 ${tool.name}`,
         parameters: (tool.inputSchema ?? {
-          type: 'object',
-        }) as McpDiscoveredTool['parameters'],
+          type: "object",
+        }) as McpDiscoveredTool["parameters"],
       }));
       return { client, transport, tools };
     } catch (error) {
       // 连接失败：确保子进程（若已 spawn）被回收
       await client.close().catch(() => undefined);
-      throw new Error(describeConnectError(config, error));
+      throw new Error(describeConnectError(config, error), { cause: error });
     }
   }
 
   /** 取活动连接；已断开则惰性自动重连（重连失败抛中文错误） */
   async function ensureConnection(
     config: McpServerConfig,
-    entry: Entry,
+    entry: Entry
   ): Promise<Connection> {
     if (entry.connection !== null) {
       return entry.connection;
@@ -184,7 +188,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const connection = await establish(config, entry);
     entry.connection = connection;
     entry.tools = connection.tools;
-    entry.status = 'connected';
+    entry.status = "connected";
     entry.error = null;
     return connection;
   }
@@ -202,16 +206,15 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         entry.connection = null;
         await previous.client.close().catch(() => undefined);
       }
-      entry.status = 'connecting';
+      entry.status = "connecting";
       entry.error = null;
       try {
         entry.connection = await establish(config, entry);
         entry.tools = entry.connection.tools;
-        entry.status = 'connected';
+        entry.status = "connected";
       } catch (error) {
-        entry.status = 'failed';
-        entry.error =
-          error instanceof Error ? error.message : String(error);
+        entry.status = "failed";
+        entry.error = error instanceof Error ? error.message : String(error);
       }
       return {
         serverId,
@@ -228,7 +231,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       }
       const previous = entry.connection;
       entry.connection = null;
-      entry.status = 'disconnected';
+      entry.status = "disconnected";
       entry.error = null;
       // 主动断开（区别于进程崩溃）：工具列表一并清空，不再提供给会话
       entry.tools = [];
@@ -239,7 +242,12 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       return options.servers().map((config) => {
         const entry = entries.get(config.id);
         if (entry === undefined) {
-          return { serverId: config.id, status: 'disconnected', tools: [], error: null };
+          return {
+            serverId: config.id,
+            status: "disconnected",
+            tools: [],
+            error: null,
+          };
         }
         return {
           serverId: config.id,
@@ -278,12 +286,12 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         .filter((connection): connection is Connection => connection !== null);
       for (const entry of entries.values()) {
         entry.connection = null;
-        entry.status = 'disconnected';
+        entry.status = "disconnected";
       }
       await Promise.all(
         closing.map((connection) =>
-          connection.client.close().catch(() => undefined),
-        ),
+          connection.client.close().catch(() => undefined)
+        )
       );
     },
   };
@@ -291,14 +299,14 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   /** 单个 MCP 工具 → ToolDefinition（permission=command：suggest 下走审批链路） */
   function adaptTool(
     config: McpServerConfig,
-    discovered: McpDiscoveredTool,
+    discovered: McpDiscoveredTool
   ): ToolDefinition {
     return {
       name: discovered.name,
       description: `【MCP:${config.name}】${discovered.description}`,
       parameters: discovered.parameters,
       // spec：MCP 工具按 command 级权限处理（server 端行为不可知，保守对待）
-      permission: 'command',
+      permission: "command",
       async execute(args, context): Promise<ToolResult> {
         try {
           // 惰性自动重连：连接断开（server 崩溃/重启）时先重建，再转发调用
@@ -310,7 +318,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
             {
               timeout: callTimeoutMs,
               signal: context.signal ?? undefined,
-            },
+            }
           );
           return contentToOutput(result);
         } catch (error) {
@@ -325,7 +333,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 }
 
 function asRecord(args: unknown): Record<string, unknown> {
-  return typeof args === 'object' && args !== null
+  return typeof args === "object" && args !== null
     ? (args as Record<string, unknown>)
     : {};
 }
@@ -334,7 +342,7 @@ function asRecord(args: unknown): Record<string, unknown> {
 function describeCallError(
   toolName: string,
   timeoutMs: number,
-  error: unknown,
+  error: unknown
 ): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/timed? ?out|timeout/i.test(message)) {

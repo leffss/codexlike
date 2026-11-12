@@ -57,7 +57,9 @@ export function createGrepTool(options: GrepToolOptions = {}) {
         regex = new RegExp(pattern, ignoreCase ? "i" : "");
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`正则表达式不合法（${pattern}）：${reason}`);
+        throw new Error(`正则表达式不合法（${pattern}）：${reason}`, {
+          cause: error,
+        });
       }
       const nameFilter =
         globPattern === undefined ? undefined : globToRegExp(globPattern);

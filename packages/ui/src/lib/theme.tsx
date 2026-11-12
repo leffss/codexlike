@@ -4,9 +4,9 @@ import {
   useEffect,
   useState,
   type ReactNode,
-} from 'react';
+} from "react";
 
-import type { ThemeName } from '@codexlike/desktop/ipc';
+import type { ThemeName } from "@codexlike/desktop/ipc";
 
 /**
  * 外观主题上下文（ADR 0006）：light / dark，默认浅色。
@@ -15,10 +15,10 @@ import type { ThemeName } from '@codexlike/desktop/ipc';
  * 这里挂载后再与主进程校准一次（镜像缺失 / 漂移时纠正）。
  */
 
-const THEME_STORAGE_KEY = 'codexlike.theme';
+const THEME_STORAGE_KEY = "codexlike.theme";
 
 function readInitialTheme(): ThemeName {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
 function applyTheme(theme: ThemeName): void {
@@ -33,7 +33,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'light',
+  theme: "light",
   setTheme: () => {},
 });
 
@@ -73,6 +73,7 @@ export function ThemeProvider(props: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Provider 与配套 Hook 同文件是 React 惯例（context 定义、Provider、useHook 三件套内聚），拆文件反而丢失内聚
 export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }

@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
 
-import { simpleGit } from 'simple-git';
+import { simpleGit } from "simple-git";
 
-import { resolveInWorkspace } from '../tools/workspace';
+import { resolveInWorkspace } from "../tools/workspace";
 
 /**
  * git 服务（spec「git 集成」）：改动面板的数据源。
@@ -13,7 +13,7 @@ import { resolveInWorkspace } from '../tools/workspace';
  */
 
 /** 变更类型（改动面板徽标）：新增 / 修改 / 删除 / 重命名 */
-export type GitChangeKind = 'added' | 'modified' | 'deleted' | 'renamed';
+export type GitChangeKind = "added" | "modified" | "deleted" | "renamed";
 
 export interface GitFileChange {
   /** 相对工作区的路径（POSIX 分隔符；重命名为新路径） */
@@ -74,18 +74,18 @@ export interface GitCommitResult {
 /** git status 的 index/workdir 两列 code 合成面板显示的单一变更类型 */
 function toChangeKind(index: string, workDir: string): GitChangeKind {
   // 暂存区状态优先（R/A/D 已 staged）；untracked 两列都是 '?'
-  const code = index !== ' ' && index !== '?' ? index : workDir;
+  const code = index !== " " && index !== "?" ? index : workDir;
   switch (code) {
-    case '?':
-    case 'A':
-      return 'added';
-    case 'D':
-      return 'deleted';
-    case 'R':
-      return 'renamed';
+    case "?":
+    case "A":
+      return "added";
+    case "D":
+      return "deleted";
+    case "R":
+      return "renamed";
     default:
       // M（修改）、C（复制）、T（类型变更）等一律按修改显示
-      return 'modified';
+      return "modified";
   }
 }
 
@@ -97,20 +97,20 @@ function toChangeKind(index: string, workDir: string): GitChangeKind {
  */
 function parseStatusPorcelainZ(raw: string): GitFileChange[] {
   const files = new Map<string, GitFileChange>();
-  const parts = raw.split('\0');
+  const parts = raw.split("\0");
   for (let i = 0; i < parts.length; i += 1) {
     const entry = parts[i]!;
-    if (entry === '') {
+    if (entry === "") {
       continue;
     }
     const x = entry[0]!;
     const y = entry[1]!;
     const path = entry.slice(3);
     const change: GitFileChange =
-      x === 'R' || x === 'C'
-        ? { path, kind: toChangeKind(x, y), oldPath: parts[i + 1] ?? '' }
+      x === "R" || x === "C"
+        ? { path, kind: toChangeKind(x, y), oldPath: parts[i + 1] ?? "" }
         : { path, kind: toChangeKind(x, y) };
-    if (x === 'R' || x === 'C') {
+    if (x === "R" || x === "C") {
       i += 1;
     }
     if (!files.has(path)) {
@@ -125,9 +125,9 @@ export function createGitService(workspacePath: string): GitService {
 
   /** 工作区相对 repo 根的 POSIX 前缀（'' = 工作区即 repo 根） */
   async function workspacePrefixInRepo(): Promise<string> {
-    const toplevel = (await git.revparse('--show-toplevel')).trim();
-    const rel = relative(toplevel, workspacePath).replace(/\\/g, '/');
-    return rel === '' ? '' : `${rel}/`;
+    const toplevel = (await git.revparse("--show-toplevel")).trim();
+    const rel = relative(toplevel, workspacePath).replace(/\\/g, "/");
+    return rel === "" ? "" : `${rel}/`;
   }
 
   return {
@@ -138,12 +138,12 @@ export function createGitService(workspacePath: string): GitService {
       }
       // -u 展开被折叠的 untracked 目录到文件级（agent 新写文件的面板语义）
       const porcelain = await git.raw([
-        'status',
-        '--porcelain=v1',
-        '-z',
-        '--untracked-files=all',
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
       ]);
-      const branchOutput = await git.raw(['branch', '--show-current']);
+      const branchOutput = await git.raw(["branch", "--show-current"]);
       const branch = branchOutput.trim();
       const prefix = await workspacePrefixInRepo();
       // porcelain 路径相对 repo 根：工作区为子目录时过滤到范围内并改写为工作区相对路径
@@ -159,14 +159,14 @@ export function createGitService(workspacePath: string): GitService {
         }));
       return {
         isGitRepo: true,
-        branch: branch === '' ? null : branch,
+        branch: branch === "" ? null : branch,
         files,
       };
     },
 
     async diffFile(path: string, oldPath?: string): Promise<GitFileDiff> {
       if (!(await git.checkIsRepo())) {
-        throw new Error('当前工作区不是 git 仓库，无法查看改动');
+        throw new Error("当前工作区不是 git 仓库，无法查看改动");
       }
       // 路径限制在工作区内（与工具层同一套边界校验，防 .. 与链接逃逸）
       const absolute = resolveInWorkspace(workspacePath, path);
@@ -174,39 +174,38 @@ export function createGitService(workspacePath: string): GitService {
       const repoRelative = `${prefix}${path}`;
       const originalRelative =
         oldPath !== undefined ? `${prefix}${oldPath}` : repoRelative;
-      let original = '';
+      let original = "";
       try {
         // HEAD 版本（LF 存储）；新文件不在 HEAD 中 → 空串
-        original = (await git.raw(['show', `HEAD:${originalRelative}`])).replace(
-          /\r\n/g,
-          '\n',
-        );
+        original = (
+          await git.raw(["show", `HEAD:${originalRelative}`])
+        ).replace(/\r\n/g, "\n");
       } catch {
-        original = '';
+        // 新文件不在 HEAD 中 → 保持初始空串
       }
-      let modified = '';
+      let modified = "";
       try {
-        modified = readFileSync(absolute, 'utf8').replace(/\r\n/g, '\n');
+        modified = readFileSync(absolute, "utf8").replace(/\r\n/g, "\n");
       } catch {
-        modified = ''; // 已删除
+        // 文件已删除 → 保持初始空串
       }
       return { path, original, modified };
     },
 
     async createSessionBranch(name: string): Promise<GitBranchResult> {
       if (!(await git.checkIsRepo())) {
-        throw new Error('当前工作区不是 git 仓库，无法创建分支');
+        throw new Error("当前工作区不是 git 仓库，无法创建分支");
       }
       try {
         // checkout -b：创建并切换（agent 的后续提交落在新分支上）。
         // 注：simple-git 4 的 checkoutBranch(name) 会把 start-point 拼成 undefined，故走 raw。
-        await git.raw(['checkout', '-b', name]);
+        await git.raw(["checkout", "-b", name]);
         return { branch: name, created: true };
       } catch (error) {
         // 分支已存在：切换过去（重复点击幂等）
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('already exists')) {
-          await git.raw(['checkout', name]);
+        if (message.includes("already exists")) {
+          await git.raw(["checkout", name]);
           return { branch: name, created: false };
         }
         throw error;
@@ -215,16 +214,20 @@ export function createGitService(workspacePath: string): GitService {
 
     async commitAll(message: string): Promise<GitCommitResult> {
       if (!(await git.checkIsRepo())) {
-        throw new Error('当前工作区不是 git 仓库，无法提交');
+        throw new Error("当前工作区不是 git 仓库，无法提交");
       }
       const status = await this.status();
       if (status.files.length === 0) {
-        return { committed: false, commitHash: null, reason: '没有可提交的变更' };
+        return {
+          committed: false,
+          commitHash: null,
+          reason: "没有可提交的变更",
+        };
       }
-      await git.raw(['add', '-A']);
+      await git.raw(["add", "-A"]);
       const summary = await git.commit(message);
       const commitHash =
-        typeof summary.commit === 'string' && summary.commit !== ''
+        typeof summary.commit === "string" && summary.commit !== ""
           ? summary.commit
           : null;
       return { committed: true, commitHash };

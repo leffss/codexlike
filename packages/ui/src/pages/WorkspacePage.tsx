@@ -331,6 +331,7 @@ export function WorkspacePage(props: {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：activeSessionId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
   }, [openSession]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
