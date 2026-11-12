@@ -166,6 +166,76 @@ describe("initialTranscript（历史恢复 → 消息段时序序列）", () => 
     expect(view).toHaveLength(1);
     expect(seg(view, 0).turnId).toBe("sum");
   });
+
+  it("历史加载重建思考段（票 02）：带 reasoning 的 assistant 消息 → 思考段在正文段之前", () => {
+    const view = initialTranscript([
+      { kind: "message", message: stored({ id: "u1", role: "user" }) },
+      {
+        kind: "message",
+        message: stored({
+          id: "a1",
+          role: "assistant",
+          content: "最终正文",
+          reasoning: "当时的推理过程",
+        }),
+      },
+      {
+        kind: "message",
+        message: stored({
+          id: "a2",
+          role: "assistant",
+          content: "被打断的回答",
+          reasoning: "中断前的思考",
+          aborted: true,
+        }),
+      },
+    ]);
+    expect(kinds(view)).toEqual([
+      "user",
+      "thinking",
+      "assistant",
+      "thinking",
+      "assistant",
+    ]);
+    // 思考段与正文段共享响应 id（历史消息以自身 id 关联）、归同一轮；
+    // 恢复的思考段非流态（无 streaming 标记）
+    expect(seg(view, 1)).toMatchObject({
+      id: "thinking-a1-1",
+      content: "当时的推理过程",
+      turnId: "u1",
+      responseId: "a1",
+    });
+    const firstThinking = seg(view, 1);
+    if (firstThinking.kind !== "thinking")
+      throw new Error("恢复后的第二段应为思考段");
+    expect(firstThinking.streaming).toBeUndefined();
+    expect(seg(view, 2)).toMatchObject({ content: "最终正文" });
+    // 中断终态的思考同样重建；中断标记仍在正文段上
+    expect(seg(view, 3)).toMatchObject({
+      content: "中断前的思考",
+      responseId: "a2",
+    });
+    expect(seg(view, 4)).toMatchObject({ interrupted: true });
+    // 稳定序号随追加递增
+    expect(view.map((item) => item.seq)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("旧会话（无思考列数据）打开不产生空思考段：assistant 消息恢复为单正文段", () => {
+    const view = initialTranscript([
+      { kind: "message", message: stored({ id: "u1", role: "user" }) },
+      {
+        kind: "message",
+        message: stored({
+          id: "a1",
+          role: "assistant",
+          content: "旧回答",
+          reasoning: undefined,
+        }),
+      },
+    ]);
+    expect(kinds(view)).toEqual(["user", "assistant"]);
+    expect(view.every((item) => item.kind !== "thinking")).toBe(true);
+  });
 });
 
 describe("时序保真（交错回复按事件发生顺序排列）", () => {
@@ -673,6 +743,43 @@ describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {
       ok: true,
       tools: [],
     });
+  });
+
+  it("重启恢复子代理思考（票 02）：落库 reasoning 重建卡内思考折叠块，旧记录不产生空块", () => {
+    const restored = initialTranscript([
+      {
+        kind: "tool-call",
+        call: toolRecord({
+          id: "d9",
+          toolName: "spawn_subagent",
+          arguments: '{"task":"调研依赖"}',
+          output: "报告：全部为最新",
+          reasoning: "子代理当时的思考",
+        }),
+      },
+    ]);
+    expect(seg(restored, 0)).toMatchObject({
+      kind: "subagent",
+      state: "done",
+      report: "报告：全部为最新",
+      reasoning: "子代理当时的思考",
+    });
+    // 旧记录（无 reasoning）不产生空思考
+    const legacy = initialTranscript([
+      {
+        kind: "tool-call",
+        call: toolRecord({
+          id: "d8",
+          toolName: "spawn_subagent",
+          arguments: '{"task":"旧任务"}',
+          output: "旧报告",
+        }),
+      },
+    ]);
+    const legacyCard = legacy[0];
+    if (legacyCard?.kind !== "subagent")
+      throw new Error("旧记录应恢复为子代理段");
+    expect(legacyCard.reasoning).toBeUndefined();
   });
 });
 

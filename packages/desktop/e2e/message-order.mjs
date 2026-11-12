@@ -180,12 +180,28 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 300));
     const restored = await segmentOrder(window);
-    // 落库历史不保留运行期思考与段切分（票 02 才落库 reasoning）：
-    // 恢复后为 user → 工具卡 → 终稿正文的消息段序列，同一渲染分派
+    // 票 02 起落库历史带 reasoning：终态消息重建为思考段（位于终态消息位置，
+    // 即工具卡之后）+ 终稿正文；运行期的多段思考拼接为终态全文
     assert(
       JSON.stringify(restored) ===
-        JSON.stringify(["message-user", "tool-call-card", "message-assistant"]),
+        JSON.stringify([
+          "message-user",
+          "tool-call-card",
+          "thinking-block",
+          "message-assistant",
+        ]),
       `重启恢复后的消息段序列不正确：${JSON.stringify(restored)}`
+    );
+    const restoredThinking = await window
+      .getByTestId("thinking-block")
+      .first()
+      .getByTestId("thinking-content")
+      .textContent();
+    assert(
+      restoredThinking !== null &&
+        restoredThinking.includes("先思考怎么读") &&
+        restoredThinking.includes("再核对一遍"),
+      `恢复后的思考全文应包含两段：${restoredThinking ?? "(空)"}`
     );
     const restoredText = await window
       .getByTestId("message-assistant")

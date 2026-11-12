@@ -178,6 +178,7 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
     arguments: '{"path":"a.txt","content":"成果"}',
   });
   expect(JSON.stringify(view)).toContain("只存在运行期的思考");
+  // 执行中（终态未落库）：持久化历史不含本轮思考——快照固定于执行起点
   expect(JSON.stringify(invoke("messages", a.id))).not.toContain(
     "只存在运行期的思考"
   );
@@ -197,9 +198,21 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
       { kind: "approval", decision: "approve" }
     )
   ).toBe(false);
-  expect(JSON.stringify(invoke("messages", a.id))).not.toContain(
-    "只存在运行期的思考"
+  // 中断终态落库（票 02）：思考全文随终态消息的 reasoning 字段持久化，
+  // 消息正文（content，即模型上下文来源）仍不含思考
+  await vi.waitFor(() =>
+    expect(
+      invoke("messages", a.id).some(
+        (item: any) => item.message?.aborted === true
+      )
+    ).toBe(true)
   );
+  const finalMessages: any[] = invoke("messages", a.id);
+  const interrupted = finalMessages.find(
+    (item) => item.kind === "message" && item.message.aborted === true
+  )?.message;
+  expect(interrupted?.reasoning).toBe("只存在运行期的思考");
+  expect(interrupted?.content).not.toContain("只存在运行期的思考");
 });
 
 it("启动前失败不覆盖上一轮现场与水位，重试仍沿原序号递增", async () => {

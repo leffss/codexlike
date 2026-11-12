@@ -379,6 +379,116 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     reopened.close();
   });
 
+  it("reasoning 随消息与工具调用记录落库：重开库完整恢复（票 02 思考回看的数据来源）", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteSessionStore(dbPath);
+    store.insertSession(sessionRecord());
+    store.insertMessage(
+      message({
+        id: "assistant-1",
+        role: "assistant",
+        content: "正文回答",
+        reasoning: "先想想再回答",
+        createdAt: "2026-11-10T08:00:02.000Z",
+      })
+    );
+    store.insertMessage(
+      message({
+        id: "assistant-2",
+        role: "assistant",
+        content: "无思考的回答",
+        createdAt: "2026-11-10T08:00:03.000Z",
+      })
+    );
+    store.insertToolCall({
+      id: "delegate-1",
+      sessionId: "session-1",
+      toolName: "spawn_subagent",
+      arguments: '{"task":"调研"}',
+      output: "子代理报告",
+      isError: false,
+      reasoning: "子代理思考全文",
+      createdAt: "2026-11-10T08:00:04.000Z",
+    });
+    store.insertToolCall({
+      id: "call-1",
+      sessionId: "session-1",
+      toolName: "read_file",
+      arguments: '{"path":"a.txt"}',
+      output: "内容",
+      isError: false,
+      createdAt: "2026-11-10T08:00:05.000Z",
+    });
+    store.close();
+
+    const reopened = createSqliteSessionStore(dbPath);
+    const messages = reopened.listMessages("session-1");
+    expect(messages[0]?.reasoning).toBe("先想想再回答");
+    expect(messages[0]?.content).toBe("正文回答");
+    // 无思考的消息：reasoning 保持 undefined（旧数据等价，不产生空字符串）
+    expect(messages[1]?.reasoning).toBeUndefined();
+    const calls = reopened.listToolCalls("session-1");
+    expect(calls[0]?.reasoning).toBe("子代理思考全文");
+    expect(calls[0]?.output).toBe("子代理报告");
+    expect(calls[1]?.reasoning).toBeUndefined();
+    reopened.close();
+  });
+
+  it("旧库迁移（票 02）：messages/tool_calls 无 reasoning 列的存量库打开后补列，旧行读回无思考且新写入正常", async () => {
+    const dbPath = tempDbPath();
+    // 票 02 之前的生产库形状：messages / tool_calls 均无 reasoning 列
+    const { DatabaseSync } = await import("node:sqlite");
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`CREATE TABLE sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+      provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, approval_mode TEXT NOT NULL DEFAULT 'assist',
+      workspace_mode TEXT NOT NULL DEFAULT 'local', archived_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`);
+    raw.exec(`CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      mentions TEXT,
+      aborted INTEGER
+    )`);
+    raw.exec(`CREATE TABLE tool_calls (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      tool_name TEXT NOT NULL,
+      arguments TEXT NOT NULL,
+      output TEXT NOT NULL,
+      is_error INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+    raw.exec(`INSERT INTO sessions (id, title, workspace_path, status, created_at, updated_at)
+      VALUES ('session-1', 'demo', 'C:\\work\\demo', 'idle', '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z')`);
+    raw.exec(`INSERT INTO messages (id, session_id, role, content, created_at)
+      VALUES ('legacy-a', 'session-1', 'assistant', '旧回答', '2026-11-10T08:00:01.000Z')`);
+    raw.exec(`INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, created_at)
+      VALUES ('legacy-d', 'session-1', 'spawn_subagent', '{"task":"旧任务"}', '旧报告', 0, '2026-11-10T08:00:02.000Z')`);
+    raw.close();
+
+    const migrated = createSqliteSessionStore(dbPath);
+    // 旧行读回：reasoning 自然缺失（undefined），不报错、不产生空思考
+    expect(migrated.listMessages("session-1")[0]?.reasoning).toBeUndefined();
+    expect(migrated.listToolCalls("session-1")[0]?.reasoning).toBeUndefined();
+    // 迁移后可按新 schema 写入思考
+    migrated.insertMessage(
+      message({
+        id: "new-a",
+        role: "assistant",
+        content: "新回答",
+        reasoning: "新思考",
+        createdAt: "2026-11-10T08:00:03.000Z",
+      })
+    );
+    expect(migrated.listMessages("session-1")[1]?.reasoning).toBe("新思考");
+    migrated.close();
+  });
+
   it("工单 03 时代的旧库（messages 无 mentions/aborted 列）打开时幂等迁移，旧数据可读", async () => {
     const dbPath = tempDbPath();
     // 手工建工单 03 时代的旧 schema（messages 无 mentions / aborted 列，07 踩坑样例）

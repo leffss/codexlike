@@ -142,6 +142,12 @@ interface SubagentEntry {
   /** 最终报告（成功）或中文失败/中断原因 */
   output: string;
   isError: boolean;
+  /**
+   * 思考过程全文（票 02）：与报告分离累积，随 spawn_subagent 延迟 tool-result
+   * 一并回流落库（tool_calls.reasoning 列），仅为恢复后展示；
+   * 不回填模型（回填内容只有 output）。
+   */
+  reasoning: string;
 }
 
 export interface SubagentOrchestrator {
@@ -314,6 +320,8 @@ export function createSubagentOrchestrator(
     let output = "";
     let isError = false;
     let aborted = false;
+    // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
+    let reasoning = "";
     try {
       const snapshot = port.resources?.();
       const execution = snapshot?.createExecution(entry.subagentId);
@@ -383,8 +391,9 @@ export function createSubagentOrchestrator(
         }[] = [];
         for await (const part of result.fullStream) {
           if (part.type === "reasoning-delta") {
-            // 思考与报告分离：只作为事件流出（嵌套卡片流式展示），
-            // 不累积进报告文本、不进入子代理消息上下文
+            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积全文
+            // （随终态报告回流落库，票 02）；不进入子代理消息上下文
+            reasoning += part.text;
             emit({
               type: "subagent-reasoning",
               subagentId: entry.subagentId,
@@ -496,6 +505,7 @@ export function createSubagentOrchestrator(
 
     entry.output = output;
     entry.isError = isError;
+    entry.reasoning = reasoning;
     entry.state = "done";
     fallbackProfiles.delete(entry.subagentId);
     emit({
@@ -551,6 +561,7 @@ export function createSubagentOrchestrator(
         thinkingEffort: context.thinkingEffort ?? "auto",
         output: "",
         isError: false,
+        reasoning: "",
       };
       entries.set(subagentId, entry);
       if (context.profile !== undefined) {
@@ -577,7 +588,13 @@ export function createSubagentOrchestrator(
     resultFor(toolCallId) {
       for (const entry of entries.values()) {
         if (entry.toolCallId === toolCallId && entry.state === "done") {
-          return { output: entry.output, isError: entry.isError };
+          // 思考全文随报告一并回流（票 02）：会话侧落库进 tool_calls.reasoning 列；
+          // 回填模型的仍只有 output
+          return {
+            output: entry.output,
+            isError: entry.isError,
+            ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
+          };
         }
       }
       return undefined;
