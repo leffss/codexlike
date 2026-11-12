@@ -1,40 +1,80 @@
 import type {
   InteractionRecord,
-  MessageRole,
   SessionEvent,
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
 } from "@codexlike/agent-core";
 
-/** 消息流里一条消息的 UI 状态（含流式/中断标记）；kind 为联合判别保留位 */
 /**
- * 本地状态消息角色（工单 07）：命令反馈与 /status 展示。
- * 只存在于渲染层（不落库、不进模型上下文、不来自 SessionEvent）。
+ * 时序消息段模型（GLOSSARY「消息段」「轮次」，ADR 0011）：
+ * 会话视图状态是按事件发生顺序排列的扁平消息段序列——思考段、正文段、
+ * 工具调用卡、子代理卡、错误段、状态段、compact 摘要段、用户消息段
+ * 全部是序列中的平等成员，不按类型归类合并；时序交错在数据层保真，
+ * 渲染层只按时序分派。
+ *
+ * 更新操作为封闭集：尾部追加、按 id 整段替换（状态迁移保持段 id 与序号）、
+ * 截断删除（compact 等结构变化由 live-session 层整体重放 initialTranscript）、
+ * 流式文本追加（只允许追加到序列末尾的流态段；被工具卡等隔断后新起段）。
+ * 不引入字段级 patch。
  */
-export type LocalMessageRole = "status";
 
-/** 消息流里一条消息的 UI 状态（含流式/中断标记） */
-export interface UiMessage {
-  kind?: undefined;
+/** 消息段公共底座：稳定序号 + 轮次标签 + 共享响应 id 关联 */
+interface SegmentBase {
+  /** 段稳定 id（渲染 key；按 id 整段替换时不变） */
   id: string;
-  role: MessageRole | LocalMessageRole;
+  /** 会话内单调稳定序号：仅随尾部追加递增，永不复用；整段替换保持原值 */
+  seq: number;
+  /** 轮次标签（触发本轮的用户消息 id）：段上的标签而非容器 */
+  turnId: string;
+  /** 共享响应 id：同一模型响应产生的思考/正文段共享此 id，关联不靠嵌套 */
+  responseId: string | null;
+}
+
+/** 用户消息段（GLOSSARY「轮次」的起点：每个用户段开启新轮次） */
+export interface UserSegment extends SegmentBase {
+  kind: "user";
   content: string;
-  /**
-   * 模型思考过程（GLOSSARY「思考档位」）：仅运行期展示，与正文分开累积；
-   * 不来自持久化（历史加载不重建），终态由 done/aborted/error 事件收敛。
-   */
-  reasoning?: string;
-  /** 助手消息流式进行中 */
+}
+
+/** 正文段：一轮回复内的一段 assistant 正文（被工具卡隔断的正文各自成段） */
+export interface AssistantSegment extends SegmentBase {
+  kind: "assistant";
+  content: string;
+  /** 流式进行中（流式文本只追加到末尾流态段） */
   streaming?: boolean;
-  /** 助手消息被用户中断，content 为部分内容 */
+  /** 该段被用户中断：content 为部分内容 */
   interrupted?: boolean;
 }
 
-/** 消息流里一张工具卡片的 UI 状态 */
-export interface UiToolCall {
+/** 思考段（GLOSSARY「思考档位」）：与正文分离的模型思考过程，序列中的独立成员 */
+export interface ThinkingSegment extends SegmentBase {
+  kind: "thinking";
+  content: string;
+  streaming?: boolean;
+}
+
+/** 错误段：模型 API 出错等的中文提示（不进入对话上下文） */
+export interface ErrorSegment extends SegmentBase {
+  kind: "error";
+  content: string;
+}
+
+/** 状态段：本地命令反馈（/status、/rename 结果等），只存在于渲染层 */
+export interface StatusSegment extends SegmentBase {
+  kind: "status";
+  content: string;
+}
+
+/** compact 摘要段（GLOSSARY「Compact」）：被压缩历史展开后的摘要卡片 */
+export interface CompactSummarySegment extends SegmentBase {
+  kind: "compact-summary";
+  content: string;
+}
+
+/** 工具调用卡段：tool-call 事件已到、tool-result 未到时显示运行中 */
+export interface ToolCallSegment extends SegmentBase {
   kind: "tool-call";
-  id: string;
   /** 所属会话（截图卡片按会话+调用 id 向主进程请求图片数据） */
   sessionId: string;
   toolName: string;
@@ -47,18 +87,12 @@ export interface UiToolCall {
   running?: boolean;
 }
 
-/** 消息流只读交互记录；操作只存在于底部 InteractionPanel。 */
-export interface UiInteraction {
-  kind: "interaction";
-  id: string;
-  interaction: InteractionRecord;
-}
-
 /**
- * 消息流里一张子代理嵌套卡片的 UI 状态（工单 13，GLOSSARY「子代理」）：
- * 排队 → 运行（当前活动工具 + 已用时）→ 完成（报告可展开）。
+ * 子代理卡段（GLOSSARY「子代理」）：排队 → 运行（当前活动工具 + 已用时）→
+ * 完成（报告可展开）。卡内嵌套的子代理工具进度与思考是卡片内部状态，
+ * 不是主序列成员。
  */
-export interface UiSubagent {
+export interface SubagentSegment extends SegmentBase {
   kind: "subagent";
   /** 子代理 id（编排器生成，进度事件匹配键） */
   id: string;
@@ -69,64 +103,203 @@ export interface UiSubagent {
   state: "queued" | "running" | "done";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
-  /**
-   * 子代理思考过程（GLOSSARY「思考档位」，思考档位 03）：与报告文本分开累积，
-   * 仅运行期展示（历史加载不重建）；终态由 subagent-report 收敛。
-   */
+  /** 子代理思考过程（与报告文本分开累积，仅运行期展示） */
   reasoning?: string;
   report: string | null;
   /** null = 未结束；false = 失败或被中断 */
   ok: boolean | null;
-  /** 子代理内部的工具调用（嵌套进度列表） */
-  tools: UiToolCall[];
+  /** 子代理内部的工具调用（卡内嵌套进度列表） */
+  tools: SubagentToolCall[];
 }
 
-/** 消息流条目：消息、工具卡片、审批卡片或子代理嵌套卡片 */
-export type UiItem = UiMessage | UiToolCall | UiInteraction | UiSubagent;
-
-/** 会话切换 / 应用启动时，把持久化历史映射为消息流初始状态 */
-export function initialMessages(history: StoredMessage[]): UiMessage[] {
-  return history.map((message) => ({
-    id: message.id,
-    role: message.role,
-    content: message.content,
-  }));
+/** 子代理卡内嵌套的工具调用进度（无段字段：不是消息流序列成员） */
+export interface SubagentToolCall {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  arguments: string;
+  output: string;
+  isError: boolean;
+  running?: boolean;
 }
 
-/** 会话时间线（消息 + 工具调用）→ 消息流初始状态 */
-export function initialTranscript(items: TranscriptItem[]): UiItem[] {
-  return items.map((item) =>
-    item.kind === "message"
-      ? {
-          id: item.message.id,
-          role: item.message.role,
-          content: item.message.content,
-          // 重启恢复：被中断的助手消息仍显示中断点标记
-          interrupted: item.message.aborted === true || undefined,
-        }
-      : item.kind === "interaction"
-        ? {
-            kind: "interaction",
-            id: item.interaction.request.id,
-            interaction: item.interaction,
-          }
-        : item.call.toolName === "spawn_subagent"
-          ? subagentFromToolRecord(item.call)
-          : {
-              kind: "tool-call",
-              id: item.call.id,
-              sessionId: item.call.sessionId,
-              toolName: item.call.toolName,
-              arguments: item.call.arguments,
-              output: item.call.output,
-              isError: item.call.isError,
-              running: false,
-            }
+/** 交互记录段：只读回放；操作只存在于底部 InteractionPanel */
+export interface InteractionSegment extends SegmentBase {
+  kind: "interaction";
+  interaction: InteractionRecord;
+}
+
+/** 消息段：消息流时序序列的最小呈现单元 */
+export type MessageSegment =
+  | UserSegment
+  | AssistantSegment
+  | ThinkingSegment
+  | ErrorSegment
+  | StatusSegment
+  | CompactSummarySegment
+  | ToolCallSegment
+  | SubagentSegment
+  | InteractionSegment;
+
+/** 下一个稳定序号：基于现有最大序号递增 */
+function nextSeq(items: MessageSegment[]): number {
+  let max = 0;
+  for (const item of items) if (item.seq > max) max = item.seq;
+  return max + 1;
+}
+
+/**
+ * 轮次标签推导：归入最后一个用户段所在轮；序列尚无用户段时以
+ * fallback（响应 id / 消息 id / 调用 id）自成兜底轮。
+ */
+function deriveTurnId(items: MessageSegment[], fallback: string): string {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item !== undefined && item.kind === "user") return item.id;
+  }
+  return fallback;
+}
+
+/** 最近一个响应段的共享响应 id（工具卡段归属正在进行的响应） */
+function lastResponseId(items: MessageSegment[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (
+      item !== undefined &&
+      (item.kind === "assistant" || item.kind === "thinking")
+    )
+      return item.responseId;
+  }
+  return null;
+}
+
+/** 流态段（思考/正文）：流式文本追加的唯一合法目标 */
+function isStreamingSegment(
+  item: MessageSegment
+): item is AssistantSegment | ThinkingSegment {
+  return (
+    (item.kind === "assistant" || item.kind === "thinking") &&
+    item.streaming === true
   );
 }
 
-/** 重启恢复：spawn_subagent 的落库记录 → 完成态嵌套卡片（task 从参数解析、报告即 output） */
-function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
+/** 同一响应内第 n 个某类段的稳定 id */
+function segmentId(
+  prefix: "text" | "thinking",
+  messageId: string,
+  items: MessageSegment[]
+): string {
+  let count = 0;
+  for (const item of items) {
+    if (
+      item.responseId === messageId &&
+      item.kind === (prefix === "text" ? "assistant" : "thinking")
+    )
+      count += 1;
+  }
+  return `${prefix}-${messageId}-${count + 1}`;
+}
+
+/** 尾部追加（封闭集操作一） */
+function append(
+  items: MessageSegment[],
+  segment: MessageSegment
+): MessageSegment[] {
+  return [...items, segment];
+}
+
+/** 按 id 整段替换（封闭集操作二）：保持段 id 与序号不变 */
+function replaceSegment(
+  items: MessageSegment[],
+  id: string,
+  update: (segment: MessageSegment) => MessageSegment
+): MessageSegment[] {
+  return items.map((item) => (item.id === id ? update(item) : item));
+}
+
+/**
+ * 会话时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
+ * 历史恢复与运行期流式输出共用同一形状：本函数产出的段序列与
+ * applySessionEvent 归并出的段序列同类同构。
+ */
+export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  for (const item of history) {
+    if (item.kind === "interaction") {
+      segments.push({
+        kind: "interaction",
+        id: item.interaction.request.id,
+        seq: nextSeq(segments),
+        turnId: deriveTurnId(segments, item.interaction.request.id),
+        responseId: null,
+        interaction: item.interaction,
+      });
+      continue;
+    }
+    if (item.kind === "tool-call") {
+      const call = item.call;
+      if (call.toolName === "spawn_subagent") {
+        segments.push(subagentFromToolRecord(call, segments));
+        continue;
+      }
+      segments.push({
+        kind: "tool-call",
+        id: call.id,
+        seq: nextSeq(segments),
+        turnId: deriveTurnId(segments, call.id),
+        responseId: null,
+        sessionId: call.sessionId,
+        toolName: call.toolName,
+        arguments: call.arguments,
+        output: call.output,
+        isError: call.isError,
+        running: false,
+      });
+      continue;
+    }
+    const message = item.message;
+    segments.push(messageSegment(message, segments));
+  }
+  return segments;
+}
+
+/** 单条持久化消息 → 对应类型的消息段（user 开新轮，assistant 以自身 id 关联响应） */
+function messageSegment(
+  message: StoredMessage,
+  segments: MessageSegment[]
+): MessageSegment {
+  const base = {
+    id: message.id,
+    seq: nextSeq(segments),
+    // user 消息开启新轮次（轮次标签 = 自身 id）；其余消息归入当前轮
+    turnId:
+      message.role === "user" ? message.id : deriveTurnId(segments, message.id),
+    // 历史 assistant 消息以自身 id 作为响应 id（思考/正文段关联键）
+    responseId: message.role === "assistant" ? message.id : null,
+  };
+  switch (message.role) {
+    case "user":
+      return { ...base, kind: "user", content: message.content };
+    case "assistant":
+      return {
+        ...base,
+        kind: "assistant",
+        content: message.content,
+        // 重启恢复：被中断的助手消息仍显示中断点标记
+        interrupted: message.aborted === true || undefined,
+      };
+    case "error":
+      return { ...base, kind: "error", content: message.content };
+    case "compact-summary":
+      return { ...base, kind: "compact-summary", content: message.content };
+  }
+}
+
+/** 重启恢复：spawn_subagent 的落库记录 → 完成态子代理段（task 从参数解析、报告即 output） */
+function subagentFromToolRecord(
+  call: ToolCallRecord,
+  segments: MessageSegment[]
+): SubagentSegment {
   let task = "";
   try {
     const parsed: unknown = JSON.parse(call.arguments);
@@ -142,9 +315,12 @@ function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
   return {
     kind: "subagent",
     id: `restore-${call.id}`,
+    seq: nextSeq(segments),
+    turnId: deriveTurnId(segments, call.id),
+    responseId: null,
     toolCallId: call.id,
     task,
-    state: "done" as const,
+    state: "done",
     startedAt: null,
     report: call.output,
     ok: !call.isError,
@@ -153,173 +329,102 @@ function subagentFromToolRecord(call: ToolCallRecord): UiSubagent {
 }
 
 /**
- * 流式事件 → 消息流增量更新（纯函数，React state 的归并核心）。
- * 调用方按 sessionId 隔离事件；切会话/设置可能错过 start，后续事件负责重建助手消息。
+ * 流式事件 → 消息段序列增量更新（纯函数，React state 的归并核心）。
+ * 调用方按 sessionId 隔离事件；切会话可能错过 assistant-start，
+ * delta / reasoning / done 自行兜底建段。
  */
 export function applySessionEvent(
-  messages: UiItem[],
+  items: MessageSegment[],
   event: SessionEvent
-): UiItem[] {
+): MessageSegment[] {
   switch (event.type) {
     case "user-message":
-      if (messages.some((item) => item.id === event.message.id))
-        return messages;
-      return [
-        ...messages,
-        {
-          id: event.message.id,
-          role: "user",
-          content: event.message.content,
-        },
-      ];
+      if (items.some((item) => item.id === event.message.id)) return items;
+      return append(items, {
+        kind: "user",
+        id: event.message.id,
+        seq: nextSeq(items),
+        turnId: event.message.id,
+        responseId: null,
+        content: event.message.content,
+      });
 
     case "assistant-start":
-      if (
-        messages.some(
-          (item) => item.kind === undefined && item.id === event.messageId
-        )
-      )
-        return messages;
-      return [
-        ...messages,
-        {
-          id: event.messageId,
-          role: "assistant",
-          content: "",
-          streaming: true,
-        },
-      ];
+      // 段由首个 delta / reasoning / 终态事件惰性建立：start 只是响应开始的标记
+      return items;
 
     case "assistant-delta":
+    case "assistant-reasoning": {
+      const isText = event.type === "assistant-delta";
+      const messageId = event.messageId;
+      const delta = event.delta;
+      const last = items[items.length - 1];
+      // 流式文本追加（封闭集操作四）：只追加到末尾的流态段；
+      // 任何隔断（工具卡、终态、其他响应的段）之后新起段，时序保真
       if (
-        !messages.some(
-          (item) => item.kind === undefined && item.id === event.messageId
-        )
+        last !== undefined &&
+        isStreamingSegment(last) &&
+        last.responseId === messageId &&
+        last.kind === (isText ? "assistant" : "thinking")
       ) {
         return [
-          ...messages,
-          {
-            id: event.messageId,
-            role: "assistant",
-            content: event.delta,
-            streaming: true,
-          },
+          ...items.slice(0, -1),
+          { ...last, content: last.content + delta },
         ];
       }
-      return messages.map((message) =>
-        message.kind === undefined && message.id === event.messageId
-          ? { ...message, content: message.content + event.delta }
-          : message
-      );
-
-    case "assistant-reasoning":
-      if (
-        !messages.some(
-          (item) => item.kind === undefined && item.id === event.messageId
-        )
-      ) {
-        return [
-          ...messages,
-          {
-            id: event.messageId,
-            role: "assistant",
-            content: "",
-            reasoning: event.delta,
-            streaming: true,
-          },
-        ];
-      }
-      // 思考与正文分离累积。
-      return messages.map((message) =>
-        message.kind === undefined && message.id === event.messageId
-          ? { ...message, reasoning: (message.reasoning ?? "") + event.delta }
-          : message
-      );
+      return append(items, {
+        kind: isText ? "assistant" : "thinking",
+        id: segmentId(isText ? "text" : "thinking", messageId, items),
+        seq: nextSeq(items),
+        turnId: deriveTurnId(items, messageId),
+        responseId: messageId,
+        content: delta,
+        streaming: true,
+      });
+    }
 
     case "assistant-done":
-      if (
-        !messages.some(
-          (item) => item.kind === undefined && item.id === event.message.id
-        )
-      ) {
-        return [
-          ...messages,
-          {
-            id: event.message.id,
-            role: "assistant",
-            content: event.message.content,
-          },
-        ];
-      }
-      return messages.map((message) =>
-        message.kind === undefined && message.id === event.message.id
-          ? { ...message, content: event.message.content, streaming: undefined }
-          : message
-      );
+      return finalizeResponse(items, event.message, false);
 
     case "assistant-aborted":
-      if (
-        !messages.some(
-          (item) => item.kind === undefined && item.id === event.message.id
-        )
-      ) {
-        return [
-          ...messages,
-          {
-            id: event.message.id,
-            role: "assistant",
-            content: event.message.content,
-            interrupted: true,
-          },
-        ];
-      }
-      return messages.map((message) =>
-        message.kind === undefined && message.id === event.message.id
-          ? {
-              ...message,
-              content: event.message.content,
-              streaming: undefined,
-              interrupted: true,
-            }
-          : message
-      );
+      return finalizeResponse(items, event.message, true);
 
     case "tool-call":
-      // spawn_subagent 由嵌套卡片呈现（subagent-queued/start 事件建卡），不出普通工具卡片
+      // spawn_subagent 由子代理段呈现（subagent-queued/start 事件建卡），不出普通工具卡
       if (event.call.toolName === "spawn_subagent") {
-        return messages;
+        return items;
       }
       if (
-        messages.some(
+        items.some(
           (item) => item.kind === "tool-call" && item.id === event.call.id
         )
       )
-        return messages;
-      return [
-        ...messages,
-        {
-          kind: "tool-call",
-          id: event.call.id,
-          sessionId: event.call.sessionId,
-          toolName: event.call.toolName,
-          arguments: event.call.arguments,
-          output: "",
-          isError: false,
-          running: true,
-        },
-      ];
+        return items;
+      return append(items, {
+        kind: "tool-call",
+        id: event.call.id,
+        seq: nextSeq(items),
+        turnId: deriveTurnId(items, event.call.id),
+        responseId: lastResponseId(items),
+        sessionId: event.call.sessionId,
+        toolName: event.call.toolName,
+        arguments: event.call.arguments,
+        output: "",
+        isError: false,
+        running: true,
+      });
 
     case "tool-result":
-      // spawn_subagent 的报告回填对应嵌套卡片（按 toolCallId 匹配）
+      // spawn_subagent 的报告回填对应子代理段（按 toolCallId 匹配）
       if (event.call.toolName === "spawn_subagent") {
         if (
-          !messages.some(
+          !items.some(
             (item) =>
               item.kind === "subagent" && item.toolCallId === event.call.id
           )
         )
-          return [...messages, subagentFromToolRecord(event.call)];
-        return messages.map((item) =>
+          return append(items, subagentFromToolRecord(event.call, items));
+        return items.map((item) =>
           item.kind === "subagent" && item.toolCallId === event.call.id
             ? {
                 ...item,
@@ -331,16 +436,27 @@ export function applySessionEvent(
         );
       }
       if (
-        !messages.some(
+        !items.some(
           (item) => item.kind === "tool-call" && item.id === event.call.id
         )
-      )
-        return [
-          ...messages,
-          ...initialTranscript([{ kind: "tool-call", call: event.call }]),
-        ];
-      return messages.map((item) =>
-        item.kind === "tool-call" && item.id === event.call.id
+      ) {
+        // 当前执行错过 tool-call（切会话后迟到）：由 tool-result 补齐终态卡
+        return append(items, {
+          kind: "tool-call",
+          id: event.call.id,
+          seq: nextSeq(items),
+          turnId: deriveTurnId(items, event.call.id),
+          responseId: lastResponseId(items),
+          sessionId: event.call.sessionId,
+          toolName: event.call.toolName,
+          arguments: event.call.arguments,
+          output: event.call.output,
+          isError: event.call.isError,
+          running: false,
+        });
+      }
+      return replaceSegment(items, event.call.id, (item) =>
+        item.kind === "tool-call"
           ? {
               ...item,
               output: event.call.output,
@@ -352,41 +468,38 @@ export function applySessionEvent(
 
     case "subagent-queued":
       if (
-        messages.some(
+        items.some(
           (item) => item.kind === "subagent" && item.id === event.subagentId
         )
       )
-        return messages;
-      return [
-        ...messages,
-        {
-          kind: "subagent",
-          id: event.subagentId,
-          toolCallId: "",
-          task: event.task,
-          state: "queued" as const,
-          startedAt: null,
-          report: null,
-          ok: null,
-          tools: [],
-        },
-      ];
+        return items;
+      return append(items, {
+        kind: "subagent",
+        id: event.subagentId,
+        seq: nextSeq(items),
+        turnId: deriveTurnId(items, event.subagentId),
+        responseId: null,
+        toolCallId: "",
+        task: event.task,
+        state: "queued",
+        startedAt: null,
+        report: null,
+        ok: null,
+        tools: [],
+      });
 
-    case "subagent-start":
-      if (
-        !messages.some(
-          (item) => item.kind === "subagent" && item.id === event.subagentId
-        )
+    case "subagent-start": {
+      const seeded = items.some(
+        (item) => item.kind === "subagent" && item.id === event.subagentId
       )
-        messages = applySessionEvent(messages, {
-          type: "subagent-queued",
-          subagentId: event.subagentId,
-          task: event.task,
-        });
-      return messages.map((item) =>
-        item.kind === "subagent" &&
-        item.id === event.subagentId &&
-        item.state !== "done"
+        ? items
+        : applySessionEvent(items, {
+            type: "subagent-queued",
+            subagentId: event.subagentId,
+            task: event.task,
+          });
+      return replaceSegment(seeded, event.subagentId, (item) =>
+        item.kind === "subagent" && item.state !== "done"
           ? {
               ...item,
               state: "running" as const,
@@ -395,32 +508,33 @@ export function applySessionEvent(
             }
           : item
       );
+    }
 
     case "subagent-tool":
-      return messages.map((item) => {
-        if (item.kind !== "subagent" || item.id !== event.subagentId) {
-          return item;
-        }
-        return {
-          ...item,
-          tools: applySessionEvent(item.tools, {
-            type: event.phase === "call" ? "tool-call" : "tool-result",
-            call: event.call,
-          }).filter((tool): tool is UiToolCall => tool.kind === "tool-call"),
-        };
-      });
+      return replaceSegment(items, event.subagentId, (item) =>
+        item.kind === "subagent"
+          ? {
+              ...item,
+              tools: applySubagentTool(
+                item.tools,
+                event.call,
+                event.phase === "call"
+              ),
+            }
+          : item
+      );
 
     case "subagent-reasoning":
       // 子代理思考：与报告分离累积到所属卡片；未知 subagentId（会话切换后迟到）忽略
-      return messages.map((item) =>
-        item.kind === "subagent" && item.id === event.subagentId
+      return replaceSegment(items, event.subagentId, (item) =>
+        item.kind === "subagent"
           ? { ...item, reasoning: (item.reasoning ?? "") + event.delta }
           : item
       );
 
     case "subagent-report":
-      return messages.map((item) =>
-        item.kind === "subagent" && item.id === event.subagentId
+      return replaceSegment(items, event.subagentId, (item) =>
+        item.kind === "subagent"
           ? {
               ...item,
               state: "done" as const,
@@ -432,62 +546,153 @@ export function applySessionEvent(
 
     case "interaction-request":
     case "interaction-resolved":
-      return mergeInteractions(messages, [event.interaction]);
+      return mergeInteractions(items, [event.interaction]);
 
     // 旧事件只作兼容，不再创建第二套可操作审批卡片。
     case "approval-request":
     case "approval-resolved":
-      return messages;
+      return items;
 
     case "error":
-      return [
-        // 出错即本轮终止：正在流式中的助手消息（含思考块）收敛，不残留进行中状态
-        ...messages.map((message) =>
-          message.kind === undefined && message.streaming === true
-            ? { ...message, streaming: undefined }
-            : message
+      // 出错即本轮终止：全部流态段收敛，尾部追加错误段
+      return append(
+        items.map((item) =>
+          isStreamingSegment(item) ? { ...item, streaming: undefined } : item
         ),
         {
+          kind: "error",
           id: event.message.id,
-          role: "error",
+          seq: nextSeq(items),
+          turnId: deriveTurnId(items, event.message.id),
+          responseId: null,
           content: event.message.content,
-        },
-      ];
+        }
+      );
   }
 }
 
-/** 加载期间缓冲事件：快照已有的消息/工具不再重复回放。 */
-export function hydrateTranscript(
-  history: TranscriptItem[],
-  events: SessionEvent[]
-): UiItem[] {
-  const messageIds = new Set(
-    history.flatMap((item) =>
-      item.kind === "message" ? [item.message.id] : []
-    )
+/** 响应终态收敛（done / aborted）：流态去除、中断标记、终稿纠错、无正文段兜底 */
+function finalizeResponse(
+  items: MessageSegment[],
+  message: StoredMessage,
+  interrupted: boolean
+): MessageSegment[] {
+  // 该响应的全部流态段（思考/正文）收敛：不残留进行中状态
+  let next = items.map((item): MessageSegment => {
+    if (isStreamingSegment(item) && item.responseId === message.id) {
+      return { ...item, streaming: undefined };
+    }
+    return item;
+  });
+  const hasTextSegments = next.some(
+    (item) => item.kind === "assistant" && item.responseId === message.id
   );
-  const toolIds = new Set(
-    history.flatMap((item) => (item.kind === "tool-call" ? [item.call.id] : []))
-  );
-  let items = initialTranscript(history);
-  for (const event of events) {
-    if ("messageId" in event && messageIds.has(event.messageId)) continue;
-    if ("message" in event && messageIds.has(event.message.id)) continue;
-    if (
-      (event.type === "tool-call" || event.type === "tool-result") &&
-      toolIds.has(event.call.id)
-    )
-      continue;
-    items = applySessionEvent(items, event);
+  if (!hasTextSegments) {
+    // 响应无任何正文段（错过全部增量 / 只有思考）：终态消息落为终态正文段
+    return append(next, {
+      kind: "assistant",
+      id: `text-${message.id}-1`,
+      seq: nextSeq(next),
+      turnId: deriveTurnId(next, message.id),
+      responseId: message.id,
+      content: message.content,
+      interrupted: interrupted || undefined,
+    });
   }
-  return items;
+  if (interrupted) {
+    // 中断点标记跟在最后一段正文上
+    for (let i = next.length - 1; i >= 0; i--) {
+      const item = next[i];
+      if (
+        item !== undefined &&
+        item.kind === "assistant" &&
+        item.responseId === message.id
+      ) {
+        next = next.map((candidate, index) =>
+          index === i ? { ...item, interrupted: true } : candidate
+        );
+        break;
+      }
+    }
+  }
+  // 单正文段（未被工具卡隔断）以终稿全文整段替换，防增量缺失；
+  // 多段切分保持原内容（delta 累积已完整），不做破坏时序的合并
+  const textSegments = next.filter(
+    (item): item is AssistantSegment =>
+      item.kind === "assistant" && item.responseId === message.id
+  );
+  const single = textSegments.length === 1 ? textSegments[0] : undefined;
+  if (single !== undefined && single.content !== message.content) {
+    next = next.map((item) =>
+      item === single ? { ...item, content: message.content } : item
+    );
+  }
+  return next;
 }
 
-/** 同一记录在实时事件、历史与 pending 快照之间幂等合并，终态不可回退。 */
+/** 子代理卡内嵌套的工具进度归并（call → 运行中，result → 终态） */
+function applySubagentTool(
+  tools: SubagentToolCall[],
+  call: ToolCallRecord,
+  isCall: boolean
+): SubagentToolCall[] {
+  if (isCall) {
+    if (tools.some((tool) => tool.id === call.id)) return tools;
+    return [
+      ...tools,
+      {
+        id: call.id,
+        sessionId: call.sessionId,
+        toolName: call.toolName,
+        arguments: call.arguments,
+        output: "",
+        isError: false,
+        running: true,
+      },
+    ];
+  }
+  if (!tools.some((tool) => tool.id === call.id)) {
+    return [
+      ...tools,
+      {
+        id: call.id,
+        sessionId: call.sessionId,
+        toolName: call.toolName,
+        arguments: call.arguments,
+        output: call.output,
+        isError: call.isError,
+        running: false,
+      },
+    ];
+  }
+  return tools.map((tool) =>
+    tool.id === call.id
+      ? { ...tool, output: call.output, isError: call.isError, running: false }
+      : tool
+  );
+}
+
+/** 渲染层本地段（status / error）：不入事件流，尾部追加并归当前轮 */
+export function appendLocalSegment(
+  items: MessageSegment[],
+  message: { kind: "status" | "error"; content: string }
+): MessageSegment[] {
+  const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return append(items, {
+    kind: message.kind,
+    id,
+    seq: nextSeq(items),
+    turnId: deriveTurnId(items, id),
+    responseId: null,
+    content: message.content,
+  });
+}
+
+/** 同一交互记录在实时事件、历史与 pending 快照之间幂等合并，终态不可回退。 */
 export function mergeInteractions(
-  items: UiItem[],
+  items: MessageSegment[],
   records: InteractionRecord[]
-): UiItem[] {
+): MessageSegment[] {
   let next = items;
   for (const interaction of records) {
     const index = next.findIndex(
@@ -500,9 +705,15 @@ export function mergeInteractions(
       previous.interaction.status !== "pending"
     )
       continue;
-    const item: UiInteraction = {
+    const item: InteractionSegment = {
       kind: "interaction",
       id: interaction.request.id,
+      seq: previous !== undefined ? previous.seq : nextSeq(next),
+      turnId:
+        previous !== undefined
+          ? previous.turnId
+          : deriveTurnId(next, interaction.request.id),
+      responseId: null,
       interaction,
     };
     next =
@@ -513,7 +724,7 @@ export function mergeInteractions(
   return next;
 }
 
-/** 子代理开跑时间的记录基准（嵌套卡片「已用时」的计算起点） */
+/** 子代理开跑时间的记录基准（卡内「已用时」的计算起点） */
 function nowIso(): string {
   return new Date().toISOString();
 }
