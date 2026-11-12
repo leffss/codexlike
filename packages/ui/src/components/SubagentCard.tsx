@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
 import type { SubagentSegment } from "../lib/session-view";
+import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 
 /**
@@ -96,7 +97,11 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
       {subagent.state === "running" && (
         <div className="border-t border-line px-3 py-2 text-xs text-fg-muted">
           {hasReasoning && (
-            <SubagentThinking reasoning={subagent.reasoning!} streaming />
+            <SubagentThinking
+              reasoning={subagent.reasoning!}
+              streaming
+              collapseKey={`subagent-thinking-${subagent.id}`}
+            />
           )}
           {activeTool !== undefined ? (
             <p>
@@ -121,7 +126,12 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
 
       {expanded && subagent.state === "done" && (
         <div className="border-t border-line px-3 py-2">
-          {hasReasoning && <SubagentThinking reasoning={subagent.reasoning!} />}
+          {hasReasoning && (
+            <SubagentThinking
+              reasoning={subagent.reasoning!}
+              collapseKey={`subagent-thinking-${subagent.id}`}
+            />
+          )}
           <div className="text-xs text-fg-subtle">最终报告</div>
           <div
             data-testid="subagent-report"
@@ -189,14 +199,31 @@ function formatElapsed(subagent: SubagentSegment, now: number): string {
 
 /**
  * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主会话思考块
- * 同构——默认收起、流式运行中带思考指示器；与报告文本分离，
+ * 同构——流式运行中默认展开实时可见、结束自动收起、收起后以一行摘要回看
+ * （开合按 collapseKey 记忆，与卡片自身开合互不干扰）；与报告文本分离，
  * 重启后由落盘 reasoning 重建（旧记录自然缺失，不渲染空块）。
+ * 受控 <details open> 的 onToggle 记忆规则同 ThinkingBlock（见其注释）。
  */
-function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
+function SubagentThinking(props: {
+  reasoning: string;
+  streaming?: boolean;
+  collapseKey: string;
+}) {
   const { reasoning, streaming } = props;
+  const { open, setOpen } = useCollapseState(
+    props.collapseKey,
+    streaming === true
+  );
+  const summary = thinkingSummary(reasoning);
   return (
     <details
       data-testid="subagent-thinking-block"
+      open={open}
+      onToggle={(event) => {
+        if (event.currentTarget.open !== open) {
+          setOpen(event.currentTarget.open);
+        }
+      }}
       className="mb-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
     >
       <summary
@@ -206,17 +233,27 @@ function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
         {streaming === true && (
           <span
             data-testid="subagent-thinking-indicator"
-            className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
+            className="generating-spinner shrink-0"
             aria-label="思考中"
           />
         )}
-        思考过程（点击展开 / 收起）
+        <span
+          data-testid="subagent-thinking-summary"
+          className="min-w-0 flex-1 truncate"
+        >
+          {streaming === true ? "思考中" : "已思考"}
+          {summary !== "" && ` · ${summary}`}
+        </span>
+        <span className="shrink-0 text-fg-subtle">{open ? "▾" : "▸"}</span>
       </summary>
       <div
         data-testid="subagent-thinking-content"
         className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 text-fg"
       >
         {reasoning}
+        {streaming === true && (
+          <span className="generating-spinner ml-1" aria-hidden="true" />
+        )}
       </div>
     </details>
   );

@@ -3,15 +3,16 @@
  * 首次使用时自动下载，带进度与中文失败提示，失败可重试）。
  * 安装器抽象为接口：默认实现走 playwright-core CLI（spawn 子进程，不真下载的测试注入 fake）。
  */
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { createRequire } from 'node:module';
+import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 
-import { chromium } from 'playwright-core';
+import { chromium } from "playwright-core";
 
 /** Chromium 下载镜像（本机网络受限时加速；用户显式设置 PLAYWRIGHT_DOWNLOAD_HOST 时不覆盖） */
-export const DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = 'https://npmmirror.com/mirrors/playwright/';
+export const DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST =
+  "https://npmmirror.com/mirrors/playwright/";
 
 /** Chromium 安装器：就绪探测 + 下载安装（宿主或测试可注入替代实现） */
 export interface ChromiumInstaller {
@@ -32,7 +33,7 @@ export interface ChromiumInstaller {
  */
 export async function ensureChromiumReady(
   installer: ChromiumInstaller,
-  onProgress: (line: string) => void,
+  onProgress: (line: string) => void
 ): Promise<void> {
   if (installer.isReady()) {
     return;
@@ -45,27 +46,28 @@ export async function ensureChromiumReady(
       `Chromium 下载失败：${reason}。本次操作已中止，稍后再次调用浏览器工具会自动重试；` +
         `网络受限时可设置环境变量 PLAYWRIGHT_DOWNLOAD_HOST 指定镜像` +
         `（默认 ${DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST}）`,
+      { cause: error }
     );
   }
   if (!installer.isReady()) {
     throw new Error(
-      'Chromium 安装流程已完成，但可执行文件仍未就绪；' +
-        '可能是下载被中断，稍后再次调用浏览器工具会自动重试',
+      "Chromium 安装流程已完成，但可执行文件仍未就绪；" +
+        "可能是下载被中断，稍后再次调用浏览器工具会自动重试"
     );
   }
 }
 
 /** spawn 子进程的最小形状（默认实现用 node:child_process；测试注入 fake） */
 export interface InstallerChildProcess {
-  stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
-  stderr: { on(event: 'data', listener: (chunk: Buffer) => void): unknown };
-  on(event: 'close', listener: (code: number | null) => void): unknown;
+  stdout: { on(event: "data", listener: (chunk: Buffer) => void): unknown };
+  stderr: { on(event: "data", listener: (chunk: Buffer) => void): unknown };
+  on(event: "close", listener: (code: number | null) => void): unknown;
 }
 
 export type InstallerSpawn = (
   command: string,
   args: readonly string[],
-  options: { env: NodeJS.ProcessEnv },
+  options: { env: NodeJS.ProcessEnv }
 ) => InstallerChildProcess;
 
 export interface CliChromiumInstallerOptions {
@@ -86,23 +88,23 @@ export interface CliChromiumInstallerOptions {
 
 /** 传给安装子进程的环境变量白名单（下载需要 PATH/代理/缓存目录定位） */
 const ENV_WHITELIST = [
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'LOCALAPPDATA',
-  'APPDATA',
-  'TEMP',
-  'TMP',
-  'LANG',
-  'TZ',
-  'SYSTEMROOT',
-  'SYSTEMDRIVE',
-  'COMSPEC',
-  'NUMBER_OF_PROCESSORS',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "TZ",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "COMSPEC",
+  "NUMBER_OF_PROCESSORS",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
 ];
 
 /** 错误信息里保留的安装器尾部输出行数 */
@@ -110,7 +112,7 @@ const TAIL_LINES = 5;
 
 /** 默认安装器：spawn playwright-core CLI（`cli.js install chromium`） */
 export function createCliChromiumInstaller(
-  options: CliChromiumInstallerOptions = {},
+  options: CliChromiumInstallerOptions = {}
 ): ChromiumInstaller {
   const env = options.env ?? process.env;
   const spawnFn: InstallerSpawn =
@@ -118,17 +120,25 @@ export function createCliChromiumInstaller(
     ((command, args, spawnOptions) => {
       const child = nodeSpawn(command, args, {
         ...spawnOptions,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
       });
       // stdio pipe 下 stdout/stderr 必非空
-      return { stdout: child.stdout!, stderr: child.stderr!, on: child.on.bind(child) };
+      return {
+        stdout: child.stdout!,
+        stderr: child.stderr!,
+        on: child.on.bind(child),
+      };
     });
-  const executable = options.executablePathOverride ?? chromium.executablePath();
+  const executable =
+    options.executablePathOverride ?? chromium.executablePath();
 
   /** 解析 playwright-core 的 cli.js（exports 白名单不含它，经 package.json 定位） */
   function cliPath(): string {
     const require = createRequire(import.meta.url);
-    return join(dirname(require.resolve('playwright-core/package.json')), 'cli.js');
+    return join(
+      dirname(require.resolve("playwright-core/package.json")),
+      "cli.js"
+    );
   }
 
   /** 子进程环境：白名单 + PLAYWRIGHT_* 全透传 + 镜像默认值（+ Electron 的 node 模式） */
@@ -136,7 +146,7 @@ export function createCliChromiumInstaller(
     const child: Record<string, string> = {};
     const pass = (name: string): void => {
       const value = env[name];
-      if (value !== undefined && value !== '') {
+      if (value !== undefined && value !== "") {
         child[name] = value;
       }
     };
@@ -144,15 +154,17 @@ export function createCliChromiumInstaller(
       pass(name);
     }
     for (const name of Object.keys(env)) {
-      if (name.toUpperCase().startsWith('PLAYWRIGHT_')) {
+      if (name.toUpperCase().startsWith("PLAYWRIGHT_")) {
         pass(name);
       }
     }
-    if (child['PLAYWRIGHT_DOWNLOAD_HOST'] === undefined) {
-      child['PLAYWRIGHT_DOWNLOAD_HOST'] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
+    if (child["PLAYWRIGHT_DOWNLOAD_HOST"] === undefined) {
+      child["PLAYWRIGHT_DOWNLOAD_HOST"] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
     }
-    if ((options.isElectron ?? process.versions.electron !== undefined) === true) {
-      child['ELECTRON_RUN_AS_NODE'] = '1';
+    if (
+      (options.isElectron ?? process.versions.electron !== undefined) === true
+    ) {
+      child["ELECTRON_RUN_AS_NODE"] = "1";
     }
     return child;
   }
@@ -164,17 +176,21 @@ export function createCliChromiumInstaller(
     install(onProgress) {
       return new Promise<void>((resolve, reject) => {
         const tail: string[] = [];
-        const buffers = { stdout: '', stderr: '' };
-        const child = spawnFn(process.execPath, [cliPath(), 'install', 'chromium', '--no-progress'], {
-          env: childEnv(),
-        });
+        const buffers = { stdout: "", stderr: "" };
+        const child = spawnFn(
+          process.execPath,
+          [cliPath(), "install", "chromium", "--no-progress"],
+          {
+            env: childEnv(),
+          }
+        );
 
-        function pump(source: 'stdout' | 'stderr', chunk: Buffer): void {
-          buffers[source] += chunk.toString('utf8');
+        function pump(source: "stdout" | "stderr", chunk: Buffer): void {
+          buffers[source] += chunk.toString("utf8");
           const lines = buffers[source].split(/\r\n|\n|\r/);
-          buffers[source] = lines.pop() ?? '';
+          buffers[source] = lines.pop() ?? "";
           for (const line of lines) {
-            if (line.trim() === '') {
+            if (line.trim() === "") {
               continue;
             }
             onProgress(line);
@@ -185,14 +201,17 @@ export function createCliChromiumInstaller(
           }
         }
 
-        child.stdout.on('data', (chunk: Buffer) => pump('stdout', chunk));
-        child.stderr.on('data', (chunk: Buffer) => pump('stderr', chunk));
-        child.on('close', (code: number | null) => {
+        child.stdout.on("data", (chunk: Buffer) => pump("stdout", chunk));
+        child.stderr.on("data", (chunk: Buffer) => pump("stderr", chunk));
+        child.on("close", (code: number | null) => {
           if (code === 0) {
             resolve();
           } else {
-            const detail = tail.length > 0 ? `；安装器输出结尾：${tail.join(' / ')}` : '';
-            reject(new Error(`playwright 安装器退出码 ${code ?? '未知'}${detail}`));
+            const detail =
+              tail.length > 0 ? `；安装器输出结尾：${tail.join(" / ")}` : "";
+            reject(
+              new Error(`playwright 安装器退出码 ${code ?? "未知"}${detail}`)
+            );
           }
         });
       });

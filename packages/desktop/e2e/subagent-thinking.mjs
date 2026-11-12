@@ -86,7 +86,7 @@ async function main() {
     app = launchedApp;
 
     // 1) 设置页：建主 Profile（mock-main）与子代理独立 Profile（mock-sub）
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     let profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -107,8 +107,8 @@ async function main() {
 
     // 2) 子代理配置区：模型指向独立 Profile MockSub。
     // 配置区在设置页挂载时拉取 Profile 列表——新建的 MockSub 需重进设置页才出现
-    await window.getByRole("button", { name: "返回工作台" }).click();
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-back").click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("subagent-settings").waitFor({ timeout: 10_000 });
     await window
       .getByTestId("subagent-profile-select")
@@ -124,7 +124,7 @@ async function main() {
     console.log("[e2e] 子代理独立 Profile（mock-sub）已配置");
 
     // 3) 建会话 → 选 high 档 → 委派（触发子代理）
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
     const effortSelect = window.getByTestId("thinking-effort-select");

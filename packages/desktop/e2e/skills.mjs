@@ -128,10 +128,7 @@ async function main() {
     const launched = await launchApp({ homeDir });
     app = launched.app;
     let window = launched.window;
-    await window
-      .locator("header nav")
-      .getByRole("button", { name: "设置", exact: true })
-      .click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const form = window.locator("form");
     await form.getByLabel("名称").fill("Skills Mock");
@@ -140,10 +137,7 @@ async function main() {
     await form.getByLabel("模型").fill("mock-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Skills Mock", { exact: true }).first().waitFor();
-    await window
-      .locator("header nav")
-      .getByRole("button", { name: "返回工作台", exact: true })
-      .click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
     async function send(text, nextStage) {

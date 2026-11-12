@@ -4,12 +4,15 @@
 
 ## E2E 定位器
 
-E2E（`packages/desktop/e2e/*.mjs`）中的元素定位一律二选一：
+E2E（`packages/desktop/e2e/*.mjs`）中的元素定位按用途收口（`pnpm check:e2e-locators` 拦截，pre-commit 运行）：
 
-- 优先 `getByTestId('[data-testid]')`（组件已大量标注）；
-- 同页可能重复的按钮/label（如设置页多个「保存」、含「模型」子串的多个 label），先 `locator('form')` 限定所在表单再定位。
+- **交互控件**（按钮/输入/链接，用于 click/fill/hover）：优先 `getByTestId('[data-testid]')`（组件已大量标注，如顶栏 `settings-open` / `settings-back`）；同页可能重复的控件（如设置页多个「保存」、含「模型」子串的多个 label），先 `locator('form')` / 容器限定再定位。**禁止根级裸 `getByRole('button', { name })`**——Playwright strict mode 下的多命中是本仓库已发生四次的回归来源。
+- **内容断言**（消息正文/状态文本，用于 waitFor/断言，不用于交互）：允许根级 `getByText`，但必须显式处理多命中——`.first()` / `.nth()` / `{ exact: true }` / `.count()` 判定四者其一（多命中未处理会在 strict mode 直接报错暴露，加了其一则是显式选择）。
+- **容器识别例外**：`locator('section').filter({ has: getByRole('heading', { name, exact: true }) })` 形式允许——heading 是文档语义结构（h2/h3 天然 aria 可达），exact 防子串，且 filter 参数不参与点击，不存在 strict mode 点错元素的风险。
 
-裸 `getByRole('button', { name })` 与 `getByLabel('子串')` 在 Playwright strict mode 下的多命中是本仓库已发生四次的回归来源。
+链式限定（`form.getByRole` / `card.getByText`，定位挂在容器上）不受限；「根级」指直接挂在 `window` 根 locator 上。
+
+豁免清单（见 `scripts/check-e2e-locators.mjs`）：`helpers.mjs` / `launch-target.mjs`（共享工具，无场景定位）；`projects-sidebar` / `interactions` / `exit-recovery` / `sidebar-archive`（flaky 治理分支收口，避免两分支碰撞）。新场景不得进豁免。
 
 ## 数据目录自建
 

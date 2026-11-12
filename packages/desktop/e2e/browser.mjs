@@ -64,7 +64,7 @@ async function main() {
     const launched = await launchApp({ homeDir });
     app = launched.app;
     const window = launched.window;
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -74,7 +74,7 @@ async function main() {
     // 设置页有多个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
     await profileForm.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Mock").first().waitFor();
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
     console.log("[e2e] 应用启动、Profile 与会话就绪");
 

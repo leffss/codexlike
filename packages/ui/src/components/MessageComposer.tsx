@@ -25,7 +25,7 @@ import {
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 
 /** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
-export const APPROVAL_MODE_OPTIONS: {
+const APPROVAL_MODE_OPTIONS: {
   value: ApprovalMode;
   label: string;
   title: string;
@@ -72,7 +72,7 @@ const APPROVAL_PILL_STYLES: Record<
  * 只对下一条发送的消息生效，不做会话级记忆；「关」是显式发送关闭请求，
  * 不保证强制思考模型实际停止思考（以服务端行为为准）。
  */
-export const THINKING_EFFORT_OPTIONS: {
+const THINKING_EFFORT_OPTIONS: {
   value: ThinkingEffort;
   label: string;
   title: string;
@@ -193,6 +193,9 @@ export function MessageComposer(props: {
   const dismissedRef = useRef<string | null>(null);
   const skillMenuOpenRef = useRef(false);
 
+  // 解构到局部：syncMenu 回调只依赖这三个属性，直接引用 props 对象
+  // 会让 exhaustive-deps 无法核对（props 每次渲染都是新引用）。
+  const { workspaceFiles, skills, onOpenSkills } = props;
   const syncMenu = useCallback(
     (text: string, caretIndex: number) => {
       const signature = `${text.length}:${caretIndex}:${text}`;
@@ -205,20 +208,21 @@ export function MessageComposer(props: {
       skillMenuOpenRef.current = draft.menu === "skills";
       setMenu(
         computeMenu(draft, {
-          files: props.workspaceFiles,
-          skills: props.skills,
+          files: workspaceFiles,
+          skills,
         })
       );
-      if (openingSkills) props.onOpenSkills?.();
+      if (openingSkills) onOpenSkills?.();
     },
-    [props.workspaceFiles, props.skills, props.onOpenSkills]
+    [workspaceFiles, skills, onOpenSkills]
   );
 
   // 异步候选到达时重算；Esc 关闭后不因刷新而重开。
   useEffect(() => {
     const caret = textareaRef.current?.selectionStart ?? value.length;
     syncMenu(value, caret);
-  }, [props.workspaceFiles, props.skills]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只监听候选集到达：value/光标变化由 commitText 显式 syncMenu，补全 value 会让每次按键都重算菜单
+  }, [workspaceFiles, skills]);
 
   function commitText(next: string, caretIndex: number) {
     setValue(next);

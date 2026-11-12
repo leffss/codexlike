@@ -62,7 +62,7 @@ async function main() {
     app = launchedApp;
 
     // 1) 设置页创建 Profile
-    await window.getByRole("button", { name: "设置", exact: true }).click();
+    await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
     await profileForm.getByLabel("名称").fill("Mock");
@@ -89,7 +89,7 @@ async function main() {
     console.log("[e2e] 设置页子代理配置区：并发上限 2 已保存");
 
     // 3) 建会话 + 委派调研
-    await window.getByRole("button", { name: "返回工作台" }).click();
+    await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
     const composer = window.getByTestId("composer-input");
     await composer.fill("委派调研一下测试入口");
