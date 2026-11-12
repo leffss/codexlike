@@ -1,8 +1,18 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import type { ProjectRecord } from "@codexlike/agent-core";
 import type { SessionListItem } from "@codexlike/desktop/ipc";
 import { SessionActivityBadge } from "./SessionActivityBadge";
+import {
+  SessionContextMenu,
+  type SessionMenuAnchor,
+} from "./SessionContextMenu";
 
 import { groupSessionsByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -46,7 +56,7 @@ function FolderIcon(props: { open: boolean }) {
  * 项目组头不依赖会话存在；归属只看 projectId，绝不按目录自动聚合。
  * 组内活跃会话在上、「已归档」子折叠在下。
  * 会话行右侧显示用户最近使用时间；后台输出不改变顺序。
- * 整理操作独立成行，不遮挡会话选择，键盘与鼠标均可访问；
+ * 整理操作收进右键菜单，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
 export function SessionSidebar(props: {
@@ -58,6 +68,7 @@ export function SessionSidebar(props: {
   onSelect: (id: string) => void;
   onCreate: () => void;
   creating: boolean;
+  onMembership: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onArchive: (id: string, archived: boolean) => void;
   onPin: (id: string, pinned: boolean) => void;
@@ -70,6 +81,72 @@ export function SessionSidebar(props: {
   );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [menu, setMenu] = useState<{
+    sessionId: string;
+    projectId: SessionListItem["projectId"];
+    archivedAt: SessionListItem["archivedAt"];
+    anchor: SessionMenuAnchor;
+  } | null>(null);
+  const menuSession = props.sessions.find(
+    (session) => session.id === menu?.sessionId
+  );
+  const closeMenu = useCallback(
+    (restoreFocus: boolean) => {
+      if (restoreFocus && menu) {
+        const active = document.activeElement;
+        const activeMenu =
+          active instanceof HTMLElement
+            ? active.closest<HTMLElement>(
+                "[data-testid='session-context-menu']"
+              )
+            : null;
+        if (
+          (active === document.body ||
+            activeMenu?.dataset.sessionId === menu.sessionId) &&
+          !document.querySelector("[role='dialog'][aria-modal='true']")
+        ) {
+          const sessionTarget = Array.from(
+            document.querySelectorAll<HTMLElement>("[data-session-select]")
+          ).find((element) => element.dataset.sessionId === menu.sessionId);
+          const groupTarget = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-testid='project-header']"
+            )
+          )
+            .find((element) => element.dataset.projectId === menu.projectId)
+            ?.querySelector<HTMLElement>("button");
+          const fallback =
+            menu.projectId === null
+              ? document.querySelector<HTMLElement>(
+                  "[data-testid='standalone-group']"
+                )
+              : groupTarget;
+          const target = menu.anchor.target.isConnected
+            ? menu.anchor.target
+            : (sessionTarget ??
+              fallback ??
+              document.querySelector<HTMLElement>(
+                "[data-testid='new-session']"
+              ));
+          target?.focus({ preventScroll: true });
+        }
+      }
+      setMenu(null);
+    },
+    [menu]
+  );
+
+  useLayoutEffect(() => {
+    if (
+      menu &&
+      (!menuSession ||
+        menuSession.projectId !== menu.projectId ||
+        menuSession.archivedAt !== menu.archivedAt ||
+        !menu.anchor.target.isConnected)
+    ) {
+      closeMenu(true);
+    }
+  });
 
   // 全列表共享的分钟级时钟：相对时间文案随时间推移刷新（非每行一个定时器）
   const [now, setNow] = useState(() => Date.now());
@@ -103,11 +180,57 @@ export function SessionSidebar(props: {
     const relative = formatRelativeTime(usedAt, now);
     const absoluteTime = `最近使用：${new Date(usedAt).toLocaleString("zh-CN")}`;
 
+    const archived = session.archivedAt !== null;
+
     return (
-      <li key={session.id} className="group relative mt-0.5">
+      <li
+        key={session.id}
+        data-testid="session-row"
+        data-session-id={session.id}
+        className={`group/session relative mt-0.5 flex items-center rounded-md ${
+          session.id === props.currentId
+            ? "bg-selected text-fg"
+            : "text-fg-muted hover:bg-hover hover:text-fg"
+        }`}
+        onContextMenu={(event) => {
+          if (editingId === session.id) return;
+          event.preventDefault();
+          const target = event.currentTarget.querySelector<HTMLButtonElement>(
+            "[data-session-select]"
+          );
+          if (!target) return;
+          setMenu({
+            sessionId: session.id,
+            projectId: session.projectId,
+            archivedAt: session.archivedAt,
+            anchor: { x: event.clientX, y: event.clientY, target },
+          });
+        }}
+        onKeyDown={(event) => {
+          if (
+            editingId === session.id ||
+            !(
+              event.key === "ContextMenu" ||
+              (event.shiftKey && event.key === "F10")
+            )
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          const target = event.target as HTMLElement;
+          const rect = target.getBoundingClientRect();
+          setMenu({
+            sessionId: session.id,
+            projectId: session.projectId,
+            archivedAt: session.archivedAt,
+            anchor: { x: rect.left, y: rect.bottom, target },
+          });
+        }}
+      >
         {editingId === session.id ? (
           <input
             data-testid="rename-input"
+            aria-label="会话名称"
             value={editingTitle}
             autoFocus
             onChange={(event) => setEditingTitle(event.target.value)}
@@ -116,79 +239,57 @@ export function SessionSidebar(props: {
             className="w-full rounded border border-accent bg-code-bg px-2 py-1.5 text-sm text-fg outline-none"
           />
         ) : (
-          <button
-            type="button"
-            data-testid="session-item"
-            data-session-id={session.id}
-            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm ${
-              session.id === props.currentId
-                ? "bg-selected text-fg"
-                : "text-fg-muted hover:bg-hover hover:text-fg"
-            }`}
-            onClick={() => props.onSelect(session.id)}
-          >
-            {session.pinned && (
-              <span className="text-[10px] text-accent">置顶</span>
-            )}
-            <span className="truncate" title={session.workspacePath}>
-              {session.title}
-            </span>
-            <span className="ml-auto flex shrink-0 items-center gap-1">
-              {session.workspaceMode === "worktree" && (
-                <span
-                  data-testid="worktree-badge"
-                  title={`托管 Worktree：${session.workspacePath}`}
-                  className="rounded bg-worktree-bg px-1 py-px text-[10px] text-worktree-fg"
-                >
-                  worktree
-                </span>
+          <>
+            <button
+              type="button"
+              data-testid={archived ? "archived-session-item" : "session-item"}
+              data-session-id={session.id}
+              data-session-select="true"
+              aria-current={session.id === props.currentId ? "page" : undefined}
+              aria-haspopup="menu"
+              aria-expanded={menu?.sessionId === session.id}
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 pr-1 text-left text-sm"
+              onClick={() => props.onSelect(session.id)}
+            >
+              {session.pinned && (
+                <span className="shrink-0 text-[10px] text-accent">置顶</span>
               )}
-              <SessionActivityBadge session={session} />
-              {relative !== "" && (
-                <span
-                  className="text-[10px] text-fg-subtle"
-                  title={absoluteTime}
-                >
-                  {relative}
-                </span>
-              )}
+              <span className="truncate" title={session.workspacePath}>
+                {session.title}
+              </span>
+              <span className="ml-auto flex shrink-0 items-center gap-1">
+                {session.workspaceMode === "worktree" && (
+                  <span
+                    data-testid="worktree-badge"
+                    title={`托管 Worktree：${session.workspacePath}`}
+                    className="rounded bg-worktree-bg px-1 py-px text-[10px] text-worktree-fg"
+                  >
+                    worktree
+                  </span>
+                )}
+                <SessionActivityBadge session={session} />
+              </span>
+            </button>
+            <span className="mr-1 grid w-14 shrink-0 items-center text-center">
+              <span
+                data-testid="session-time"
+                className="col-start-1 row-start-1 text-[10px] text-fg-subtle group-hover/session:invisible group-focus-within/session:invisible"
+                title={absoluteTime}
+              >
+                {relative}
+              </span>
+              <button
+                type="button"
+                data-testid="pin-button"
+                aria-pressed={session.pinned ?? false}
+                title={session.pinned ? "取消置顶" : "置顶会话"}
+                className="pointer-events-none col-start-1 row-start-1 rounded px-1 py-0.5 text-[10px] text-fg-muted opacity-0 hover:text-accent group-hover/session:pointer-events-auto group-hover/session:opacity-100 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100"
+                onClick={() => props.onPin(session.id, !session.pinned)}
+              >
+                {session.pinned ? "取消置顶" : "置顶"}
+              </button>
             </span>
-          </button>
-        )}
-        {editingId !== session.id && (
-          <span className="flex justify-end gap-1 px-1 pb-1">
-            <button
-              type="button"
-              data-testid="pin-button"
-              aria-pressed={session.pinned ?? false}
-              title={session.pinned ? "取消置顶" : "置顶会话"}
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
-              onClick={() => props.onPin(session.id, !session.pinned)}
-            >
-              {session.pinned ? "取消置顶" : "置顶"}
-            </button>
-            <button
-              type="button"
-              data-testid="rename-button"
-              title="重命名（/rename）"
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
-              onClick={() => {
-                setEditingId(session.id);
-                setEditingTitle(session.title);
-              }}
-            >
-              重命名
-            </button>
-            <button
-              type="button"
-              data-testid="archive-button"
-              title="归档（/archive）：收进本项目「已归档」"
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-warn-fg"
-              onClick={() => props.onArchive(session.id, true)}
-            >
-              归档
-            </button>
-          </span>
+          </>
         )}
       </li>
     );
@@ -212,51 +313,74 @@ export function SessionSidebar(props: {
 
     return (
       <li key={group.key}>
-        <button
-          type="button"
+        <div
           data-testid={
-            group.projectId === null ? "standalone-group" : "project-group"
+            group.projectId === null ? "standalone-header" : "project-header"
           }
-          title={group.path}
-          aria-expanded={expanded}
-          className="mt-2 flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium text-fg-muted hover:bg-hover hover:text-fg"
-          onClick={() =>
-            group.projectId === null
-              ? setStandaloneCollapsed((prev) => !prev)
-              : props.onCollapseProject(group.projectId, expanded)
-          }
+          data-project-id={group.projectId ?? undefined}
+          className="group/header mt-2 flex items-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
         >
-          <span className="w-3 shrink-0 text-center text-fg-subtle">
-            {expanded ? "▾" : "▸"}
-          </span>
-          <FolderIcon open={expanded} />
-          <span className="truncate">{group.name}</span>
-          <span className="ml-auto shrink-0 text-[10px] text-fg-subtle">
-            {group.active.length}
-            {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
-          </span>
-        </button>
-        {group.projectId !== null && (
           <button
             type="button"
-            data-testid="project-new-session"
-            disabled={props.creating}
-            className="ml-4 rounded px-2 py-1 text-xs text-accent hover:bg-hover"
-            onClick={() => props.onCreateInProject(group.projectId!)}
+            data-testid={
+              group.projectId === null ? "standalone-group" : "project-group"
+            }
+            title={group.path}
+            aria-expanded={expanded}
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-medium"
+            onClick={() =>
+              group.projectId === null
+                ? setStandaloneCollapsed((prev) => !prev)
+                : props.onCollapseProject(group.projectId, expanded)
+            }
           >
-            + 新建会话
+            <span className="w-3 shrink-0 text-center text-fg-subtle">
+              {expanded ? "▾" : "▸"}
+            </span>
+            <FolderIcon open={expanded} />
+            <span className="truncate">{group.name}</span>
           </button>
-        )}
-        {group.projectId !== null && props.onRemoveProject && (
-          <button
-            type="button"
-            data-testid="project-remove"
-            className="rounded px-2 py-1 text-xs text-fg-muted hover:text-warn-fg"
-            onClick={() => props.onRemoveProject!(group.projectId!)}
-          >
-            移除项目
-          </button>
-        )}
+          <span className="mr-1 grid shrink-0 items-center">
+            <span
+              data-testid="project-session-count"
+              className={`col-start-1 row-start-1 px-1 text-right text-[10px] text-fg-subtle ${
+                group.projectId !== null
+                  ? "group-hover/header:invisible group-focus-within/header:invisible"
+                  : ""
+              }`}
+            >
+              {group.active.length}
+              {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
+            </span>
+            {group.projectId !== null && (
+              <span className="pointer-events-none col-start-1 row-start-1 flex justify-end gap-0.5 opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
+                <button
+                  type="button"
+                  data-testid="project-new-session"
+                  title="在此项目新建会话"
+                  aria-label="在此项目新建会话"
+                  disabled={props.creating}
+                  className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover disabled:opacity-50"
+                  onClick={() => props.onCreateInProject(group.projectId!)}
+                >
+                  +
+                </button>
+                {props.onRemoveProject && (
+                  <button
+                    type="button"
+                    data-testid="project-remove"
+                    title="移除项目"
+                    aria-label="移除项目"
+                    className="rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-warn-fg"
+                    onClick={() => props.onRemoveProject!(group.projectId!)}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            )}
+          </span>
+        </div>
         {expanded && (
           <ul className="pl-3">
             {group.active.map((session) => renderSessionItem(session))}
@@ -276,35 +400,7 @@ export function SessionSidebar(props: {
             </button>
             {archivedOpen && (
               <ul className="mt-0.5" data-testid="archived-list">
-                {group.archived.map((session) => (
-                  <li
-                    key={session.id}
-                    className="mt-0.5 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-fg-subtle hover:bg-hover"
-                  >
-                    <button
-                      type="button"
-                      data-testid="archived-session-item"
-                      data-session-id={session.id}
-                      aria-current={
-                        session.id === props.currentId ? "page" : undefined
-                      }
-                      className="min-w-0 flex-1 truncate text-left hover:text-accent"
-                      title={`查看归档历史 · ${session.workspacePath}`}
-                      onClick={() => props.onSelect(session.id)}
-                    >
-                      {session.title}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="unarchive-button"
-                      title="取消归档，回到项目活跃列表"
-                      className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted shadow-sm hover:text-accent"
-                      onClick={() => props.onArchive(session.id, false)}
-                    >
-                      恢复
-                    </button>
-                  </li>
-                ))}
+                {group.archived.map((session) => renderSessionItem(session))}
               </ul>
             )}
           </div>
@@ -315,6 +411,40 @@ export function SessionSidebar(props: {
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface-muted">
+      {menu && menuSession && (
+        <SessionContextMenu
+          sessionId={menuSession.id}
+          anchor={menu.anchor}
+          onClose={closeMenu}
+          items={[
+            {
+              testId: "session-membership",
+              label: menuSession.projectId === null ? "移入项目" : "移出项目",
+              onSelect: () => props.onMembership(menuSession.id),
+            },
+            {
+              testId: "rename-button",
+              label: "重命名",
+              onSelect: () => {
+                setEditingTitle(menuSession.title);
+                setEditingId(menuSession.id);
+              },
+            },
+            {
+              testId:
+                menuSession.archivedAt === null
+                  ? "archive-button"
+                  : "unarchive-button",
+              label: menuSession.archivedAt === null ? "归档" : "恢复",
+              onSelect: () =>
+                props.onArchive(
+                  menuSession.id,
+                  menuSession.archivedAt === null
+                ),
+            },
+          ]}
+        />
+      )}
       <div className="flex items-center justify-between px-3 py-3">
         <h2 className="text-sm font-medium text-fg">会话</h2>
         <button

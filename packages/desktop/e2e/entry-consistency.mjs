@@ -10,7 +10,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  projectAction,
+  sessionMenu,
+  startMockProvider,
+} from "./helpers.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "codexlike-entry-consistency-"));
 const homeDir = join(root, "home");
@@ -66,7 +73,7 @@ try {
   await profiles.getByText("Entry Mock", { exact: true }).waitFor();
   await window.getByTestId("settings-back").click();
   await window.getByTestId("add-project").click();
-  await window.getByTestId("project-new-session").click();
+  await projectAction(window);
   await command("/new");
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
@@ -76,33 +83,37 @@ try {
   await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   await send("入口隔离任务");
   const originalPath = await window.getByTestId("workspace-path").textContent();
-  await window.getByTestId("session-new").click({ timeout: 5000 });
+  await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
     (await window.getByTestId("draft-workspace-mode").inputValue()) === "local",
-    "会话内快捷新建使用项目草稿默认本地"
+    "侧栏项目新建使用项目草稿默认本地"
   );
   assert(
     (await window.getByTestId("workspace-path").textContent()).includes(
       workspaceDir
     ),
-    "快捷新建沿用项目而非 Worktree 副本"
+    "侧栏项目新建沿用项目而非 Worktree 副本"
   );
   assert(
     (await window.getByTestId("session-item").count()) === 1,
-    "快捷入口不产生空记录"
+    "侧栏入口不产生空记录"
   );
   await item("入口隔离任务").click();
   assert(
     (await window.getByTestId("workspace-path").textContent()) === originalPath,
     "新建不改变原执行目录"
   );
-  console.log("[e2e] 会话快捷入口与项目草稿保持显式归属通过");
+  console.log("[e2e] 会话侧栏入口与项目草稿保持显式归属通过");
   await window.getByTestId("session-search-toggle").click();
   await window.getByTestId("session-search-input").fill("入口隔离任务");
   await window.getByTestId("session-search-result").waitFor();
   const longTitle = "重命名后仍可搜索的长标题".repeat(12);
-  await item("入口隔离任务").locator("..").getByTestId("rename-button").click();
+  await (
+    await sessionMenu(window, item("入口隔离任务"))
+  )
+    .getByTestId("rename-button")
+    .click();
   await window.getByTestId("rename-input").fill(longTitle);
   await window.getByTestId("rename-input").press("Enter");
   await item(longTitle).waitFor();
@@ -115,7 +126,16 @@ try {
     "重命名后正文搜索结果实时更新标题"
   );
   console.log("[e2e] 搜索展开期间重命名同步通过");
-  await window.getByTestId("session-archive").click();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("archive-button")
+    .click();
   await window
     .getByTestId("session-search-result")
     .waitFor({ state: "detached", timeout: 5000 });
@@ -130,13 +150,31 @@ try {
     "归档搜索只能查看历史"
   );
   await window.getByTestId("session-search-toggle").click();
-  await window.getByTestId("session-restore").click();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("archived-session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("unarchive-button")
+    .click();
   await window
     .getByTestId("session-search-result")
     .filter({ hasNotText: "已归档" })
     .waitFor({ timeout: 5000 });
   console.log("[e2e] 搜索展开期间归档与恢复同步通过");
-  await window.getByTestId("session-membership").click();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("session-membership")
+    .click();
   await window.getByTestId("membership-confirm").click();
   await window
     .getByTestId("session-search-result")
@@ -157,14 +195,14 @@ try {
     "独立新建不继承完全访问"
   );
   await input().fill("独立入口保留草稿");
-  await window.getByTestId("project-new-session").click();
+  await projectAction(window);
   await input().fill("项目入口保留草稿");
   await item(longTitle).click();
-  await window.getByTestId("session-new").click();
+  await window.getByTestId("new-session").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",
-    "移出后快捷入口恢复独立草稿而非项目草稿"
+    "移出后侧栏入口恢复独立草稿而非项目草稿"
   );
   await item(longTitle).click();
   await command("/archive");
@@ -183,7 +221,7 @@ try {
     (await input().inputValue()) === "独立入口保留草稿",
     "重启独立新建草稿完整"
   );
-  await window.getByTestId("project-new-session").click();
+  await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
     (await input().inputValue()) === "项目入口保留草稿",
@@ -200,7 +238,10 @@ try {
     .getByTestId("session-search-result")
     .filter({ hasText: "独立会话" })
     .click();
-  await window.getByTestId("session-restore").waitFor();
+  await window
+    .getByTestId("archived-session-item")
+    .filter({ hasText: longTitle })
+    .waitFor();
   assert(
     (await window.getByTestId("workspace-path").textContent()) === originalPath,
     "移出及重开不改实际工作区"
@@ -225,15 +266,33 @@ try {
     model.requestCount() === requestsBeforeRestart,
     "重启归档记录不能自动执行模型"
   );
-  await window.getByTestId("session-restore").click();
-  await window.getByTestId("session-archive").waitFor();
-  await window.getByTestId("session-membership").click();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("archived-session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("unarchive-button")
+    .click();
+  await item(longTitle).waitFor();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("session-membership")
+    .click();
   await window
     .getByTestId("membership-target")
     .selectOption({ label: "来源项目" });
   await window.getByTestId("membership-confirm").click();
   await window
-    .getByTestId("project-group")
+    .getByTestId("project-header")
     .locator("..")
     .getByTestId("session-item")
     .filter({ hasText: longTitle })
@@ -245,19 +304,28 @@ try {
     "移回后 /new 按当前项目恢复草稿"
   );
   await item(longTitle).click();
-  await window.getByTestId("session-membership").click();
+  await (
+    await sessionMenu(
+      window,
+      window
+        .getByTestId("session-item")
+        .and(window.locator('[aria-current="page"]'))
+    )
+  )
+    .getByTestId("session-membership")
+    .click();
   await window.getByTestId("membership-confirm").click();
   await window
-    .getByTestId("standalone-group")
+    .getByTestId("standalone-header")
     .locator("..")
     .getByTestId("session-item")
     .waitFor();
-  await window.getByTestId("project-new-session").click();
+  await projectAction(window);
   await send("待移除项目成员");
   await window.getByTestId("session-search-toggle").click();
   await window.getByTestId("session-search-input").fill("待移除项目成员");
   await window.getByTestId("session-search-result").waitFor();
-  await window.getByTestId("project-remove").click();
+  await projectAction(window, "project-remove");
   await window.getByTestId("project-removal-confirm").click();
   await window.getByTestId("project-group").waitFor({ state: "detached" });
   await window
@@ -265,10 +333,13 @@ try {
     .waitFor({ state: "detached" });
   await window.getByTestId("session-search-toggle").click();
   await item(longTitle).waitFor();
-  await window
+  await (
+    await sessionMenu(window, item(longTitle))
+  )
     .getByTestId("session-membership")
     .filter({ hasText: "移入项目" })
     .waitFor();
+  await window.keyboard.press("Escape");
   assert(
     (await window.getByTestId("workspace-path").textContent()) === originalPath,
     "当前成员被移除后安全导航到幸存独立记录"

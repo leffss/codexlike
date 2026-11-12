@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { ProjectRecord } from "@codexlike/agent-core";
 import type { ProjectRemoval, SessionListItem } from "@codexlike/desktop/ipc";
 
@@ -12,10 +12,86 @@ export function MembershipDialog(props: {
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const sessionId = props.session.id;
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement;
+    const sessionTarget = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[data-session-select]")
+      ).find((element) => element.dataset.sessionId === sessionId);
+    const returnTarget =
+      previous instanceof HTMLElement &&
+      previous !== document.body &&
+      !previous.closest("[role='menu']")
+        ? previous
+        : sessionTarget();
+    (
+      dialog.querySelector<HTMLElement>(
+        "select:not(:disabled), button:not(:disabled)"
+      ) ?? dialog
+    ).focus({ preventScroll: true });
+    return () => {
+      // 等卸载及可能的新对话框聚焦完成，只接管仍空缺的焦点。
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (
+          active !== document.body &&
+          active?.isConnected &&
+          !dialog.contains(active)
+        )
+          return;
+        if (document.querySelector("[role='dialog'][aria-modal='true']"))
+          return;
+        const target = returnTarget?.isConnected
+          ? returnTarget
+          : (sessionTarget() ??
+            document.querySelector<HTMLElement>("[data-testid='new-session']"));
+        target?.focus({ preventScroll: true });
+      });
+    };
+  }, [sessionId]);
   const movingOut = props.session.projectId !== null;
   const [target, setTarget] = useState(props.projects[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) props.onClose();
+    } else if (event.key === "Tab") {
+      const targets = Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>(
+          "select:not(:disabled), button:not(:disabled)"
+        )
+      );
+      const index = targets.indexOf(document.activeElement as HTMLElement);
+      if (
+        !targets.length ||
+        index < 0 ||
+        (event.shiftKey ? index === 0 : index === targets.length - 1)
+      ) {
+        event.preventDefault();
+        (event.shiftKey ? targets.at(-1) : targets[0])?.focus();
+        if (!targets.length) event.currentTarget.focus();
+      }
+    }
+  }
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (busy) dialog.focus({ preventScroll: true });
+    else if (document.activeElement === dialog) {
+      dialog
+        .querySelector<HTMLElement>(
+          "select:not(:disabled), button:not(:disabled)"
+        )
+        ?.focus({ preventScroll: true });
+    }
+  }, [busy]);
   async function confirm() {
     setBusy(true);
     setError(null);
@@ -37,6 +113,9 @@ export function MembershipDialog(props: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
       <section
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         role="dialog"
         aria-modal="true"
         aria-label="调整会话归属"

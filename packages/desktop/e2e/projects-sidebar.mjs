@@ -9,7 +9,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  projectAction,
+  sessionMenu,
+  startMockProvider,
+} from "./helpers.mjs";
 
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-workbench-"));
@@ -54,7 +61,7 @@ async function main() {
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Workbench Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-input").fill("项目草稿");
     assert(
       (await window.getByTestId("session-item").count()) === 0,
@@ -63,7 +70,7 @@ async function main() {
     await window.getByTestId("new-session").click();
     await window.getByTestId("composer-input").fill("独立草稿");
     assert(!existsSync(join(homeDir, "sessions")), "首次发送前不分配专用目录");
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     assert(
       (await window.getByTestId("composer-input").inputValue()) === "项目草稿",
       "项目草稿切换不丢"
@@ -118,7 +125,7 @@ async function main() {
     );
     assert(
       (await window
-        .getByTestId("standalone-group")
+        .getByTestId("standalone-header")
         .locator("..")
         .getByTestId("session-item")
         .count()) === 1,
@@ -128,13 +135,12 @@ async function main() {
       .getByTestId("workspace-path")
       .getAttribute("title");
     assert(existsSync(standalonePath), "专用持久目录真实存在");
-    await window
-      .getByTestId("session-item")
-      .filter({ hasText: "独立草稿" })
-      .hover();
-    await window
-      .getByTestId("standalone-group")
-      .locator("..")
+    await (
+      await sessionMenu(
+        window,
+        window.getByTestId("session-item").filter({ hasText: "独立草稿" })
+      )
+    )
       .getByTestId("rename-button")
       .click();
     await window.getByTestId("rename-input").fill("独立新标题");
@@ -151,7 +157,7 @@ async function main() {
     await window.getByTestId("composer-send").waitFor();
     assert(
       (await window
-        .getByTestId("standalone-group")
+        .getByTestId("standalone-header")
         .locator("..")
         .getByTestId("session-item")
         .count()) === 2,

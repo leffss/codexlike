@@ -13,6 +13,8 @@ import {
   assertSemanticOverlay,
   closeApp,
   launchApp,
+  projectAction,
+  sessionMenu,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -57,12 +59,11 @@ async function main() {
     const item = (title) =>
       window.getByTestId("session-item").filter({ hasText: title });
     const standalone = () =>
-      window.getByTestId("standalone-group").locator("..");
-    const project = () => window.getByTestId("project-group").locator("..");
+      window.getByTestId("standalone-header").locator("..");
+    const project = () => window.getByTestId("project-header").locator("..");
     async function create(title, inProject = false) {
-      await window
-        .getByTestId(inProject ? "project-new-session" : "new-session")
-        .click();
+      if (inProject) await projectAction(window);
+      else await window.getByTestId("new-session").click();
       if (!inProject)
         await window.getByTestId("draft-select-workspace").click();
       await window.getByTestId("composer-input").fill(title);
@@ -72,7 +73,16 @@ async function main() {
     }
     await create("待移动");
     await window.getByTestId("composer-input").fill("保留当前草稿");
-    await window.getByTestId("session-membership").click();
+    await (
+      await sessionMenu(
+        window,
+        window
+          .getByTestId("session-item")
+          .and(window.locator('[aria-current="page"]'))
+      )
+    )
+      .getByTestId("session-membership")
+      .click();
     await assertSemanticOverlay(window.getByTestId("membership-dialog"));
     await window
       .getByTestId("membership-target")
@@ -87,17 +97,35 @@ async function main() {
         "保留当前草稿",
       "移入不丢草稿"
     );
-    await window.getByTestId("session-membership").click();
+    await (
+      await sessionMenu(
+        window,
+        window
+          .getByTestId("session-item")
+          .and(window.locator('[aria-current="page"]'))
+      )
+    )
+      .getByTestId("session-membership")
+      .click();
     await window.getByTestId("membership-confirm").click();
     await standalone()
       .getByTestId("session-item")
       .filter({ hasText: "待移动" })
       .waitFor();
     await create("归档所属", true);
-    await window.getByTestId("session-archive").click();
+    await (
+      await sessionMenu(
+        window,
+        window
+          .getByTestId("session-item")
+          .and(window.locator('[aria-current="page"]'))
+      )
+    )
+      .getByTestId("archive-button")
+      .click();
     await item("归档所属").waitFor({ state: "detached" });
     await create("当前所属", true);
-    await window.getByTestId("project-remove").click();
+    await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-dialog").waitFor();
     await assertSemanticOverlay(window.getByTestId("project-removal-dialog"));
     assert(
@@ -117,14 +145,23 @@ async function main() {
     await window.getByTestId("composer-input").fill("请求等待");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("interaction-panel").waitFor();
-    await window.getByTestId("session-membership").click();
+    await (
+      await sessionMenu(
+        window,
+        window
+          .getByTestId("session-item")
+          .and(window.locator('[aria-current="page"]'))
+      )
+    )
+      .getByTestId("session-membership")
+      .click();
     await window.getByTestId("membership-confirm").click();
     await window
       .getByTestId("membership-error")
       .filter({ hasText: "先停止" })
       .waitFor();
     await window.getByTestId("membership-cancel").click();
-    await window.getByTestId("project-remove").click();
+    await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window
       .getByTestId("project-removal-error")
@@ -140,7 +177,7 @@ async function main() {
     await window.getByTestId("session-search-toggle").click();
     await window.getByTestId("session-search-input").fill("当前所属");
     await window.getByTestId("session-search-result").waitFor();
-    await window.getByTestId("project-remove").click();
+    await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     await window
@@ -181,9 +218,9 @@ async function main() {
       .waitFor();
     await window.getByTestId("composer-send").waitFor();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-input").fill("只属于移除项目的草稿");
-    await window.getByTestId("project-remove").click();
+    await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     await window
@@ -191,12 +228,12 @@ async function main() {
       .filter({ hasText: "待移动" })
       .waitFor();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     assert(
       (await window.getByTestId("composer-input").inputValue()) === "",
       "重新添加项目不恢复已移除草稿"
     );
-    await window.getByTestId("project-remove").click();
+    await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     console.log(

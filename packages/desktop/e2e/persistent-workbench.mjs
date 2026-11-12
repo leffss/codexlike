@@ -2,7 +2,13 @@
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  projectAction,
+  startMockProvider,
+} from "./helpers.mjs";
 
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-persistent-workbench-"));
@@ -72,16 +78,16 @@ async function main() {
     await window.getByText("Second Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-session").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await window.getByTestId("thinking-effort-select").selectOption("high");
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await closeApp(app);
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.waitForFunction(
       () =>
         document.querySelector('[data-testid="composer-input"]')?.value ===
@@ -122,7 +128,7 @@ async function main() {
         document.querySelector('[data-testid="message-stream"]').scrollTop > 500
     );
     const readingTop = await stream.evaluate((el) => el.scrollTop);
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();

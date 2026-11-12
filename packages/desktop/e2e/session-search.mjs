@@ -36,6 +36,7 @@ async function main() {
     await window.getByText("Search Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
     async function create(title, project = false) {
+      if (project) await window.getByTestId("project-group").hover();
       await window
         .getByTestId(project ? "project-new-session" : "new-session")
         .click();
@@ -64,7 +65,11 @@ async function main() {
     const standaloneId =
       await item("同目录独立任务").getAttribute("data-session-id");
     const archivedId = await item("待归档任务").getAttribute("data-session-id");
-    await window.getByTestId("session-archive").click();
+    await item("待归档任务").click({ button: "right" });
+    await window
+      .getByTestId("session-context-menu")
+      .getByTestId("archive-button")
+      .click();
     await item("待归档任务").waitFor({ state: "detached" });
     await window.getByTestId("project-group").click();
     assert((await item("项目任务").count()) === 0, "项目折叠隐藏日常列表");
@@ -85,13 +90,28 @@ async function main() {
       ).includes("独立会话"),
       "同目录独立归属不混淆"
     );
+    const beforeOpen = await window.evaluate(() =>
+      window.codexlike.sessions.list()
+    );
+    const projectBeforeOpen = beforeOpen.find(
+      (session) => session.id === projectId
+    );
     await results().filter({ hasText: "项目任务" }).click();
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "持久正文星河-1" })
       .waitFor();
     const list = await window.evaluate(() => window.codexlike.sessions.list());
-    assert(list[0].id === projectId, "搜索打开登记用户最近使用");
+    assert(
+      list.find((session) => session.id === projectId).lastUsedAt ===
+        projectBeforeOpen.lastUsedAt,
+      "搜索打开不得更新 lastUsedAt"
+    );
+    assert(
+      JSON.stringify(list.map((session) => session.id)) ===
+        JSON.stringify(beforeOpen.map((session) => session.id)),
+      "搜索打开不得改变最近使用顺序"
+    );
     await search("星河");
     await window.getByTestId("session-search-archived").check();
     await results().filter({ hasText: "待归档任务" }).waitFor();
@@ -111,14 +131,22 @@ async function main() {
       await window.getByTestId("composer-send").isDisabled(),
       "归档历史可看不可发送"
     );
-    await window.getByTestId("session-restore").click();
+    await window
+      .getByTestId("archived-session-item")
+      .filter({ hasText: "待归档任务" })
+      .click({ button: "right" });
+    await window
+      .getByTestId("session-context-menu")
+      .getByTestId("unarchive-button")
+      .click();
     await item("待归档任务").waitFor();
     await search("星河");
     await window.getByTestId("session-search-archived").uncheck();
     await results().filter({ hasText: "待归档任务" }).waitFor();
     await window.getByTestId("session-search-toggle").click();
-    await item("同目录独立任务")
-      .locator("..")
+    await item("同目录独立任务").click({ button: "right" });
+    await window
+      .getByTestId("session-context-menu")
       .getByTestId("rename-button")
       .click();
     await window.getByTestId("rename-input").fill("唯一标题100%_新名");

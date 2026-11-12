@@ -70,7 +70,7 @@ export interface SessionRecord {
   archivedAt: string | null;
   /** ISO 8601 */
   createdAt: string;
-  /** 用户查看/发送时更新；缺省以 createdAt 排序，不由后台事件驱动。 */
+  /** 创建/发送时更新；缺省以 createdAt 排序，查看与后台事件不更新。 */
   lastUsedAt?: string;
   /** 置顶优先于最近使用；未设置等价 false。 */
   pinned?: boolean;

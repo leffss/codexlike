@@ -11,7 +11,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  projectAction,
+  startMockProvider,
+} from "./helpers.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -85,7 +91,7 @@ async function main() {
     await window.getByText("Worktree Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("draft-workspace-mode").waitFor({ timeout: 5000 });
     assert(
       (await window.getByTestId("draft-workspace-mode").inputValue()) ===
@@ -167,7 +173,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("共享等待");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("interaction-panel").waitFor({ timeout: 15000 });
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("workspace-sharing-warning").waitFor();
     assert(
       (
@@ -212,12 +218,11 @@ async function main() {
       "重开仍使用原副本"
     );
     await window.getByTestId("add-project").click();
-    await window
-      .getByTestId("project-group")
-      .filter({ hasText: "plain" })
-      .locator("..")
-      .getByTestId("project-new-session")
-      .click();
+    await projectAction(
+      window,
+      "project-new-session",
+      window.getByTestId("project-header").filter({ hasText: "plain" })
+    );
     await window.getByTestId("draft-workspace-mode").selectOption("worktree");
     await window.getByTestId("composer-input").fill("非 Git 失败重试");
     await window.getByTestId("composer-send").click();

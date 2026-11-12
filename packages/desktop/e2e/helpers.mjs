@@ -16,6 +16,30 @@ export function assert(condition, message) {
   }
 }
 
+/** 操作指定行的 portal 菜单；右键不应隐式切换当前会话。 */
+export async function sessionMenu(window, item) {
+  const id = await item.getAttribute("data-session-id");
+  assert(id, "菜单目标必须有稳定会话 ID");
+  await item.click({ button: "right" });
+  const menu = window.getByTestId("session-context-menu");
+  await menu.waitFor();
+  assert(
+    (await menu.getAttribute("data-session-id")) === id,
+    "菜单绑定目标 ID"
+  );
+  return menu;
+}
+
+/** 先悬浮指定项目头，再点击显现的操作，不以 force 绕过命中检查。 */
+export async function projectAction(
+  window,
+  action = "project-new-session",
+  header = window.getByTestId("project-header")
+) {
+  await header.hover();
+  await header.getByTestId(action).click();
+}
+
 /** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
 export async function assertSemanticOverlay(dialog) {
   const colors = await dialog.evaluate((element) => {
@@ -89,7 +113,7 @@ export async function prepareDraft(
       await window.getByTestId("add-project").click();
       await window.getByTestId("project-group").waitFor();
     }
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
   } else {
     await window.getByTestId("new-session").click();
     await window.getByTestId("draft-select-workspace").click();

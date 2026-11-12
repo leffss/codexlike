@@ -13,6 +13,7 @@ import {
   closeApp,
   launchApp,
   prepareDraft,
+  sessionMenu,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -204,11 +205,16 @@ async function main() {
       { timeout: 5_000 }
     );
     await window.getByTestId("toggle-archived").click();
-    await window
+    await (
+      await sessionMenu(
+        window,
+        window
+          .getByTestId("archived-session-item")
+          .filter({ hasText: "第二个独立任务" })
+      )
+    )
       .getByTestId("unarchive-button")
-      .first()
-      .waitFor({ timeout: 5_000 });
-    await window.getByTestId("unarchive-button").first().click();
+      .click();
     await window.waitForFunction(
       () =>
         document.querySelectorAll('[data-testid="session-item"]').length === 2,

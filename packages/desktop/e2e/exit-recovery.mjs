@@ -14,6 +14,7 @@ import {
   assert,
   assertSemanticOverlay,
   launchApp,
+  projectAction,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -133,7 +134,7 @@ async function main() {
     await window.getByTestId("settings-open").click();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("approval-mode-select").selectOption("assist");
     await send(window, "项目慢任务");
     await window
@@ -196,7 +197,7 @@ async function main() {
         document.querySelector('[data-testid="message-stream"]').scrollTop > 500
     );
     const readingTop = await stream.evaluate((el) => el.scrollTop);
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-session").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
@@ -340,7 +341,7 @@ async function main() {
         "high",
       "设置重开恢复"
     );
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     assert(
       (await window.getByTestId("composer-input").inputValue()) ===
         "项目新建草稿",
@@ -410,7 +411,7 @@ async function main() {
     await window.getByTestId("composer-send").waitFor();
 
     // 异常终止：操作系统杀死进程，重启同库归一，不把异常当正常退出保证。
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("approval-mode-select").selectOption("assist");
     await send(window, "异常慢任务");
     await until(() => held.has("异常慢任务"), "异常任务未执行到等待点");

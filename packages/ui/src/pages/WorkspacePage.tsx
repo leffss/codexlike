@@ -211,7 +211,7 @@ export function WorkspacePage(props: {
   }, []);
 
   const openSession = useCallback(
-    async (id: string, userInitiated = false) => {
+    async (id: string) => {
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
       setCurrentId(id);
@@ -237,7 +237,6 @@ export function WorkspacePage(props: {
       loadingRef.current = buffer;
       const snapshotVersion = workspaceState.version();
       try {
-        if (userInitiated) await window.codexlike.sessions.markUsed(id);
         const [view] = await Promise.all([
           window.codexlike.sessions.view(id),
           workspaceState.loadSession(id),
@@ -569,7 +568,7 @@ export function WorkspacePage(props: {
     }
   }
 
-  /** 侧栏、主区及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
+  /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
   async function archiveSession(id: string, archived: boolean) {
     const generation = sessionRequestRef.current;
     try {
@@ -866,11 +865,16 @@ export function WorkspacePage(props: {
         onCreateInProject={startCreateSession}
         sessions={sessions}
         currentId={currentId}
-        onSelect={(id) => void openSession(id, true)}
+        onSelect={(id) => void openSession(id)}
         onCreate={() => void startCreateSession()}
         creating={creating}
         onRename={(id, title) => void renameSession(id, title)}
         onArchive={(id, archived) => void archiveSession(id, archived)}
+        onMembership={(id) =>
+          setMembershipSession(
+            sessions.find((session) => session.id === id) ?? null
+          )
+        }
         onPin={(id, pinned) => {
           void window.codexlike.sessions
             .setPinned(id, pinned)
@@ -891,7 +895,10 @@ export function WorkspacePage(props: {
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-line px-4 py-2">
-          <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">
+          <span
+            data-testid="session-title"
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
+          >
             {current?.title ??
               (draft
                 ? draft.projectId === null
@@ -901,44 +908,8 @@ export function WorkspacePage(props: {
           </span>
           <SessionSearch
             recordsRevision={recordsRevision}
-            onSelect={(id) => void openSession(id, true)}
+            onSelect={(id) => void openSession(id)}
           />
-          {current && (
-            <button
-              type="button"
-              data-testid="session-new"
-              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
-              onClick={() => void startCreateSession(current.projectId)}
-            >
-              {current.projectId === null ? "新建独立会话" : "在此项目新建"}
-            </button>
-          )}
-          {current && (
-            <button
-              type="button"
-              data-testid="session-membership"
-              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
-              onClick={() => setMembershipSession(current)}
-            >
-              {current.projectId === null ? "移入项目" : "移出项目"}
-            </button>
-          )}
-          {current && (
-            <button
-              type="button"
-              data-testid={
-                current.archivedAt === null
-                  ? "session-archive"
-                  : "session-restore"
-              }
-              className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
-              onClick={() =>
-                void archiveSession(current.id, current.archivedAt === null)
-              }
-            >
-              {current.archivedAt === null ? "归档会话" : "恢复会话"}
-            </button>
-          )}
           <button
             type="button"
             data-testid="resources-toggle"

@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  projectAction,
+  startMockProvider,
+} from "./helpers.mjs";
 
 async function until(fn, message) {
   const end = Date.now() + 15_000;
@@ -72,7 +78,7 @@ async function main() {
     await profiles.getByText("Live Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
-    await window.getByTestId("project-new-session").click();
+    await projectAction(window);
     await window.getByTestId("composer-input").fill("项目A");
     await window.getByTestId("composer-send").click();
     const a = window.getByTestId("session-item").filter({ hasText: "项目A" });
