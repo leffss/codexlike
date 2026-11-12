@@ -75,10 +75,20 @@ describe("唯一底部 InteractionPanel", () => {
     const html = renderToStaticMarkup(
       createElement(MessageStream, {
         items: [
-          { kind: "interaction", id: "r1", interaction: approval },
+          {
+            kind: "interaction",
+            id: "r1",
+            seq: 1,
+            turnId: "u1",
+            responseId: null,
+            interaction: approval,
+          },
           {
             kind: "interaction",
             id: "r2",
+            seq: 2,
+            turnId: "u1",
+            responseId: null,
             interaction: {
               ...approval,
               status: "resolved",
@@ -88,6 +98,9 @@ describe("唯一底部 InteractionPanel", () => {
           {
             kind: "interaction",
             id: "r3",
+            seq: 3,
+            turnId: "u1",
+            responseId: null,
             interaction: {
               ...approval,
               status: "cancelled",

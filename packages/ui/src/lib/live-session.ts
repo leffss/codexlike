@@ -7,7 +7,7 @@ import {
   applySessionEvent,
   initialTranscript,
   mergeInteractions,
-  type UiItem,
+  type MessageSegment,
 } from "./session-view";
 
 export interface LiveSession {
@@ -15,13 +15,13 @@ export interface LiveSession {
   executionId: string | null;
   sequence: number;
   activity: SessionActivity;
-  items: UiItem[];
+  items: MessageSegment[];
 }
 
 function applyLiveEvent(
-  items: UiItem[],
+  items: MessageSegment[],
   event: SessionEventEnvelope["event"]
-): UiItem[] {
+): MessageSegment[] {
   if (event.type === "compact-start") return items;
   if (event.type === "compact-finished")
     return initialTranscript(event.history);

@@ -20,6 +20,8 @@
     "test:e2e:interactions": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:interactions",
     "test:e2e:worktree": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worktree",
     "test:e2e:subagent-thinking": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-thinking",
+    "test:e2e:message-order": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:message-order",
+    "test:e2e:worked-history": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worked-history",
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
     "prepare": "husky",
     "test:e2e:projects": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:projects",
@@ -31,6 +33,9 @@
     "test:e2e:membership": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:membership",
     "test:e2e:live-sessions": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:live-sessions",
     "test:e2e:exit": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:exit",
+    "test:e2e:width": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:width",
+    "test:e2e:reasoning-recovery": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:reasoning-recovery",
+    "test:e2e:scroll": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:scroll",
     "check:adr": "node scripts/check-adr.mjs",
     "test:e2e:all": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:all"
   },

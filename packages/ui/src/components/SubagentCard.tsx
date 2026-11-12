@@ -3,16 +3,23 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
-import type { UiSubagent } from "../lib/session-view";
+import { useCollapseState } from "../lib/collapse-memory";
+import { markdownComponents } from "../lib/markdown";
+import type { SubagentSegment } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 
 /**
- * 子代理嵌套卡片（工单 13，GLOSSARY「子代理」）：
+ * 子代理嵌套卡片（工单 13，GLOSSARY「子代理」；票 04 开合规则）：
  * 排队（并发上限等待）→ 运行中（当前活动工具 + 已用时）→ 完成（最终报告可展开）。
+ * 运行→完成边沿自动收起一次：默认收起（报告折叠），用户已手动操作过则
+ * 记忆值不覆盖（开合是渲染层内存态，滚动、切换会话不丢）。
  */
-export function SubagentCard(props: { subagent: UiSubagent }) {
+export function SubagentCard(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
-  const [expanded, setExpanded] = useState(subagent.state === "done");
+  const { open: expanded, toggle } = useCollapseState(
+    `subagent-${subagent.id}`,
+    false
+  );
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   // 运行中每秒刷新「已用时」；结束后停止计时
@@ -22,13 +29,6 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
     }
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [subagent.state]);
-
-  // 报告到达自动展开（流式路径卡片以排队态挂载，完成时用户最关心报告）
-  useEffect(() => {
-    if (subagent.state === "done") {
-      setExpanded(true);
-    }
   }, [subagent.state]);
 
   const statusLabel =
@@ -64,7 +64,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
         type="button"
         data-testid="subagent-toggle"
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-hover"
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={toggle}
         aria-expanded={expanded}
       >
         <span className="rounded bg-subagent-bg px-1.5 py-0.5 font-mono text-xs text-subagent-fg">
@@ -130,6 +130,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
             >
               {subagent.report ?? ""}
             </ReactMarkdown>
@@ -172,7 +173,7 @@ export function SubagentCard(props: { subagent: UiSubagent }) {
 }
 
 /** 已用时（运行中实时刷新；恢复的卡片无 startedAt 则不显示数字） */
-function formatElapsed(subagent: UiSubagent, now: number): string {
+function formatElapsed(subagent: SubagentSegment, now: number): string {
   if (subagent.startedAt === null) {
     return "";
   }
@@ -187,8 +188,9 @@ function formatElapsed(subagent: UiSubagent, now: number): string {
 }
 
 /**
- * 子代理思考折叠块（思考档位 03）：与主会话思考块同构——默认收起、
- * 流式运行中带思考指示器；与报告文本分离，仅运行期展示（历史恢复不重建）。
+ * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主会话思考块
+ * 同构——默认收起、流式运行中带思考指示器；与报告文本分离，
+ * 重启后由落盘 reasoning 重建（旧记录自然缺失，不渲染空块）。
  */
 function SubagentThinking(props: { reasoning: string; streaming?: boolean }) {
   const { reasoning, streaming } = props;

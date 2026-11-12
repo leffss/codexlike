@@ -15,6 +15,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -143,6 +144,10 @@ async function main() {
     }
     assert(seenBodies.length === 6, `预期 6 个请求，实际 ${seenBodies.length}`);
 
+    // 票 04：轮完成后思考段收进该轮「已工作折叠区」（默认收起），
+    // 先展开折叠区再交互；thinking 折叠块自身的默认收起/展开断言不变
+    await window.getByTestId("worked-history-toggle").click();
+    await window.getByTestId("worked-history-items").waitFor();
     const thinkingBlock = window.getByTestId("thinking-block").first();
     await thinkingBlock.waitFor({ timeout: 20_000 });
     // 默认收起：思考内容不可见
@@ -188,12 +193,16 @@ async function main() {
     await effortSelect.selectOption("medium");
     await window.getByTestId("composer-input").fill("读一下 note.txt");
     await window.getByTestId("composer-send").click();
-    // 工具卡片出现 = 第 1 轮运行中：此刻切档（为下一条消息预置）
-    const toolCard = window.getByTestId("tool-call-card").first();
-    await toolCard.waitFor({ timeout: 20_000 });
+    // 工具调用轮（第 7 个请求）到达 mock 即切档（为下一条消息预置）。
+    // 档位在发送时快照、运行中切换不影响本轮；read_file 卡片断言不依赖
+    // 运行中的短暂可见窗口（票 04：轮完成即收进折叠区），改在完成后展开回看。
+    // 工具往返可能快于轮询粒度（醒来时第 8 个请求已发），以 >=7 为准
+    for (let i = 0; i < 100 && seenBodies.length < 7; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
     assert(
-      (await toolCard.getAttribute("data-tool-name")) === "read_file",
-      "运行中应出现 read_file 工具卡片"
+      seenBodies.length >= 7,
+      `第 7 个请求（工具调用轮）未到达 mock，实际 ${seenBodies.length}`
     );
     await effortSelect.selectOption("off");
     // 等本轮全部请求到达：第 8 个请求（工具回填后的最终文本轮）才是快照断言对象
@@ -201,11 +210,20 @@ async function main() {
       await new Promise((r) => setTimeout(r, 100));
     }
     assert(seenBodies.length === 8, `预期 8 个请求，实际 ${seenBodies.length}`);
-    // 等最终文本回复渲染（本轮结束）
+    // 等最终文本回复渲染（本轮结束；最终正文在折叠区外，收起也可见）
     await window
       .getByTestId("message-assistant")
       .nth(6)
       .waitFor({ timeout: 20_000 });
+    await new Promise((r) => setTimeout(r, 300));
+    // 轮完成后工具卡收进已工作折叠区：展开回看，read_file 卡仍完整（票 04）
+    await expandWorkedHistory(window, 1);
+    const restoredToolCard = window.getByTestId("tool-call-card").first();
+    await restoredToolCard.waitFor({ timeout: 10_000 });
+    assert(
+      (await restoredToolCard.getAttribute("data-tool-name")) === "read_file",
+      "本轮 read_file 工具卡片应存在（展开回看完整）"
+    );
     await new Promise((r) => setTimeout(r, 300));
     const secondRound = JSON.parse(seenBodies[7]);
     assert(

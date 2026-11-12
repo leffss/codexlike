@@ -14,7 +14,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  expandWorkedHistory,
+  launchApp,
+  startMockProvider,
+} from "./helpers.mjs";
 
 /**
  * 场景脚本：第 1 次 /chat/completions 返回 tool_call（write_file），
@@ -143,16 +149,9 @@ async function main() {
       .fill("创建 e2e.txt，并给出一个 TypeScript 代码块");
     await window.getByTestId("composer-send").click();
 
-    // 工具卡片出现（折叠态：工具名 + 参数摘要），点击展开可见完整输出
+    // 工具卡片出现（运行中的轮强制展开过程，卡片实时可见）
     const card = window.getByTestId("tool-call-card").first();
     await card.waitFor({ timeout: 20_000 });
-    assert(
-      (await card.getAttribute("data-tool-name")) === "write_file",
-      "工具卡片未显示 write_file"
-    );
-    await card.getByTestId("tool-call-toggle").click();
-    await card.getByText("已写入 e2e.txt").waitFor({ timeout: 10_000 });
-    console.log("[e2e] 工具卡片渲染：write_file 摘要 + 可展开完整输出");
 
     // 工具真实执行：工作区内文件已写入
     const writtenPath = join(homeDir, "workspace", "e2e.txt");
@@ -163,10 +162,23 @@ async function main() {
       "工具写入内容不正确"
     );
 
+    // 轮完成（最终流式 markdown 渲染；票 04 过程段收进已工作折叠区）
     await window
       .getByTestId("message-assistant")
       .getByText("const answer = 42;")
       .waitFor({ timeout: 20_000 });
+    // 展开折叠区回看工具卡（折叠态：工具名 + 参数摘要 + 状态 + 耗时），
+    // 点击展开可见完整输出
+    await expandWorkedHistory(window, 0);
+    const doneCard = window.getByTestId("tool-call-card").first();
+    await doneCard.waitFor({ timeout: 10_000 });
+    assert(
+      (await doneCard.getAttribute("data-tool-name")) === "write_file",
+      "工具卡片未显示 write_file"
+    );
+    await doneCard.getByTestId("tool-call-toggle").click();
+    await doneCard.getByText("已写入 e2e.txt").waitFor({ timeout: 10_000 });
+    console.log("[e2e] 工具卡片渲染：write_file 摘要 + 可展开完整输出");
     const highlighted = await window
       .locator('[data-testid="message-assistant"] pre code.hljs')
       .count();
@@ -190,7 +202,16 @@ async function main() {
     const searchCard = window.getByTestId("tool-call-card").filter({
       hasText: "web_search",
     });
+    // web_search 与 write_file 同属第一条消息的轮次（mock 按请求序分流），
+    // 上一段已展开该轮折叠区，卡片保持可见（开合记忆不丢）
     await searchCard.waitFor({ timeout: 20_000 });
+    // 等第二条消息完成（第 2 个含代码块的最终正文渲染）
+    await window
+      .getByTestId("message-assistant")
+      .filter({ hasText: "const answer = 42;" })
+      .nth(1)
+      .waitFor({ timeout: 20_000 });
+    await expandWorkedHistory(window, 0);
     await searchCard.getByTestId("tool-call-toggle").click();
     // 展开后的输出区含「标题 / URL / 摘要」三要素
     const searchOutput = searchCard.getByTestId("tool-call-output");
@@ -234,8 +255,15 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     const restored = await window.getByTestId("message-assistant").count();
     assert(restored >= 1, "重启后助手消息历史未恢复");
+    // 票 04：重启恢复后轮完成默认收起，展开各轮折叠区断言工具卡片完整恢复
+    const toggleCount = await window
+      .getByTestId("worked-history-toggle")
+      .count();
+    for (let i = 0; i < toggleCount; i++) {
+      await expandWorkedHistory(window, i);
+    }
     const restoredCards = await window.getByTestId("tool-call-card").count();
-    assert(restoredCards >= 1, "重启后工具卡片未恢复");
+    assert(restoredCards >= 2, "重启后工具卡片未恢复（两轮各一张）");
     console.log("[e2e] 重启后侧栏会话列表、消息历史与工具卡片完整恢复");
 
     await closeApp(app);

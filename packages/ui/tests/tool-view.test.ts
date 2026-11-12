@@ -51,7 +51,8 @@ describe("initialTranscript（时间线 → 消息流初始状态）", () => {
 
     const view = initialTranscript(items);
     expect(view).toHaveLength(3);
-    expect(view[1]).toMatchObject({
+    const tool = view.find((item) => item.kind === "tool-call");
+    expect(tool).toMatchObject({
       kind: "tool-call",
       toolName: "read_file",
       output: "1\taaa",
@@ -78,7 +79,7 @@ describe("initialTranscript（时间线 → 消息流初始状态）", () => {
     ];
 
     const view = initialTranscript(items);
-    expect(view[1]).toMatchObject({ id: "m2", interrupted: true });
+    expect(view.at(-1)).toMatchObject({ id: "m2", interrupted: true });
   });
 });
 
