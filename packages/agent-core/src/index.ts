@@ -30,11 +30,11 @@ export type {
   SessionPreferences,
   ReadingPosition,
   SavedQuestionDraft,
-} from "./session/workbench-state";
-export { workbenchKey } from "./session/workbench-state";
+} from "./task/workbench-state";
+export { workbenchKey } from "./task/workbench-state";
 
 // 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
-// （ApprovalMode 定义在 ./session/approval，经下方审批域出口统一导出）
+// （ApprovalMode 定义在 ./task/approval，经下方审批域出口统一导出）
 export type {
   ApprovalDecisionRecord,
   CompactRecord,
@@ -48,9 +48,9 @@ export type {
   StoredMessage,
   TranscriptItem,
   WorkspaceMode,
-} from "./session/types";
+} from "./task/types";
 
-export type { SessionSearchResult } from "./session/search";
+export type { SessionSearchResult } from "./task/search";
 
 // 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
 export type {
@@ -58,14 +58,14 @@ export type {
   ApprovalGate,
   ApprovalMode,
   ApprovalRequest,
-} from "./session/approval";
+} from "./task/approval";
 export {
   APPROVAL_MODES,
   APPROVAL_MODE_NAMES,
   commandFirstWord,
   decideApproval,
   isRiskyCommand,
-} from "./session/approval";
+} from "./task/approval";
 
 // 工具域类型（GLOSSARY「工具注册表」）：type-only，工具实现（Node 专属）在 ./node 出口
 export type {

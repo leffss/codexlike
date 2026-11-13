@@ -1,4 +1,4 @@
-import type { StoredMessage } from "../session/types";
+import type { StoredMessage } from "../task/types";
 
 /** 运行、恢复、压缩与 token 估算共用的上下文文本；问答不产生额外用户轮次。 */
 export function composeStoredMessageContent(message: StoredMessage): string {

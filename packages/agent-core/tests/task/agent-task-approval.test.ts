@@ -6,10 +6,10 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
-import type { ApprovalMode } from "../../src/session/approval";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import type { ApprovalMode } from "../../src/task/approval";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
 const profile: ProviderProfile = {

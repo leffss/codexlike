@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ThinkingEffort } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createSessionManager } from "../../src/task/manager";
 
 const profile: ProviderProfile = {
   id: "profile-1",

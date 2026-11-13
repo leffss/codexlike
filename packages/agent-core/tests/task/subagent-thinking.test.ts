@@ -11,9 +11,9 @@ import {
   type ThinkingEffort,
 } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
 /** 主会话 Profile（sendMessage 携带；「同主模型」回退路径用到） */

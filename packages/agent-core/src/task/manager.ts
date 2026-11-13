@@ -15,7 +15,7 @@ import {
 import type { ProviderProfile } from "../provider/provider-profile";
 import type { ToolDefinition } from "../tools/types";
 
-import { createAgentSession, type AgentSession } from "./agent-session";
+import { createAgentSession, type AgentSession } from "./agent-task";
 import type { ApprovalMode } from "./approval";
 import type { SessionPersistence } from "./persistence";
 import type { SessionSearchResult } from "./search";

@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createAgentSession } from "../../src/session/agent-session";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createAgentSession } from "../../src/task/agent-task";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
 import type {
   ToolDefinition,
   ToolExecutionContext,

@@ -3,10 +3,10 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionRecord } from "../../src/session/types";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionRecord } from "../../src/task/types";
+import { createSessionManager } from "../../src/task/manager";
 import { fakeResourceSnapshot } from "./resource-fixture";
 
 /** 工单 07：AGENTS.md → 系统提示、@引用 → 该条消息的模型上下文 */

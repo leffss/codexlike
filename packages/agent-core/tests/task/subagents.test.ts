@@ -7,9 +7,9 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { AgentResourceSnapshot } from "../../src/context/resource-types";
 import type { ToolDefinition } from "../../src/tools/types";

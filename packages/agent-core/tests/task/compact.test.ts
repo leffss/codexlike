@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createLanguageModelFromProfile } from "../../src/index";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createSessionManager } from "../../src/task/manager";
 import { fakeResourceSnapshot } from "./resource-fixture";
 
 /**

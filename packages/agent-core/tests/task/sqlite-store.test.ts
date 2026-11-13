@@ -5,8 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import type { SessionRecord, StoredMessage } from "../../src/session/types";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import type { SessionRecord, StoredMessage } from "../../src/task/types";
 
 /** 最小合法会话记录（固定时间戳避免测试不稳定） */
 function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {

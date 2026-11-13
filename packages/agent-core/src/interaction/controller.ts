@@ -1,5 +1,5 @@
-import type { SessionPersistence } from "../session/persistence";
-import type { SessionEvent } from "../session/types";
+import type { SessionPersistence } from "../task/persistence";
+import type { SessionEvent } from "../task/types";
 import type {
   InteractionRecord,
   InteractionRequest,

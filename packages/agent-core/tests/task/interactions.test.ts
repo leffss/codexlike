@@ -11,9 +11,9 @@ import type { InteractionRecord } from "../../src/interaction/types";
 import { describe, expect, it } from "vitest";
 
 import { createInteractionController } from "../../src/interaction/controller";
-import { createSessionManager } from "../../src/session/manager";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import type { SessionEvent } from "../../src/session/types";
+import { createSessionManager } from "../../src/task/manager";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import type { SessionEvent } from "../../src/task/types";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 
 const profile: ProviderProfile = {

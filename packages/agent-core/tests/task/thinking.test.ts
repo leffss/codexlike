@@ -8,9 +8,9 @@ import {
   type CreateLanguageModelOptions,
 } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSqliteSessionStore } from "../../src/task/persistence";
+import { createAgentSession } from "../../src/task/agent-task";
+import type { SessionEvent, SessionRecord } from "../../src/task/types";
 
 /** 测试用 Provider Profile（apiKey 不会被真实使用：模型工厂注入 mock / fetch 替身） */
 const profile: ProviderProfile = {

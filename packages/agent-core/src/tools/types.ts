@@ -3,7 +3,7 @@
  * 全部可 JSON 序列化：ToolCallRecord 与会话事件、IPC、UI 卡片共用。
  * 本文件浏览器安全（无 Node 内置模块），实现（fs/child_process）在 ./node 出口。
  */
-import type { ApprovalMode } from "../session/approval";
+import type { ApprovalMode } from "../task/approval";
 import type { ProviderProfile } from "../provider/provider-profile";
 import type { ThinkingEffort } from "../provider/language-model";
 

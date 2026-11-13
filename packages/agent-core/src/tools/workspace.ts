@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import type { ApprovalMode } from "../session/approval";
+import type { ApprovalMode } from "../task/approval";
 
 /**
  * 按审批模式解析工具路径（GLOSSARY「审批模式」；ADR 0004）：
