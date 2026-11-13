@@ -35,6 +35,7 @@ import {
   type TurnView,
 } from "../lib/turn-view";
 import { AssistantActions } from "./AssistantActions";
+import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -404,7 +405,7 @@ function WorkedHistory(props: {
         onClick={toggle}
         className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs text-fg-muted hover:bg-hover"
       >
-        <span className="shrink-0 text-xs">{open ? "▾" : "▸"}</span>
+        <DisclosureArrow open={open} />
         {turn.running && (
           <span
             data-testid="worked-history-indicator"
@@ -491,7 +492,7 @@ function ToolGroupView(props: {
         onClick={toggle}
         className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs hover:bg-hover"
       >
-        <span className="shrink-0 text-xs">{open ? "▾" : "▸"}</span>
+        <DisclosureArrow open={open} />
         <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-accent">
           {item.toolName}
         </span>
@@ -583,7 +584,7 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
           data-testid="thinking-toggle"
           className="flex cursor-pointer select-none items-center gap-2"
         >
-          <span className="shrink-0 text-xs">{open ? "▾" : "▸"}</span>
+          <DisclosureArrow open={open} />
           {streaming && (
             <span
               data-testid="thinking-indicator"

@@ -9,6 +9,8 @@ import type { SubagentSegment } from "../lib/session-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 
+import { DisclosureArrow } from "./DisclosureArrow";
+
 /**
  * 子代理嵌套卡片（工单 13，GLOSSARY「子代理」；票 04 开合规则）：
  * 排队（并发上限等待）→ 运行中（当前活动工具 + 已用时）→ 完成（最终报告可展开）。
@@ -68,7 +70,7 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
         onClick={toggle}
         aria-expanded={expanded}
       >
-        <span className="shrink-0 text-xs">{expanded ? "▾" : "▸"}</span>
+        <DisclosureArrow open={expanded} />
         <span className="rounded bg-subagent-bg px-1.5 py-0.5 font-mono text-xs text-subagent-fg">
           子代理
         </span>
@@ -230,7 +232,7 @@ function SubagentThinking(props: {
         data-testid="subagent-thinking-toggle"
         className="flex cursor-pointer select-none items-center gap-2"
       >
-        <span className="shrink-0 text-xs">{open ? "▾" : "▸"}</span>
+        <DisclosureArrow open={open} />
         {streaming === true && (
           <span
             data-testid="subagent-thinking-indicator"

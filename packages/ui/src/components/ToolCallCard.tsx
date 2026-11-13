@@ -5,6 +5,8 @@ import type { ToolCallSegment } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
 
+import { DisclosureArrow } from "./DisclosureArrow";
+
 /** 截图卡片的图片展示：展开时经主进程按 会话+调用 id 读取文件（dataURL） */
 function ScreenshotView(props: { call: ToolCallSegment }) {
   const { call } = props;
@@ -93,7 +95,7 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
         onClick={toggle}
         aria-expanded={expanded}
       >
-        <span className="shrink-0 text-xs">{expanded ? "▾" : "▸"}</span>
+        <DisclosureArrow open={expanded} />
         <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
           {call.toolName}
         </span>
