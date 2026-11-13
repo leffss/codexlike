@@ -60,7 +60,11 @@ export function trackWindowLaunchState(options: {
     }
   }
 
-  /** 读当前完整现场（正常态 bounds + 是否最大化）写盘；先取消挂起的防抖写 */
+  /**
+   * 读当前窗口现场（正常态 bounds + 是否最大化）写盘；先取消挂起的防抖写。
+   * 合并写（patch）：只覆盖窗口字段，保留渲染层上报的工作台目标/视图
+   * （票03）——整体替换会把它们清掉，拖一次窗口就丢掉记住的会话。
+   */
   function saveNow(): void {
     cancelTimer();
     if (win.isDestroyed()) return;
@@ -68,7 +72,7 @@ export function trackWindowLaunchState(options: {
       bounds: win.getNormalBounds(),
       maximized: win.isMaximized(),
     };
-    void store.set(state).catch((error: unknown) => {
+    void store.patch(state).catch((error: unknown) => {
       // 写盘失败不拖垮主进程；下次窗口事件会再尝试
       console.error("[launch-state] 保存失败：", error);
     });
