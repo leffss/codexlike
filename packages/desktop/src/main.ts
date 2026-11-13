@@ -517,6 +517,9 @@ void app.whenReady().then(async () => {
   });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
+  // 输入队列恢复（票 04 / ADR 0013）：主进程服务与凭据装配完成后启用，
+  // 不依赖窗口、view 或渲染层加载；暂停态队列由持久标志保持不消费。
+  sessionRuntime.startInputQueues();
   mainWindow = createMainWindow(themePreference);
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 

@@ -64,7 +64,7 @@ export function registerSessionHandlers(options: {
   resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
   /** 输入队列持久化（票 01 / ADR 0013）：同一 SQLite 库的独立连接；缺省内存（单测装配）。 */
   queueStore?: InputQueueStore;
-}): SessionExitRuntime {
+}): SessionExitRuntime & { startInputQueues(): void } {
   const {
     manager,
     profiles,
@@ -138,9 +138,15 @@ export function registerSessionHandlers(options: {
   }
   const queues = createSessionInputQueues({
     store: queueStore,
-    isBusy: (sessionId) => management.execution(sessionId)?.running ?? false,
-    dispatch: dispatchQueued,
+    // 退出冻结是宿主门控，不是用户暂停；不落盘，也不取下一条。
+    isBusy: (sessionId) =>
+      exiting || (management.execution(sessionId)?.running ?? false),
+    // 队首还在读取凭据/准备发送时也算在途工作，退出需等它复查闸门后排空。
+    dispatch: (sessionId, entry, onSettled) =>
+      track(dispatchQueued(sessionId, entry, onSettled)),
     onChange: (sessionId, reason, queue, paused, sendingId) => {
+      // 队列变更经会话事件信封推送（空闲修改也有信封可挂，票 03 acceptQueue），
+      // 所有工作台窗口收到同一权威快照。
       const envelope = liveSessions.acceptQueue(sessionId, {
         type: "queue-changed",
         reason,
@@ -205,7 +211,8 @@ export function registerSessionHandlers(options: {
           executions.delete(sessionId);
         // 流结束（完成/出错/中断）：唤醒等待本轮的消费循环并尝试取队首（票 01）
         releaseStreamWaiters(sessionId);
-        queues.onIdle(sessionId);
+        // 应用退出中断不等于插话完成：保留用户暂停，不在收尾时触发下一轮。
+        if (!stopping) queues.onIdle(sessionId);
       },
     };
   }
@@ -1062,7 +1069,21 @@ export function registerSessionHandlers(options: {
     }
   );
 
+  function continueInputQueues() {
+    for (const record of manager.list()) {
+      // 跳过执行中的会话：此时 onIdle 会把在途插话误判为已完成而提前
+      // 解除暂停；它们的轮次落定时由 end() 自然触发恢复。
+      if (
+        record.archivedAt === null &&
+        !(management.execution(record.id)?.running ?? false)
+      )
+        queues.onIdle(record.id);
+    }
+  }
+
   return {
+    /** 主进程服务装配完成后启用恢复；不依赖窗口、view 或渲染层加载。 */
+    startInputQueues: continueInputQueues,
     hasWork: () =>
       starts.size > 0 ||
       tasks.size > 0 ||
@@ -1075,6 +1096,8 @@ export function registerSessionHandlers(options: {
       exiting = false;
       stopping = false;
       releaseDeferredStarts();
+      // 冻结期间已自然结束的轮次没有后续空闲事件，取消退出需重新触发。
+      continueInputQueues();
     },
     async stopAndDrain() {
       stopping = true;
