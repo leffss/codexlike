@@ -1,6 +1,7 @@
 import type { DragEvent, ReactNode } from "react";
 
-import type { QueuedMessage } from "@codexlike/desktop/ipc";
+import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
+import { EMPTY_QUEUE_STATE } from "../lib/live-session";
 
 /** 队列条最多直接预览的条目数：超过折叠为「+N 更多」（spec 用户故事 4） */
 const PREVIEW_LIMIT = 5;
@@ -27,11 +28,8 @@ const DRAG_PAYLOAD = "application/x-codexlike-queue-item";
  *   无删除/取回编辑/拖拽入口，也不作为重排目标（主进程同步强制）。
  */
 export function QueueBar(props: {
-  queue: QueuedMessage[];
-  /** 队列暂停标志（票 02）：区别于正常排队 */
-  paused?: boolean;
-  /** 正在发出的条目 id（票 03）：区别显示并锁定 */
-  sendingItemId?: string | null;
+  /** 队列状态快照（review 重构收拢三元组）：排队条目 + 暂停标志 + 正在发出条目 */
+  queueState?: QueueSnapshot;
   /** 编辑中的条目 id（票 03）：高亮并显示取消入口 */
   editingItemId?: string | null;
   /** 手动恢复：清暂停标志并立即继续消费 */
@@ -47,15 +45,17 @@ export function QueueBar(props: {
   /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿 */
   onCancelEdit?: () => void;
 }) {
-  const {
-    queue,
-    paused = false,
-    sendingItemId = null,
-    editingItemId = null,
-  } = props;
+  const { queueState = EMPTY_QUEUE_STATE } = props;
+  const { queue, paused, sendingId: sendingItemId } = queueState;
+  const editingItemId = props.editingItemId ?? null;
   if (queue.length === 0) return null;
   const visible = queue.slice(0, PREVIEW_LIMIT);
   const hidden = queue.length - visible.length;
+  // 计数口径（review 修复）：排队计数「待发 N」不含正在发出（inflight）的条目；
+  // inflight 在下方以锁定态展示并单独标注「发送中」。
+  const waitingCount = queue.filter((item) => item.id !== sendingItemId).length;
+  const sending =
+    sendingItemId !== null && queue.some((item) => item.id === sendingItemId);
 
   function handleDrop(event: DragEvent<HTMLLIElement>, target: QueuedMessage) {
     const draggedId = event.dataTransfer.getData(DRAG_PAYLOAD);
@@ -83,7 +83,7 @@ export function QueueBar(props: {
           data-testid="queue-item"
           data-item-id={item.id}
           className="flex items-center gap-2"
-          aria-label={`正在发出：${previewText(item.text)}`}
+          aria-label={`发送中：${previewText(item.text)}`}
         >
           <div
             data-testid="queue-item-sending"
@@ -97,7 +97,7 @@ export function QueueBar(props: {
               data-testid="queue-item-sending-badge"
               className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent-fg"
             >
-              正在发出
+              发送中
             </span>
           </div>
         </li>
@@ -177,15 +177,20 @@ export function QueueBar(props: {
       className="mb-2 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-fg-muted"
       aria-label={
         paused
-          ? `输入队列 ${queue.length} 条，已暂停`
-          : `输入队列 ${queue.length} 条`
+          ? `输入队列 待发 ${waitingCount} 条，已暂停`
+          : `输入队列 待发 ${waitingCount} 条`
       }
     >
       <div className="mb-1 flex items-center gap-2">
         <span className="font-medium text-fg">输入队列</span>
         <span data-testid="queue-count" className="tabular-nums">
-          {queue.length} 条
+          待发 {waitingCount} 条
         </span>
+        {sending && (
+          <span data-testid="queue-sending-count" className="text-fg-subtle">
+            1 条发送中
+          </span>
+        )}
         {paused && (
           <span
             data-testid="queue-paused"

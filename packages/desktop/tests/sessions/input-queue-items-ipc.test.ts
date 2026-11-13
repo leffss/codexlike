@@ -160,7 +160,7 @@ it("编辑 IPC 原地更新：顺序与快照不动，事件推送全部窗口�
   await invoke("send", id, "排队甲", app.profile.id);
   await invoke("send", id, "排队乙", app.profile.id);
   const view = invoke("view", id);
-  const [first, second] = view.queue;
+  const [first, second] = view.queueState.queue;
   const bad = view.sequence;
   // 身份与参数校验
   expect(() =>
@@ -178,7 +178,7 @@ it("编辑 IPC 原地更新：顺序与快照不动，事件推送全部窗口�
   expect(() =>
     invoke("queue-update", id, first.id, "改", "排队甲", ["ok.md", 5])
   ).toThrow(/引用/);
-  expect(invoke("view", id).queue).toEqual(view.queue);
+  expect(invoke("view", id).queueState.queue).toEqual(view.queueState.queue);
 
   const result = invoke(
     "queue-update",
@@ -226,15 +226,19 @@ it("迟到保存不复活已取出发送的条目：出队后编辑/删除/重�
   const app = await setup();
   const id = await app.start();
   await invoke("send", id, "排队甲", app.profile.id);
-  const entry = invoke("view", id).queue[0];
+  const entry = invoke("view", id).queueState.queue[0];
 
   // 首轮结束 → 甲被取出发送：请求到达但响应保持挂起——本轮未结束，
   // 甲以「正在发出」保留在队列视图中（置顶、锁定、可稳定观察）
   await app.finish("首轮");
   await waitFor(() => expect(app.requests).toContain("排队甲"));
-  await waitFor(() => expect(invoke("view", id).queueSendingId).toBe(entry.id));
+  await waitFor(() =>
+    expect(invoke("view", id).queueState.sendingId).toBe(entry.id)
+  );
   const duringFlight = invoke("view", id);
-  expect(duringFlight.queue.map((item: any) => item.id)).toEqual([entry.id]);
+  expect(duringFlight.queueState.queue.map((item: any) => item.id)).toEqual([
+    entry.id,
+  ]);
   // UI 区分信号经事件推送：dequeue 携带锁定 id
   const dequeueEvents = app.delivered[0]!.filter(
     (envelope) =>
@@ -252,12 +256,14 @@ it("迟到保存不复活已取出发送的条目：出队后编辑/删除/重�
   ).toThrow(/不存在|已发出/);
   expect(() => invoke("queue-remove", id, entry.id)).toThrow(/不存在|已发出/);
   expect(() => invoke("queue-reorder", id, [entry.id])).toThrow(/不一致/);
-  expect(invoke("view", id).queueSendingId).toBe(entry.id);
+  expect(invoke("view", id).queueState.sendingId).toBe(entry.id);
 
   // 放行发送：本轮结束后移出视图，队列清空
   await app.finish("排队甲");
-  await waitFor(() => expect(invoke("view", id).queue).toEqual([]));
-  await waitFor(() => expect(invoke("view", id).queueSendingId).toBeNull());
+  await waitFor(() => expect(invoke("view", id).queueState.queue).toEqual([]));
+  await waitFor(() =>
+    expect(invoke("view", id).queueState.sendingId).toBeNull()
+  );
   await waitFor(() => expect(invoke("execution", id).running).toBe(false));
 }, 30_000);
 
@@ -269,15 +275,16 @@ it("重排 IPC：暂停窗口内合法重排生效并持久化，清单不一致
   await invoke("send", id, "乙", app.profile.id);
   await invoke("send", id, "丙", app.profile.id);
   await app.pause(id);
-  const ids = () => invoke("view", id).queue.map((item: any) => item.text);
+  const ids = () =>
+    invoke("view", id).queueState.queue.map((item: any) => item.text);
   expect(ids()).toEqual(["甲", "乙", "丙"]);
-  expect(invoke("view", id).queuePaused).toBe(true);
+  expect(invoke("view", id).queueState.paused).toBe(true);
   // 参数校验
   expect(() => invoke("queue-reorder", id, "not-array")).toThrow(/顺序清单/);
   expect(() => invoke("queue-reorder", id, ["x", 5])).toThrow(/顺序清单/);
   expect(() => invoke("queue-reorder", id, ["甲"])).toThrow(/不一致/);
   const view = invoke("view", id);
-  const order = view.queue.map((item: any) => item.id);
+  const order = view.queueState.queue.map((item: any) => item.id);
   const reordered = [order[2], order[0], order[1]];
   const result = invoke("queue-reorder", id, reordered);
   expect(result.queue.map((item: any) => item.text)).toEqual([
@@ -306,7 +313,7 @@ it("重排 IPC：暂停窗口内合法重排生效并持久化，清单不一致
   await app.finish("丙");
   await app.finish("甲");
   await app.finish("乙");
-  await waitFor(() => expect(invoke("view", id).queue).toEqual([]));
+  await waitFor(() => expect(invoke("view", id).queueState.queue).toEqual([]));
   expect(app.requests).toEqual(["首轮任务", "丙", "甲", "乙"]);
 }, 30_000);
 
@@ -315,7 +322,7 @@ it("删除 IPC 校验会话/条目身份；空闲暂停时向所有窗口推送�
   const id = await app.start();
   await invoke("send", id, "待删除", app.profile.id);
   await invoke("send", id, "保留", app.profile.id);
-  const [removed, kept] = invoke("view", id).queue;
+  const [removed, kept] = invoke("view", id).queueState.queue;
   await app.pause(id);
   const before = invoke("view", id);
   expect(() => invoke("queue-remove", "missing", removed.id)).toThrow(
@@ -338,7 +345,7 @@ it("删除 IPC 校验会话/条目身份；空闲暂停时向所有窗口推送�
     });
     expect(events.at(-1)!.sequence).toBeGreaterThan(before.sequence);
   }
-  expect(invoke("view", id).queue).toEqual([kept]);
+  expect(invoke("view", id).queueState.queue).toEqual([kept]);
   const reopened = createSqliteInputQueueStore(app.dbPath);
   try {
     expect(reopened.list(id)).toEqual([kept]);

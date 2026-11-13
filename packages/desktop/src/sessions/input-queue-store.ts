@@ -2,7 +2,11 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { InputQueueStore, QueuedMessage } from "./input-queue";
+import {
+  assertReorderableList,
+  type InputQueueStore,
+  type QueuedMessage,
+} from "./input-queue";
 
 /**
  * 输入队列的 SQLite 持久化（票 01 / ADR 0013）：排队消息按会话存到
@@ -140,13 +144,10 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     },
     reorder(sessionId, orderedIds) {
       const current = list(sessionId);
-
+      // 无重复/未知校验走共享函数（review 重构）；完整性由协调器权威把关
+      assertReorderableList(current, orderedIds);
       const idSet = new Set(orderedIds);
-      if (idSet.size !== orderedIds.length)
-        throw new Error("重排：条目清单有重复");
       const members = current.filter((entry) => idSet.has(entry.id));
-      if (members.length !== orderedIds.length)
-        throw new Error("重排：条目清单与队列不一致");
       // 子集占用的 position 集合内重新分配；整体一个事务，中断不产生半套顺序
       const positions = members
         .map((entry) => entry.position)

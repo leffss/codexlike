@@ -230,13 +230,21 @@ export interface SessionView {
   events: SessionEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: SessionActivity;
-  /** 输入队列快照（票 01/03）：切换会话时队列条原样恢复（正在发出的条目置顶） */
-  queue?: QueuedMessage[];
-  /** 队列暂停标志（票 02）：切换/重启恢复时保持暂停态显示 */
-  queuePaused?: boolean;
-  /** 正在发出的条目 id（票 03）：切换/重启恢复时保持区别显示 */
-  queueSendingId?: string | null;
+  /**
+   * 输入队列状态快照（票 01/02/03，review 重构收拢为三元组单点）：
+   * 切换/重启恢复时队列条（含暂停态与正在发出条目）原样恢复。
+   */
+  queueState?: QueueSnapshot;
 }
+
+/**
+ * 队列状态快照（review 重构）：queue / paused / sendingId 三元组的单一携带
+ * 形状——view 快照、事件接续与组件 props 不再各自摊开三个字段。
+ */
+export type QueueSnapshot = Pick<
+  QueueOperationResult,
+  "queue" | "paused" | "sendingId"
+>;
 
 /** 队列操作结果（票 02/03）：操作生效后的队列快照、暂停标志与正在发出条目 */
 export interface QueueOperationResult {

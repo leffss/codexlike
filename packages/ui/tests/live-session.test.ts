@@ -425,14 +425,12 @@ it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回�
   const initial = hydrateLiveSession(view);
   const next = receiveLiveEvent(initial, changed);
   expect(next.sequence).toBe(3);
-  expect(next.queuePaused).toBe(true);
+  expect(next.queueState.paused).toBe(true);
   expect(next.items).toEqual(initial.items);
   const buffered = hydrateLiveSession(view, [changed]);
   expect(buffered).toMatchObject({
     sequence: next.sequence,
-    queue: next.queue,
-    queuePaused: next.queuePaused,
-    queueSendingId: next.queueSendingId,
+    queueState: next.queueState,
   });
   expect(receiveLiveEvent(next, changed)).toBe(next);
   expect(
@@ -468,8 +466,8 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
       sendingId: "q1",
     },
   });
-  expect(state.queueSendingId).toBe("q1");
-  expect(state.queue.map((entry) => entry.id)).toEqual(["q1"]);
+  expect(state.queueState.sendingId).toBe("q1");
+  expect(state.queueState.queue.map((entry) => entry.id)).toEqual(["q1"]);
   // 出队完成：条目移除、锁定清空
   state = receiveLiveEvent(state, {
     ...delta(4, ""),
@@ -481,16 +479,15 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
       sendingId: null,
     },
   });
-  expect(state.queueSendingId).toBeNull();
-  expect(state.queue).toEqual([]);
+  expect(state.queueState.sendingId).toBeNull();
+  expect(state.queueState.queue).toEqual([]);
   // 切换/重开恢复：view 快照带回锁定 id（正在发出的条目仍区别显示）
   const restored = hydrateLiveSession({
     ...snapshot,
-    queue: [item],
-    queueSendingId: "q1",
+    queueState: { queue: [item], paused: false, sendingId: "q1" },
     activity: idle.activity,
   });
-  expect(restored.queueSendingId).toBe("q1");
+  expect(restored.queueState.sendingId).toBe("q1");
 });
 
 it("输入队列随事件与快照接续（票 01）：入队更新快照，出队开启新执行起点，不进消息流", () => {
@@ -518,8 +515,10 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
       paused: false,
     },
   });
-  expect(enqueued.queue.map((item) => item.text)).toEqual(["排队第一条"]);
-  expect(enqueued.queuePaused).toBe(false);
+  expect(enqueued.queueState.queue.map((item) => item.text)).toEqual([
+    "排队第一条",
+  ]);
+  expect(enqueued.queueState.paused).toBe(false);
   // 队列事件不进消息流
   expect(enqueued.items).toEqual(state.items);
 
@@ -533,7 +532,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
       paused: true,
     },
   });
-  expect(pausedState.queuePaused).toBe(true);
+  expect(pausedState.queueState.paused).toBe(true);
 
   // 回复结束（running=false）后出队发送：queue-changed 挂新执行，
   // 视为明确执行起点接续（与 user-message 同级的 starts）
@@ -564,8 +563,8 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
       paused: false,
     },
   });
-  expect(dequeued.queue).toEqual([]);
-  expect(dequeued.queuePaused).toBe(false);
+  expect(dequeued.queueState.queue).toEqual([]);
+  expect(dequeued.queueState.paused).toBe(false);
   expect(dequeued.executionId).toBe("e2");
   // 新执行起点后的正文事件照常接续
   const continued = receiveLiveEvent(dequeued, delta(7, "新回复", "e2"));
@@ -574,10 +573,11 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   // 切换会话快照恢复：view.queue 原样带回队列条与暂停态（票 02）
   const restored = hydrateLiveSession({
     ...snapshot,
-    queue: queued,
-    queuePaused: true,
+    queueState: { queue: queued, paused: true, sendingId: null },
     activity: { ...activity, running: false, outcome: "completed" },
   });
-  expect(restored.queue.map((item) => item.text)).toEqual(["排队第一条"]);
-  expect(restored.queuePaused).toBe(true);
+  expect(restored.queueState.queue.map((item) => item.text)).toEqual([
+    "排队第一条",
+  ]);
+  expect(restored.queueState.paused).toBe(true);
 });

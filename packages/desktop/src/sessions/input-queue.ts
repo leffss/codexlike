@@ -80,6 +80,22 @@ export type QueueChangeReason =
  * 消费由注入的 dispatch 完成；启动失败时条目保留在队列（不丢），
  * 等待下一个触发点（下一次执行结束或下一次入队）。
  */
+/**
+ * 重排清单校验（review 重构共享）：orderedIds 必须无重复、且每个 id 都在
+ * 当前队列条目中（子集语义——协调器排除正在发出的队首后要求恰好全量排列，
+ * store 按子集重排 position）。报错文案单点：协调器与两个 store 不再各验一遍。
+ */
+export function assertReorderableList(
+  current: readonly QueuedMessage[],
+  orderedIds: readonly string[]
+): void {
+  if (new Set(orderedIds).size !== orderedIds.length)
+    throw new Error("重排清单与当前排队条目不一致，请刷新后重试");
+  const known = new Set(current.map((entry) => entry.id));
+  if (orderedIds.some((id) => !known.has(id)))
+    throw new Error("重排清单与当前排队条目不一致，请刷新后重试");
+}
+
 export function createSessionInputQueues(deps: {
   store: InputQueueStore;
   isBusy: (sessionId: string) => boolean;
@@ -246,22 +262,18 @@ export function createSessionInputQueues(deps: {
      * 重排（票 03）：orderedIds 必须恰好是本会话仍在排队（不含正在发出）
      * 的全部条目 id 的一次排列——清单不完整或夹带未知 id 一律拒绝，
      * 异步入队/删除交错时不会遗漏或复活条目；合法则在排队子集内重排。
+     * 权威校验在协调器（review 重构）：无重复/未知走共享校验，完整性单点补齐。
      */
     reorder(sessionId: string, orderedIds: string[]): void {
       const sendingId = sendingIds.get(sessionId);
       if (sendingId !== undefined && orderedIds.includes(sendingId))
         throw new Error("正在发出的消息不能重排");
-      const queuedIds = store
-        .list(sessionId)
-        .filter((entry) => entry.id !== sendingId)
-        .map((entry) => entry.id);
-      const unique = new Set(orderedIds);
-      if (
-        unique.size !== orderedIds.length ||
-        unique.size !== queuedIds.length ||
-        orderedIds.some((id) => !unique.has(id)) ||
-        queuedIds.some((id) => !unique.has(id))
-      )
+      const current = store.list(sessionId);
+      assertReorderableList(current, orderedIds);
+      const queuedCount = current.filter(
+        (entry) => entry.id !== sendingId
+      ).length;
+      if (orderedIds.length !== queuedCount)
         throw new Error("重排清单与当前排队条目不一致，请刷新后重试");
       store.reorder(sessionId, orderedIds);
       notify(sessionId, "reorder");
@@ -356,12 +368,10 @@ export function createMemoryInputQueueStore(): InputQueueStore {
     },
     reorder(sessionId, orderedIds) {
       const current = rows.get(sessionId) ?? [];
+      // 无重复/未知校验走共享函数（review 重构）；完整性由协调器权威把关
+      assertReorderableList(current, orderedIds);
       const idSet = new Set(orderedIds);
-      if (idSet.size !== orderedIds.length)
-        throw new Error("重排：条目清单有重复");
       const members = current.filter((item) => idSet.has(item.id));
-      if (members.length !== orderedIds.length)
-        throw new Error("重排：条目清单与队列不一致");
       // 子集占用的 position 集合内重新分配，子集外条目（如正在发出的队首）不动
       const positions = members
         .map((item) => item.position)

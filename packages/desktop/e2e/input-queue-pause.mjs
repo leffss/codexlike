@@ -178,7 +178,7 @@ async function main() {
     await input.press("Enter");
     await window
       .getByTestId("queue-count")
-      .getByText("2 条")
+      .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
     await window.getByTestId("composer-stop").click();
     await window.getByTestId("queue-paused").waitFor({ timeout: 10_000 });

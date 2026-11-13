@@ -1,5 +1,5 @@
 import type {
-  QueuedMessage,
+  QueueSnapshot,
   SessionActivity,
   SessionEventEnvelope,
   SessionView,
@@ -11,6 +11,13 @@ import {
   type MessageSegment,
 } from "./session-view";
 
+/** 队列状态为空时的基准快照（无排队、未暂停、无正在发出条目）。 */
+export const EMPTY_QUEUE_STATE: QueueSnapshot = {
+  queue: [],
+  paused: false,
+  sendingId: null,
+};
+
 export interface LiveSession {
   sessionId: string;
   autoApprove: boolean;
@@ -18,12 +25,11 @@ export interface LiveSession {
   sequence: number;
   activity: SessionActivity;
   items: MessageSegment[];
-  /** 输入队列快照（票 01）：随 queue-changed 事件与 view 快照接续，不进消息流 */
-  queue: QueuedMessage[];
-  /** 队列暂停标志（票 02）：随 queue-changed 事件与 view 快照接续 */
-  queuePaused: boolean;
-  /** 正在发出的条目 id（票 03）：区别显示并锁定；随 queue-changed 事件与 view 快照接续 */
-  queueSendingId: string | null;
+  /**
+   * 输入队列状态快照（票 01/02/03，review 重构收拢三元组）：随 queue-changed
+   * 事件与 view 快照接续，不进消息流——含排队条目、暂停标志与正在发出条目。
+   */
+  queueState: QueueSnapshot;
 }
 
 function applyLiveEvent(
@@ -80,18 +86,14 @@ export function receiveLiveEvent(
     sequence: envelope.sequence,
     activity: envelope.activity,
     items: applyLiveEvent(state.items, envelope.event),
-    queue:
+    queueState:
       envelope.event.type === "queue-changed"
-        ? envelope.event.queue
-        : state.queue,
-    queuePaused:
-      envelope.event.type === "queue-changed"
-        ? envelope.event.paused
-        : state.queuePaused,
-    queueSendingId:
-      envelope.event.type === "queue-changed"
-        ? (envelope.event.sendingId ?? null)
-        : state.queueSendingId,
+        ? {
+            queue: envelope.event.queue,
+            paused: envelope.event.paused,
+            sendingId: envelope.event.sendingId ?? null,
+          }
+        : state.queueState,
   };
 }
 
@@ -110,9 +112,7 @@ export function hydrateLiveSession(
     sequence: view.sequence,
     activity: view.activity,
     items: mergeInteractions(items, view.pendingInteractions),
-    queue: view.queue ?? [],
-    queuePaused: view.queuePaused ?? false,
-    queueSendingId: view.queueSendingId ?? null,
+    queueState: view.queueState ?? EMPTY_QUEUE_STATE,
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

@@ -124,7 +124,7 @@ async function main() {
       (await input.inputValue()) === "/status",
       "忙时命令提示后应保留输入，便于回复结束后重发"
     );
-    await window.getByTestId("queue-count").getByText("1 条").waitFor({
+    await window.getByTestId("queue-count").getByText("待发 1 条").waitFor({
       timeout: 10_000,
     });
     console.log("[e2e] 忙时斜杠命令：提示不入队不执行，输入保留");

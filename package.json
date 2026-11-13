@@ -29,6 +29,8 @@
     "test:e2e:input-queue": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue",
     "test:e2e:input-queue-items": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-items",
     "test:e2e:input-queue-restart": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-restart",
+    "test:e2e:input-queue-pause": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-pause",
+    "test:e2e:input-queue-composer": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-composer",
     "test:e2e:worked-history": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worked-history",
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
     "prepare": "husky",

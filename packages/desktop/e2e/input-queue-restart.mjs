@@ -119,7 +119,7 @@ async function main() {
     await enqueue(window, "重启排队乙");
     await window
       .getByTestId("queue-count")
-      .getByText("2 条")
+      .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
     console.log("[e2e] 会话 A 忙时入队两条（非暂停）");
 
@@ -147,7 +147,7 @@ async function main() {
     await enqueue(window, "暂停保留二");
     await window
       .getByTestId("queue-count")
-      .getByText("2 条")
+      .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
     await window.getByTestId("composer-stop").click();
     await window.getByTestId("queue-paused").waitFor({ timeout: 10_000 });
@@ -182,7 +182,7 @@ async function main() {
     await window.getByTestId("queue-paused").waitFor({ timeout: 10_000 });
     await window
       .getByTestId("queue-count")
-      .getByText("2 条")
+      .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
     const previews = await window
       .getByTestId("queue-item-preview")

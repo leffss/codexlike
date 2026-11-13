@@ -169,14 +169,14 @@ it("真实 SQLite 重开后由启动入口逐条消费，未创建窗口或查�
   const id = await app.start("退出前执行");
   await invoke("send", id, "恢复第一条", app.profile.id);
   await invoke("send", id, "恢复第二条", app.profile.id);
-  const before = invoke("view", id).queue;
+  const before = invoke("view", id).queueState.queue;
   await first.close();
 
   const reopened = app.open();
   // 注册服务不等于服务就绪；主进程显式启用前不得自动请求模型。
   expect(app.requests).toEqual(["退出前执行"]);
-  expect(invoke("view", id).queue).toEqual(before);
-  expect(invoke("view", id).queuePaused).toBe(false);
+  expect(invoke("view", id).queueState.queue).toEqual(before);
+  expect(invoke("view", id).queueState.paused).toBe(false);
   reopened.runtime.startInputQueues();
   // 恢复后不再调用 view/hydration；外部模型收到请求独立证明后台执行。
   await app.reply("恢复第一条", false);
@@ -184,7 +184,7 @@ it("真实 SQLite 重开后由启动入口逐条消费，未创建窗口或查�
   await app.reply("恢复第一条");
   await app.reply("恢复第二条");
   await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
-  expect(invoke("view", id).queue).toEqual([]);
+  expect(invoke("view", id).queueState.queue).toEqual([]);
   expect(
     invoke("messages", id)
       .filter((item: any) => item.message?.role === "user")
@@ -214,11 +214,11 @@ it("失效 Profile 的会话只保留自己的队首，不阻塞其他会话恢�
   await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
   await new Promise((resolve) => setTimeout(resolve, 200));
   expect(app.requests).not.toContain("失效快照排队");
-  expect(invoke("view", failing).queue.map((entry: any) => entry.text)).toEqual(
-    ["失效快照排队"]
-  );
-  expect(invoke("view", failing).queuePaused).toBe(false);
-  expect(invoke("view", healthy).queue).toEqual([]);
+  expect(
+    invoke("view", failing).queueState.queue.map((entry: any) => entry.text)
+  ).toEqual(["失效快照排队"]);
+  expect(invoke("view", failing).queueState.paused).toBe(false);
+  expect(invoke("view", healthy).queueState.queue).toEqual([]);
 }, 30_000);
 
 it("启动恢复仍等待凭据时退出必须排空该发送，不能先关库或发出模型请求", async () => {
@@ -226,7 +226,7 @@ it("启动恢复仍等待凭据时退出必须排空该发送，不能先关库�
   const first = app.open();
   const id = await app.start("凭据门控前执行");
   await invoke("send", id, "仍在解密的队首", app.profile.id);
-  const before = invoke("view", id).queue;
+  const before = invoke("view", id).queueState.queue;
   await first.close();
 
   const reopened = app.open();
@@ -246,8 +246,8 @@ it("启动恢复仍等待凭据时退出必须排空该发送，不能先关库�
   gate.release();
   await stopping;
   expect(reopened.exit.state().phase).toBe("ready");
-  expect(invoke("view", id).queue).toEqual(before);
-  expect(invoke("view", id).queuePaused).toBe(false);
+  expect(invoke("view", id).queueState.queue).toEqual(before);
+  expect(invoke("view", id).queueState.paused).toBe(false);
   expect(app.requests).toEqual(["凭据门控前执行"]);
 }, 30_000);
 
@@ -259,8 +259,8 @@ it("正常退出中断插话不清除用户暂停，重开后保持原队列并�
   await invoke("send", id, "暂停保留二", app.profile.id);
   invoke("interrupt", id);
   await waitFor(() => expect(first.runtime.hasWork()).toBe(false));
-  const before = invoke("view", id).queue;
-  expect(invoke("view", id).queuePaused).toBe(true);
+  const before = invoke("view", id).queueState.queue;
+  expect(invoke("view", id).queueState.paused).toBe(true);
   await invoke("send", id, "未完成的插话", app.profile.id);
   await app.reply("未完成的插话", false);
   first.exit.request();
@@ -271,15 +271,15 @@ it("正常退出中断插话不清除用户暂停，重开后保持原队列并�
 
   const reopened = app.open();
   reopened.runtime.startInputQueues();
-  expect(invoke("view", id).queuePaused).toBe(true);
-  expect(invoke("view", id).queue).toEqual(before);
+  expect(invoke("view", id).queueState.paused).toBe(true);
+  expect(invoke("view", id).queueState.queue).toEqual(before);
   expect(app.requests).toEqual(["用户准备停止", "未完成的插话"]);
   invoke("queue-resume", id);
   await app.reply("暂停保留一");
   await app.reply("暂停保留二");
   await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
-  expect(invoke("view", id).queue).toEqual([]);
-  expect(invoke("view", id).queuePaused).toBe(false);
+  expect(invoke("view", id).queueState.queue).toEqual([]);
+  expect(invoke("view", id).queueState.paused).toBe(false);
 }, 30_000);
 
 it("取消退出不能把仍在进行的插话当作完成，暂停直到本轮真正结束", async () => {
@@ -293,12 +293,12 @@ it("取消退出不能把仍在进行的插话当作完成，暂停直到本轮�
   await app.reply("正在插话", false);
   host.exit.request();
   host.exit.answer(host.exit.state().id, false);
-  expect(invoke("view", id).queuePaused).toBe(true);
+  expect(invoke("view", id).queueState.paused).toBe(true);
   expect(app.requests).toEqual(["插话前执行", "正在插话"]);
   await app.reply("正在插话");
   await app.reply("插话后排队");
   await waitFor(() => expect(host.runtime.hasWork()).toBe(false));
-  expect(invoke("view", id).queuePaused).toBe(false);
+  expect(invoke("view", id).queueState.paused).toBe(false);
 }, 30_000);
 
 it("退出确认期间回复完成也不消费队首，取消退出后无需查看即可继续", async () => {
@@ -312,13 +312,13 @@ it("退出确认期间回复完成也不消费队首，取消退出后无需查�
   await app.reply("退出确认中的执行");
   await waitFor(() => expect(invoke("execution", id).running).toBe(false));
   expect(app.requests).toEqual(["退出确认中的执行"]);
-  expect(invoke("view", id).queuePaused).toBe(false);
-  expect(invoke("view", id).queue.map((entry: any) => entry.text)).toEqual([
-    "取消退出后消费",
-  ]);
+  expect(invoke("view", id).queueState.paused).toBe(false);
+  expect(
+    invoke("view", id).queueState.queue.map((entry: any) => entry.text)
+  ).toEqual(["取消退出后消费"]);
 
   host.exit.answer(host.exit.state().id, false);
   await app.reply("取消退出后消费");
   await waitFor(() => expect(host.runtime.hasWork()).toBe(false));
-  expect(invoke("view", id).queue).toEqual([]);
+  expect(invoke("view", id).queueState.queue).toEqual([]);
 }, 30_000);

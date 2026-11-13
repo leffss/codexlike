@@ -43,6 +43,8 @@ import { prepareSessionWorkspace } from "./worktree-flow";
 import { canonicalWorkspacePath, workspaceSharing } from "./workspace-sharing";
 import {
   IPC,
+  type QueueOperationResult,
+  type QueueSnapshot,
   type SessionEventEnvelope,
   type StartSessionInput,
 } from "../shared/ipc";
@@ -162,7 +164,7 @@ export function registerSessionHandlers(options: {
     },
   });
 
-  /** 队列消费的发送：走 send 主路径；启动成功即返回，流结束经 onSettled 回调。 */
+  /** 队列消费的发送：走发送主路径；启动成功即返回，流结束经 onSettled 回调。 */
   async function dispatchQueued(
     sessionId: string,
     entry: QueuedMessage,
@@ -178,15 +180,7 @@ export function registerSessionHandlers(options: {
     waiters.add(release);
     streamWaiters.set(sessionId, waiters);
     try {
-      await send(
-        sessionId,
-        entry.text,
-        entry.providerProfileId,
-        entry.mentionPaths,
-        entry.thinkingEffort,
-        entry.approvalMode,
-        true
-      );
+      await sendQueued(sessionId, entry);
     } catch (error) {
       // 启动失败：注销等待（end() 可能已提前释放），条目由协调器保留
       waiters.delete(release);
@@ -255,15 +249,10 @@ export function registerSessionHandlers(options: {
     if (typeof sessionId !== "string")
       throw new Error("view：sessionId 必须是字符串");
     const view = liveSessions.view(sessionId);
-    // 输入队列快照（票 01/02）：切回会话时队列条与暂停态原样恢复
+    // 输入队列快照（票 01/02，review 重构收拢三元组）：切回会话时队列条原样恢复
     return view === null
       ? null
-      : {
-          ...view,
-          queue: queues.snapshot(sessionId),
-          queuePaused: queues.isPaused(sessionId),
-          queueSendingId: queues.sendingItem(sessionId),
-        };
+      : { ...view, queueState: queueSnapshot(sessionId) };
   });
   ipcMain.handle(
     IPC.sessions.markViewed,
@@ -522,16 +511,25 @@ export function registerSessionHandlers(options: {
     }
   );
 
-  async function send(
-    sessionId: unknown,
-    text: unknown,
-    profileId?: unknown,
-    mentionPaths?: unknown,
-    thinkingEffort?: unknown,
-    approvalMode?: unknown,
-    /** 队列消费内部调用：会话忙时不得再入队（避免自我吞掉），竞态以启动失败保留条目 */
-    fromQueue = false
-  ) {
+  /**
+   * 发送核心（review 重构拆分）：用户直发与队列消费共用——参数校验、参数快照、
+   * 占位、流式事件泵。来源以具名 source 区分（取代 fromQueue 布尔尾参）：
+   * - user：渲染层直发。会话忙时改为入队（票 01）；等待用户交互时明确拒绝；
+   *   暂停期间的直发登记为插话（票 02）。
+   * - queue：队列消费内部发送。不再入队（避免自我吞掉），也不算插话；
+   *   参数取入队时的快照。竞态以启动失败保留条目。
+   */
+  async function deliverMessage(input: {
+    source: "user" | "queue";
+    sessionId: unknown;
+    text: unknown;
+    profileId?: unknown;
+    mentionPaths?: unknown;
+    thinkingEffort?: unknown;
+    approvalMode?: unknown;
+  }) {
+    const { source, sessionId, text } = input;
+    const fromUser = source === "user";
     assertOpen();
     if (typeof sessionId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
@@ -542,18 +540,22 @@ export function registerSessionHandlers(options: {
     const saved = manager.readWorkbench(
       workbenchKey({ kind: "session", sessionId })
     );
+    const { approvalMode } = input;
+    let profileId = input.profileId;
+    let thinkingEffort = input.thinkingEffort;
     profileId ??= saved?.value.preferences.providerProfileId;
     thinkingEffort ??= saved?.value.preferences.thinkingEffort;
     if (typeof profileId !== "string" || profileId === "") {
       throw new Error("请先选择模型（Provider Profile）");
     }
     if (
-      mentionPaths !== undefined &&
-      (!Array.isArray(mentionPaths) ||
-        mentionPaths.some((path) => typeof path !== "string"))
+      input.mentionPaths !== undefined &&
+      (!Array.isArray(input.mentionPaths) ||
+        input.mentionPaths.some((path) => typeof path !== "string"))
     ) {
       throw new Error("send：@引用 路径列表不合法");
     }
+    const mentionPaths = input.mentionPaths as string[] | undefined;
     // 思考档位（GLOSSARY「思考档位」）：IPC 边界不信任渲染进程，只接受五档枚举；
     // 校验走 agent-core 统一入口（未传等价 auto，非法值以中文异常抛回渲染进程；
     // agent-core 发送入口同样校验，双保险）
@@ -577,21 +579,30 @@ export function registerSessionHandlers(options: {
 
     // 输入队列（票 01）：会话忙时不再报错，而是入队（主进程单一真相）。
     // 入队即快照发送参数（Profile / 思考档位 / 审批模式 / @引用），消费按快照发。
-    if (!fromQueue && (management.execution(sessionId)?.running ?? false)) {
-      queues.enqueue(sessionId, {
-        text,
-        mentionPaths: (mentionPaths as string[] | undefined) ?? [],
-        providerProfileId: profile.id,
-        thinkingEffort: effortSnapshot,
-        approvalMode: approvalSnapshot as ApprovalMode,
-      });
-      return;
+    if (fromUser) {
+      const executionState = management.execution(sessionId);
+      // 等待用户交互（审批/问答，spec 用户故事 17 / Out of Scope）：UI 已禁用，
+      // 直调 IPC 绕过 UI 的发送一律拒绝——明确中文报错，不入队也不触发消费
+      //（排队消息会卡在无法消费的时机）。
+      if (executionState?.waitingForUser) {
+        throw new Error("会话正在等待审批或问答，请先回应后再发送");
+      }
+      if (executionState?.running ?? false) {
+        queues.enqueue(sessionId, {
+          text,
+          mentionPaths: mentionPaths ?? [],
+          providerProfileId: profile.id,
+          thinkingEffort: effortSnapshot,
+          approvalMode: approvalSnapshot as ApprovalMode,
+        });
+        return;
+      }
     }
 
     // @引用 内容在主进程读取（路径限制在工作区内），失败以中文异常抛回
     const mentions = readMentionAttachments(
       session.record.workspacePath,
-      (mentionPaths as string[] | undefined) ?? []
+      mentionPaths ?? []
     );
 
     // await 后复查退出闸门；已到达的异步发送不能在 flush 期间偷启动。
@@ -602,7 +613,7 @@ export function registerSessionHandlers(options: {
       beginExecution(sessionId);
     // 插话（票 02）：暂停期间的直发消息已开始执行——回复结束（完成/出错/
     // 中断）时自动清除暂停标志并恢复队列消费（协调器 onIdle 兑现）。
-    if (!fromQueue && queues.isPaused(sessionId)) {
+    if (fromUser && queues.isPaused(sessionId)) {
       queues.beginInterjection(sessionId);
     }
     try {
@@ -650,6 +661,39 @@ export function registerSessionHandlers(options: {
       throw error;
     }
   }
+
+  /** 渲染层发送入口（sessions.send IPC）：忙时入队、等待用户交互时拒绝、空闲直发。 */
+  async function send(
+    sessionId: unknown,
+    text: unknown,
+    profileId?: unknown,
+    mentionPaths?: unknown,
+    thinkingEffort?: unknown,
+    approvalMode?: unknown
+  ) {
+    await deliverMessage({
+      source: "user",
+      sessionId,
+      text,
+      profileId,
+      mentionPaths,
+      thinkingEffort,
+      approvalMode,
+    });
+  }
+
+  /** 队列消费的内部发送（review 重构）：参数取入队时快照，跳过入队与插话登记。 */
+  function sendQueued(sessionId: string, entry: QueuedMessage): Promise<void> {
+    return deliverMessage({
+      source: "queue",
+      sessionId,
+      text: entry.text,
+      profileId: entry.providerProfileId,
+      mentionPaths: entry.mentionPaths,
+      thinkingEffort: entry.thinkingEffort,
+      approvalMode: entry.approvalMode,
+    });
+  }
   ipcMain.handle(IPC.sessions.send, (_e, ...args: Parameters<typeof send>) =>
     track(send(...args))
   );
@@ -685,13 +729,19 @@ export function registerSessionHandlers(options: {
     if (typeof id !== "string" || !id.trim())
       throw new Error("队列操作：条目标识不合法");
   }
-  function queueResult(sessionId: string) {
+  /** 队列状态快照（review 重构）：queue / paused / sendingId 三元组单点取数。 */
+  function queueSnapshot(sessionId: string): QueueSnapshot {
     return {
-      sessionId,
-      sequence: liveSessions.view(sessionId)?.sequence ?? 0,
       queue: queues.snapshot(sessionId),
       paused: queues.isPaused(sessionId),
       sendingId: queues.sendingItem(sessionId),
+    };
+  }
+  function queueResult(sessionId: string): QueueOperationResult {
+    return {
+      sessionId,
+      sequence: liveSessions.view(sessionId)?.sequence ?? 0,
+      ...queueSnapshot(sessionId),
     };
   }
   ipcMain.handle(
@@ -752,9 +802,7 @@ export function registerSessionHandlers(options: {
   ipcMain.handle(
     IPC.sessions.queueResume,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("queueResume：sessionId 必须是字符串");
-      }
+      // 参数与会话校验统一走 assertQueueSession（review 重构），与其余队列操作一致
       assertQueueSession(sessionId);
       queues.resume(sessionId);
       return queueResult(sessionId);
@@ -764,9 +812,6 @@ export function registerSessionHandlers(options: {
   ipcMain.handle(
     IPC.sessions.queueClear,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("queueClear：sessionId 必须是字符串");
-      }
       assertQueueSession(sessionId);
       queues.clearQueue(sessionId);
       return queueResult(sessionId);

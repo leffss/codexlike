@@ -25,7 +25,7 @@ import {
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
 import { QueueBar } from "./QueueBar";
-import type { QueuedMessage } from "@codexlike/desktop/ipc";
+import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
 
 /** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
 const APPROVAL_MODE_OPTIONS: {
@@ -136,12 +136,11 @@ export function MessageComposer(props: {
    * （空态 2xl / 有内容三档由 WorkspacePage 单点选择下发）。
    */
   contentWidthClass?: string;
-  /** 当前会话的输入队列（票 01）：输入框上方只读队列条；空时不渲染 */
-  queue?: QueuedMessage[];
-  /** 队列暂停标志（票 02）：队列条显示暂停态与「恢复」「清空」操作 */
-  queuePaused?: boolean;
-  /** 正在发出的条目 id（票 03）：队列条区别显示并锁定 */
-  queueSendingItemId?: string | null;
+  /**
+   * 当前会话的输入队列状态（票 01/02/03，review 重构收拢三元组）：
+   * 排队条目 + 暂停标志 + 正在发出条目；队列空时队列条不渲染。
+   */
+  queueState?: QueueSnapshot;
   /** 编辑中的条目 id（票 03）：队列条高亮并显示取消入口 */
   queueEditingItemId?: string | null;
   /** 手动恢复队列消费（票 02） */
@@ -154,12 +153,8 @@ export function MessageComposer(props: {
   onQueueEditItem?: (item: QueuedMessage) => void;
   /** 拖拽重排（票 03）：提交仍在排队条目的完整新顺序 */
   onQueueReorder?: (orderedIds: string[]) => void;
-  /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿 */
+  /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿；按钮与 Esc 共用 */
   onQueueCancelEdit?: () => void;
-  /** 正在编辑排队消息（票 03）：主操作变为「保存编辑」，Esc 取消 */
-  queueEditing?: boolean;
-  /** 取消编辑入口（票 03）：按钮与 Esc 共用 */
-  onCancelQueueEdit?: () => void;
 }) {
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
@@ -306,10 +301,15 @@ export function MessageComposer(props: {
       }
     }
 
-    // Esc 取消取回编辑（票 03）：菜单已关时才生效（菜单优先用 Esc 关闭）
-    if (event.key === "Escape" && menu === null && props.queueEditing) {
+    // Esc 取消取回编辑（票 03）：菜单已关时才生效（菜单优先用 Esc 关闭）。
+    // 正在编辑由 queueEditingItemId 派生（review 重构），取消入口单数化。
+    if (
+      event.key === "Escape" &&
+      menu === null &&
+      props.queueEditingItemId != null
+    ) {
       event.preventDefault();
-      props.onCancelQueueEdit?.();
+      props.onQueueCancelEdit?.();
       return;
     }
 
@@ -324,6 +324,21 @@ export function MessageComposer(props: {
     }
   }
 
+  // 停止按钮（review 重构提取）：「编辑中」与「流式进行中」两个分支共用同一
+  // 形态（危险色圆形、行尾位置）；空闲时不渲染。
+  const stopButton =
+    props.streaming === true ? (
+      <button
+        type="button"
+        data-testid="composer-stop"
+        onClick={() => props.onStop?.()}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
+        title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+      >
+        <StopIcon className="h-5 w-5" />
+      </button>
+    ) : null;
+
   return (
     // 补偿消息流原生滚动条占宽，基准列对齐后输入卡片左右各外扩 8px。
     <div
@@ -337,9 +352,7 @@ export function MessageComposer(props: {
         {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
             暂停态（停止保留队列）显示「恢复」「清空」操作 */}
         <QueueBar
-          queue={props.queue ?? []}
-          paused={props.queuePaused}
-          sendingItemId={props.queueSendingItemId}
+          queueState={props.queueState}
           editingItemId={props.queueEditingItemId}
           onResume={props.onQueueResume}
           onClear={props.onQueueClear}
@@ -522,13 +535,13 @@ export function MessageComposer(props: {
               >
                 技能
               </button>
-              {props.queueEditing ? (
+              {props.queueEditingItemId != null ? (
                 <>
                   {/* 票 03：取回编辑中的主操作——保存原地更新，取消保留原文并还原草稿 */}
                   <button
                     type="button"
                     data-testid="composer-cancel-edit"
-                    onClick={() => props.onCancelQueueEdit?.()}
+                    onClick={() => props.onQueueCancelEdit?.()}
                     className="h-8 shrink-0 rounded-full border border-line px-3 text-xs text-fg-muted hover:bg-hover"
                     title="取消编辑：条目原样保留，输入框还原先前草稿"
                   >
@@ -544,17 +557,7 @@ export function MessageComposer(props: {
                   >
                     保存编辑
                   </button>
-                  {props.streaming === true && (
-                    <button
-                      type="button"
-                      data-testid="composer-stop"
-                      onClick={() => props.onStop?.()}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
-                      title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
-                    >
-                      <StopIcon className="h-5 w-5" />
-                    </button>
-                  )}
+                  {stopButton}
                 </>
               ) : props.streaming === true ? (
                 <>
@@ -571,15 +574,7 @@ export function MessageComposer(props: {
                       加入队列
                     </button>
                   )}
-                  <button
-                    type="button"
-                    data-testid="composer-stop"
-                    onClick={() => props.onStop?.()}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
-                    title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
-                  >
-                    <StopIcon className="h-5 w-5" />
-                  </button>
+                  {stopButton}
                 </>
               ) : (
                 <button

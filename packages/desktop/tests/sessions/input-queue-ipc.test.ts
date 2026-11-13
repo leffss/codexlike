@@ -75,6 +75,9 @@ async function setup() {
     },
   });
   const responses = new Map<string, ServerResponse>();
+  /** 触发问答工具的消息文本：第一轮返回 tool_calls（挂起等用户回答），回答后的第二轮收尾 */
+  const ASK_MARKER = "排队乙：触发提问";
+  const askRounds = new Map<string, number>();
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => {
@@ -87,6 +90,48 @@ async function setup() {
       ).content;
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.flushHeaders();
+      // 第二轮请求把问答结果并入同一条 user 消息（文本 = 原文 + 问答附录），用前缀匹配
+      if (text.startsWith(ASK_MARKER)) {
+        const round = askRounds.get(ASK_MARKER) ?? 0;
+        askRounds.set(ASK_MARKER, round + 1);
+        const asking = round === 0;
+        const delta = asking
+          ? {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "queue-ask",
+                  type: "function",
+                  function: {
+                    name: "ask_user_question",
+                    arguments: JSON.stringify({
+                      questions: [
+                        {
+                          id: "platform",
+                          header: "平台",
+                          question: "优先支持哪个平台？",
+                          multiSelect: false,
+                          options: [{ id: "windows", label: "Windows" }],
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }
+          : { content: "已收到回答" };
+        // 两条 chunk（与 interactions-ipc.test.ts 一致）：先 delta、再 finish_reason
+        for (const choice of [
+          { delta, finish_reason: null },
+          { delta: {}, finish_reason: asking ? "tool_calls" : "stop" },
+        ]) {
+          res.write(
+            `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, ...choice }] })}\n\n`
+          );
+        }
+        res.end("data: [DONE]\n\n");
+        return;
+      }
       responses.set(text, res);
     });
   });
@@ -164,6 +209,8 @@ async function setup() {
     finish,
     hasRequest: (text: string) => responses.has(text),
     delivered,
+    /** mock server 识别的问答触发文本：该消息的回复第一轮挂起等待用户回答 */
+    askMarker: ASK_MARKER,
   };
 }
 
@@ -202,7 +249,7 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   });
   // view 快照：切回会话时队列原样可见
   const view = invoke("view", session.id);
-  expect(view.queue.map((item: any) => item.text)).toEqual([
+  expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
     "排队一",
     "排队二",
   ]);
@@ -211,7 +258,9 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   await app.finish("首轮任务");
   await app.reply("排队一");
   await app.reply("排队二");
-  await waitFor(() => expect(invoke("view", session.id).queue).toEqual([]));
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
@@ -259,7 +308,9 @@ it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随�
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
-  await waitFor(() => expect(invoke("view", session.id).queue).toEqual([]));
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
 }, 30_000);
 
 it("排队存在时点停止：当前回复中断、队列原样保留并进入暂停（事件与 view 可见）", async () => {
@@ -275,8 +326,10 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   // 排队存在时点停止：中断当前回复，队列保留并进入暂停
   expect(invoke("interrupt", session.id)).toBe(true);
   const view = invoke("view", session.id);
-  expect(view.queue.map((item: any) => item.text)).toEqual(["排队一"]);
-  expect(view.queuePaused).toBe(true);
+  expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
+    "排队一",
+  ]);
+  expect(view.queueState.paused).toBe(true);
 
   // 置暂停推送 queue-changed(pause) 事件信封（携带暂停后快照）
   const pauseEvents = app.delivered.filter(
@@ -297,7 +350,7 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   );
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(app.hasRequest("排队一")).toBe(false);
-  expect(invoke("view", session.id).queuePaused).toBe(true);
+  expect(invoke("view", session.id).queueState.paused).toBe(true);
 
   // 收尾：手动恢复并让排队消息完成
   invoke("queue-resume", session.id);
@@ -305,7 +358,9 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
-  await waitFor(() => expect(invoke("view", session.id).queue).toEqual([]));
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
 }, 30_000);
 
 it("暂停期间插话直发：插话回复结束后自动恢复队列消费", async () => {
@@ -326,7 +381,7 @@ it("暂停期间插话直发：插话回复结束后自动恢复队列消费", a
   await invoke("send", session.id, "插话", app.profile.id);
   await waitFor(() => expect(app.hasRequest("插话")).toBe(true));
   expect(
-    invoke("view", session.id).queue.map((item: any) => item.text)
+    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
   ).toEqual(["排队一"]);
 
   // 插话的回复结束 → 暂停自动解除、队列继续消费
@@ -335,8 +390,10 @@ it("暂停期间插话直发：插话回复结束后自动恢复队列消费", a
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
-  await waitFor(() => expect(invoke("view", session.id).queue).toEqual([]));
-  expect(invoke("view", session.id).queuePaused).toBe(false);
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
+  expect(invoke("view", session.id).queueState.paused).toBe(false);
   // 顺序：首轮（中断）→ 插话 → 排队一
   const userTexts = invoke("messages", session.id)
     .filter((item: any) => item.message?.role === "user")
@@ -366,7 +423,9 @@ it("手动恢复（queue-resume）：清暂停标志并立即从队首继续消�
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
-  await waitFor(() => expect(invoke("view", session.id).queue).toEqual([]));
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
 }, 30_000);
 
 it("清空（queue-clear）：全部作废删除、队列消失、无消费", async () => {
@@ -388,11 +447,71 @@ it("清空（queue-clear）：全部作废删除、队列消失、无消费", as
   expect(result.queue).toEqual([]);
   expect(result.paused).toBe(false);
   const view = invoke("view", session.id);
-  expect(view.queue).toEqual([]);
-  expect(view.queuePaused).toBe(false);
+  expect(view.queueState.queue).toEqual([]);
+  expect(view.queueState.paused).toBe(false);
 
   // 清空后不再消费：模型从未收到排队消息
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(app.hasRequest("排队一")).toBe(false);
   expect(app.hasRequest("排队二")).toBe(false);
+}, 30_000);
+
+it("等待用户交互（审批/问答）期间直调 send：明确中文报错、不入队、队列不消费（spec 用户故事 17）", async () => {
+  const app = await setup();
+  const session = await invoke("start", {
+    requestId: "queue-pending-reject",
+    projectId: null,
+    text: "首轮任务",
+  });
+  await app.reply("首轮任务", "首轮进行中", null);
+  await invoke("send", session.id, "排队甲", app.profile.id);
+  await invoke("send", session.id, app.askMarker, app.profile.id);
+  await invoke("send", session.id, "排队丙", app.profile.id);
+
+  // 首轮完成 → 消费「排队甲」→ 甲完成 → 消费问答触发条 → 回复挂起等待用户回答
+  await app.finish("首轮任务");
+  await app.reply("排队甲");
+  await waitFor(() =>
+    expect(invoke("execution", session.id).waitingForUser).toBe(true)
+  );
+  // 队列快照：问答触发条已取出发送（inflight 置顶），仍剩「排队丙」待发
+  expect(
+    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
+  ).toEqual([app.askMarker, "排队丙"]);
+
+  // UI 已禁用，此处直调 send 模拟绕过 UI 的路径：不得静默入队，明确中文报错
+  await expect(
+    invoke("send", session.id, "插话", app.profile.id)
+  ).rejects.toThrow("会话正在等待审批或问答");
+  // 不入队：快照没有新条目，也没有新的 enqueue 事件
+  expect(
+    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
+  ).toEqual([app.askMarker, "排队丙"]);
+  // 队列不消费：「排队丙」未被发出
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(app.hasRequest("排队丙")).toBe(false);
+
+  // 收尾：回答问题 → 本轮完成 → 队列自动恢复消费「排队丙」
+  const pending = invoke("pending-interactions", session.id);
+  expect(pending).toHaveLength(1);
+  expect(
+    invoke("respond-interaction", session.id, pending[0].request.id, {
+      kind: "questions",
+      answers: [
+        {
+          questionId: "platform",
+          status: "answered",
+          selectedOptionIds: ["windows"],
+          text: "",
+        },
+      ],
+    })
+  ).toBe(true);
+  await app.reply("排队丙");
+  await waitFor(() =>
+    expect(invoke("execution", session.id).running).toBe(false)
+  );
+  await waitFor(() =>
+    expect(invoke("view", session.id).queueState.queue).toEqual([])
+  );
 }, 30_000);

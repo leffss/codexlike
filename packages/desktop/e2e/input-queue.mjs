@@ -94,7 +94,7 @@ async function main() {
     await input.press("Enter");
     await window
       .getByTestId("queue-count")
-      .getByText("2 条")
+      .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
     console.log("[e2e] 回复进行中入队两条：队列条显示预览与条数");
 
