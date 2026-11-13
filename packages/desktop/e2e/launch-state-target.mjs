@@ -11,6 +11,8 @@
 // ⑤ 记住的会话已不存在 → 回退排序最前的未归档会话；无可打开会话时停新建草稿入口
 // ⑥ kill 进程（taskkill /T /F，不走退出屏障）后重开，现场照样恢复
 // ⑦ 删除现场文件 → 冷启动行为与现状一致（打开排序最前的未归档会话，非记住的会话）
+// ⑧ 运行中切到乙后设置页往返（同一实例内卸载重挂 WorkspacePage）→ 仍显示乙、
+//    现场目标仍是乙、再重启仍回乙（重挂不是冷启动，恢复与上报只属真冷启动）
 // 运行：node e2e/launch-state-target.mjs（需先 build）。
 import { execFile } from "node:child_process";
 import {
@@ -233,7 +235,7 @@ async function main() {
     server.close();
   }
   console.log(
-    "[e2e] 启动现场目标与视图：会话/归档/草稿/设置页/回退/强杀/无文件 全场景 OK"
+    "[e2e] 启动现场目标与视图：会话/归档/草稿/设置页/回退/强杀/无文件/设置页往返 全场景 OK"
   );
 }
 
@@ -531,6 +533,67 @@ async function runScenarios(port) {
     assert(
       (await firstActiveSessionId(second.window)) === front,
       "对照组：排序最前的未归档会话应与打开的一致"
+    );
+  });
+
+  await scenario("⑧ 设置页往返重挂不重恢复启动目标", async (homeDir, ctl) => {
+    const { window } = await ctl.launch();
+    await window.evaluate(() => localStorage.clear());
+    await createProfile(window, port);
+    await createSession(window, "往返甲会话");
+    await createSession(window, "往返乙会话");
+    const remembered = await sessionIdByTitle(window, "往返甲会话");
+    const switched = await sessionIdByTitle(window, "往返乙会话");
+    await selectSession(window, "往返甲会话");
+    await assertCurrentSession(window, remembered, "退出前应查看甲会话");
+    await waitForTarget(
+      homeDir,
+      { kind: "session", sessionId: remembered },
+      "退出前上报"
+    );
+    await ctl.quit();
+
+    const second = await ctl.relaunch();
+    await assertCurrentSession(
+      second.window,
+      remembered,
+      "冷启动应恢复到启动目标甲"
+    );
+    await selectSession(second.window, "往返乙会话");
+    await assertCurrentSession(second.window, switched, "运行中切到乙");
+    await waitForTarget(
+      homeDir,
+      { kind: "session", sessionId: switched },
+      "切乙上报"
+    );
+
+    // 设置页往返（同一实例内卸载重挂 WorkspacePage，不重启）：重挂后冷启动
+    // 效应异步执行，先等任一会话成为当前（恢复完成），再留出时间窗断言
+    // 既不拉回甲也不把甲写回现场
+    await second.window.getByTestId("settings-open").click();
+    await second.window.getByTestId("settings-back").click();
+    await until(
+      async () => (await currentSessionId(second.window)) !== null,
+      "设置页返回后应恢复显示某个会话"
+    );
+    await delay(2000);
+    assert(
+      (await currentSessionId(second.window)) === switched,
+      `设置页返回后应仍显示乙（不被拉回启动目标甲，实际 ${await currentSessionId(second.window)}）`
+    );
+    const state = readState(homeDir);
+    assert(
+      state.workbenchTarget?.kind === "session" &&
+        state.workbenchTarget.sessionId === switched,
+      "设置页往返后现场目标应仍是乙"
+    );
+
+    await ctl.quit();
+    const third = await ctl.relaunch();
+    await assertCurrentSession(
+      third.window,
+      switched,
+      "再重启仍回乙（现场未被启动目标覆盖）"
     );
   });
 }

@@ -13,7 +13,7 @@ export function registerApplicationExit(options: {
   releaseResources(): Promise<void>;
   /**
    * 退出请求被接受时同步调用（窗口仍存活、尚未进入销毁）：
-   * 供各持久化层刷出防抖中的未落盘写（如启动现场，票02）。
+   * 供注入方同步刷出防抖中的未落盘写（当前仅启动现场 launch-state 注入，票02）。
    */
   flushPendingWrites?(): void;
 }) {

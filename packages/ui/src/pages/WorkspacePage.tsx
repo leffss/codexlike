@@ -54,6 +54,7 @@ import {
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { reportLaunchState } from "../lib/launch-state";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -210,9 +211,10 @@ export function WorkspacePage(props: {
    * （低频事件不防抖），重开回到退出前正在查看的目标；失败不阻塞界面。
    */
   const reportWorkbenchTarget = useCallback((target: WorkbenchTarget) => {
-    window.codexlike.launchState.setWorkbenchTarget(target).catch((error) => {
-      console.error(`保存工作台目标现场失败：${String(error)}`);
-    });
+    reportLaunchState(
+      window.codexlike.launchState.setWorkbenchTarget(target),
+      "保存工作台目标现场失败"
+    );
   }, []);
 
   async function revokeAutoApprove(id: string) {
@@ -420,8 +422,16 @@ export function WorkspacePage(props: {
       // 冷启动恢复（票03）：第一优先级取启动现场的工作台目标——记住的会话
       // （归档照常恢复）或新建草稿入口（连同项目关联，草稿文本由 workbench_state
       // 既有机制恢复）。项目已删除的草稿目标视为失效，走回退链。
+      // 真冷启动守卫（对照下方回退链守卫的语义）：只在无已打开会话、无草稿时
+      // 恢复并上报。currentIdRef 在重挂后恒为 null（组件级），故「无已打开会话」
+      // 由 App 级 workspaceState.activeSessionId 承载——切设置页卸载本页后重挂
+      // 时它仍是用户最后查看的会话，不得以挂载时刻固化的启动目标抢占，否则
+      // 拉回旧会话并把它重新写回启动现场。
       const target = initialTargetRef.current;
-      if (target?.kind === "session") {
+      const coldStart =
+        workspaceState.activeSessionId === null &&
+        workspaceState.activeDraftProjectId === undefined;
+      if (coldStart && target?.kind === "session") {
         const remembered = list.find(
           (session) => session.id === target.sessionId
         );
@@ -429,7 +439,7 @@ export function WorkspacePage(props: {
           await openSession(remembered.id);
           return;
         }
-      } else if (target?.kind === "new") {
+      } else if (coldStart && target?.kind === "new") {
         const projectId = target.projectId;
         if (
           projectId === null ||

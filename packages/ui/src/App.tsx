@@ -3,6 +3,7 @@ import type { WindowState } from "@codexlike/desktop/ipc";
 import type { WorkbenchTarget } from "@codexlike/agent-core";
 import { createWorkspaceState } from "./lib/workspace-state";
 import { subscribeWindowState } from "./lib/window-state";
+import { reportLaunchState } from "./lib/launch-state";
 import { ApplicationExit } from "./components/ApplicationExit";
 import { WindowControls } from "./components/WindowControls";
 
@@ -14,13 +15,14 @@ type View = "workspace" | "settings";
 
 /**
  * 顶层视图切换：即时上报启动现场（票03，低频事件不防抖），
- * 重开回到退出前所在视图；上报失败不阻塞界面。
+ * 重开回到退出前所在视图；上报失败不阻塞界面（共用 lib/launch-state 形状）。
  */
 function switchViewWithReport(view: View, setView: (view: View) => void) {
   setView(view);
-  window.codexlike.launchState.setView(view).catch((error) => {
-    console.error(`保存顶层视图现场失败：${String(error)}`);
-  });
+  reportLaunchState(
+    window.codexlike.launchState.setView(view),
+    "保存顶层视图现场失败"
+  );
 }
 
 /** 同一行标题栏：品牌空白区拖动，右侧主题 / 设置 / 窗口按钮不可拖动。 */
