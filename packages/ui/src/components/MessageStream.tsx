@@ -404,6 +404,9 @@ function WorkedHistory(props: {
         onClick={toggle}
         className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs text-fg-muted hover:bg-hover"
       >
+        <span className="shrink-0 text-xs text-fg-subtle">
+          {open ? "▾" : "▸"}
+        </span>
         {turn.running && (
           <span
             data-testid="worked-history-indicator"
@@ -418,8 +421,6 @@ function WorkedHistory(props: {
           {" · "}
           {turn.history.length} 个过程段
         </span>
-        <span className="flex-1" />
-        <span className="text-fg-subtle">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
         <ol
@@ -492,6 +493,9 @@ function ToolGroupView(props: {
         onClick={toggle}
         className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs hover:bg-hover"
       >
+        <span className="shrink-0 text-xs text-fg-subtle">
+          {open ? "▾" : "▸"}
+        </span>
         <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-accent">
           {item.toolName}
         </span>
@@ -501,8 +505,6 @@ function ToolGroupView(props: {
             含失败
           </span>
         )}
-        <span className="flex-1" />
-        <span className="text-fg-subtle">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
         <ol
@@ -585,6 +587,9 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
           data-testid="thinking-toggle"
           className="flex cursor-pointer select-none items-center gap-2"
         >
+          <span className="shrink-0 text-xs text-fg-subtle">
+            {open ? "▾" : "▸"}
+          </span>
           {streaming && (
             <span
               data-testid="thinking-indicator"
@@ -599,7 +604,6 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             {streaming ? "思考中" : "已思考"}
             {summary !== "" && ` · ${summary}`}
           </span>
-          <span className="shrink-0 text-fg-subtle">{open ? "▾" : "▸"}</span>
         </summary>
         <div
           data-testid="thinking-content"

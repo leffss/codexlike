@@ -93,6 +93,9 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
         onClick={toggle}
         aria-expanded={expanded}
       >
+        <span className="shrink-0 text-xs text-fg-subtle">
+          {expanded ? "▾" : "▸"}
+        </span>
         <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
           {call.toolName}
         </span>
@@ -120,7 +123,6 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
             {duration}
           </span>
         )}
-        <span className="shrink-0 text-fg-subtle">{expanded ? "▾" : "▸"}</span>
       </button>
 
       {expanded && (
