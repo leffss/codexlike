@@ -13,4 +13,6 @@
 - [ ] preload 转发表同步更名；渲染层全局类型声明同步更新
 - [ ] 旧 channel 字符串**双注册兼容**：同一 handler 同时挂新旧两个 channel 名，现有 UI 调用与 e2e 不改仍绿（票 06 收尾删除）
 - [ ] 主进程抛给用户的中文异常文案换词（「原会话已移除」等「会话」→「任务」）
+- [ ] 磁盘 sessions/<id>/screenshots 截图目录约定换为 task 系（自票 02 移交；对应测试的字面断言同步改）
+- [ ] expand 约束（与票 02 同构）：desktop 侧一切改动须让 ui 包零改动全绿——类型名用反向别名（如 SessionListItem = TaskListItem），channel 双注册；UI 消费面的字段级命名（taskId、kind:"task"、事件字面量 session-auto-approve-changed 等）暂留旧名，随票 04 定稿。agent-core 遗留结构成员（updateSession、createForSession、closeSession、createSessionBranch 等，desktop 是唯一消费者）在本票一并更名并同步 desktop 调用点
 - [ ] desktop 全部测试改绿（含输入队列系 5 个、live 事件、搜索、恢复等 19 个会话系测试文件）

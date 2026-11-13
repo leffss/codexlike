@@ -6,13 +6,13 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-human
+**Status:** done
 
 - [x] 会话领域模块目录（agent-core 内 session 系目录）及 14 个模块文件更名为 task 系
 - [x] 公共类型与接口全改：`SessionRecord`→`TaskRecord`、`SessionManager`→`TaskManager`、`SessionEvent`→`TaskEvent`、`SessionStatus` 等；子代理事件载荷字段 `task` 与 `spawn_subagent` 的 `task` 参数**不动**
 - [x] SCHEMA 全改：`sessions` 表→`tasks`，各表 `session_id` 外键列同步更名；增量迁移逻辑按新表名重写
 - [x] 新库文件名启用（不复用旧库文件名）；检测到旧库文件存在时不读、不删、不迁移，直接使用新库
-- [ ] 磁盘 `sessions/<id>/` 截图子目录约定同步换为 task 系；worktrees 目录用 id 本身做键，不动（**随票 03 落地**：该约定的唯一实现点是 `desktop/src/sessions/screenshots.ts`，其测试 `desktop/tests/sessions/screenshots.test.ts` 字面断言 `sessions\s-1\screenshots` 路径——本票 desktop 硬约束「不改不破」下不可达，须与 desktop 模块同批翻转；worktrees 目录按 id 做键本票已确认不动，agent-core 侧无 `sessions/` 路径引用）
+- [x] 磁盘截图子目录：实现点在 desktop（screenshots 模块），随票 03 落地（移交）；worktrees 目录用 id 本身做键，不动（已确认）
 - [x] 公共导出（包入口的 index/node 出口）暂留旧名 re-export 别名，desktop 现有 import 不改也能通过 typecheck
 - [x] agent-core 全部测试改绿（含 sqlite-store 对 schema/迁移的断言、resume 等价、子代理、思考档位等 15 个会话系测试文件）；architecture 守卫通过
 
@@ -61,3 +61,4 @@
 - `WorkbenchTarget` 判别式 `{ kind: "session"; sessionId }`（desktop/ui 构造；`workbenchKey` 输出键已换 `["task", id]`，输入形状待票 03）
 - `TaskEvent` 变体的 `sessionId` 字段与 `"session-auto-approve-changed"` 事件字面量（desktop `live-sessions.ts` / ui 引用）
 - `StoredMessage` / `ToolCallRecord` / `ApprovalRequest` / `InteractionRequest` 的 `sessionId` 字段（desktop/ui 全量引用，票 03/04 翻转）
+- 票02 截图目录验收项移交票03：唯一实现点 desktop/src/sessions/screenshots.ts 及其字面断言测试受「desktop 测试不改必须绿」expand 约束，归属翻转（2026-11-13，编排确认）
