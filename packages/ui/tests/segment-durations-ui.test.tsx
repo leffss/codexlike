@@ -11,7 +11,7 @@ import type {
   ThinkingSegment,
   ToolCallSegment,
   UserSegment,
-} from "../src/lib/session-view";
+} from "../src/lib/task-view";
 
 /**
  * 过程段耗时呈现（spec 用户故事 26「实时跳动 + 最终定格」）：

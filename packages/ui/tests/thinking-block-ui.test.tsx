@@ -9,7 +9,7 @@ import type {
   MessageSegment,
   SubagentSegment,
   ThinkingSegment,
-} from "../src/lib/session-view";
+} from "../src/lib/task-view";
 
 /**
  * 思考块开合默认值（呈现层内存态 + collapse-memory）：

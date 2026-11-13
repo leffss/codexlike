@@ -1,13 +1,13 @@
-import type { SessionListItem } from "@codexlike/desktop/ipc";
+import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
-import { SessionActivityBadge } from "../src/components/SessionActivityBadge";
-import { SessionSidebar } from "../src/components/SessionSidebar";
+import { TaskActivityBadge } from "../src/components/TaskActivityBadge";
+import { TaskSidebar } from "../src/components/TaskSidebar";
 
-function session(overrides: Partial<SessionListItem> = {}): SessionListItem {
+function task(overrides: Partial<TaskListItem> = {}): TaskListItem {
   return {
-    id: "session",
+    id: "task",
     projectId: null,
     title: "这是一条应优先占满剩余宽度且只显示一行的完整会话标题",
     workspacePath: "C:/work/demo",
@@ -25,11 +25,11 @@ function session(overrides: Partial<SessionListItem> = {}): SessionListItem {
   };
 }
 
-function renderSidebar(item: SessionListItem) {
+function renderSidebar(item: TaskListItem) {
   return renderToStaticMarkup(
-    createElement(SessionSidebar, {
+    createElement(TaskSidebar, {
       projects: [],
-      sessions: [item],
+      tasks: [item],
       currentId: item.id,
       creating: false,
       onAddProject() {},
@@ -98,7 +98,7 @@ afterEach(() => {
 
 it("项目置顶入口是独立键盘按钮，置顶标识与空项目均保留", () => {
   const html = renderToStaticMarkup(
-    createElement(SessionSidebar, {
+    createElement(TaskSidebar, {
       projects: [
         {
           id: "p",
@@ -108,7 +108,7 @@ it("项目置顶入口是独立键盘按钮，置顶标识与空项目均保留"
           pinned: true,
         },
       ],
-      sessions: [],
+      tasks: [],
       currentId: null,
       creating: false,
       onAddProject() {},
@@ -149,7 +149,7 @@ it.each([
   "单行标题优先伸缩，tooltip 保留完整标题、路径和$name",
   ({ lastUsedAt, relative }) => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-13T11:00:00Z"));
-    const item = session({ lastUsedAt });
+    const item = task({ lastUsedAt });
     const html = renderSidebar(item);
     const label = elementByTestId(html, "session-label");
     expect(label.tag).toBe("span");
@@ -172,7 +172,7 @@ it.each([
 it.each([false, true])(
   "置顶状态 %s 使用独立图标按钮且名称可访问，已置顶始终可见",
   (pinned) => {
-    const html = renderSidebar(session({ pinned }));
+    const html = renderSidebar(task({ pinned }));
     const select = elementByTestId(html, "session-item");
     const pin = elementByTestId(html, "pin-button");
     const label = pinned ? "取消置顶" : "置顶会话";
@@ -197,14 +197,14 @@ it.each([false, true])(
       }
     } else {
       expect(classes(pin.opening)).toContain(
-        "group-focus-within/session:opacity-100"
+        "group-focus-within/task:opacity-100"
       );
     }
   }
 );
 
 it("Worktree 使用图标和读屏标签，保留原路径 tooltip，本地会话不显示该徽标", () => {
-  const item = session({
+  const item = task({
     workspaceMode: "worktree",
     workspacePath: "C:/worktrees/feature",
     workspaceOriginPath: "C:/work/demo",
@@ -215,15 +215,13 @@ it("Worktree 使用图标和读屏标签，保留原路径 tooltip，本地会�
   );
   expect(badge.content).toContain("<svg");
   expectCompactLabel(badge.content, "worktree");
-  expect(renderSidebar(session())).not.toContain(
-    'data-testid="worktree-badge"'
-  );
+  expect(renderSidebar(task())).not.toContain('data-testid="worktree-badge"');
 });
 
 const activityCases: {
   name: string;
   label: string;
-  overrides: Partial<SessionListItem>;
+  overrides: Partial<TaskListItem>;
 }[] = [
   {
     name: "等待优先于运行、失败和未读",
@@ -329,12 +327,12 @@ const activityCases: {
 it.each(activityCases)(
   "活动标签 $name 默认保持文字外观，compact 与侧栏保留同一可访问名称",
   ({ label, overrides }) => {
-    const item = session(overrides);
+    const item = task(overrides);
     const normal = renderToStaticMarkup(
-      createElement(SessionActivityBadge, { session: item })
+      createElement(TaskActivityBadge, { task: item })
     );
     const explicitNormal = renderToStaticMarkup(
-      createElement(SessionActivityBadge, { session: item, compact: false })
+      createElement(TaskActivityBadge, { task: item, compact: false })
     );
     expect(explicitNormal).toBe(normal);
     const normalBadge = elementByTestId(normal, "session-activity");
@@ -346,7 +344,7 @@ it.each(activityCases)(
     );
 
     const compact = renderToStaticMarkup(
-      createElement(SessionActivityBadge, { session: item, compact: true })
+      createElement(TaskActivityBadge, { task: item, compact: true })
     );
     for (const html of [compact, renderSidebar(item)]) {
       const badge = elementByTestId(html, "session-activity");
@@ -394,14 +392,14 @@ it.each([
       },
     },
   },
-] satisfies { name: string; overrides: Partial<SessionListItem> }[])(
+] satisfies { name: string; overrides: Partial<TaskListItem> }[])(
   "$name 不显示活动标签",
   ({ overrides }) => {
-    const item = session(overrides);
+    const item = task(overrides);
     for (const compact of [undefined, false, true]) {
       expect(
         renderToStaticMarkup(
-          createElement(SessionActivityBadge, { session: item, compact })
+          createElement(TaskActivityBadge, { task: item, compact })
         )
       ).toBe("");
     }
@@ -413,7 +411,7 @@ it.each([false, true])(
   "原始 HTML 不存在嵌套按钮，包括已归档状态 %s",
   (archived) => {
     const html = renderSidebar(
-      session({
+      task({
         pinned: true,
         archivedAt: archived ? "2026-11-13T10:00:00Z" : null,
         workspaceMode: "worktree",

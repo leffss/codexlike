@@ -1,24 +1,24 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { ProjectRecord } from "@codexlike/agent-core";
-import type { ProjectRemoval, SessionListItem } from "@codexlike/desktop/ipc";
+import type { ProjectRemoval, TaskListItem } from "@codexlike/desktop/ipc";
 
 const button =
   "rounded border border-line px-3 py-1.5 text-sm hover:bg-hover disabled:opacity-50";
 
 /** 选择与确认只表达用户意图，活动及目录约束仍由宿主在实际写入点复查。 */
 export function MembershipDialog(props: {
-  session: SessionListItem;
+  task: TaskListItem;
   projects: ProjectRecord[];
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
-  const sessionId = props.session.id;
+  const sessionId = props.task.id;
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     const previous = document.activeElement;
-    const sessionTarget = () =>
+    const taskTarget = () =>
       Array.from(
         document.querySelectorAll<HTMLElement>("[data-session-select]")
       ).find((element) => element.dataset.sessionId === sessionId);
@@ -27,7 +27,7 @@ export function MembershipDialog(props: {
       previous !== document.body &&
       !previous.closest("[role='menu']")
         ? previous
-        : sessionTarget();
+        : taskTarget();
     (
       dialog.querySelector<HTMLElement>(
         "select:not(:disabled), button:not(:disabled)"
@@ -47,13 +47,13 @@ export function MembershipDialog(props: {
           return;
         const target = returnTarget?.isConnected
           ? returnTarget
-          : (sessionTarget() ??
+          : (taskTarget() ??
             document.querySelector<HTMLElement>("[data-testid='new-session']"));
         target?.focus({ preventScroll: true });
       });
     };
   }, [sessionId]);
-  const movingOut = props.session.projectId !== null;
+  const movingOut = props.task.projectId !== null;
   const [target, setTarget] = useState(props.projects[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +97,7 @@ export function MembershipDialog(props: {
     setError(null);
     try {
       await window.codexlike.sessions.setProject(
-        props.session.id,
+        props.task.id,
         movingOut ? null : target
       );
       await props.onChanged();
@@ -123,7 +123,7 @@ export function MembershipDialog(props: {
         className="w-[440px] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl"
       >
         <h2 className="mb-3 font-medium">
-          {movingOut ? "移出项目" : "移入项目"} · {props.session.title}
+          {movingOut ? "移出项目" : "移入项目"} · {props.task.title}
         </h2>
         <p className="mb-3 text-sm text-fg-muted">
           只调整项目归属，不改变工作区、分支、历史或会话设置。
@@ -131,7 +131,7 @@ export function MembershipDialog(props: {
         {!movingOut && (
           <>
             <p className="mb-2 text-xs text-fg-muted">
-              {props.session.workspaceMode === "worktree"
+              {props.task.workspaceMode === "worktree"
                 ? "Worktree 会话只能移回来源项目。"
                 : "只能移入与实际工作区相同目录的项目。"}
             </p>

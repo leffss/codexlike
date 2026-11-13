@@ -3,7 +3,7 @@ import type {
   InteractionResponse,
   ApprovalMode,
   ThinkingEffort,
-  SessionPreferences,
+  TaskPreferences,
   ReadingPosition,
 } from "@codexlike/agent-core";
 
@@ -19,7 +19,7 @@ import {
   type WorkbenchPort,
 } from "./persistent-workbench";
 
-export interface NewSessionDraft {
+export interface NewTaskDraft {
   requestId: string;
   projectId: string | null;
   text: string;
@@ -41,17 +41,17 @@ const idleSubmission: SubmissionState = { busy: false, error: null };
 /** 运行交互只在内存；草稿与下次发送设置经宿主持久保存。 */
 export function createWorkspaceState(port?: WorkbenchPort) {
   const persisted = createPersistentWorkbench(port, notify);
-  const preferences = new Map<string, SessionPreferences>();
+  const preferences = new Map<string, TaskPreferences>();
   const positions = new Map<string, ReadingPosition | null>();
   const loaded = new Set<string>();
-  const removedSessions = new Set<string>();
+  const removedTasks = new Set<string>();
   const removedProjects = new Set<string>();
-  const defaultPreferences: SessionPreferences = {
+  const defaultPreferences: TaskPreferences = {
     providerProfileId: "",
     thinkingEffort: "auto",
     approvalMode: "ask",
   };
-  const sessionTarget = (sessionId: string) => ({
+  const taskTarget = (sessionId: string) => ({
     kind: "session" as const,
     sessionId,
   });
@@ -60,7 +60,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   const observedAt = new Map<string, number>();
   const drafts = new Map<string, QuestionDraft>();
   const composers = new Map<string, string>();
-  const newDrafts = new Map<string | null, NewSessionDraft>();
+  const newDrafts = new Map<string | null, NewTaskDraft>();
   function newDraft(projectId: string | null, defaultProfile = "") {
     let draft = newDrafts.get(projectId);
     if (!draft) {
@@ -90,7 +90,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     for (const listener of listeners) listener();
   }
   function observe(record: InteractionRecord) {
-    if (removedSessions.has(record.request.sessionId)) return;
+    if (removedTasks.has(record.request.sessionId)) return;
     const id = key(record.request.sessionId, record.request.id);
     const previous = records.get(id);
     // 终态是墓碑，旧 pending 快照/请求事件永远不能把它复活。
@@ -99,7 +99,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     observedAt.set(id, revision + 1);
     if (record.status === "resolved") {
       drafts.delete(id);
-      persisted.patch(sessionTarget(record.request.sessionId), (value) => {
+      persisted.patch(taskTarget(record.request.sessionId), (value) => {
         const questionDrafts = { ...value.questionDrafts };
         delete questionDrafts[record.request.id];
         return { ...value, questionDrafts };
@@ -115,10 +115,10 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   return {
     flush: persisted.flush,
     persistenceError: persisted.error,
-    async loadSession(sessionId: string) {
+    async loadTask(sessionId: string) {
       if (loaded.has(sessionId)) return;
-      const entry = await persisted.load(sessionTarget(sessionId));
-      if (removedSessions.has(sessionId)) return;
+      const entry = await persisted.load(taskTarget(sessionId));
+      if (removedTasks.has(sessionId)) return;
       if (entry && !loaded.has(sessionId)) {
         if (!composers.has(sessionId))
           composers.set(sessionId, entry.value.text);
@@ -153,13 +153,13 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     preferences: (sessionId: string) =>
       preferences.get(sessionId) ?? defaultPreferences,
-    setPreferences(sessionId: string, patch: Partial<SessionPreferences>) {
-      if (removedSessions.has(sessionId)) return;
+    setPreferences(sessionId: string, patch: Partial<TaskPreferences>) {
+      if (removedTasks.has(sessionId)) return;
       preferences.set(sessionId, {
         ...(preferences.get(sessionId) ?? defaultPreferences),
         ...patch,
       });
-      persisted.patch(sessionTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(sessionId), (value) => ({
         ...value,
         preferences: { ...value.preferences, ...patch },
       }));
@@ -167,19 +167,19 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     readingPosition: (sessionId: string) => positions.get(sessionId) ?? null,
     setReadingPosition(sessionId: string, position: ReadingPosition) {
-      if (removedSessions.has(sessionId)) return;
+      if (removedTasks.has(sessionId)) return;
       positions.set(sessionId, position);
-      persisted.patch(sessionTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(sessionId), (value) => ({
         ...value,
         readingPosition: position,
       }));
     },
-    activeSessionId: null as string | null,
+    activeTaskId: null as string | null,
     activeDraftProjectId: undefined as string | null | undefined,
     newDraft,
     editNewDraft(
       projectId: string | null,
-      patch: Partial<Omit<NewSessionDraft, "requestId" | "projectId">>
+      patch: Partial<Omit<NewTaskDraft, "requestId" | "projectId">>
     ) {
       if (projectId !== null && removedProjects.has(projectId)) return;
       const draft = newDraft(projectId);
@@ -208,8 +208,8 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       newDrafts.delete(projectId);
       const removed = new Set(sessionIds);
       for (const sessionId of removed) {
-        removedSessions.add(sessionId);
-        persisted.remove(sessionTarget(sessionId));
+        removedTasks.add(sessionId);
+        persisted.remove(taskTarget(sessionId));
         composers.delete(sessionId);
         preferences.delete(sessionId);
         positions.delete(sessionId);
@@ -320,9 +320,9 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     },
     composer: (sessionId: string) => composers.get(sessionId) ?? "",
     setComposer(sessionId: string, text: string) {
-      if (removedSessions.has(sessionId)) return;
+      if (removedTasks.has(sessionId)) return;
       composers.set(sessionId, text);
-      persisted.patch(sessionTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(sessionId), (value) => ({
         ...value,
         text,
       }));
@@ -343,7 +343,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
         return;
       const next = updateQuestionDraft(record.request, draft, action);
       drafts.set(id, next);
-      persisted.patch(sessionTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(sessionId), (value) => ({
         ...value,
         questionDrafts: { ...value.questionDrafts, [requestId]: next },
       }));

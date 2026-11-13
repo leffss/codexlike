@@ -1,19 +1,18 @@
-import type { SessionListItem } from "@codexlike/desktop/ipc";
+import type { TaskListItem } from "@codexlike/desktop/ipc";
 
 /** 执行结果与已读独立，查看失败/中断不会把结果改成成功。 */
-export function SessionActivityBadge({
-  session,
+export function TaskActivityBadge({
+  task,
   compact = false,
 }: {
-  session: SessionListItem;
+  task: TaskListItem;
   compact?: boolean;
 }) {
-  const activity = session.activity;
+  const activity = task.activity;
   const waiting =
     activity?.waitingForUser ??
-    (session.status === "waiting-user" ||
-      session.status === "waiting-approval");
-  const running = activity?.running ?? session.status === "streaming";
+    (task.status === "waiting-user" || task.status === "waiting-approval");
+  const running = activity?.running ?? task.status === "streaming";
   const label = waiting
     ? "等待用户"
     : running

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   InteractionRecord,
-  SessionEvent,
+  TaskEvent,
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
@@ -10,12 +10,12 @@ import type {
 
 import {
   appendLocalSegment,
-  applySessionEvent,
+  applyTaskEvent,
   initialTranscript,
   mergeInteractions,
   type AssistantSegment,
   type MessageSegment,
-} from "../src/lib/session-view";
+} from "../src/lib/task-view";
 
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
   return {
@@ -65,16 +65,16 @@ describe("正文完成时刻", () => {
     "多段正文经 %s 中断后，新轮正常完成不污染旧轮时间与正文",
     (type) => {
       let items: MessageSegment[] = [];
-      const events: SessionEvent[] = [
+      const events: TaskEvent[] = [
         { type: "user-message", message: stored({ id: "u1" }) },
         { type: "assistant-delta", messageId: "a1", delta: "工具前正文" },
         { type: "tool-call", call: toolRecord() },
         { type: "tool-result", call: toolRecord() },
         { type: "assistant-delta", messageId: "a1", delta: "工具后部分正文" },
       ];
-      for (const event of events) items = applySessionEvent(items, event);
+      for (const event of events) items = applyTaskEvent(items, event);
       const before = textSegments(items);
-      items = applySessionEvent(items, {
+      items = applyTaskEvent(items, {
         type,
         message: stored({
           id: "a1",
@@ -107,11 +107,11 @@ describe("正文完成时刻", () => {
         before.map((item) => [item.id, item.seq, item.at])
       );
 
-      items = applySessionEvent(items, {
+      items = applyTaskEvent(items, {
         type: "user-message",
         message: stored({ id: "u2", content: "继续" }),
       });
-      items = applySessionEvent(items, {
+      items = applyTaskEvent(items, {
         type: "assistant-delta",
         messageId: "a2",
         delta: "新轮正文",
@@ -120,7 +120,7 @@ describe("正文完成时刻", () => {
       expect(newText).toMatchObject({ turnId: "u2", streaming: true });
       expect(newText.completedAt).toBeUndefined();
       expect(textSegments(items).slice(0, 2)).toEqual(interrupted);
-      items = applySessionEvent(items, {
+      items = applyTaskEvent(items, {
         type: "assistant-done",
         message: stored({
           id: "a2",
@@ -152,13 +152,13 @@ describe("正文完成时刻", () => {
         content: "部分正文",
       });
       const items = withDelta
-        ? applySessionEvent([], {
+        ? applyTaskEvent([], {
             type: "assistant-delta",
             messageId: message.id,
             delta: "部分",
           })
         : [];
-      const result = applySessionEvent(items, {
+      const result = applyTaskEvent(items, {
         type: "assistant-done",
         message,
       });
@@ -181,8 +181,8 @@ describe("正文完成时刻", () => {
         role: type === "error" ? "error" : "assistant",
         content: "部分正文",
       });
-      const live = applySessionEvent(
-        applySessionEvent([], {
+      const live = applyTaskEvent(
+        applyTaskEvent([], {
           type: "assistant-delta",
           messageId: message.id,
           delta: "部分正文",
@@ -203,15 +203,15 @@ describe("正文完成时刻", () => {
         createdAt: "非法时间",
         content: "部分正文",
       });
-      const live = applySessionEvent(
-        applySessionEvent([], {
+      const live = applyTaskEvent(
+        applyTaskEvent([], {
           type: "assistant-delta",
           messageId: message.id,
           delta: "部分正文",
         }),
         { type, message }
       );
-      const missed = applySessionEvent([], { type, message });
+      const missed = applyTaskEvent([], { type, message });
       const restored = initialTranscript([{ kind: "message", message }]);
       for (const items of [live, missed, restored]) {
         expect(
@@ -224,19 +224,19 @@ describe("正文完成时刻", () => {
   );
 
   it("正常终态只给最后正文记录消息完成时刻，不覆盖段建立时刻或合并过程正文", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-delta",
       messageId: "a1",
       delta: "过程正文",
     });
-    items = applySessionEvent(items, { type: "tool-call", call: toolRecord() });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, { type: "tool-call", call: toolRecord() });
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "最终正文",
     });
     const before = textSegments(items);
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-done",
       message: stored({
         id: "a1",
@@ -437,28 +437,28 @@ describe("initialTranscript（历史恢复 → 消息段时序序列）", () => 
 
 describe("时序保真（交错回复按事件发生顺序排列）", () => {
   it("正文→工具→再正文：同一响应的第二次正文显示在工具卡之后", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1", content: "跑一下测试" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "先看文件，",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-call",
       call: toolRecord({ id: "t1", output: "" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-result",
       call: toolRecord({ id: "t1", output: "结果" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "测试通过",
@@ -475,12 +475,12 @@ describe("时序保真（交错回复按事件发生顺序排列）", () => {
   });
 
   it("多段思考与正文、工具穿插保持交错：思考不再被提升合并成一段", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1", content: "交错任务" }),
     });
-    const apply = (event: SessionEvent) => {
-      items = applySessionEvent(items, event);
+    const apply = (event: TaskEvent) => {
+      items = applyTaskEvent(items, event);
     };
     apply({ type: "assistant-start", messageId: "a1" });
     apply({
@@ -528,16 +528,16 @@ describe("时序保真（交错回复按事件发生顺序排列）", () => {
   });
 
   it("流式增量只追加到末尾流态段：同段内容连续累积", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "你",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "好",
@@ -545,7 +545,7 @@ describe("时序保真（交错回复按事件发生顺序排列）", () => {
     expect(items).toHaveLength(1);
     expect(seg(items, 0)).toMatchObject({ kind: "assistant", content: "你好" });
     const seqBefore = seg(items, 0).seq;
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "！",
@@ -556,13 +556,13 @@ describe("时序保真（交错回复按事件发生顺序排列）", () => {
 
 describe("封闭更新集（尾部追加 / 按 id 整段替换 / 截断重放 / 流态追加）", () => {
   it("tool-result 按 id 整段替换工具卡：段 id 与序号不变、状态迁移", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "tool-call",
       call: toolRecord({ id: "t1", output: "" }),
     });
     const before = seg(items, 0);
     expect(before).toMatchObject({ running: true });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-result",
       call: toolRecord({ id: "t1", output: "结果", isError: true }),
     });
@@ -577,15 +577,15 @@ describe("封闭更新集（尾部追加 / 按 id 整段替换 / 截断重放 / 
   });
 
   it("重复事件幂等：同 id 事件不重建段、序号不复用", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "tool-result",
       call: toolRecord({ id: "t1" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-result",
       call: toolRecord({ id: "t1" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-call",
       call: toolRecord({ id: "t1" }),
     });
@@ -594,15 +594,15 @@ describe("封闭更新集（尾部追加 / 按 id 整段替换 / 截断重放 / 
   });
 
   it("compact 整体重放：initialTranscript 生成全新序列（截断删除的表达方式）", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1", content: "旧问题" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "旧回答",
@@ -628,7 +628,7 @@ describe("封闭更新集（尾部追加 / 按 id 整段替换 / 截断重放 / 
 
 describe("终态收敛与事件兜底", () => {
   it("完整一轮往返：user 追加，assistant 流式累积到完成、流态标记收敛", () => {
-    const events: SessionEvent[] = [
+    const events: TaskEvent[] = [
       {
         type: "user-message",
         message: stored({ id: "u1", content: "打个招呼" }),
@@ -642,7 +642,7 @@ describe("终态收敛与事件兜底", () => {
       },
     ];
     let items: MessageSegment[] = [];
-    for (const event of events) items = applySessionEvent(items, event);
+    for (const event of events) items = applyTaskEvent(items, event);
     expect(kinds(items)).toEqual(["user", "assistant"]);
     expect(seg(items, 1)).toMatchObject({
       content: "你好，世界",
@@ -651,16 +651,16 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("单正文段的 done 以终稿全文整段替换（防增量缺失）", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "部分",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-done",
       message: stored({ id: "a1", role: "assistant", content: "完整终稿" }),
     });
@@ -672,29 +672,29 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("跨工具卡的多正文段 done：保持切分、只收敛流态、末段带中断标记", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "前半",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-call",
       call: toolRecord({ id: "t1", output: "" }),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "后半",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-aborted",
       message: stored({
         id: "a1",
@@ -719,16 +719,16 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("aborted 收敛思考段：流态去除、内容保留", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-reasoning",
       messageId: "a1",
       delta: "想到一半",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-aborted",
       message: stored({
         id: "a1",
@@ -745,21 +745,21 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("error：全部流态段收敛 + 尾部追加错误段", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-reasoning",
       messageId: "a1",
       delta: "出错前的思考",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "半截正文",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "error",
       message: stored({
         id: "e1",
@@ -779,7 +779,7 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("错过 start 的 delta / reasoning / done 仍按序兜底重建段", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "assistant-delta",
       messageId: "a1",
       delta: "只有增量",
@@ -792,12 +792,12 @@ describe("终态收敛与事件兜底", () => {
         streaming: true,
       },
     ]);
-    const done = applySessionEvent(items, {
+    const done = applyTaskEvent(items, {
       type: "assistant-done",
       message: stored({ id: "a1", role: "assistant", content: "终稿" }),
     });
     expect(done[0]).toMatchObject({ content: "终稿" });
-    const onlyDone = applySessionEvent([], {
+    const onlyDone = applyTaskEvent([], {
       type: "assistant-done",
       message: stored({ id: "a2", role: "assistant", content: "直接终稿" }),
     });
@@ -807,7 +807,7 @@ describe("终态收敛与事件兜底", () => {
   });
 
   it("消息流外的本地反馈（status）经 appendLocalSegment 尾部追加并归当前轮", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1" }),
     });
@@ -831,12 +831,12 @@ describe("终态收敛与事件兜底", () => {
 
 describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {
   it("queued → start → 工具进度 → report：卡状态迁移、时序位置保持", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1" }),
     });
-    const apply = (event: SessionEvent) => {
-      items = applySessionEvent(items, event);
+    const apply = (event: TaskEvent) => {
+      items = applyTaskEvent(items, event);
     };
     apply({ type: "subagent-queued", subagentId: "sa-1", task: "调研 vitest" });
     apply({
@@ -887,7 +887,7 @@ describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {
   });
 
   it("spawn_subagent 不出普通工具卡；tool-result 按 toolCallId 回填卡报告", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "tool-call",
       call: toolRecord({
         id: "d1",
@@ -896,7 +896,7 @@ describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {
       }),
     });
     expect(items).toHaveLength(0);
-    items = applySessionEvent([], {
+    items = applyTaskEvent([], {
       type: "tool-result",
       call: toolRecord({
         id: "d1",
@@ -911,7 +911,7 @@ describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {
   });
 
   it("未知 subagentId 的迟到 reasoning 被忽略", () => {
-    const items = applySessionEvent([], {
+    const items = applyTaskEvent([], {
       type: "subagent-reasoning",
       subagentId: "sa-gone",
       delta: "迟到的思考",
@@ -1003,7 +1003,7 @@ describe("交互记录段（mergeInteractions）", () => {
     let state = initialTranscript([
       { kind: "interaction", interaction: record },
     ]);
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "interaction-request",
       interaction: record,
     });
@@ -1013,11 +1013,11 @@ describe("交互记录段（mergeInteractions）", () => {
       status: "resolved",
       response: { kind: "approval", decision: "approve" },
     };
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "interaction-resolved",
       interaction: resolved,
     });
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "interaction-request",
       interaction: record,
     });
@@ -1031,7 +1031,7 @@ describe("交互记录段（mergeInteractions）", () => {
   });
 
   it("旧审批事件不再创建可操作审批卡", () => {
-    let state = applySessionEvent([], {
+    let state = applyTaskEvent([], {
       type: "approval-request",
       request: {
         id: "c1",
@@ -1043,7 +1043,7 @@ describe("交互记录段（mergeInteractions）", () => {
       },
     });
     expect(state).toHaveLength(0);
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "approval-resolved",
       requestId: "ghost",
       decision: "approve",
@@ -1055,8 +1055,8 @@ describe("交互记录段（mergeInteractions）", () => {
 describe("段时刻打点（已工作折叠区工时与工具耗时的数据来源）", () => {
   it("运行期尾部追加的段都带 at（epoch ms）", () => {
     const before = Date.now();
-    const state = applySessionEvent(
-      applySessionEvent([], {
+    const state = applyTaskEvent(
+      applyTaskEvent([], {
         type: "user-message",
         message: stored({ id: "u1", role: "user" }),
       }),
@@ -1071,8 +1071,8 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
   });
 
   it("工具卡打点：call 记 startedAt，result 补 endedAt 且原值不变", () => {
-    const seeded = applySessionEvent(
-      applySessionEvent([], {
+    const seeded = applyTaskEvent(
+      applyTaskEvent([], {
         type: "user-message",
         message: stored({ id: "u1", role: "user" }),
       }),
@@ -1086,7 +1086,7 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
       }
     );
     const startedAt = seg(seeded, 1).at;
-    const final = applySessionEvent(seeded, {
+    const final = applyTaskEvent(seeded, {
       type: "tool-result",
       call: toolRecord({ id: "c1", output: "结果" }),
     });
@@ -1130,7 +1130,7 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
       { type: "tool-result", call: toolRecord({ id: "c1", output: "结果" }) },
       { type: "assistant-delta", messageId: "a1", delta: "工具后正文" },
     ].reduce(
-      (acc, event) => applySessionEvent(acc, event as SessionEvent),
+      (acc, event) => applyTaskEvent(acc, event as TaskEvent),
       [] as MessageSegment[]
     );
     const after = Date.now();
@@ -1157,18 +1157,18 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
   });
 
   it("子代理卡打点：report/tool-result 回流记 endedAt，恢复的完成态无起止对", () => {
-    let items: MessageSegment[] = applySessionEvent([], {
+    let items: MessageSegment[] = applyTaskEvent([], {
       type: "subagent-queued",
       subagentId: "sa-1",
       task: "调研",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-start",
       subagentId: "sa-1",
       task: "调研",
       toolCallId: "delegate-1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-tool",
       subagentId: "sa-1",
       phase: "call",
@@ -1181,7 +1181,7 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
       running: true,
       startedAt: expect.any(Number),
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-tool",
       subagentId: "sa-1",
       phase: "result",
@@ -1197,7 +1197,7 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
     expect(card.state).toBe("running");
     expect(card.endedAt).toBeNull();
     // 报告到达：完成态打 endedAt（总耗时定格基准）
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-report",
       subagentId: "sa-1",
       task: "调研",

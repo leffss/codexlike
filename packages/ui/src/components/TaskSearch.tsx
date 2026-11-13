@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import type { SessionSearchResult } from "@codexlike/agent-core";
+import type { TaskSearchResult } from "@codexlike/agent-core";
 
 /** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的会话历史。 */
-export function SessionSearch(props: {
+export function TaskSearch(props: {
   onSelect: (id: string) => void;
   recordsRevision?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [results, setResults] = useState<SessionSearchResult[]>([]);
+  const [results, setResults] = useState<TaskSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);

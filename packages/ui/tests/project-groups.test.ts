@@ -1,6 +1,6 @@
-import type { ProjectRecord, SessionRecord } from "@codexlike/agent-core";
+import type { ProjectRecord, TaskRecord } from "@codexlike/agent-core";
 import { expect, it } from "vitest";
-import { groupSessionsByProject } from "../src/lib/project-groups";
+import { groupTasksByProject } from "../src/lib/project-groups";
 
 const project: ProjectRecord = {
   id: "project",
@@ -8,9 +8,9 @@ const project: ProjectRecord = {
   workspacePath: "C:/work/demo",
   createdAt: "2026-11-11T00:00:00Z",
 };
-function session(overrides: Partial<SessionRecord> = {}): SessionRecord {
+function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
-    id: "session",
+    id: "task",
     projectId: null,
     title: "会话",
     workspacePath: project.workspacePath,
@@ -28,7 +28,7 @@ function session(overrides: Partial<SessionRecord> = {}): SessionRecord {
 }
 it("显式项目在没有会话时仍显示，独立分区不伪造成项目", () => {
   expect(
-    groupSessionsByProject([], [project]).map((group) => [
+    groupTasksByProject([], [project]).map((group) => [
       group.projectId,
       group.name,
       group.active.length,
@@ -39,11 +39,11 @@ it("显式项目在没有会话时仍显示，独立分区不伪造成项目", (
   ]);
 });
 it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所属分区", () => {
-  const groups = groupSessionsByProject(
+  const groups = groupTasksByProject(
     [
-      session({ id: "standalone" }),
-      session({ id: "local", projectId: project.id }),
-      session({
+      task({ id: "standalone" }),
+      task({ id: "local", projectId: project.id }),
+      task({
         id: "detached",
         workspaceMode: "worktree",
         workspacePath: "C:/worktrees/wt",
@@ -59,15 +59,15 @@ it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所�
   expect(groups[0]!.active.map((item) => item.id)).toEqual(["local"]);
 });
 it("各分区分别保留归档历史并按时间排序，不丢失空项目", () => {
-  const groups = groupSessionsByProject(
+  const groups = groupTasksByProject(
     [
-      session({
+      task({
         id: "old",
         lastUsedAt: "2026-11-10T00:00:00Z",
         updatedAt: "2026-11-12T00:00:00Z",
       }),
-      session({ id: "archived", archivedAt: project.createdAt }),
-      session({ id: "recent" }),
+      task({ id: "archived", archivedAt: project.createdAt }),
+      task({ id: "recent" }),
     ],
     [project]
   );
@@ -82,12 +82,16 @@ it("置顶项目在普通项目前，同类保持输入顺序，取消置顶恢�
     { ...project, id: "c" },
     { ...project, id: "d", pinned: true },
   ];
-  expect(
-    groupSessionsByProject([], projects).map((group) => group.key)
-  ).toEqual(["b", "d", "a", "c", "standalone"]);
+  expect(groupTasksByProject([], projects).map((group) => group.key)).toEqual([
+    "b",
+    "d",
+    "a",
+    "c",
+    "standalone",
+  ]);
   expect(projects.map((item) => item.id)).toEqual(["a", "b", "c", "d"]);
   expect(
-    groupSessionsByProject(
+    groupTasksByProject(
       [],
       projects.map((item) => ({ ...item, pinned: false }))
     ).map((group) => group.key)

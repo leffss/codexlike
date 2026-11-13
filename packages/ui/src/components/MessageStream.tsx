@@ -8,7 +8,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
-import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
 import { useLocalDay } from "../lib/use-local-day";
 import { markdownComponents } from "../lib/markdown";
@@ -25,7 +25,7 @@ import {
   type ScrollGeometry,
   type VerticalIntent,
 } from "../lib/scroll-follow";
-import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
+import type { MessageSegment, ThinkingSegment } from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import {
   formatDurationCn,
@@ -80,8 +80,7 @@ export function MessageStream(props: {
   followSignal?: number;
 }) {
   const now = useLocalDay();
-  const contentWidthClass =
-    props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
+  const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   const container = useRef<HTMLDivElement>(null);
   useScrollbarGutter(container, props.onScrollbarGutterChange);
   const restored = useRef<string | null | undefined>(undefined);

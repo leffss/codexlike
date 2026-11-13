@@ -1,6 +1,6 @@
 import type {
   ResourceSnapshotSummary,
-  SessionResourcesView,
+  TaskResourcesView,
   SkillDescriptor,
 } from "@codexlike/agent-core";
 
@@ -13,7 +13,7 @@ const STATUS_LABELS: Record<SkillDescriptor["status"], string> = {
 
 /** 只显示资源元数据；不读取或展开 AGENTS/技能正文。 */
 export function AgentResourcesPanel(props: {
-  resources: SessionResourcesView | null;
+  resources: TaskResourcesView | null;
   loading: boolean;
   error: string | null;
   onRefresh: () => void;

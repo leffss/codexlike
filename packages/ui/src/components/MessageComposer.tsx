@@ -22,7 +22,7 @@ import {
   handleMenuKey,
   type ComposerMenuState,
 } from "../lib/composer-menu";
-import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
 import { QueueBar } from "./QueueBar";
 import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
@@ -156,8 +156,7 @@ export function MessageComposer(props: {
   /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿；按钮与 Esc 共用 */
   onQueueCancelEdit?: () => void;
 }) {
-  const contentWidthClass =
-    props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
+  const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   const [localValue, setLocalValue] = useState("");
   const value = props.draftValue ?? localValue;
   function setValue(next: string) {
@@ -345,7 +344,7 @@ export function MessageComposer(props: {
       data-testid="composer-region"
       className="bg-canvas px-4 py-3"
       style={{
-        paddingRight: "calc(1rem + var(--session-scrollbar-gutter, 0px))",
+        paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
       }}
     >
       <div className={contentWidthClass}>

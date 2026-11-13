@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MessageStream } from "../src/components/MessageStream";
 import { SubagentCard } from "../src/components/SubagentCard";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
-import type { MessageSegment, SubagentSegment } from "../src/lib/session-view";
+import type { MessageSegment, SubagentSegment } from "../src/lib/task-view";
 
 /** 静态渲染接缝：验证三个真实入口的链接语义，不替代桌面 E2E 点击验证。 */
 const entries = ["assistant", "compact-summary", "subagent"] as const;
@@ -41,7 +41,7 @@ function render(entry: (typeof entries)[number], content: string): string {
   return renderToStaticMarkup(
     createElement(MessageStream, {
       items: [segment],
-      sessionId: "markdown-links-session",
+      sessionId: "markdown-links-task",
     })
   );
 }

@@ -33,11 +33,11 @@ const CHANGE_KIND_CLASSES: Record<GitChangeKind, string> = {
  */
 export function ChangesPanel(props: {
   sessionId: string;
-  sessionTitle: string;
+  taskTitle: string;
   selectedProfileId: string;
   onClose: () => void;
 }) {
-  const { sessionId, sessionTitle, selectedProfileId, onClose } = props;
+  const { sessionId, taskTitle, selectedProfileId, onClose } = props;
 
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -308,7 +308,7 @@ export function ChangesPanel(props: {
             >
               {branchBusy
                 ? "创建中…"
-                : `创建分支 ${codexlikeBranchName(sessionTitle)}`}
+                : `创建分支 ${codexlikeBranchName(taskTitle)}`}
             </button>
             {branchFeedback !== null && (
               <p

@@ -1,6 +1,6 @@
 import type {
   InteractionRecord,
-  SessionEvent,
+  TaskEvent,
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
@@ -14,7 +14,7 @@ import type {
  * 渲染层只按时序分派。
  *
  * 更新操作为封闭集：尾部追加、按 id 整段替换（状态迁移保持段 id 与序号）、
- * 截断删除（compact 等结构变化由 live-session 层整体重放 initialTranscript）、
+ * 截断删除（compact 等结构变化由 live-task 层整体重放 initialTranscript）、
  * 流式文本追加（只允许追加到序列末尾的流态段；被工具卡等隔断后新起段）。
  * 不引入字段级 patch。
  */
@@ -259,7 +259,7 @@ function replaceSegment(
 /**
  * 会话时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
  * 历史恢复与运行期流式输出共用同一形状：本函数产出的段序列与
- * applySessionEvent 归并出的段序列同类同构。
+ * applyTaskEvent 归并出的段序列同类同构。
  */
 export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
   const segments: MessageSegment[] = [];
@@ -405,9 +405,9 @@ function subagentFromToolRecord(
  * 调用方按 sessionId 隔离事件；切会话可能错过 assistant-start，
  * delta / reasoning / done 自行兜底建段。
  */
-export function applySessionEvent(
+export function applyTaskEvent(
   items: MessageSegment[],
-  event: SessionEvent
+  event: TaskEvent
 ): MessageSegment[] {
   switch (event.type) {
     case "user-message":
@@ -586,7 +586,7 @@ export function applySessionEvent(
         (item) => item.kind === "subagent" && item.id === event.subagentId
       )
         ? items
-        : applySessionEvent(items, {
+        : applyTaskEvent(items, {
             type: "subagent-queued",
             subagentId: event.subagentId,
             task: event.task,

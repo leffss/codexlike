@@ -1,15 +1,15 @@
 import type {
   QueueSnapshot,
-  SessionActivity,
-  SessionEventEnvelope,
-  SessionView,
+  TaskActivity,
+  TaskEventEnvelope,
+  TaskView,
 } from "@codexlike/desktop/ipc";
 import {
-  applySessionEvent,
+  applyTaskEvent,
   initialTranscript,
   mergeInteractions,
   type MessageSegment,
-} from "./session-view";
+} from "./task-view";
 
 /** 队列状态为空时的基准快照（无排队、未暂停、无正在发出条目）。 */
 export const EMPTY_QUEUE_STATE: QueueSnapshot = {
@@ -18,12 +18,12 @@ export const EMPTY_QUEUE_STATE: QueueSnapshot = {
   sendingId: null,
 };
 
-export interface LiveSession {
+export interface LiveTask {
   sessionId: string;
   autoApprove: boolean;
   executionId: string | null;
   sequence: number;
-  activity: SessionActivity;
+  activity: TaskActivity;
   items: MessageSegment[];
   /**
    * 输入队列状态快照（票 01/02/03，review 重构收拢三元组）：随 queue-changed
@@ -34,20 +34,20 @@ export interface LiveSession {
 
 function applyLiveEvent(
   items: MessageSegment[],
-  event: SessionEventEnvelope["event"]
+  event: TaskEventEnvelope["event"]
 ): MessageSegment[] {
   if (event.type === "compact-start") return items;
   if (event.type === "compact-finished")
     return initialTranscript(event.history);
   if (event.type === "queue-changed") return items;
-  return applySessionEvent(items, event);
+  return applyTaskEvent(items, event);
 }
 
 /** 信封只按单调水位接续；新执行必须由明确起点开启，旧执行不能越界。 */
 export function receiveLiveEvent(
-  state: LiveSession,
-  envelope: SessionEventEnvelope
-): LiveSession {
+  state: LiveTask,
+  envelope: TaskEventEnvelope
+): LiveTask {
   if (
     envelope.sessionId !== state.sessionId ||
     envelope.sequence <= state.sequence
@@ -98,14 +98,14 @@ export function receiveLiveEvent(
 }
 
 /** 快照历史固定于执行起点，运行日志不会与轮末落库的正文重复。 */
-export function hydrateLiveSession(
-  view: SessionView,
-  buffered: SessionEventEnvelope[] = []
-): LiveSession {
+export function hydrateLiveTask(
+  view: TaskView,
+  buffered: TaskEventEnvelope[] = []
+): LiveTask {
   let items = initialTranscript(view.history);
   for (const envelope of view.events)
     items = applyLiveEvent(items, envelope.event);
-  let state: LiveSession = {
+  let state: LiveTask = {
     sessionId: view.sessionId,
     autoApprove: view.autoApprove ?? false,
     executionId: view.executionId,

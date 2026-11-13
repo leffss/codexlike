@@ -7,7 +7,7 @@ import type {
   ThinkingSegment,
   ToolCallSegment,
   UserSegment,
-} from "../src/lib/session-view";
+} from "../src/lib/task-view";
 import {
   formatWorkDuration,
   groupConsecutiveTools,

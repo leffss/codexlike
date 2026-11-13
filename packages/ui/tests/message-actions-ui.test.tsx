@@ -6,7 +6,7 @@ afterEach(() => vi.useRealTimers());
 
 import { MessageStream } from "../src/components/MessageStream";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
-import type { AssistantSegment, MessageSegment } from "../src/lib/session-view";
+import type { AssistantSegment, MessageSegment } from "../src/lib/task-view";
 
 function assistant(
   overrides: Partial<AssistantSegment> = {}
@@ -27,7 +27,7 @@ function render(items: MessageSegment[], streaming = false): string {
     createElement(MessageStream, {
       items,
       streaming,
-      sessionId: "actions-session",
+      sessionId: "actions-task",
     })
   );
 }

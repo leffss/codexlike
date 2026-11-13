@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
-export interface SessionMenuAnchor {
+export interface TaskMenuAnchor {
   x: number;
   y: number;
   target: HTMLElement;
@@ -14,9 +14,9 @@ interface MenuItem {
 }
 
 /** 焦点仅在主动取消时归还；执行操作不能抢走对话框或重命名输入的焦点。 */
-export function SessionContextMenu(props: {
+export function TaskContextMenu(props: {
   sessionId: string;
-  anchor: SessionMenuAnchor;
+  anchor: TaskMenuAnchor;
   items: MenuItem[];
   onClose: (restoreFocus: boolean) => void;
 }) {

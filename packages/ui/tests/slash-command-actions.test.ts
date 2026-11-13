@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { ProviderProfile } from "@codexlike/agent-core";
 
 import {
-  formatSessionStatus,
+  formatTaskStatus,
   matchProfilesForModelSwitch,
   planSlashCommand,
 } from "../src/lib/slash-command-actions";
-import type { SessionStatusInfo } from "@codexlike/desktop/ipc";
+import type { TaskStatusInfo } from "@codexlike/desktop/ipc";
 
 const profiles: ProviderProfile[] = [
   {
@@ -37,7 +37,7 @@ const profiles: ProviderProfile[] = [
 describe("planSlashCommand", () => {
   it("/new：按管理归属打开新草稿，不依赖执行工作区", () => {
     expect(planSlashCommand({ name: "new", argument: "" }, true)).toEqual({
-      type: "new-session",
+      type: "new-task",
     });
   });
 
@@ -64,16 +64,16 @@ describe("planSlashCommand", () => {
 
   it("除 /new 外的命令在没有会话时不可用", () => {
     expect(planSlashCommand({ name: "status", argument: "" }, false)).toEqual({
-      type: "needs-session",
+      type: "needs-task",
     });
     expect(planSlashCommand({ name: "rename", argument: "x" }, false)).toEqual({
-      type: "needs-session",
+      type: "needs-task",
     });
   });
 
   it("新草稿中的 /new 与新建按钮一样可用，不要求先产生空会话", () => {
     expect(planSlashCommand({ name: "new", argument: "" }, false)).toEqual({
-      type: "new-session",
+      type: "new-task",
     });
   });
 });
@@ -107,10 +107,10 @@ describe("matchProfilesForModelSwitch（/model 关键词匹配）", () => {
   });
 });
 
-describe("formatSessionStatus（/status 展示文案）", () => {
+describe("formatTaskStatus（/status 展示文案）", () => {
   it("最近轮摘要独立显示采集时间与分执行者加载，明确不代表当前激活", () => {
     for (const resourcePhase of ["active", "preview"] as const) {
-      const text = formatSessionStatus({
+      const text = formatTaskStatus({
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 500,
@@ -175,7 +175,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
     }
   });
   it("没有最近轮摘要不显示历史加载，空加载摘要仍展示采集时间", () => {
-    const status: SessionStatusInfo = {
+    const status: TaskStatusInfo = {
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
@@ -185,11 +185,11 @@ describe("formatSessionStatus（/status 展示文案）", () => {
       contextWindowTokens: null,
       compacted: null,
     };
-    expect(formatSessionStatus(status)).not.toContain("最近一轮摘要");
-    expect(
-      formatSessionStatus({ ...status, lastResources: null })
-    ).not.toContain("最近一轮摘要");
-    const text = formatSessionStatus({
+    expect(formatTaskStatus(status)).not.toContain("最近一轮摘要");
+    expect(formatTaskStatus({ ...status, lastResources: null })).not.toContain(
+      "最近一轮摘要"
+    );
+    const text = formatTaskStatus({
       ...status,
       lastResources: {
         estimatedTokens: 0,
@@ -210,7 +210,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
 
   it("资源状态区分当前快照和下轮预览，展示来源/状态/诊断与执行者而非正文", () => {
     for (const resourcePhase of ["active", "preview"] as const) {
-      const text = formatSessionStatus({
+      const text = formatTaskStatus({
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 500,
@@ -277,7 +277,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
     }
   });
   it("包含模型、用量估算、消息数、AGENTS.md 来源与审批模式（中文档位说明）", () => {
-    const text = formatSessionStatus({
+    const text = formatTaskStatus({
       model: "glm-4.7",
       providerProfileName: "GLM",
       estimatedContextTokens: 1234,
@@ -292,7 +292,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
       approvalMode: "assist",
       contextWindowTokens: null,
       compacted: null,
-    } satisfies SessionStatusInfo);
+    } satisfies TaskStatusInfo);
     expect(text).toContain("模型：GLM · glm-4.7");
     expect(text).toContain("1234");
     expect(text).toContain("12");
@@ -311,7 +311,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
         "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
       ],
     ] as const) {
-      const text = formatSessionStatus({
+      const text = formatTaskStatus({
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 0,
@@ -320,13 +320,13 @@ describe("formatSessionStatus（/status 展示文案）", () => {
         approvalMode: mode,
         contextWindowTokens: null,
         compacted: null,
-      } satisfies SessionStatusInfo);
+      } satisfies TaskStatusInfo);
       expect(text).toContain(expected);
     }
   });
 
   it("未发现 AGENTS.md、未选模型时的降级文案", () => {
-    const text = formatSessionStatus({
+    const text = formatTaskStatus({
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
@@ -335,7 +335,7 @@ describe("formatSessionStatus（/status 展示文案）", () => {
       approvalMode: "assist",
       contextWindowTokens: null,
       compacted: null,
-    } satisfies SessionStatusInfo);
+    } satisfies TaskStatusInfo);
     expect(text).toContain("未选择");
     expect(text).toContain("未发现");
   });
@@ -343,17 +343,17 @@ describe("formatSessionStatus（/status 展示文案）", () => {
 
 /** 工单 08：/compact 命令分发与 /status 已压缩文案 */
 describe("/compact（手动压缩）ui 分发", () => {
-  it("/compact → compact 动作；无会话时 needs-session", () => {
+  it("/compact → compact 动作；无会话时 needs-task", () => {
     expect(planSlashCommand({ name: "compact", argument: "" }, true)).toEqual({
       type: "compact",
     });
     expect(planSlashCommand({ name: "compact", argument: "" }, false)).toEqual({
-      type: "needs-session",
+      type: "needs-task",
     });
   });
 
-  it("formatSessionStatus：已压缩时显示「已压缩」标记与压缩后用量", () => {
-    const text = formatSessionStatus({
+  it("formatTaskStatus：已压缩时显示「已压缩」标记与压缩后用量", () => {
+    const text = formatTaskStatus({
       model: "glm-4.7",
       providerProfileName: "GLM",
       estimatedContextTokens: 210,
@@ -362,14 +362,14 @@ describe("/compact（手动压缩）ui 分发", () => {
       approvalMode: "assist",
       contextWindowTokens: null,
       compacted: { at: "2026-11-11T09:00:00.000Z", messagesCompacted: 8 },
-    } satisfies SessionStatusInfo);
+    } satisfies TaskStatusInfo);
     expect(text).toContain("已压缩");
     expect(text).toContain("8");
     expect(text).toContain("210");
   });
 
-  it("formatSessionStatus：未压缩时不显示压缩标记", () => {
-    const text = formatSessionStatus({
+  it("formatTaskStatus：未压缩时不显示压缩标记", () => {
+    const text = formatTaskStatus({
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
@@ -378,7 +378,7 @@ describe("/compact（手动压缩）ui 分发", () => {
       approvalMode: "assist",
       contextWindowTokens: null,
       compacted: null,
-    } satisfies SessionStatusInfo);
+    } satisfies TaskStatusInfo);
     expect(text).not.toContain("已压缩");
   });
 });

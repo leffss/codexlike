@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useCollapseState } from "../lib/collapse-memory";
-import type { ToolCallSegment } from "../lib/session-view";
+import type { ToolCallSegment } from "../lib/task-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";

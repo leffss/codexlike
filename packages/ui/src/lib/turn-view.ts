@@ -1,8 +1,4 @@
-import type {
-  MessageSegment,
-  ToolCallSegment,
-  UserSegment,
-} from "./session-view";
+import type { MessageSegment, ToolCallSegment, UserSegment } from "./task-view";
 
 /**
  * 轮次聚合与轮内切分（ADR 0011 呈现分层第三层，GLOSSARY「轮次」「已工作折叠区」）。
