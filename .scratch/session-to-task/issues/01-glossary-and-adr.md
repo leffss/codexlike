@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** completed
+**Status:** done
 
 - [x] GLOSSARY「会话（Session）」词条更名为「任务（Task）」，定义内容随词更新；_Avoid_ 反转：`task` 移出，`session`、`会话`、chat、conversation 进入
 - [x] 派生词条同步换词：独立会话→独立任务、会话自动批准→任务自动批准；用户交互、执行审批、审批模式、输入队列、排队消息、队列暂停、消息流、工作台目标、启动现场、托管 Worktree、斜杠命令、思考档位、Compact 等词条正文中的「会话」全部改为「任务」，对应英文 Session→Task
