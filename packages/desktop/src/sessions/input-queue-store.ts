@@ -81,6 +81,12 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
   const removeStmt = db.prepare(
     "DELETE FROM input_queue WHERE session_id = ? AND id = ?"
   );
+  const updateStmt = db.prepare(
+    "UPDATE input_queue SET text = ?, mention_paths = ? WHERE session_id = ? AND id = ?"
+  );
+  const reorderStmt = db.prepare(
+    "UPDATE input_queue SET position = ? WHERE session_id = ? AND id = ?"
+  );
   const clearStmt = db.prepare("DELETE FROM input_queue WHERE session_id = ?");
   const pausedStmt = db.prepare(
     "SELECT paused FROM input_queue_state WHERE session_id = ?"
@@ -92,11 +98,15 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     "DELETE FROM input_queue_state WHERE session_id = ?"
   );
 
+  function list(sessionId: string): QueuedMessage[] {
+    return (listStmt.all(sessionId) as unknown as QueueRow[]).map(
+      toQueuedMessage
+    );
+  }
+
   return {
     list(sessionId) {
-      return (listStmt.all(sessionId) as unknown as QueueRow[]).map(
-        toQueuedMessage
-      );
+      return list(sessionId);
     },
     append(sessionId, entry) {
       const position = Number(
@@ -117,6 +127,40 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     },
     remove(sessionId, id) {
       return removeStmt.run(sessionId, id).changes > 0;
+    },
+    update(sessionId, id, patch) {
+      const changes = updateStmt.run(
+        patch.text,
+        JSON.stringify(patch.mentionPaths),
+        sessionId,
+        id
+      ).changes;
+      if (changes === 0) return null;
+      return list(sessionId).find((entry) => entry.id === id) ?? null;
+    },
+    reorder(sessionId, orderedIds) {
+      const current = list(sessionId);
+
+      const idSet = new Set(orderedIds);
+      if (idSet.size !== orderedIds.length)
+        throw new Error("重排：条目清单有重复");
+      const members = current.filter((entry) => idSet.has(entry.id));
+      if (members.length !== orderedIds.length)
+        throw new Error("重排：条目清单与队列不一致");
+      // 子集占用的 position 集合内重新分配；整体一个事务，中断不产生半套顺序
+      const positions = members
+        .map((entry) => entry.position)
+        .sort((a, b) => a - b);
+      db.exec("BEGIN");
+      try {
+        orderedIds.forEach((id, index) => {
+          reorderStmt.run(positions[index]!, sessionId, id);
+        });
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     clear(sessionId) {
       clearStmt.run(sessionId);

@@ -508,6 +508,7 @@ void app.whenReady().then(async () => {
     manager,
     profiles: store,
     getWindow: () => mainWindow,
+    getWindows: () => BrowserWindow.getAllWindows(),
     dataDir: dataDir(),
     browserManager,
     worktreeService,

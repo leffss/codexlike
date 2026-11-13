@@ -44,6 +44,30 @@ function createMemoryStore(): InputQueueStore {
     clear(sessionId) {
       rows.delete(sessionId);
     },
+    update(sessionId, id, patch) {
+      const current = rows.get(sessionId) ?? [];
+      const index = current.findIndex((item) => item.id === id);
+      if (index === -1) return null;
+      const saved = { ...current[index]!, ...patch };
+      current[index] = saved;
+      return saved;
+    },
+    reorder(sessionId, orderedIds) {
+      const current = list(sessionId);
+      const idSet = new Set(orderedIds);
+      if (idSet.size !== orderedIds.length)
+        throw new Error("重排：条目清单有重复");
+      const members = current.filter((item) => idSet.has(item.id));
+      if (members.length !== orderedIds.length)
+        throw new Error("重排：条目清单与队列不一致");
+      const positions = members
+        .map((item) => item.position)
+        .sort((a, b) => a - b);
+      const byId = new Map(members.map((item) => [item.id, item]));
+      orderedIds.forEach((id, index) => {
+        byId.get(id)!.position = positions[index]!;
+      });
+    },
     isPaused: (sessionId) => paused.has(sessionId),
     setPaused(sessionId, value) {
       if (value) paused.add(sessionId);
@@ -153,9 +177,13 @@ describe("createSessionInputQueues（忙时入队与逐条自动消费）", () =
       expect(app.queues.snapshot("session-1")).toEqual([])
     );
     expect(app.store.list("session-1")).toEqual([]);
+    // 票 03：取出即「正在发出」事件（带锁定 id）→ 出队（inflight 视图）
+    // → 本轮结束移出视图；顺序保持
     expect(app.changes.map((item) => item.reason)).toEqual([
       "enqueue",
+      "sending",
       "dequeue",
+      "sending",
     ]);
   });
 
@@ -182,12 +210,15 @@ describe("createSessionInputQueues（忙时入队与逐条自动消费）", () =
     await vi.waitFor(() =>
       expect(app.dispatched.map((item) => item.entry.text)).toEqual(["第一条"])
     );
-    // 第一条「回复进行中」：第二条不得发出；第一条已发出（移除）
+    // 第一条「回复进行中」：第二条不得发出；第一条已从持久层移除，
+    // 以「正在发出」（inflight 视图置顶 + 锁定 id）保留在队列视图中
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(app.dispatched).toHaveLength(1);
     expect(app.queues.snapshot("session-1").map((item) => item.text)).toEqual([
+      "第一条",
       "第二条",
     ]);
+    expect(app.queues.sendingItem("session-1")).toBeDefined();
 
     // 第一条回复完成：第二条随后发出、队列清空
     await vi.waitFor(() => expect(releases.length).toBe(1));
@@ -207,10 +238,12 @@ describe("createSessionInputQueues（忙时入队与逐条自动消费）", () =
     let failFirst = true;
     const app = harness({
       isBusy: () => true,
-      dispatch: (sessionId, entry) =>
-        entry.text === "第一条" && failFirst
-          ? Promise.reject(new Error("Profile 已删除"))
-          : Promise.resolve(),
+      dispatch: (sessionId, entry, onSettled) => {
+        if (entry.text === "第一条" && failFirst)
+          return Promise.reject(new Error("Profile 已删除"));
+        onSettled();
+        return Promise.resolve();
+      },
     });
     app.queues.enqueue("session-1", { ...INPUT, text: "第一条" });
     app.setBusy(() => false);

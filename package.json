@@ -27,6 +27,7 @@
     "test:e2e:subagent-thinking": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-thinking",
     "test:e2e:message-order": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:message-order",
     "test:e2e:input-queue": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue",
+    "test:e2e:input-queue-items": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-items",
     "test:e2e:worked-history": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:worked-history",
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
     "prepare": "husky",

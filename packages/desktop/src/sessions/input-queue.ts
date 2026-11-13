@@ -38,6 +38,18 @@ export interface InputQueueStore {
   ): QueuedMessage;
   /** 移除一条；不存在返回 false。 */
   remove(sessionId: string, id: string): boolean;
+  /** 原地更新内容（顺序与参数快照不变）；条目不存在返回 null。 */
+  update(
+    sessionId: string,
+    id: string,
+    patch: { text: string; mentionPaths: string[] }
+  ): QueuedMessage | null;
+  /**
+   * 按给定子集顺序重排：子集当前占用的 position 集合内重新分配，
+   * 子集外的条目（如正在发出未出队的队首）位置不动。
+   * 清单与队列子集不符（未知/重复）抛错，顺序不变。
+   */
+  reorder(sessionId: string, orderedIds: string[]): void;
   /** 清空指定会话的队列。 */
   clear(sessionId: string): void;
   /** 队列暂停标志（票 02）：随队列持久化，重启后保持暂停（启动扫描见票 04）。 */
@@ -48,9 +60,17 @@ export interface InputQueueStore {
   close(): void;
 }
 
-/** 队列变更原因：入队 / 出队发送 / 置暂停 / 恢复 / 清空（事件信封携带变更后快照与暂停态）。 */
+/** 队列变更原因：入队 / 出队发送 / 置暂停 / 恢复 / 清空 / 单条删除 / 原地编辑 / 重排 / 正在发出状态变化。 */
 export type QueueChangeReason =
-  "enqueue" | "dequeue" | "pause" | "resume" | "clear";
+  | "enqueue"
+  | "dequeue"
+  | "pause"
+  | "resume"
+  | "clear"
+  | "remove"
+  | "update"
+  | "reorder"
+  | "sending";
 
 /**
  * 每会话独立的输入队列协调器（票 01 主干）。
@@ -79,20 +99,48 @@ export function createSessionInputQueues(deps: {
     reason: QueueChangeReason,
     queue: QueuedMessage[],
     /** 变更后的队列暂停标志（票 02）：渲染层据此区分暂停态与正常排队。 */
-    paused: boolean
+    paused: boolean,
+    /** 正在发出的条目 id（票 03）：已取出发送、尚未出队；null 表示无。 */
+    sendingId: string | null
   ) => void;
 }) {
   const { store, isBusy, dispatch, onChange } = deps;
   const pumping = new Set<string>();
   /** 插话（票 02）在途标记：暂停期间直发的新消息已开始执行，其回复结束时自动恢复消费。 */
   const interjections = new Set<string>();
+  /**
+   * 正在发出的条目（票 03）：pump 取队首发送前同步登记（主进程单一真相，
+   * 不靠 UI disabled）——await 期间该条目不可编辑/删除/重排；发送启动完成
+   * 出队或启动失败解锁。每会话同时至多一条（消费逐条进行）。
+   */
+  const sendingIds = new Map<string, string>();
+  /**
+   * 本轮已取出发送、回复尚未结束的条目（票 03，spec 用户故事 25）：已从
+   * 持久层移除（崩溃重启不会重发），但保留在队列视图中以「正在发出」区别
+   * 显示并锁定，本轮回复结束（完成/出错/中断）后从视图移除。内存态，
+   * 重启后自然消失（条目已出队落库）。
+   */
+  const inflight = new Map<string, QueuedMessage>();
+
+  /** 队列视图：正在发出的条目置顶（锁定显示）+ 仍在排队的条目。 */
+  function queueView(sessionId: string): QueuedMessage[] {
+    const sending = inflight.get(sessionId);
+    const rest = store.list(sessionId);
+    return sending === undefined ? rest : [sending, ...rest];
+  }
+
+  /** 正在发出的条目 id：取出发送中，或本轮已发出、回复未结束（inflight）。 */
+  function currentSendingId(sessionId: string): string | null {
+    return sendingIds.get(sessionId) ?? inflight.get(sessionId)?.id ?? null;
+  }
 
   function notify(sessionId: string, reason: QueueChangeReason): void {
     onChange(
       sessionId,
       reason,
-      store.list(sessionId),
-      store.isPaused(sessionId)
+      queueView(sessionId),
+      store.isPaused(sessionId),
+      currentSendingId(sessionId)
     );
   }
 
@@ -106,6 +154,10 @@ export function createSessionInputQueues(deps: {
         if (store.isPaused(sessionId)) return;
         const head = store.list(sessionId)[0];
         if (head === undefined) return;
+        // 票 03：取出发送即同步锁定（主进程强制）——dispatch 内部的 await
+        // 窗口期里，迟到的编辑/删除/重排都会被拒，已发出的条目不能被改写。
+        sendingIds.set(sessionId, head.id);
+        notify(sessionId, "sending");
         let releaseSettled!: () => void;
         const settled = new Promise<void>((resolve) => {
           releaseSettled = resolve;
@@ -113,15 +165,23 @@ export function createSessionInputQueues(deps: {
         try {
           await dispatch(sessionId, head, releaseSettled);
         } catch {
-          // 启动失败：条目保留（消息不丢），等待下一个触发点。
+          // 启动失败：解锁并保留条目（消息不丢），等待下一个触发点。
+          sendingIds.delete(sessionId);
+          notify(sessionId, "sending");
           return;
         }
-        // 消息已发出：从队列移除并在本轮流仍在进行时推送出队事件
-        // （信封需要当前执行的 executionId，见 session-ipc 装配）。
+        // 消息已发出：立即从持久层移除（崩溃重启不重发），转入 inflight
+        // 视图（正在发出、锁定显示）直到本轮回复结束。
         store.remove(sessionId, head.id);
+        sendingIds.delete(sessionId);
+        inflight.set(sessionId, head);
         notify(sessionId, "dequeue");
         // 等本轮回复结束再取下一条（发一条、等完成、再发下一条）。
         await settled;
+        if (inflight.get(sessionId) === head) {
+          inflight.delete(sessionId);
+          notify(sessionId, "sending");
+        }
       }
     } finally {
       pumping.delete(sessionId);
@@ -150,9 +210,69 @@ export function createSessionInputQueues(deps: {
       }
       void pump(sessionId);
     },
-    /** 当前队列快照（position 升序）。 */
+    /** 删除只作用于仍在排队的本会话条目，不容许跨会话操作。 */
+    remove(sessionId: string, id: string): void {
+      if (sendingIds.get(sessionId) === id)
+        throw new Error("该消息正在发出，不能删除");
+      if (!store.remove(sessionId, id))
+        throw new Error("排队消息不存在或已发出，请刷新队列");
+      notify(sessionId, "remove");
+    },
+    /**
+     * 原地编辑（票 03）：内容更新、位置与参数快照不变，顺序不受影响。
+     * expectedText 是取回编辑时的原文（CAS）：条目已被其他窗口修改则拒绝，
+     * 由用户重新载入；正在发出的条目拒绝迟到保存。
+     */
+    update(
+      sessionId: string,
+      id: string,
+      patch: { text: string; mentionPaths: string[] },
+      expectedText: string
+    ): QueuedMessage {
+      if (sendingIds.get(sessionId) === id)
+        throw new Error("该消息正在发出，不能编辑");
+      const current = store.list(sessionId).find((entry) => entry.id === id);
+      if (current === undefined)
+        throw new Error("排队消息不存在或已发出，请刷新队列");
+      if (current.text !== expectedText)
+        throw new Error("该消息已被其他窗口修改，请重新点击载入编辑");
+      const updated = store.update(sessionId, id, patch);
+      if (updated === null)
+        throw new Error("排队消息不存在或已发出，请刷新队列");
+      notify(sessionId, "update");
+      return updated;
+    },
+    /**
+     * 重排（票 03）：orderedIds 必须恰好是本会话仍在排队（不含正在发出）
+     * 的全部条目 id 的一次排列——清单不完整或夹带未知 id 一律拒绝，
+     * 异步入队/删除交错时不会遗漏或复活条目；合法则在排队子集内重排。
+     */
+    reorder(sessionId: string, orderedIds: string[]): void {
+      const sendingId = sendingIds.get(sessionId);
+      if (sendingId !== undefined && orderedIds.includes(sendingId))
+        throw new Error("正在发出的消息不能重排");
+      const queuedIds = store
+        .list(sessionId)
+        .filter((entry) => entry.id !== sendingId)
+        .map((entry) => entry.id);
+      const unique = new Set(orderedIds);
+      if (
+        unique.size !== orderedIds.length ||
+        unique.size !== queuedIds.length ||
+        orderedIds.some((id) => !unique.has(id)) ||
+        queuedIds.some((id) => !unique.has(id))
+      )
+        throw new Error("重排清单与当前排队条目不一致，请刷新后重试");
+      store.reorder(sessionId, orderedIds);
+      notify(sessionId, "reorder");
+    },
+    /** 正在发出的条目 id（票 03）：取出发送中或本轮已发出未结束；null 表示无。 */
+    sendingItem(sessionId: string): string | null {
+      return currentSendingId(sessionId);
+    },
+    /** 当前队列快照（正在发出的条目置顶 + 仍按 position 升序的排队条目）。 */
     snapshot(sessionId: string): QueuedMessage[] {
-      return store.list(sessionId);
+      return queueView(sessionId);
     },
     /** 队列暂停标志（票 02）。 */
     isPaused(sessionId: string): boolean {
@@ -225,6 +345,31 @@ export function createMemoryInputQueueStore(): InputQueueStore {
       if (index === -1) return false;
       current.splice(index, 1);
       return true;
+    },
+    update(sessionId, id, patch) {
+      const current = rows.get(sessionId) ?? [];
+      const index = current.findIndex((item) => item.id === id);
+      if (index === -1) return null;
+      const saved = { ...current[index]!, ...patch };
+      current[index] = saved;
+      return saved;
+    },
+    reorder(sessionId, orderedIds) {
+      const current = rows.get(sessionId) ?? [];
+      const idSet = new Set(orderedIds);
+      if (idSet.size !== orderedIds.length)
+        throw new Error("重排：条目清单有重复");
+      const members = current.filter((item) => idSet.has(item.id));
+      if (members.length !== orderedIds.length)
+        throw new Error("重排：条目清单与队列不一致");
+      // 子集占用的 position 集合内重新分配，子集外条目（如正在发出的队首）不动
+      const positions = members
+        .map((item) => item.position)
+        .sort((a, b) => a - b);
+      const byId = new Map(members.map((item) => [item.id, item]));
+      orderedIds.forEach((id, index) => {
+        byId.get(id)!.position = positions[index]!;
+      });
     },
     clear(sessionId) {
       rows.delete(sessionId);

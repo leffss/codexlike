@@ -102,6 +102,19 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.sessions.queueResume, sessionId),
     queueClear: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.queueClear, sessionId),
+    queueRemove: (sessionId, itemId) =>
+      ipcRenderer.invoke(IPC.sessions.queueRemove, sessionId, itemId),
+    queueUpdate: (sessionId, itemId, text, expectedText, mentionPaths) =>
+      ipcRenderer.invoke(
+        IPC.sessions.queueUpdate,
+        sessionId,
+        itemId,
+        text,
+        expectedText,
+        mentionPaths
+      ),
+    queueReorder: (sessionId, orderedIds) =>
+      ipcRenderer.invoke(IPC.sessions.queueReorder, sessionId, orderedIds),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>

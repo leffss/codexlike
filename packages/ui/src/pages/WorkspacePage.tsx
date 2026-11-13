@@ -61,6 +61,14 @@ import {
   planSlashCommand,
 } from "../lib/slash-command-actions";
 
+/** 取回编辑会话（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
+interface QueueEditSession {
+  sessionId: string;
+  itemId: string;
+  originalText: string;
+  savedDraft: string;
+}
+
 /**
  * 主界面三栏装配：会话列表 / 消息流 / 输入框。
  * 会话与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
@@ -101,6 +109,17 @@ export function WorkspacePage(props: {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   /** 队列暂停标志（票 02）：停止保留队列时队列条显示暂停态与恢复/清空操作 */
   const [queuePaused, setQueuePaused] = useState(false);
+  /** 正在发出的条目 id（票 03）：队列条区别显示并锁定 */
+  const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
+  /**
+   * 取回编辑会话（票 03）：点击排队消息把内容载入输入框，保存原地更新。
+   * originalText 为载入时的原文（主进程 CAS 校验）；savedDraft 为进入编辑前
+   * 的输入框草稿，取消编辑或切走会话时还原，不丢用户文字。
+   */
+  const [queueEdit, setQueueEdit] = useState<QueueEditSession | null>(null);
+  /** 编辑会话的即时读数：事件回调里不读过期的渲染帧状态 */
+  const queueEditRef = useRef<QueueEditSession | null>(null);
+  queueEditRef.current = queueEdit;
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
@@ -271,6 +290,11 @@ export function WorkspacePage(props: {
     async (id: string) => {
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
+      // 编辑中的排队消息随会话归属：切走先还原该会话的输入框草稿，不丢文字（票 03）
+      const editing = queueEditRef.current;
+      if (editing !== null && editing.sessionId !== id)
+        workspaceState.setComposer(editing.sessionId, editing.savedDraft);
+      setQueueEdit(null);
       setCurrentId(id);
       workspaceState.activeSessionId = id;
       currentIdRef.current = id;
@@ -280,6 +304,7 @@ export function WorkspacePage(props: {
       setMessages([]);
       setQueue([]);
       setQueuePaused(false);
+      setQueueSendingId(null);
       setWorkspaceFiles([]);
       setResources(null);
       setContextWarning(null);
@@ -321,6 +346,7 @@ export function WorkspacePage(props: {
         setMessages(live.items);
         setQueue(live.queue);
         setQueuePaused(live.queuePaused);
+        setQueueSendingId(live.queueSendingId);
         setStreaming(live.activity.running);
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
@@ -413,6 +439,7 @@ export function WorkspacePage(props: {
           ]);
           setQueue(live.queue);
           setQueuePaused(live.queuePaused);
+          setQueueSendingId(live.queueSendingId);
           setStreaming(live.activity.running);
           setCompacting(
             live.activity.running && live.activity.operation === "compact"
@@ -638,6 +665,7 @@ export function WorkspacePage(props: {
       const result = await window.codexlike.sessions.queueResume(currentId);
       setQueue(result.queue);
       setQueuePaused(result.paused);
+      setQueueSendingId(result.sendingId);
     } catch (error) {
       pushLocalStatus(
         `恢复队列失败：${error instanceof Error ? error.message : String(error)}`
@@ -654,12 +682,136 @@ export function WorkspacePage(props: {
       const result = await window.codexlike.sessions.queueClear(currentId);
       setQueue(result.queue);
       setQueuePaused(result.paused);
+      setQueueSendingId(result.sendingId);
     } catch (error) {
       pushLocalStatus(
         `清空队列失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
+
+  /** 删除单条排队消息（票 03）：立即作废，不会被消费。 */
+  async function removeQueueItem(itemId: string) {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const result = await window.codexlike.sessions.queueRemove(
+        currentId,
+        itemId
+      );
+      setQueue(result.queue);
+      setQueuePaused(result.paused);
+      setQueueSendingId(result.sendingId);
+    } catch (error) {
+      pushLocalStatus(
+        `删除排队消息失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 拖拽重排（票 03）：提交仍在排队条目的完整新顺序，顺序即时生效并持久化。 */
+  async function reorderQueue(orderedIds: string[]) {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const result = await window.codexlike.sessions.queueReorder(
+        currentId,
+        orderedIds
+      );
+      setQueue(result.queue);
+      setQueuePaused(result.paused);
+      setQueueSendingId(result.sendingId);
+    } catch (error) {
+      pushLocalStatus(
+        `调整发送顺序失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 点击排队消息取回编辑（票 03）：内容载入输入框；正在发出的条目锁定不可编辑。 */
+  function startQueueItemEdit(item: QueuedMessage) {
+    if (currentId === null || item.sessionId !== currentId) return;
+    if (item.id === queueSendingId) return;
+    const editing = queueEditRef.current;
+    // 切换编辑目标时沿用最早保存的草稿（当前输入框已是另一条排队内容）
+    const savedDraft =
+      editing?.sessionId === currentId
+        ? editing.savedDraft
+        : workspaceState.composer(currentId);
+    setQueueEdit({
+      sessionId: currentId,
+      itemId: item.id,
+      originalText: item.text,
+      savedDraft,
+    });
+    workspaceState.setComposer(currentId, item.text);
+  }
+
+  /** 取消编辑（票 03）：条目原样保留，输入框还原进入编辑前的草稿。 */
+  function cancelQueueEdit() {
+    const editing = queueEditRef.current;
+    if (editing === null) return;
+    setQueueEdit(null);
+    if (currentIdRef.current === editing.sessionId)
+      workspaceState.setComposer(editing.sessionId, editing.savedDraft);
+  }
+
+  /**
+   * 保存编辑（票 03）：原地更新该条，顺序与参数快照不变。
+   * 主进程按载入原文 CAS 校验：条目已被其他窗口修改或已取出发送则拒绝，
+   * 此时编辑文本保留在输入框（不无声丢失，由用户决定下一步）。
+   */
+  async function saveQueueEdit(text: string, mentionPaths: string[]) {
+    const editing = queueEditRef.current;
+    if (editing === null) return;
+    const { sessionId, itemId, originalText } = editing;
+    const composerSnapshot = workspaceState.composer(sessionId);
+    try {
+      const result = await window.codexlike.sessions.queueUpdate(
+        sessionId,
+        itemId,
+        text,
+        originalText,
+        mentionPaths.length === 0 ? undefined : mentionPaths
+      );
+      if (currentIdRef.current === sessionId) {
+        setQueue(result.queue);
+        setQueuePaused(result.paused);
+        setQueueSendingId(result.sendingId);
+      }
+      setQueueEdit(null);
+      if (workspaceState.composer(sessionId) === composerSnapshot)
+        workspaceState.setComposer(sessionId, "");
+    } catch (error) {
+      // 保存被拒：编辑会话结束，文本留在输入框，用户可重新取回或直接发送
+      setQueueEdit(null);
+      if (currentIdRef.current === sessionId)
+        pushLocalStatus(
+          `保存排队消息失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
+        );
+    }
+  }
+
+  // 编辑目标被消费/移除/他窗口操作时结束编辑会话：文本保留在输入框（票 03）
+  useEffect(() => {
+    if (queueEdit === null || loading) return;
+    if (currentId === null || queueEdit.sessionId !== currentId) return;
+    const item = queue.find((entry) => entry.id === queueEdit.itemId);
+    if (item === undefined) {
+      setQueueEdit(null);
+      pushLocalStatus(
+        "编辑的排队消息已发出或被移除：编辑未保存，文本保留在输入框"
+      );
+      return;
+    }
+    if (item.id === queueSendingId) {
+      setQueueEdit(null);
+      pushLocalStatus("编辑的排队消息已开始发送：编辑未保存，文本保留在输入框");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pushLocalStatus 为稳定 useCallback
+  }, [queue, queueSendingId, queueEdit, currentId, loading]);
 
   /** 重命名按钮及命令共享记录刷新，已展开搜索不得保留旧标题。 */
   async function renameSession(id: string, title: string, announce = false) {
@@ -874,6 +1026,16 @@ export function WorkspacePage(props: {
       return;
     const submission = resolveComposerSubmission(text);
     if (submission === null) {
+      return;
+    }
+    // 取回编辑优先（票 03）：编辑中的提交是原地更新该条，不是新消息/入队
+    const editing = queueEditRef.current;
+    if (editing !== null && editing.sessionId === currentId) {
+      if (submission.kind === "slash-command") {
+        pushLocalStatus("编辑中的排队消息不能是命令（输入已保留）");
+        return;
+      }
+      void saveQueueEdit(submission.text, submission.mentionPaths);
       return;
     }
     if (submission.kind === "slash-command") {
@@ -1347,8 +1509,22 @@ export function WorkspacePage(props: {
               streaming={streaming}
               queue={currentId === null ? [] : queue}
               queuePaused={currentId !== null && queuePaused}
+              queueSendingItemId={currentId === null ? null : queueSendingId}
+              queueEditingItemId={
+                queueEdit !== null && queueEdit.sessionId === currentId
+                  ? queueEdit.itemId
+                  : null
+              }
               onQueueResume={() => void resumeQueue()}
               onQueueClear={() => void clearQueue()}
+              onQueueRemove={(itemId) => void removeQueueItem(itemId)}
+              onQueueEditItem={startQueueItemEdit}
+              onQueueReorder={(orderedIds) => void reorderQueue(orderedIds)}
+              onQueueCancelEdit={cancelQueueEdit}
+              queueEditing={
+                queueEdit !== null && queueEdit.sessionId === currentId
+              }
+              onCancelQueueEdit={cancelQueueEdit}
               onStop={() => void stop()}
               hint={composerHint}
               approvalMode={

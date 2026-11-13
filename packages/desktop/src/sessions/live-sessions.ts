@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   SessionManager,
   TranscriptItem,
@@ -65,7 +66,11 @@ export function createLiveSessions(manager: SessionManager) {
     event: SessionEventEnvelope["event"]
   ): SessionEventEnvelope | null {
     const live = sessions.get(id);
-    if (!live || live.executionId !== executionId || live.terminalAt > 0)
+    if (
+      !live ||
+      live.executionId !== executionId ||
+      (live.terminalAt > 0 && event.type !== "queue-changed")
+    )
       return null;
     // 停止后仅接收清理终态，不能再显示新的正文、工具开始或等待请求。
     if (
@@ -135,6 +140,26 @@ export function createLiveSessions(manager: SessionManager) {
     live.events.push(envelope);
     return envelope;
   }
+  /** 队列修改不等同于执行：空闲/重开后也延续会话水位，不伪造运行态。 */
+  function acceptQueue(
+    id: string,
+    event: Extract<SessionEventEnvelope["event"], { type: "queue-changed" }>
+  ): SessionEventEnvelope | null {
+    if (!sessions.has(id)) {
+      if (!manager.list().some((record) => record.id === id)) return null;
+      sessions.set(id, {
+        executionId: randomUUID(),
+        history: manager.transcript(id),
+        events: [],
+        sequence: 0,
+        viewed: 0,
+        terminalAt: 0,
+        stopped: false,
+        activity: activity(id),
+      });
+    }
+    return accept(id, sessions.get(id)!.executionId, event);
+  }
   function view(id: string): SessionView | null {
     const record = manager.list().find((record) => record.id === id);
     if (!record) return null;
@@ -174,6 +199,7 @@ export function createLiveSessions(manager: SessionManager) {
   return {
     begin,
     accept,
+    acceptQueue,
     view,
     activity,
     markViewed,

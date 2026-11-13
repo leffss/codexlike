@@ -105,6 +105,9 @@ export const IPC = {
     queueResume: "sessions:queue-resume",
     /** 输入队列（票 02）：清空——作废全部排队消息并清暂停标志 */
     queueClear: "sessions:queue-clear",
+    queueRemove: "sessions:queue-remove",
+    queueUpdate: "sessions:queue-update",
+    queueReorder: "sessions:queue-reorder",
     /** /rename 与侧栏重命名共用（同一 IPC 通道） */
     rename: "sessions:rename",
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
@@ -195,12 +198,14 @@ export interface SessionEventEnvelope {
         error?: string;
       }
     | {
-        /** 输入队列变更（票 01/02）：入队、出队发送、暂停/恢复/清空；queue 为变更后完整快照 */
+        /** 输入队列变更（票 01/02/03）：入队、出队发送、暂停/恢复/清空、删除/编辑/重排/发出锁定；queue 为变更后完整快照（正在发出的条目置顶） */
         type: "queue-changed";
         reason: QueueChangeReason;
         queue: QueuedMessage[];
         /** 变更后的队列暂停标志（票 02）：渲染层据此区分暂停态与正常排队 */
         paused: boolean;
+        /** 正在发出的条目 id（票 03）：队列快照中置顶锁定显示的条目；省略/null 表示无 */
+        sendingId?: string | null;
       };
   activity: SessionActivity;
 }
@@ -225,16 +230,21 @@ export interface SessionView {
   events: SessionEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: SessionActivity;
-  /** 输入队列快照（票 01）：切换会话时队列条原样恢复 */
+  /** 输入队列快照（票 01/03）：切换会话时队列条原样恢复（正在发出的条目置顶） */
   queue?: QueuedMessage[];
   /** 队列暂停标志（票 02）：切换/重启恢复时保持暂停态显示 */
   queuePaused?: boolean;
+  /** 正在发出的条目 id（票 03）：切换/重启恢复时保持区别显示 */
+  queueSendingId?: string | null;
 }
 
-/** 队列操作结果（票 02）：操作生效后的队列快照与暂停标志 */
+/** 队列操作结果（票 02/03）：操作生效后的队列快照、暂停标志与正在发出条目 */
 export interface QueueOperationResult {
+  sessionId: string;
+  sequence: number;
   queue: QueuedMessage[];
   paused: boolean;
+  sendingId: string | null;
 }
 
 export interface ProjectRemoval {
@@ -395,6 +405,27 @@ export interface CodexLikeApi {
      * 返回操作生效后的队列快照与暂停标志。
      */
     queueClear(sessionId: string): Promise<QueueOperationResult>;
+    /** 立即作废指定排队消息；已发出或跨会话条目拒绝修改。 */
+    queueRemove(
+      sessionId: string,
+      itemId: string
+    ): Promise<QueueOperationResult>;
+    /**
+     * 原地编辑排队消息（票 03）：内容更新、位置与参数快照不变。
+     * expectedText 为取回编辑时的原文（CAS）：他窗口先改或条目已取出发送则拒绝。
+     */
+    queueUpdate(
+      sessionId: string,
+      itemId: string,
+      text: string,
+      expectedText: string,
+      mentionPaths?: string[]
+    ): Promise<QueueOperationResult>;
+    /** 拖拽重排（票 03）：orderedIds 须为仍在排队条目的完整排列。 */
+    queueReorder(
+      sessionId: string,
+      orderedIds: string[]
+    ): Promise<QueueOperationResult>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
     rename(sessionId: string, title: string): Promise<SessionRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */

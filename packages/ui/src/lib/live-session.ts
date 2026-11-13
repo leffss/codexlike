@@ -22,6 +22,8 @@ export interface LiveSession {
   queue: QueuedMessage[];
   /** 队列暂停标志（票 02）：随 queue-changed 事件与 view 快照接续 */
   queuePaused: boolean;
+  /** 正在发出的条目 id（票 03）：区别显示并锁定；随 queue-changed 事件与 view 快照接续 */
+  queueSendingId: string | null;
 }
 
 function applyLiveEvent(
@@ -48,10 +50,8 @@ export function receiveLiveEvent(
   const starts =
     envelope.event.type === "user-message" ||
     envelope.event.type === "compact-start" ||
-    // 出队发送（票 01）开启新一轮执行：queue-changed 挂在发送轮的新
-    // executionId 上，与 user-message 同为明确执行起点。
-    (envelope.event.type === "queue-changed" &&
-      envelope.event.reason === "dequeue");
+    // 队列是会话状态而非执行增量：空闲修改也按主进程单调水位接续。
+    envelope.event.type === "queue-changed";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [
@@ -88,6 +88,10 @@ export function receiveLiveEvent(
       envelope.event.type === "queue-changed"
         ? envelope.event.paused
         : state.queuePaused,
+    queueSendingId:
+      envelope.event.type === "queue-changed"
+        ? (envelope.event.sendingId ?? null)
+        : state.queueSendingId,
   };
 }
 
@@ -108,6 +112,7 @@ export function hydrateLiveSession(
     items: mergeInteractions(items, view.pendingInteractions),
     queue: view.queue ?? [],
     queuePaused: view.queuePaused ?? false,
+    queueSendingId: view.queueSendingId ?? null,
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

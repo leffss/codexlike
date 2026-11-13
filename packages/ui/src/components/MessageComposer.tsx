@@ -140,10 +140,26 @@ export function MessageComposer(props: {
   queue?: QueuedMessage[];
   /** 队列暂停标志（票 02）：队列条显示暂停态与「恢复」「清空」操作 */
   queuePaused?: boolean;
+  /** 正在发出的条目 id（票 03）：队列条区别显示并锁定 */
+  queueSendingItemId?: string | null;
+  /** 编辑中的条目 id（票 03）：队列条高亮并显示取消入口 */
+  queueEditingItemId?: string | null;
   /** 手动恢复队列消费（票 02） */
   onQueueResume?: () => void;
   /** 清空队列（票 02） */
   onQueueClear?: () => void;
+  /** 删除单条排队消息（票 03） */
+  onQueueRemove?: (itemId: string) => void;
+  /** 点击排队消息取回编辑（票 03）：内容载入输入框 */
+  onQueueEditItem?: (item: QueuedMessage) => void;
+  /** 拖拽重排（票 03）：提交仍在排队条目的完整新顺序 */
+  onQueueReorder?: (orderedIds: string[]) => void;
+  /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿 */
+  onQueueCancelEdit?: () => void;
+  /** 正在编辑排队消息（票 03）：主操作变为「保存编辑」，Esc 取消 */
+  queueEditing?: boolean;
+  /** 取消编辑入口（票 03）：按钮与 Esc 共用 */
+  onCancelQueueEdit?: () => void;
 }) {
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
@@ -290,6 +306,13 @@ export function MessageComposer(props: {
       }
     }
 
+    // Esc 取消取回编辑（票 03）：菜单已关时才生效（菜单优先用 Esc 关闭）
+    if (event.key === "Escape" && menu === null && props.queueEditing) {
+      event.preventDefault();
+      props.onCancelQueueEdit?.();
+      return;
+    }
+
     // Enter 发送，Shift+Enter 换行
     if (
       event.key === "Enter" &&
@@ -316,8 +339,14 @@ export function MessageComposer(props: {
         <QueueBar
           queue={props.queue ?? []}
           paused={props.queuePaused}
+          sendingItemId={props.queueSendingItemId}
+          editingItemId={props.queueEditingItemId}
           onResume={props.onQueueResume}
           onClear={props.onQueueClear}
+          onRemove={props.onQueueRemove}
+          onEditItem={props.onQueueEditItem}
+          onReorder={props.onQueueReorder}
+          onCancelEdit={props.onQueueCancelEdit}
         />
         {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
         <form
@@ -493,7 +522,41 @@ export function MessageComposer(props: {
               >
                 技能
               </button>
-              {props.streaming === true ? (
+              {props.queueEditing ? (
+                <>
+                  {/* 票 03：取回编辑中的主操作——保存原地更新，取消保留原文并还原草稿 */}
+                  <button
+                    type="button"
+                    data-testid="composer-cancel-edit"
+                    onClick={() => props.onCancelQueueEdit?.()}
+                    className="h-8 shrink-0 rounded-full border border-line px-3 text-xs text-fg-muted hover:bg-hover"
+                    title="取消编辑：条目原样保留，输入框还原先前草稿"
+                  >
+                    取消编辑
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="composer-save-edit"
+                    disabled={props.disabled}
+                    onClick={submit}
+                    className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
+                    title="保存编辑（与 Enter 等效）：原地更新该条排队消息，不改变顺序"
+                  >
+                    保存编辑
+                  </button>
+                  {props.streaming === true && (
+                    <button
+                      type="button"
+                      data-testid="composer-stop"
+                      onClick={() => props.onStop?.()}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
+                      title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+                    >
+                      <StopIcon className="h-5 w-5" />
+                    </button>
+                  )}
+                </>
+              ) : props.streaming === true ? (
                 <>
                   {/* 票 05：忙且有输入 →「加入队列」主操作与「停止」并排（spec 用户故事 5）；
                       无输入或禁用（等待用户交互等）不提供入队，仅停止（用户故事 6 / 17）。 */}

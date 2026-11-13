@@ -248,8 +248,10 @@ it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随�
   );
   expect(dequeued.length).toBeGreaterThanOrEqual(1);
   expect((dequeued.at(-1)!.event as any).queue.map((i: any) => i.text)).toEqual(
-    ["乙"]
+    // 票 03：甲已取出发送——从持久层移除，以「正在发出」置顶保留在视图
+    ["甲", "乙"]
   );
+  expect((dequeued.at(-1)!.event as any).sendingId).toBeDefined();
 
   // 「甲」完成 → 「乙」随后自动发出
   await app.finish("甲");

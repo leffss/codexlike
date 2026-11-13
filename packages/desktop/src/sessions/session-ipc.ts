@@ -52,6 +52,8 @@ export function registerSessionHandlers(options: {
   manager: SessionManager;
   profiles: ProfileStore;
   getWindow: () => BrowserWindow | null;
+  /** 队列状态属于会话：所有工作台窗口都接收同一权威事件。 */
+  getWindows?: () => BrowserWindow[];
   /** 应用数据目录（截图读回的路径约定；工单 11） */
   dataDir: string;
   /** 浏览器会话管理器（会话归档时释放其浏览器 context；工单 11） */
@@ -67,6 +69,10 @@ export function registerSessionHandlers(options: {
     manager,
     profiles,
     getWindow,
+    getWindows = () => {
+      const window = getWindow();
+      return window ? [window] : [];
+    },
     dataDir,
     browserManager,
     worktreeService,
@@ -134,16 +140,19 @@ export function registerSessionHandlers(options: {
     store: queueStore,
     isBusy: (sessionId) => management.execution(sessionId)?.running ?? false,
     dispatch: dispatchQueued,
-    onChange: (sessionId, reason, queue, paused) => {
-      // 队列变更经会话事件信封推送；无活跃执行（如空闲时手动恢复/清空）时
-      // 无信封可挂，由操作通道的返回值与切回会话时的 view 快照兜底。
-      const executionId = executions.get(sessionId);
-      if (executionId === undefined) return;
-      emit({
-        sessionId,
-        executionId,
-        event: { type: "queue-changed", reason, queue, paused },
+    onChange: (sessionId, reason, queue, paused, sendingId) => {
+      const envelope = liveSessions.acceptQueue(sessionId, {
+        type: "queue-changed",
+        reason,
+        queue,
+        paused,
+        sendingId,
       });
+      if (!envelope) return;
+      for (const window of getWindows()) {
+        if (!window.isDestroyed())
+          window.webContents.send(IPC.sessionEvents, envelope);
+      }
     },
   });
 
@@ -246,6 +255,7 @@ export function registerSessionHandlers(options: {
           ...view,
           queue: queues.snapshot(sessionId),
           queuePaused: queues.isPaused(sessionId),
+          queueSendingId: queues.sendingItem(sessionId),
         };
   });
   ipcMain.handle(
@@ -655,17 +665,92 @@ export function registerSessionHandlers(options: {
     }
   );
 
+  function assertQueueSession(sessionId: unknown): asserts sessionId is string {
+    assertOpen();
+    if (typeof sessionId !== "string" || !sessionId.trim())
+      throw new Error("队列操作：会话标识不合法");
+    const record = manager.list().find((item) => item.id === sessionId);
+    if (!record) throw new Error("会话不存在或已移除");
+    if (record.archivedAt !== null)
+      throw new Error("会话已归档，请先恢复再操作队列");
+  }
+  function assertQueueItemId(id: unknown): asserts id is string {
+    if (typeof id !== "string" || !id.trim())
+      throw new Error("队列操作：条目标识不合法");
+  }
+  function queueResult(sessionId: string) {
+    return {
+      sessionId,
+      sequence: liveSessions.view(sessionId)?.sequence ?? 0,
+      queue: queues.snapshot(sessionId),
+      paused: queues.isPaused(sessionId),
+      sendingId: queues.sendingItem(sessionId),
+    };
+  }
+  ipcMain.handle(
+    IPC.sessions.queueRemove,
+    (_e, sessionId: unknown, id: unknown) => {
+      assertQueueSession(sessionId);
+      assertQueueItemId(id);
+      queues.remove(sessionId, id);
+      return queueResult(sessionId);
+    }
+  );
+  ipcMain.handle(
+    IPC.sessions.queueUpdate,
+    (
+      _e,
+      sessionId: unknown,
+      id: unknown,
+      text: unknown,
+      expectedText: unknown,
+      mentionPaths: unknown
+    ) => {
+      assertQueueSession(sessionId);
+      assertQueueItemId(id);
+      if (typeof text !== "string" || text.trim() === "")
+        throw new Error("消息内容不能为空");
+      if (typeof expectedText !== "string")
+        throw new Error("编辑保存：缺少原文校验值");
+      if (
+        mentionPaths !== undefined &&
+        (!Array.isArray(mentionPaths) ||
+          mentionPaths.some((path) => typeof path !== "string"))
+      )
+        throw new Error("queueUpdate：@引用 路径列表不合法");
+      queues.update(
+        sessionId,
+        id,
+        { text, mentionPaths: (mentionPaths as string[] | undefined) ?? [] },
+        expectedText
+      );
+      return queueResult(sessionId);
+    }
+  );
+  ipcMain.handle(
+    IPC.sessions.queueReorder,
+    (_e, sessionId: unknown, orderedIds: unknown) => {
+      assertQueueSession(sessionId);
+      if (
+        !Array.isArray(orderedIds) ||
+        orderedIds.some((id) => typeof id !== "string" || !id.trim()) ||
+        new Set(orderedIds).size !== orderedIds.length
+      )
+        throw new Error("重排：条目顺序清单不合法");
+      queues.reorder(sessionId, orderedIds as string[]);
+      return queueResult(sessionId);
+    }
+  );
+
   ipcMain.handle(
     IPC.sessions.queueResume,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
         throw new Error("queueResume：sessionId 必须是字符串");
       }
+      assertQueueSession(sessionId);
       queues.resume(sessionId);
-      return {
-        queue: queues.snapshot(sessionId),
-        paused: queues.isPaused(sessionId),
-      };
+      return queueResult(sessionId);
     }
   );
 
@@ -675,11 +760,9 @@ export function registerSessionHandlers(options: {
       if (typeof sessionId !== "string") {
         throw new Error("queueClear：sessionId 必须是字符串");
       }
+      assertQueueSession(sessionId);
       queues.clearQueue(sessionId);
-      return {
-        queue: queues.snapshot(sessionId),
-        paused: queues.isPaused(sessionId),
-      };
+      return queueResult(sessionId);
     }
   );
 

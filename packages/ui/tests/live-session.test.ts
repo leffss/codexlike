@@ -406,6 +406,93 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
   expect(restoredThinking.streaming).toBeUndefined();
 });
 
+it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回退队列", () => {
+  const view: SessionView = {
+    ...snapshot,
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  const changed: SessionEventEnvelope = {
+    ...delta(3, ""),
+    activity: view.activity,
+    event: {
+      type: "queue-changed",
+      reason: "remove",
+      queue: [],
+      paused: true,
+      sendingId: null,
+    },
+  };
+  const initial = hydrateLiveSession(view);
+  const next = receiveLiveEvent(initial, changed);
+  expect(next.sequence).toBe(3);
+  expect(next.queuePaused).toBe(true);
+  expect(next.items).toEqual(initial.items);
+  const buffered = hydrateLiveSession(view, [changed]);
+  expect(buffered).toMatchObject({
+    sequence: next.sequence,
+    queue: next.queue,
+    queuePaused: next.queuePaused,
+    queueSendingId: next.queueSendingId,
+  });
+  expect(receiveLiveEvent(next, changed)).toBe(next);
+  expect(
+    receiveLiveEvent(next, { ...changed, sessionId: "b", sequence: 4 })
+  ).toBe(next);
+});
+
+it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 id 不丢、出队后清空、切换恢复保持", () => {
+  const item = {
+    id: "q1",
+    sessionId: "a",
+    position: 0,
+    text: "正在发出的一条",
+    mentionPaths: [],
+    providerProfileId: "p1",
+    thinkingEffort: "auto" as const,
+    approvalMode: "ask" as const,
+    createdAt: "2026-11-13T00:00:00Z",
+  };
+  // 取出发送：sending 事件携带锁定 id，条目仍在队列快照中
+  const idle: SessionView = {
+    ...snapshot,
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  let state = hydrateLiveSession(idle);
+  state = receiveLiveEvent(state, {
+    ...delta(3, ""),
+    event: {
+      type: "queue-changed",
+      reason: "sending",
+      queue: [item],
+      paused: false,
+      sendingId: "q1",
+    },
+  });
+  expect(state.queueSendingId).toBe("q1");
+  expect(state.queue.map((entry) => entry.id)).toEqual(["q1"]);
+  // 出队完成：条目移除、锁定清空
+  state = receiveLiveEvent(state, {
+    ...delta(4, ""),
+    event: {
+      type: "queue-changed",
+      reason: "dequeue",
+      queue: [],
+      paused: false,
+      sendingId: null,
+    },
+  });
+  expect(state.queueSendingId).toBeNull();
+  expect(state.queue).toEqual([]);
+  // 切换/重开恢复：view 快照带回锁定 id（正在发出的条目仍区别显示）
+  const restored = hydrateLiveSession({
+    ...snapshot,
+    queue: [item],
+    queueSendingId: "q1",
+    activity: idle.activity,
+  });
+  expect(restored.queueSendingId).toBe("q1");
+});
+
 it("输入队列随事件与快照接续（票 01）：入队更新快照，出队开启新执行起点，不进消息流", () => {
   const queued = [
     {
