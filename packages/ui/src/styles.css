@@ -255,15 +255,34 @@ body {
   background-color: transparent;
 }
 
+/* collapse 下 border-radius 无效，改 separate + 单向内分隔线，外框与圆角收在 table 自身 */
 .markdown table {
   margin: 0.6em 0;
-  border-collapse: collapse;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .markdown th,
 .markdown td {
   padding: 0.3em 0.7em;
-  border: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.markdown th:last-child,
+.markdown td:last-child {
+  border-right: none;
+}
+
+/* 末行去底边避免与外框双线；thead 为末子元素时（无数据行的空表）同理 */
+.markdown tbody tr:last-child td,
+.markdown tbody tr:last-child th,
+.markdown thead:last-child th {
+  border-bottom: none;
 }
 
 .markdown th {
