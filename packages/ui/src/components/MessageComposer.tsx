@@ -94,7 +94,8 @@ const THINKING_EFFORT_OPTIONS: {
  * - 模型选择器（Provider Profile）对下一条发送的消息生效；
  * - 审批模式选择器随时可切，只对下一次发送生效；
  * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发；
- * - 本轮回复进行中（流式输出或工具执行）时发送按钮切换为「停止」，打断当前轮。
+ * - 本轮回复进行中（流式输出或工具执行）：有输入时显示「加入队列」与「停止」
+ *   并排双按钮（票 05，与 Enter 同一提交路径），无输入时仅「停止」；空闲为单发送按钮。
  */
 export function MessageComposer(props: {
   /** 草稿由 App 按会话保存；未传时保持独立使用能力。 */
@@ -493,15 +494,30 @@ export function MessageComposer(props: {
                 技能
               </button>
               {props.streaming === true ? (
-                <button
-                  type="button"
-                  data-testid="composer-stop"
-                  onClick={() => props.onStop?.()}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
-                  title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
-                >
-                  <StopIcon className="h-5 w-5" />
-                </button>
+                <>
+                  {/* 票 05：忙且有输入 →「加入队列」主操作与「停止」并排（spec 用户故事 5）；
+                      无输入或禁用（等待用户交互等）不提供入队，仅停止（用户故事 6 / 17）。 */}
+                  {value.trim() !== "" && !props.disabled && (
+                    <button
+                      type="button"
+                      data-testid="composer-enqueue"
+                      onClick={submit}
+                      className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover"
+                      title="加入队列（与 Enter 等效）：回复结束后自动逐条发出"
+                    >
+                      加入队列
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="composer-stop"
+                    onClick={() => props.onStop?.()}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
+                    title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
+                  >
+                    <StopIcon className="h-5 w-5" />
+                  </button>
+                </>
               ) : (
                 <button
                   type="submit"

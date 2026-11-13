@@ -877,6 +877,14 @@ export function WorkspacePage(props: {
       return;
     }
     if (submission.kind === "slash-command") {
+      // 忙时命令不入队不执行（spec 用户故事 16，票 05）：命令在错误的时机被
+      // 延迟执行没有意义；提示后保留输入，回复结束后原样重发即可执行。
+      if (streaming) {
+        pushLocalStatus(
+          `命令 /${submission.name} 不入队：回复结束后可用（输入已保留）`
+        );
+        return;
+      }
       void runCommand(submission.name, submission.argument);
       if (currentId !== null) workspaceState.setComposer(currentId, "");
       else if (draft)
