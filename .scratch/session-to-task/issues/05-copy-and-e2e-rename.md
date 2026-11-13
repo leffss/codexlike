@@ -12,5 +12,6 @@
 - [ ] agent-core 斜杠命令描述换词（`/new` `/rename` `/archive` `/status` 的中文说明）
 - [ ] 20 个 session 系 data-testid 值换为 task 系；`check:e2e-locators` 联动通过
 - [ ] 41 个 e2e 场景中依赖中文文案断言与 testid 的全部联动改；场景表（若登记）同步
+- [ ] 独立任务工作区磁盘目录 sessions/<id>/workspace 换为 task 系路径（自票 03 移交；e2e projects-sidebar/packaged 的断言耦合联动改）
 - [ ] 全量 e2e 链按根 package.json 的全量链跑绿（直接退出码，不接管道）
 - [ ] 全仓用户可见层面不再出现「会话」字样：grep 验证，代码注释、避免词列表与 ADR 除外
