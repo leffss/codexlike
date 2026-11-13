@@ -461,7 +461,7 @@ export function SessionSidebar(props: {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface-muted">
+    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface-muted">
       {menu && menuSession && (
         <SessionContextMenu
           sessionId={menuSession.id}

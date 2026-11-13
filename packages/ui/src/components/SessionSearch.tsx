@@ -55,7 +55,7 @@ export function SessionSearch(props: {
       {open && (
         <section
           aria-label="跨项目会话搜索"
-          className="absolute right-0 top-full z-20 mt-2 w-96 max-w-[80vw] rounded-lg border border-line bg-surface p-3 shadow-xl"
+          className="absolute right-0 top-full z-20 mt-2 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
           }}
@@ -75,7 +75,7 @@ export function SessionSearch(props: {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="输入标题或消息正文"
-                className="mt-2 w-full rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+                className="mt-2 block w-full rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
               />
             </label>
             <div className="mt-2 flex items-center justify-between text-xs text-fg-muted">

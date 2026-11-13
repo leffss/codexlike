@@ -4,12 +4,12 @@
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
 // 1) 新建、已有与加载中使用同一三档内容列，工作区信息也与消息流对齐。
-// 2) 窗口内容区 1280px（会话容器 1024px ≥864）→ 4xl 档：
+// 2) 窗口内容区 1280px（会话容器 992px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
-// 3) 窗口内容区 1600px（容器 1344px ≥1280）→ 6xl 档：内容列 1152px；
+// 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
 //    头部 / 消息流左右缘对齐，输入卡片外扩；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
-// 5) 窗口内容区 1000px（容器 744px <864）→ 基础档：内容列回落全宽（<896px）。
+// 5) 窗口内容区 1000px（容器 712px <864）→ 基础档：内容列回落全宽（<896px）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,8 +23,8 @@ import {
   startMockProvider,
 } from "./helpers.mjs";
 
-/** 档位换算依据：侧栏固定 w-64（256px），窗口内容区宽 - 256 = 会话容器宽 */
-const SIDEBAR_WIDTH = 256;
+/** 档位换算依据：侧栏固定 w-72（288px），窗口内容区宽 - 288 = 会话容器宽 */
+const SIDEBAR_WIDTH = 288;
 const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
 
 /** 宽内容回复：12 列宽表格 + 220 字符长代码行，在任何档位都超出内容列宽。
@@ -177,7 +177,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
-    // 固定窗口内容区 1280×800：会话容器 = 1280 - 256 = 1024px
+    // 固定窗口内容区 1280×800：会话容器 = 1280 - 288 = 992px
     await resizeWindow(app, 1280, 800);
 
     // 场景 1：新建草稿与已有会话采用相同 4xl 档，不再单独收窄。
@@ -199,23 +199,30 @@ async function main() {
     await window.getByTestId("message-assistant").waitFor();
     await waitForReplyDone(window);
 
-    // 场景 2：4xl 档（容器 1024px）：突破 768px 旧锁死，上限 896px
+    // 场景 2：4xl 档（容器 992px）：突破 768px 旧锁死，上限 896px
     const tier4 = await assertContentWidth(window, {
       min: 769,
       max: 896,
-      label: "4xl 档（容器 1024px）",
+      label: "4xl 档（容器 992px）",
     });
     assert(
       tier4.width > 768,
       `4xl 档 assistant 内容宽 ${tier4.width} 必须突破旧 768px 锁死值`
     );
 
-    // 场景 3：6xl 档（窗口内容区 1600 → 容器 1344px ≥1280）：上限 1152px
+    // 场景 3：6xl 档（窗口内容区 1600 → 容器 1312px ≥1280）：留白 192px，上限 1152px
     await resizeWindow(app, 1600, 900);
+    const wideGutter = await window
+      .getByTestId("message-stream")
+      .evaluate((el) => el.offsetWidth - el.clientWidth);
+    const expectedWide = Math.min(
+      1600 - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
+      1152
+    );
     const tier6 = await assertContentWidth(window, {
-      min: 1100,
-      max: 1153,
-      label: "6xl 档（容器 1344px）",
+      min: expectedWide - 2,
+      max: expectedWide + 2,
+      label: "6xl 档（容器 1312px）",
     });
     assert(
       tier6.width > tier4.width,
@@ -273,7 +280,7 @@ async function main() {
       `消息流滚动容器不应有横向溢出：scroll ${metrics.stream.scrollWidth} > client ${metrics.stream.clientWidth}`
     );
 
-    // 场景 5：基础档（窗口内容区 1000 → 容器 744px <864）：内容列回落全宽
+    // 场景 5：基础档（窗口内容区 1000 → 容器 712px <864）：内容列回落全宽
     await resizeWindow(app, 1000, 800);
     const gutter = await window
       .getByTestId("message-stream")
@@ -282,7 +289,7 @@ async function main() {
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
       max: 895,
-      label: "基础档（容器 744px）",
+      label: "基础档（容器 712px）",
     });
     assert(
       tierBase.width < tier4.width,
@@ -424,9 +431,9 @@ async function main() {
     // 同一真实会话通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
     const session = window.getByTestId("session-item").first();
     for (const [width, height, min, max] of [
-      [1000, 800, 650, 744],
+      [1000, 800, expectedFull - 2, expectedFull + 2],
       [1280, 800, 769, 896],
-      [1600, 900, 1100, 1152],
+      [1600, 900, expectedWide - 2, expectedWide + 2],
     ]) {
       await resizeWindow(app, width, height);
       const existing = await assertAligned(

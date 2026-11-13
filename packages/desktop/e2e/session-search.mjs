@@ -4,6 +4,49 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
 
+async function assertSearchLayout(window) {
+  const layout = await window
+    .getByTestId("session-search-input")
+    .evaluate((input) => {
+      const panel = input.closest("section");
+      const label = input.closest("label");
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      range.setEndBefore(input);
+      const description = range.getBoundingClientRect();
+      const field = input.getBoundingClientRect();
+      const box = panel.getBoundingClientRect();
+      const status = panel
+        .querySelector('[role="status"]')
+        .getBoundingClientRect();
+      const actions = panel
+        .querySelector('[data-testid="session-search-refresh"]')
+        .parentElement.getBoundingClientRect();
+      return {
+        descriptionBottom: description.bottom,
+        inputTop: field.top,
+        inputBottom: field.bottom,
+        actionsTop: actions.top,
+        actionsBottom: actions.bottom,
+        statusTop: status.top,
+        contained: field.left >= box.left && field.right <= box.right,
+        panelVisible: box.left >= 0 && box.right <= innerWidth,
+        overflow: panel.scrollWidth > panel.clientWidth + 1,
+        pageOverflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+  assert(
+    layout.inputTop >= layout.descriptionBottom &&
+      layout.actionsTop >= layout.inputBottom &&
+      layout.statusTop >= layout.actionsBottom &&
+      layout.contained &&
+      layout.panelVisible &&
+      !layout.overflow &&
+      !layout.pageOverflow,
+    `搜索说明、输入框和状态纵向排列且不溢出：${JSON.stringify(layout)}`
+  );
+}
+
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-session-search-"));
   const homeDir = join(root, "home");
@@ -23,6 +66,34 @@ async function main() {
     let window;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     window.setDefaultTimeout(8000);
+    await window.getByTestId("session-search-toggle").click();
+    for (const width of [1280, 1000]) {
+      await app.evaluate(
+        ({ BrowserWindow }, width) =>
+          BrowserWindow.getAllWindows()[0].setContentSize(width, 800),
+        width
+      );
+      await window.waitForFunction((width) => innerWidth === width, width);
+      for (const theme of ["light", "dark"]) {
+        if (
+          (await window.evaluate(
+            () => document.documentElement.dataset.theme
+          )) !== theme
+        )
+          await window.getByTestId("theme-toggle").click();
+        await window.waitForFunction(
+          (theme) => document.documentElement.dataset.theme === theme,
+          theme
+        );
+        await assertSearchLayout(window);
+      }
+    }
+    await window.getByTestId("theme-toggle").click();
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(1280, 800)
+    );
+    await window.waitForFunction(() => innerWidth === 1280);
+    await window.getByTestId("session-search-input").press("Escape");
     await window.getByTestId("add-project").click();
     await window.getByTestId("project-group").waitFor();
     await window.getByTestId("settings-open").click();
@@ -57,6 +128,7 @@ async function main() {
         .getByTestId("session-search-status")
         .filter({ hasText: /找到|没有匹配|输入标题/ })
         .waitFor();
+      await assertSearchLayout(window);
     }
     await create("项目任务", true);
     await create("同目录独立任务");
@@ -209,6 +281,7 @@ async function main() {
         .getByTestId("session-search-status")
         .filter({ hasText: "正在搜索" })
         .waitFor();
+      await assertSearchLayout(window);
       assert(
         await app.evaluate(() => globalThis.searchGate.entered),
         "旧查询已到达真实IPC闸门"
@@ -223,6 +296,14 @@ async function main() {
         await new Promise(requestAnimationFrame);
       });
     }
+    await holdQuery("星河-1", true);
+    await releaseQuery();
+    await window
+      .getByTestId("session-search-status")
+      .filter({ hasText: "搜索失败" })
+      .waitFor();
+    await assertSearchLayout(window);
+    await search("");
     await holdQuery("星河-1");
     await search("星河-2");
     assert(

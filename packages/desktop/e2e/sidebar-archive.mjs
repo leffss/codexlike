@@ -263,6 +263,14 @@ async function main() {
     );
     console.log(`[e2e:sidebar] 截图目录 ${screenshotDir}`);
     async function assertSingleLineTitles() {
+      const sidebarWidth = await window
+        .getByTestId("session-row")
+        .first()
+        .evaluate((row) => row.closest("aside").getBoundingClientRect().width);
+      assert(
+        Math.abs(sidebarWidth - 288) <= 1,
+        `侧栏宽度为 288px：${sidebarWidth}`
+      );
       const layouts = await window
         .getByTestId("session-row")
         .evaluateAll((rows) =>
