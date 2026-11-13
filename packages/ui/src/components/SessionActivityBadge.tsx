@@ -40,15 +40,15 @@ export function SessionActivityBadge({
       aria-label={compact ? label : undefined}
       className={
         compact
-          ? `flex h-3 w-3 shrink-0 items-center justify-center rounded-full ${tone}`
+          ? `flex ${running ? "h-4 w-4" : "h-3 w-3"} shrink-0 items-center justify-center rounded-full ${tone}`
           : `rounded px-1 py-px text-[10px] ${tone}`
       }
     >
       {compact ? (
         <>
           <svg
-            width="10"
-            height="10"
+            width={running ? 14 : 10}
+            height={running ? 14 : 10}
             viewBox="0 0 12 12"
             fill="none"
             stroke="currentColor"
