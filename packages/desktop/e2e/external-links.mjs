@@ -301,7 +301,7 @@ async function main() {
     let window;
     ({ app, window } = await launchApp({ homeDir }));
     window.setDefaultTimeout(3000);
-    await window.getByTestId("new-session").waitFor();
+    await window.getByTestId("new-task").waitFor();
     const mainWindow = await app.browserWindow(window);
     const mainWindowId = await mainWindow.evaluate((win) => win.id);
     // 只替换 OS 打开/原生提示边界，不注册或替换任何产品导航处理器。
@@ -335,7 +335,7 @@ async function main() {
     }, model.port);
     await window.getByTestId("settings-open").click();
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill(PROMPT);
     await window.getByTestId("composer-send").click();
     const assistant = window.getByTestId("message-assistant");

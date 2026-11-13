@@ -160,7 +160,7 @@ async function main() {
     );
     await checkTitlebar(window);
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("自绘关闭按钮保留的草稿");
     await window.keyboard.press("Alt");
     assert(!(await nativeState(app)).menuVisible, "Alt 不得唤回通用菜单");
@@ -187,7 +187,7 @@ async function main() {
     app = null;
 
     ({ app, window } = await launchApp({ homeDir }));
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await untilDraft(
       window,
       "自绘关闭按钮保留的草稿",
