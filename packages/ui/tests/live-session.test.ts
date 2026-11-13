@@ -424,16 +424,34 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   let state = hydrateLiveSession(snapshot);
   const enqueued = receiveLiveEvent(state, {
     ...delta(3, ""),
-    event: { type: "queue-changed", reason: "enqueue", queue: queued },
+    event: {
+      type: "queue-changed",
+      reason: "enqueue",
+      queue: queued,
+      paused: false,
+    },
   });
   expect(enqueued.queue.map((item) => item.text)).toEqual(["排队第一条"]);
+  expect(enqueued.queuePaused).toBe(false);
   // 队列事件不进消息流
   expect(enqueued.items).toEqual(state.items);
 
+  // 停止置暂停（票 02）：paused 随 queue-changed 事件接续
+  const pausedState = receiveLiveEvent(enqueued, {
+    ...delta(4, ""),
+    event: {
+      type: "queue-changed",
+      reason: "pause",
+      queue: queued,
+      paused: true,
+    },
+  });
+  expect(pausedState.queuePaused).toBe(true);
+
   // 回复结束（running=false）后出队发送：queue-changed 挂新执行，
   // 视为明确执行起点接续（与 user-message 同级的 starts）
-  const settled = receiveLiveEvent(enqueued, {
-    ...delta(4, ""),
+  const settled = receiveLiveEvent(pausedState, {
+    ...delta(5, ""),
     event: {
       type: "assistant-done",
       message: {
@@ -450,21 +468,29 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   const dequeued = receiveLiveEvent(state, {
     sessionId: "a",
     executionId: "e2",
-    sequence: 5,
+    sequence: 6,
     activity: { ...activity, running: true },
-    event: { type: "queue-changed", reason: "dequeue", queue: [] },
+    event: {
+      type: "queue-changed",
+      reason: "dequeue",
+      queue: [],
+      paused: false,
+    },
   });
   expect(dequeued.queue).toEqual([]);
+  expect(dequeued.queuePaused).toBe(false);
   expect(dequeued.executionId).toBe("e2");
   // 新执行起点后的正文事件照常接续
-  const continued = receiveLiveEvent(dequeued, delta(6, "新回复", "e2"));
+  const continued = receiveLiveEvent(dequeued, delta(7, "新回复", "e2"));
   expect(continued.items.at(-1)).toMatchObject({ content: "新回复" });
 
-  // 切换会话快照恢复：view.queue 原样带回队列条
+  // 切换会话快照恢复：view.queue 原样带回队列条与暂停态（票 02）
   const restored = hydrateLiveSession({
     ...snapshot,
     queue: queued,
+    queuePaused: true,
     activity: { ...activity, running: false, outcome: "completed" },
   });
   expect(restored.queue.map((item) => item.text)).toEqual(["排队第一条"]);
+  expect(restored.queuePaused).toBe(true);
 });

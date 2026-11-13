@@ -98,6 +98,10 @@ const api: CodexLikeApi = {
       ),
     interrupt: (sessionId) =>
       ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
+    queueResume: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.queueResume, sessionId),
+    queueClear: (sessionId) =>
+      ipcRenderer.invoke(IPC.sessions.queueClear, sessionId),
     rename: (sessionId, title) =>
       ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
     archive: (sessionId, archived) =>

@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS input_queue (
 );
 CREATE INDEX IF NOT EXISTS idx_input_queue_session_position
   ON input_queue(session_id, position);
+CREATE TABLE IF NOT EXISTS input_queue_state (
+  session_id TEXT PRIMARY KEY,
+  paused INTEGER NOT NULL
+);
 `;
 
 interface QueueRow {
@@ -78,6 +82,15 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     "DELETE FROM input_queue WHERE session_id = ? AND id = ?"
   );
   const clearStmt = db.prepare("DELETE FROM input_queue WHERE session_id = ?");
+  const pausedStmt = db.prepare(
+    "SELECT paused FROM input_queue_state WHERE session_id = ?"
+  );
+  const pauseStmt = db.prepare(
+    "INSERT INTO input_queue_state (session_id, paused) VALUES (?, 1) ON CONFLICT(session_id) DO UPDATE SET paused = 1"
+  );
+  const unpauseStmt = db.prepare(
+    "DELETE FROM input_queue_state WHERE session_id = ?"
+  );
 
   return {
     list(sessionId) {
@@ -107,6 +120,14 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     },
     clear(sessionId) {
       clearStmt.run(sessionId);
+    },
+    isPaused(sessionId) {
+      const row = pausedStmt.get(sessionId) as { paused: number } | undefined;
+      return row?.paused === 1;
+    },
+    setPaused(sessionId, paused) {
+      if (paused) pauseStmt.run(sessionId);
+      else unpauseStmt.run(sessionId);
     },
     close() {
       db.close();

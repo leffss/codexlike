@@ -137,6 +137,12 @@ export function MessageComposer(props: {
   contentWidthClass?: string;
   /** 当前会话的输入队列（票 01）：输入框上方只读队列条；空时不渲染 */
   queue?: QueuedMessage[];
+  /** 队列暂停标志（票 02）：队列条显示暂停态与「恢复」「清空」操作 */
+  queuePaused?: boolean;
+  /** 手动恢复队列消费（票 02） */
+  onQueueResume?: () => void;
+  /** 清空队列（票 02） */
+  onQueueClear?: () => void;
 }) {
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
@@ -304,8 +310,14 @@ export function MessageComposer(props: {
       }}
     >
       <div className={contentWidthClass}>
-        {/* 输入队列条（票 01）：输入框上方只读预览，回复结束后自动逐条发出 */}
-        <QueueBar queue={props.queue ?? []} />
+        {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
+            暂停态（停止保留队列）显示「恢复」「清空」操作 */}
+        <QueueBar
+          queue={props.queue ?? []}
+          paused={props.queuePaused}
+          onResume={props.onQueueResume}
+          onClear={props.onQueueClear}
+        />
         {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
         <form
           data-testid="composer-card"

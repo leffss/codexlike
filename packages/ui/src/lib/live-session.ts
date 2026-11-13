@@ -20,6 +20,8 @@ export interface LiveSession {
   items: MessageSegment[];
   /** 输入队列快照（票 01）：随 queue-changed 事件与 view 快照接续，不进消息流 */
   queue: QueuedMessage[];
+  /** 队列暂停标志（票 02）：随 queue-changed 事件与 view 快照接续 */
+  queuePaused: boolean;
 }
 
 function applyLiveEvent(
@@ -82,6 +84,10 @@ export function receiveLiveEvent(
       envelope.event.type === "queue-changed"
         ? envelope.event.queue
         : state.queue,
+    queuePaused:
+      envelope.event.type === "queue-changed"
+        ? envelope.event.paused
+        : state.queuePaused,
   };
 }
 
@@ -101,6 +107,7 @@ export function hydrateLiveSession(
     activity: view.activity,
     items: mergeInteractions(items, view.pendingInteractions),
     queue: view.queue ?? [],
+    queuePaused: view.queuePaused ?? false,
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

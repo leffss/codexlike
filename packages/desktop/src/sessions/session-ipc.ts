@@ -134,15 +134,15 @@ export function registerSessionHandlers(options: {
     store: queueStore,
     isBusy: (sessionId) => management.execution(sessionId)?.running ?? false,
     dispatch: dispatchQueued,
-    onChange: (sessionId, reason, queue) => {
-      // 队列变更经会话事件信封推送；无活跃执行（理论边界）时无信封可挂，
-      // 渲染层切回会话时经 view 快照兜底。
+    onChange: (sessionId, reason, queue, paused) => {
+      // 队列变更经会话事件信封推送；无活跃执行（如空闲时手动恢复/清空）时
+      // 无信封可挂，由操作通道的返回值与切回会话时的 view 快照兜底。
       const executionId = executions.get(sessionId);
       if (executionId === undefined) return;
       emit({
         sessionId,
         executionId,
-        event: { type: "queue-changed", reason, queue },
+        event: { type: "queue-changed", reason, queue, paused },
       });
     },
   });
@@ -239,10 +239,14 @@ export function registerSessionHandlers(options: {
     if (typeof sessionId !== "string")
       throw new Error("view：sessionId 必须是字符串");
     const view = liveSessions.view(sessionId);
-    // 输入队列快照（票 01）：切回会话时队列条原样恢复
+    // 输入队列快照（票 01/02）：切回会话时队列条与暂停态原样恢复
     return view === null
       ? null
-      : { ...view, queue: queues.snapshot(sessionId) };
+      : {
+          ...view,
+          queue: queues.snapshot(sessionId),
+          queuePaused: queues.isPaused(sessionId),
+        };
   });
   ipcMain.handle(
     IPC.sessions.markViewed,
@@ -579,6 +583,11 @@ export function registerSessionHandlers(options: {
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
     const { executionId, controller, rollbackLive, end } =
       beginExecution(sessionId);
+    // 插话（票 02）：暂停期间的直发消息已开始执行——回复结束（完成/出错/
+    // 中断）时自动清除暂停标志并恢复队列消费（协调器 onIdle 兑现）。
+    if (!fromQueue && queues.isPaused(sessionId)) {
+      queues.beginInterjection(sessionId);
+    }
     try {
       // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
       // 在这里以异常抛回渲染进程；之后的事件异步推送。
@@ -636,8 +645,41 @@ export function registerSessionHandlers(options: {
       }
       // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲会话幂等返回 false
       const interrupted = interrupts.interrupt(sessionId);
-      if (interrupted) liveSessions.stop(sessionId);
+      if (interrupted) {
+        liveSessions.stop(sessionId);
+        // 停止路径（票 02）：排队消息存在时置队列暂停——队列原样保留、
+        // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。
+        queues.pause(sessionId);
+      }
       return interrupted;
+    }
+  );
+
+  ipcMain.handle(
+    IPC.sessions.queueResume,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== "string") {
+        throw new Error("queueResume：sessionId 必须是字符串");
+      }
+      queues.resume(sessionId);
+      return {
+        queue: queues.snapshot(sessionId),
+        paused: queues.isPaused(sessionId),
+      };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.sessions.queueClear,
+    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+      if (typeof sessionId !== "string") {
+        throw new Error("queueClear：sessionId 必须是字符串");
+      }
+      queues.clearQueue(sessionId);
+      return {
+        queue: queues.snapshot(sessionId),
+        paused: queues.isPaused(sessionId),
+      };
     }
   );
 

@@ -15,6 +15,7 @@ import { createSessionInputQueues } from "../../src/sessions/input-queue";
 /** 内存 store 假件：按接口语义模拟 SQLite 存储 */
 function createMemoryStore(): InputQueueStore {
   const rows = new Map<string, QueuedMessage[]>();
+  const paused = new Set<string>();
   function list(sessionId: string) {
     return [...(rows.get(sessionId) ?? [])].sort(
       (a, b) => a.position - b.position
@@ -43,6 +44,11 @@ function createMemoryStore(): InputQueueStore {
     clear(sessionId) {
       rows.delete(sessionId);
     },
+    isPaused: (sessionId) => paused.has(sessionId),
+    setPaused(sessionId, value) {
+      if (value) paused.add(sessionId);
+      else paused.delete(sessionId);
+    },
     close() {},
   };
 }
@@ -61,6 +67,7 @@ function harness(overrides?: {
     sessionId: string;
     reason: string;
     queue: QueuedMessage[];
+    paused: boolean;
   }[] = [];
   let busy = overrides?.isBusy ?? (() => false);
   const queues = createSessionInputQueues({
@@ -76,8 +83,8 @@ function harness(overrides?: {
         onSettled();
       }
     },
-    onChange: (sessionId, reason, queue) =>
-      changes.push({ sessionId, reason, queue: [...queue] }),
+    onChange: (sessionId, reason, queue, paused) =>
+      changes.push({ sessionId, reason, queue: [...queue], paused }),
   });
   return {
     store,
@@ -243,6 +250,130 @@ describe("createSessionInputQueues（忙时入队与逐条自动消费）", () =
   });
 });
 
+describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与插话自动恢复）", () => {
+  it("暂停门控：暂停时消费循环不取队首（onIdle 与入队触发都不消费）", async () => {
+    const app = harness({ isBusy: () => true });
+    app.queues.enqueue("session-1", INPUT);
+    // 停止路径：队列非空 → 置暂停（队列原样保留）
+    app.queues.pause("session-1");
+    expect(app.queues.isPaused("session-1")).toBe(true);
+
+    // 会话空闲后触发消费：暂停门控——不取队首
+    app.setBusy(() => false);
+    app.queues.onIdle("session-1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.dispatched).toHaveLength(0);
+    expect(app.queues.snapshot("session-1")).toHaveLength(1);
+
+    // 暂停期间再入队：同样不消费
+    app.queues.enqueue("session-1", { ...INPUT, text: "第二条" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.dispatched).toHaveLength(0);
+    expect(app.queues.snapshot("session-1").map((item) => item.text)).toEqual([
+      "接着做第二步",
+      "第二条",
+    ]);
+    // 置暂停推送变更事件；暂停期间的入队事件同样携带暂停态
+    expect(app.changes).toHaveLength(3);
+    expect(app.changes[1]).toMatchObject({
+      sessionId: "session-1",
+      reason: "pause",
+      paused: true,
+    });
+    expect(app.changes[2]).toMatchObject({ reason: "enqueue", paused: true });
+  });
+
+  it("手动恢复：清暂停标志并立即从队首继续逐条消费", async () => {
+    const app = harness({ isBusy: () => true });
+    app.queues.enqueue("session-1", { ...INPUT, text: "第一条" });
+    app.queues.enqueue("session-1", { ...INPUT, text: "第二条" });
+    app.queues.pause("session-1");
+
+    app.setBusy(() => false);
+    app.queues.resume("session-1");
+    expect(app.queues.isPaused("session-1")).toBe(false);
+    // 立即触发消费：从队首逐条发出直至清空
+    await vi.waitFor(() =>
+      expect(app.dispatched.map((item) => item.entry.text)).toEqual([
+        "第一条",
+        "第二条",
+      ])
+    );
+    await vi.waitFor(() =>
+      expect(app.queues.snapshot("session-1")).toEqual([])
+    );
+    expect(app.changes.find((item) => item.reason === "resume")).toMatchObject({
+      paused: false,
+    });
+  });
+
+  it("空队列置暂停是无操作（停止空闲/无排队会话不产生暂停残留）", () => {
+    const app = harness();
+    app.queues.pause("session-1");
+    expect(app.queues.isPaused("session-1")).toBe(false);
+    expect(app.changes).toHaveLength(0);
+  });
+
+  it("插话完成自动恢复：暂停期间直发消息回复结束 → 清暂停标志并继续消费", async () => {
+    const app = harness({ isBusy: () => true });
+    app.queues.enqueue("session-1", { ...INPUT, text: "排队消息" });
+    app.queues.pause("session-1");
+    app.setBusy(() => false);
+    // 暂停期间直发新消息（插话）：会话空闲走现有直发路径，
+    // 由装配层在执行开始时登记（beginInterjection）
+    app.queues.beginInterjection("session-1");
+    expect(app.queues.isPaused("session-1")).toBe(true);
+
+    // 插话的回复结束（onIdle）：自动清暂停标志并恢复队列消费
+    app.queues.onIdle("session-1");
+    expect(app.queues.isPaused("session-1")).toBe(false);
+    await vi.waitFor(() =>
+      expect(app.dispatched.map((item) => item.entry.text)).toEqual([
+        "排队消息",
+      ])
+    );
+    await vi.waitFor(() =>
+      expect(app.queues.snapshot("session-1")).toEqual([])
+    );
+    expect(app.changes.find((item) => item.reason === "resume")).toMatchObject({
+      paused: false,
+    });
+  });
+
+  it("无插话的 onIdle 不解除暂停（中断后的空闲仍保持暂停）", async () => {
+    const app = harness({ isBusy: () => true });
+    app.queues.enqueue("session-1", INPUT);
+    app.queues.pause("session-1");
+    app.setBusy(() => false);
+    // 中断后流结束的 onIdle（无插话登记）：暂停保持
+    app.queues.onIdle("session-1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.queues.isPaused("session-1")).toBe(true);
+    expect(app.dispatched).toHaveLength(0);
+  });
+
+  it("清空：全部排队消息作废删除、暂停标志清除、清空后不再消费", async () => {
+    const app = harness({ isBusy: () => true });
+    app.queues.enqueue("session-1", { ...INPUT, text: "第一条" });
+    app.queues.enqueue("session-1", { ...INPUT, text: "第二条" });
+    app.queues.pause("session-1");
+    app.setBusy(() => false);
+
+    app.queues.clearQueue("session-1");
+    expect(app.queues.snapshot("session-1")).toEqual([]);
+    expect(app.queues.isPaused("session-1")).toBe(false);
+    expect(app.changes.find((item) => item.reason === "clear")).toMatchObject({
+      queue: [],
+      paused: false,
+    });
+
+    // 清空后任何触发点都不再消费
+    app.queues.onIdle("session-1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.dispatched).toHaveLength(0);
+  });
+});
+
 describe("createSqliteInputQueueStore（队列持久化，与会话消息同库）", () => {
   it("存取往返：重开数据库后队列内容与顺序一致；移除/清空生效", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
@@ -304,6 +435,42 @@ describe("createSqliteInputQueueStore（队列持久化，与会话消息同库�
       reopened.clear("session-1");
       expect(reopened.list("session-1")).toEqual([]);
       reopened.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("暂停标志持久化往返：置暂停重开库保持暂停，清除后不再暂停", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "input-queue-pause-"));
+    try {
+      const { createSqliteInputQueueStore } =
+        await import("../../src/sessions/input-queue-store");
+      const dbPath = join(root, "session-workbench.db");
+      const store = createSqliteInputQueueStore(dbPath);
+      // 未记录的会话默认不暂停
+      expect(store.isPaused("session-1")).toBe(false);
+      store.setPaused("session-1", true);
+      store.close();
+
+      // 重启后保持暂停（票 02：标志随队列存储持久化）
+      const reopened = createSqliteInputQueueStore(dbPath);
+      expect(reopened.isPaused("session-1")).toBe(true);
+      expect(reopened.isPaused("session-2")).toBe(false);
+      // 会话隔离：清除只影响目标会话
+      reopened.setPaused("session-1", false);
+      reopened.setPaused("session-2", true);
+      expect(reopened.isPaused("session-1")).toBe(false);
+      expect(reopened.isPaused("session-2")).toBe(true);
+      reopened.close();
+
+      // 再次重开：清除/置位都已落盘
+      const third = createSqliteInputQueueStore(dbPath);
+      expect(third.isPaused("session-1")).toBe(false);
+      expect(third.isPaused("session-2")).toBe(true);
+      third.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -43,7 +43,7 @@ export type { SubagentSettings };
 export type { TerminalShell };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
-// 输入队列（票 01）：队列条与事件载荷的公共形状
+// 输入队列（票 01/02）：队列条与事件载荷的公共形状
 export type { QueuedMessage, QueueChangeReason };
 
 /**
@@ -101,6 +101,10 @@ export const IPC = {
     send: "sessions:send",
     /** 停止按钮：打断指定会话运行中的本轮（流式输出或工具执行）；空闲返回 false */
     interrupt: "sessions:interrupt",
+    /** 输入队列（票 02）：手动恢复——清暂停标志并立即从队首继续逐条消费 */
+    queueResume: "sessions:queue-resume",
+    /** 输入队列（票 02）：清空——作废全部排队消息并清暂停标志 */
+    queueClear: "sessions:queue-clear",
     /** /rename 与侧栏重命名共用（同一 IPC 通道） */
     rename: "sessions:rename",
     /** /archive 与侧栏归档共用；archived=false 取消归档 */
@@ -191,10 +195,12 @@ export interface SessionEventEnvelope {
         error?: string;
       }
     | {
-        /** 输入队列变更（票 01）：入队 / 出队发送；queue 为变更后完整快照 */
+        /** 输入队列变更（票 01/02）：入队、出队发送、暂停/恢复/清空；queue 为变更后完整快照 */
         type: "queue-changed";
         reason: QueueChangeReason;
         queue: QueuedMessage[];
+        /** 变更后的队列暂停标志（票 02）：渲染层据此区分暂停态与正常排队 */
+        paused: boolean;
       };
   activity: SessionActivity;
 }
@@ -221,6 +227,14 @@ export interface SessionView {
   activity: SessionActivity;
   /** 输入队列快照（票 01）：切换会话时队列条原样恢复 */
   queue?: QueuedMessage[];
+  /** 队列暂停标志（票 02）：切换/重启恢复时保持暂停态显示 */
+  queuePaused?: boolean;
+}
+
+/** 队列操作结果（票 02）：操作生效后的队列快照与暂停标志 */
+export interface QueueOperationResult {
+  queue: QueuedMessage[];
+  paused: boolean;
 }
 
 export interface ProjectRemoval {
@@ -367,9 +381,20 @@ export interface CodexLikeApi {
     /**
      * 打断指定会话运行中的本轮（停止按钮）：
      * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
+     * 排队消息存在时队列原样保留并进入队列暂停（票 02）。
      * 会话空闲时幂等返回 false。
      */
     interrupt(sessionId: string): Promise<boolean>;
+    /**
+     * 输入队列手动恢复（票 02）：清除队列暂停标志并立即从队首继续逐条消费；
+     * 返回操作生效后的队列快照与暂停标志（未暂停时幂等无副作用）。
+     */
+    queueResume(sessionId: string): Promise<QueueOperationResult>;
+    /**
+     * 输入队列清空（票 02）：作废删除全部排队消息并清除暂停标志（无残留）；
+     * 返回操作生效后的队列快照与暂停标志。
+     */
+    queueClear(sessionId: string): Promise<QueueOperationResult>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
     rename(sessionId: string, title: string): Promise<SessionRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */

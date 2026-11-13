@@ -99,6 +99,8 @@ export function WorkspacePage(props: {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageSegment[]>([]);
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  /** 队列暂停标志（票 02）：停止保留队列时队列条显示暂停态与恢复/清空操作 */
+  const [queuePaused, setQueuePaused] = useState(false);
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
@@ -277,6 +279,7 @@ export function WorkspacePage(props: {
         currentIdRef.current === id && sessionRequestRef.current === request;
       setMessages([]);
       setQueue([]);
+      setQueuePaused(false);
       setWorkspaceFiles([]);
       setResources(null);
       setContextWarning(null);
@@ -317,6 +320,7 @@ export function WorkspacePage(props: {
         );
         setMessages(live.items);
         setQueue(live.queue);
+        setQueuePaused(live.queuePaused);
         setStreaming(live.activity.running);
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
@@ -408,6 +412,7 @@ export function WorkspacePage(props: {
             ...prev.filter((item) => item.kind === "status"),
           ]);
           setQueue(live.queue);
+          setQueuePaused(live.queuePaused);
           setStreaming(live.activity.running);
           setCompacting(
             live.activity.running && live.activity.operation === "compact"
@@ -608,7 +613,8 @@ export function WorkspacePage(props: {
   }
 
   /** 停止按钮：打断当前会话运行中的本轮（流式输出中断 / 工具子进程终止）。
-   *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。 */
+   *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。
+   *  排队消息存在时队列进入暂停（票 02），队列条显示恢复/清空操作。 */
   async function stop() {
     if (currentId === null) {
       return;
@@ -618,6 +624,39 @@ export function WorkspacePage(props: {
     } catch (error) {
       pushLocalStatus(
         `停止失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 队列暂停手动恢复（票 02）：清暂停标志并立即从队首继续逐条消费；
+   *  后续队列变更经事件流接续，操作结果快照先行落到本地状态。 */
+  async function resumeQueue() {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const result = await window.codexlike.sessions.queueResume(currentId);
+      setQueue(result.queue);
+      setQueuePaused(result.paused);
+    } catch (error) {
+      pushLocalStatus(
+        `恢复队列失败：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 队列清空（票 02）：作废全部排队消息并清暂停标志，队列条消失。 */
+  async function clearQueue() {
+    if (currentId === null) {
+      return;
+    }
+    try {
+      const result = await window.codexlike.sessions.queueClear(currentId);
+      setQueue(result.queue);
+      setQueuePaused(result.paused);
+    } catch (error) {
+      pushLocalStatus(
+        `清空队列失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -1299,6 +1338,9 @@ export function WorkspacePage(props: {
               }
               streaming={streaming}
               queue={currentId === null ? [] : queue}
+              queuePaused={currentId !== null && queuePaused}
+              onQueueResume={() => void resumeQueue()}
+              onQueueClear={() => void clearQueue()}
               onStop={() => void stop()}
               hint={composerHint}
               approvalMode={
