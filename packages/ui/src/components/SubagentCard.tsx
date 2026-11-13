@@ -68,9 +68,7 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
         onClick={toggle}
         aria-expanded={expanded}
       >
-        <span className="shrink-0 text-xs text-fg-subtle">
-          {expanded ? "▾" : "▸"}
-        </span>
+        <span className="shrink-0 text-xs">{expanded ? "▾" : "▸"}</span>
         <span className="rounded bg-subagent-bg px-1.5 py-0.5 font-mono text-xs text-subagent-fg">
           子代理
         </span>
@@ -232,9 +230,7 @@ function SubagentThinking(props: {
         data-testid="subagent-thinking-toggle"
         className="flex cursor-pointer select-none items-center gap-2"
       >
-        <span className="shrink-0 text-xs text-fg-subtle">
-          {open ? "▾" : "▸"}
-        </span>
+        <span className="shrink-0 text-xs">{open ? "▾" : "▸"}</span>
         {streaming === true && (
           <span
             data-testid="subagent-thinking-indicator"
