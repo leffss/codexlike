@@ -888,12 +888,12 @@ async function main() {
     console.log("[e2e] Shift+F10/Enter 归属弹窗初始焦点与 Escape 返回通过");
     // 公开归档 IPC 只加可控等待，仍转发真实宿主处理，不直接改库。
     await app.evaluate(({ ipcMain }) => {
-      const original = ipcMain._invokeHandlers.get("sessions:archive");
+      const original = ipcMain._invokeHandlers.get("tasks:archive");
       globalThis.sidebarArchiveGate = { release: null, entered: false };
-      ipcMain.removeHandler("sessions:archive");
-      ipcMain.handle("sessions:archive", async (event, ...args) => {
-        ipcMain.removeHandler("sessions:archive");
-        ipcMain.handle("sessions:archive", original);
+      ipcMain.removeHandler("tasks:archive");
+      ipcMain.handle("tasks:archive", async (event, ...args) => {
+        ipcMain.removeHandler("tasks:archive");
+        ipcMain.handle("tasks:archive", original);
         await new Promise((resolve) => {
           globalThis.sidebarArchiveGate.release = resolve;
           globalThis.sidebarArchiveGate.entered = true;

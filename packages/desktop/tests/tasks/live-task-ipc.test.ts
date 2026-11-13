@@ -339,7 +339,7 @@ it("模型未结束时公开现场包含后台完整增量，快照水位可无�
   const joined = [
     ...snapshot.events,
     ...app.delivered.filter(
-      (item) => item.sessionId === a.id && item.sequence > snapshot.sequence
+      (item) => item.taskId === a.id && item.sequence > snapshot.sequence
     ),
   ];
   expect(
@@ -351,7 +351,7 @@ it("模型未结束时公开现场包含后台完整增量，快照水位可无�
   expect(
     next.events.every(
       (item: any) =>
-        item.sessionId === a.id && item.executionId === snapshot.executionId
+        item.taskId === a.id && item.executionId === snapshot.executionId
     )
   ).toBe(true);
   expect(JSON.stringify(next)).not.toContain("B独立输出");

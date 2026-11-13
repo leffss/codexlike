@@ -53,7 +53,7 @@ export function WorkspaceSharingNotice(props: {
     async function refresh() {
       const generation = ++request;
       try {
-        const view = await window.codexlike.sessions.workspaceSharing(
+        const view = await window.codexlike.tasks.workspaceSharing(
           JSON.parse(targetKey)
         );
         if (active && generation === request) {
@@ -70,7 +70,7 @@ export function WorkspaceSharingNotice(props: {
       }
     }
     void refresh();
-    const unsubscribe = window.codexlike.onSessionEvent(({ event }) => {
+    const unsubscribe = window.codexlike.onTaskEvent(({ event }) => {
       if (
         [
           "user-message",
@@ -89,22 +89,22 @@ export function WorkspaceSharingNotice(props: {
     };
   }, [targetKey]);
 
-  if (!sharing?.runningSessions.length && !error) return null;
+  if (!sharing?.runningTasks.length && !error) return null;
 
   return (
     <div
       data-testid="workspace-sharing-notice"
       className="shrink-0 border-t border-line px-4 py-2 text-xs text-fg-muted"
     >
-      {sharing && sharing.runningSessions.length > 0 && (
+      {sharing && sharing.runningTasks.length > 0 && (
         <p
           data-testid="workspace-sharing-warning"
           role="status"
           className="text-warn-fg"
         >
-          共享文件风险：另有 {sharing.runningSessions.length}{" "}
+          共享文件风险：另有 {sharing.runningTasks.length}{" "}
           个会话正在同一实际目录执行或等待回应（
-          {sharing.runningSessions.map((item) => item.title).join("、")}
+          {sharing.runningTasks.map((item) => item.title).join("、")}
           ）。修改会互相影响，可继续发送，也可先停止其他任务。
         </p>
       )}

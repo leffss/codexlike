@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import type { SessionSearchResult } from "@codexlike/agent-core";
+import type { TaskSearchResult } from "@codexlike/agent-core";
 
 /** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的会话历史。 */
-export function SessionSearch(props: {
+export function TaskSearch(props: {
   onSelect: (id: string) => void;
   recordsRevision?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [results, setResults] = useState<SessionSearchResult[]>([]);
+  const [results, setResults] = useState<TaskSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -22,7 +22,7 @@ export function SessionSearch(props: {
     setLoading(true);
     // 每次查询及关闭/清空都会淘汰旧请求；成功和失败都不能覆盖后来的查询。
     let active = true;
-    void window.codexlike.sessions.search(query, includeArchived).then(
+    void window.codexlike.tasks.search(query, includeArchived).then(
       (found) => {
         if (!active) return;
         setResults(found);

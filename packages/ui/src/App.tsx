@@ -127,7 +127,7 @@ function AppShell(props: {
   // 设置页期间仍接收交互终态；后台会话切回不会复活已完成请求。
   useEffect(
     () =>
-      window.codexlike.onSessionEvent(({ event }) => {
+      window.codexlike.onTaskEvent(({ event }) => {
         if (
           event.type === "interaction-request" ||
           event.type === "interaction-resolved"

@@ -1,6 +1,6 @@
 import type {
   InteractionRecord,
-  SessionEvent,
+  TaskEvent,
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
@@ -14,7 +14,7 @@ import type {
  * 渲染层只按时序分派。
  *
  * 更新操作为封闭集：尾部追加、按 id 整段替换（状态迁移保持段 id 与序号）、
- * 截断删除（compact 等结构变化由 live-session 层整体重放 initialTranscript）、
+ * 截断删除（compact 等结构变化由 live-task 层整体重放 initialTranscript）、
  * 流式文本追加（只允许追加到序列末尾的流态段；被工具卡等隔断后新起段）。
  * 不引入字段级 patch。
  */
@@ -88,7 +88,7 @@ export interface CompactSummarySegment extends SegmentBase {
 export interface ToolCallSegment extends SegmentBase {
   kind: "tool-call";
   /** 所属会话（截图卡片按会话+调用 id 向主进程请求图片数据） */
-  sessionId: string;
+  taskId: string;
   toolName: string;
   /** 参数 JSON 字符串（展示时解析） */
   arguments: string;
@@ -136,7 +136,7 @@ export interface SubagentSegment extends SegmentBase {
 /** 子代理卡内嵌套的工具调用进度（无段字段：不是消息流序列成员） */
 export interface SubagentToolCall {
   id: string;
-  sessionId: string;
+  taskId: string;
   toolName: string;
   arguments: string;
   output: string;
@@ -259,7 +259,7 @@ function replaceSegment(
 /**
  * 会话时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
  * 历史恢复与运行期流式输出共用同一形状：本函数产出的段序列与
- * applySessionEvent 归并出的段序列同类同构。
+ * applyTaskEvent 归并出的段序列同类同构。
  */
 export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
   const segments: MessageSegment[] = [];
@@ -289,7 +289,7 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
         turnId: deriveTurnId(segments, call.id),
         responseId: null,
         at: parseIso(call.createdAt),
-        sessionId: call.sessionId,
+        taskId: call.sessionId,
         toolName: call.toolName,
         arguments: call.arguments,
         output: call.output,
@@ -402,12 +402,12 @@ function subagentFromToolRecord(
 
 /**
  * 流式事件 → 消息段序列增量更新（纯函数，React state 的归并核心）。
- * 调用方按 sessionId 隔离事件；切会话可能错过 assistant-start，
+ * 调用方按 taskId 隔离事件；切会话可能错过 assistant-start，
  * delta / reasoning / done 自行兜底建段。
  */
-export function applySessionEvent(
+export function applyTaskEvent(
   items: MessageSegment[],
-  event: SessionEvent
+  event: TaskEvent
 ): MessageSegment[] {
   switch (event.type) {
     case "user-message":
@@ -422,7 +422,7 @@ export function applySessionEvent(
         content: event.message.content,
       });
 
-    case "session-auto-approve-changed":
+    case "task-auto-approve-changed":
       // 授权状态由会话控制区展示，不生成历史消息段。
       return items;
 
@@ -491,7 +491,7 @@ export function applySessionEvent(
         turnId: deriveTurnId(items, event.call.id),
         responseId: lastResponseId(items),
         at: nowEpoch(),
-        sessionId: event.call.sessionId,
+        taskId: event.call.sessionId,
         toolName: event.call.toolName,
         arguments: event.call.arguments,
         output: "",
@@ -536,7 +536,7 @@ export function applySessionEvent(
           turnId: deriveTurnId(items, event.call.id),
           responseId: lastResponseId(items),
           at: nowEpoch(),
-          sessionId: event.call.sessionId,
+          taskId: event.call.sessionId,
           toolName: event.call.toolName,
           arguments: event.call.arguments,
           output: event.call.output,
@@ -586,7 +586,7 @@ export function applySessionEvent(
         (item) => item.kind === "subagent" && item.id === event.subagentId
       )
         ? items
-        : applySessionEvent(items, {
+        : applyTaskEvent(items, {
             type: "subagent-queued",
             subagentId: event.subagentId,
             task: event.task,
@@ -741,7 +741,7 @@ function applySubagentTool(
       ...tools,
       {
         id: call.id,
-        sessionId: call.sessionId,
+        taskId: call.sessionId,
         toolName: call.toolName,
         arguments: call.arguments,
         output: "",
@@ -756,7 +756,7 @@ function applySubagentTool(
       ...tools,
       {
         id: call.id,
-        sessionId: call.sessionId,
+        taskId: call.sessionId,
         toolName: call.toolName,
         arguments: call.arguments,
         output: call.output,

@@ -93,6 +93,6 @@ it("全部 sessions:* channel 与 tasks:* 双注册同一 handler", async () => 
   expect(window).toBeDefined();
   expect(handlers.get("tasks:list")!({}, undefined)).toEqual([]);
   expect(() => handlers.get("tasks:view")!({}, 42)).toThrow(
-    "view：sessionId 必须是字符串"
+    "view：taskId 必须是字符串"
   );
 });

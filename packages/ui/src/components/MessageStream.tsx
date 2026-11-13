@@ -8,7 +8,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
-import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
 import { useLocalDay } from "../lib/use-local-day";
 import { markdownComponents } from "../lib/markdown";
@@ -25,7 +25,7 @@ import {
   type ScrollGeometry,
   type VerticalIntent,
 } from "../lib/scroll-follow";
-import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
+import type { MessageSegment, ThinkingSegment } from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import {
   formatDurationCn,
@@ -67,7 +67,7 @@ export function MessageStream(props: {
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
-  sessionId?: string | null;
+  taskId?: string | null;
   loading?: boolean;
   readingPosition?: ReadingPosition | null;
   onReadingPosition?: (position: ReadingPosition) => void;
@@ -80,8 +80,7 @@ export function MessageStream(props: {
   followSignal?: number;
 }) {
   const now = useLocalDay();
-  const contentWidthClass =
-    props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
+  const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   const container = useRef<HTMLDivElement>(null);
   useScrollbarGutter(container, props.onScrollbarGutterChange);
   const restored = useRef<string | null | undefined>(undefined);
@@ -135,7 +134,7 @@ export function MessageStream(props: {
       restored.current = undefined;
       return;
     }
-    if (!container.current || restored.current === props.sessionId) return;
+    if (!container.current || restored.current === props.taskId) return;
     const element = container.current;
     const plan = restoreReadingPlan({
       saved: props.readingPosition
@@ -149,13 +148,13 @@ export function MessageStream(props: {
     scriptedScroll.current = { top: plan.scrollTop, at: performance.now() };
     element.scrollTop = plan.scrollTop;
     commitMode(plan.mode);
-    restored.current = props.sessionId;
-  }, [props.sessionId, props.loading, props.items, props.readingPosition]);
+    restored.current = props.taskId;
+  }, [props.taskId, props.loading, props.items, props.readingPosition]);
 
   // 内容变化（流式增量 / 工具卡更新 / 折叠变化 / 压缩指示）：跟随贴底、
   // 脱离保持阅读位置（不夺滚动权）。
   useLayoutEffect(() => {
-    if (restored.current !== props.sessionId) return;
+    if (restored.current !== props.taskId) return;
     const element = container.current;
     if (!element) return;
     if (anchorDecisionAfterContentChange(followRef.current) !== "snap") return;
@@ -166,7 +165,7 @@ export function MessageStream(props: {
       return;
     }
     snapToBottom(element);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sessionId 只作恢复完成 guard：会话切换的滚动由上方恢复 effect 单点负责，补全后切换当帧会叠加 snapToBottom 覆盖恢复的阅读位置
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- taskId 只作恢复完成 guard：会话切换的滚动由上方恢复 effect 单点负责，补全后切换当帧会叠加 snapToBottom 覆盖恢复的阅读位置
   }, [props.items, props.compacting]);
 
   // 发送新 prompt：强制回底并进入跟随（spec 用户故事 6）。挂载时执行一次
@@ -184,11 +183,7 @@ export function MessageStream(props: {
   }
 
   function saveReadingPosition(geometry: ScrollGeometry) {
-    if (
-      !props.loading &&
-      restored.current === props.sessionId &&
-      props.sessionId
-    )
+    if (!props.loading && restored.current === props.taskId && props.taskId)
       props.onReadingPosition?.(
         readingSpotOnLeave({ mode: followRef.current, geometry })
       );

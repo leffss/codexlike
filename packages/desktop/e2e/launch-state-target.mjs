@@ -62,7 +62,7 @@ function readStateSafe(homeDir) {
 
 /** 等启动现场文件的工作台目标到达期望（上报为即时落盘，此处只是排掉 IPC 往返） */
 async function waitForTarget(homeDir, expected, message) {
-  const key = expected.kind === "session" ? "sessionId" : "projectId";
+  const key = expected.kind === "task" ? "taskId" : "projectId";
   await until(() => {
     const state = readStateSafe(homeDir);
     return (
@@ -252,7 +252,7 @@ async function runScenarios(port) {
     await assertCurrentSession(window, remembered, "退出前应查看甲会话");
     await waitForTarget(
       homeDir,
-      { kind: "session", sessionId: remembered },
+      { kind: "task", taskId: remembered },
       "退出前上报"
     );
     await ctl.quit();
@@ -297,7 +297,7 @@ async function runScenarios(port) {
     await assertCurrentSession(window, archived, "退出前应查看归档会话");
     await waitForTarget(
       homeDir,
-      { kind: "session", sessionId: archived },
+      { kind: "task", taskId: archived },
       "归档目标上报"
     );
     await ctl.quit();
@@ -359,7 +359,7 @@ async function runScenarios(port) {
       await waitForView(homeDir, "settings", "切到设置页上报视图");
       await waitForTarget(
         homeDir,
-        { kind: "session", sessionId },
+        { kind: "task", taskId: sessionId },
         "设置页下目标保持"
       );
       await ctl.quit();
@@ -408,16 +408,12 @@ async function runScenarios(port) {
         .click();
       const gone = await sessionIdByTitle(window, "将被删目标会话");
       await assertCurrentSession(window, gone, "退出前查看归档目标");
-      await waitForTarget(
-        homeDir,
-        { kind: "session", sessionId: gone },
-        "目标上报"
-      );
+      await waitForTarget(homeDir, { kind: "task", taskId: gone }, "目标上报");
       await ctl.quit();
 
       // 两次启动之间把记住的会话指向不存在的 id（模拟记住的会话已被删除）
       const state = readState(homeDir);
-      state.workbenchTarget.sessionId = "ghost-session-id";
+      state.workbenchTarget.taskId = "ghost-session-id";
       writeFileSync(
         join(homeDir, STATE_FILE),
         JSON.stringify(state, null, 2),
@@ -457,16 +453,12 @@ async function runScenarios(port) {
       .filter({ hasText: "独苗会话" })
       .click();
     await assertCurrentSession(window, only, "退出前查看归档独苗");
-    await waitForTarget(
-      homeDir,
-      { kind: "session", sessionId: only },
-      "目标上报"
-    );
+    await waitForTarget(homeDir, { kind: "task", taskId: only }, "目标上报");
     await ctl.quit();
 
     // 记住的目标失效且无未归档会话：与现有冷启动一致，停在新建草稿入口
     const state = readState(homeDir);
-    state.workbenchTarget.sessionId = "ghost-session-id";
+    state.workbenchTarget.taskId = "ghost-session-id";
     writeFileSync(
       join(homeDir, STATE_FILE),
       JSON.stringify(state, null, 2),
@@ -491,7 +483,7 @@ async function runScenarios(port) {
     await assertCurrentSession(window, remembered, "强杀前查看目标会话");
     await waitForTarget(
       homeDir,
-      { kind: "session", sessionId: remembered },
+      { kind: "task", taskId: remembered },
       "目标上报"
     );
     // 强杀：不经退出屏障，现场只剩之前即时落盘的上报
@@ -548,7 +540,7 @@ async function runScenarios(port) {
     await assertCurrentSession(window, remembered, "退出前应查看甲会话");
     await waitForTarget(
       homeDir,
-      { kind: "session", sessionId: remembered },
+      { kind: "task", taskId: remembered },
       "退出前上报"
     );
     await ctl.quit();
@@ -563,7 +555,7 @@ async function runScenarios(port) {
     await assertCurrentSession(second.window, switched, "运行中切到乙");
     await waitForTarget(
       homeDir,
-      { kind: "session", sessionId: switched },
+      { kind: "task", taskId: switched },
       "切乙上报"
     );
 
@@ -583,8 +575,8 @@ async function runScenarios(port) {
     );
     const state = readState(homeDir);
     assert(
-      state.workbenchTarget?.kind === "session" &&
-        state.workbenchTarget.sessionId === switched,
+      state.workbenchTarget?.kind === "task" &&
+        state.workbenchTarget.taskId === switched,
       "设置页往返后现场目标应仍是乙"
     );
 

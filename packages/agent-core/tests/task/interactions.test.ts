@@ -313,11 +313,9 @@ describe("用户交互公开 seam", () => {
     expect(events.filter((e) => e.type === "interaction-request")).toHaveLength(
       1
     );
-    expect(
-      events.find((e) => e.type === "session-auto-approve-changed")
-    ).toEqual({
-      type: "session-auto-approve-changed",
-      sessionId: session.id,
+    expect(events.find((e) => e.type === "task-auto-approve-changed")).toEqual({
+      type: "task-auto-approve-changed",
+      taskId: session.id,
       autoApprove: true,
     });
     expect(
@@ -492,7 +490,7 @@ describe("用户交互公开 seam", () => {
     let count = 0;
     const changes: boolean[] = [];
     for await (const event of session.sendMessage({ text: "执行", profile })) {
-      if (event.type === "session-auto-approve-changed")
+      if (event.type === "task-auto-approve-changed")
         changes.push(event.autoApprove);
       if (event.type === "interaction-request") {
         const id = event.interaction.request.id;

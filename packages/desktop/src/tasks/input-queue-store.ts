@@ -58,7 +58,7 @@ function toQueuedMessage(row: QueueRow): QueuedMessage {
   }
   return {
     id: row.id,
-    sessionId: row.task_id,
+    taskId: row.task_id,
     position: Number(row.position),
     text: row.text,
     mentionPaths,
@@ -102,23 +102,21 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
     "DELETE FROM input_queue_state WHERE task_id = ?"
   );
 
-  function list(sessionId: string): QueuedMessage[] {
-    return (listStmt.all(sessionId) as unknown as QueueRow[]).map(
-      toQueuedMessage
-    );
+  function list(taskId: string): QueuedMessage[] {
+    return (listStmt.all(taskId) as unknown as QueueRow[]).map(toQueuedMessage);
   }
 
   return {
-    list(sessionId) {
-      return list(sessionId);
+    list(taskId) {
+      return list(taskId);
     },
-    append(sessionId, entry) {
+    append(taskId, entry) {
       const position = Number(
-        (nextPositionStmt.get(sessionId) as { next: number }).next
+        (nextPositionStmt.get(taskId) as { next: number }).next
       );
       appendStmt.run(
         entry.id,
-        sessionId,
+        taskId,
         position,
         entry.text,
         JSON.stringify(entry.mentionPaths),
@@ -127,23 +125,23 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
         entry.approvalMode,
         entry.createdAt
       );
-      return { ...entry, sessionId, position };
+      return { ...entry, taskId, position };
     },
-    remove(sessionId, id) {
-      return removeStmt.run(sessionId, id).changes > 0;
+    remove(taskId, id) {
+      return removeStmt.run(taskId, id).changes > 0;
     },
-    update(sessionId, id, patch) {
+    update(taskId, id, patch) {
       const changes = updateStmt.run(
         patch.text,
         JSON.stringify(patch.mentionPaths),
-        sessionId,
+        taskId,
         id
       ).changes;
       if (changes === 0) return null;
-      return list(sessionId).find((entry) => entry.id === id) ?? null;
+      return list(taskId).find((entry) => entry.id === id) ?? null;
     },
-    reorder(sessionId, orderedIds) {
-      const current = list(sessionId);
+    reorder(taskId, orderedIds) {
+      const current = list(taskId);
       // 无重复/未知校验走共享函数（review 重构）；完整性由协调器权威把关
       assertReorderableList(current, orderedIds);
       const idSet = new Set(orderedIds);
@@ -155,7 +153,7 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
       db.exec("BEGIN");
       try {
         orderedIds.forEach((id, index) => {
-          reorderStmt.run(positions[index]!, sessionId, id);
+          reorderStmt.run(positions[index]!, taskId, id);
         });
         db.exec("COMMIT");
       } catch (error) {
@@ -163,16 +161,16 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
         throw error;
       }
     },
-    clear(sessionId) {
-      clearStmt.run(sessionId);
+    clear(taskId) {
+      clearStmt.run(taskId);
     },
-    isPaused(sessionId) {
-      const row = pausedStmt.get(sessionId) as { paused: number } | undefined;
+    isPaused(taskId) {
+      const row = pausedStmt.get(taskId) as { paused: number } | undefined;
       return row?.paused === 1;
     },
-    setPaused(sessionId, paused) {
-      if (paused) pauseStmt.run(sessionId);
-      else unpauseStmt.run(sessionId);
+    setPaused(taskId, paused) {
+      if (paused) pauseStmt.run(taskId);
+      else unpauseStmt.run(taskId);
     },
     close() {
       db.close();

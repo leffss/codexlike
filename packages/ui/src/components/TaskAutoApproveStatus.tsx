@@ -1,5 +1,5 @@
 /** 会话级持久授权，与当前执行、问答和基础审批模式独立。 */
-export function SessionAutoApproveStatus(props: {
+export function TaskAutoApproveStatus(props: {
   autoApprove: boolean;
   busy: boolean;
   error: string | null;

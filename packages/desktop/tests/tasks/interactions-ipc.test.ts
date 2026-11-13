@@ -403,8 +403,8 @@ describe("统一用户交互 IPC", () => {
   it("拒绝不合法的任务和请求标识，不把渲染层对象当作授权", () => {
     setup();
     expect(() =>
-      invoke("sessions:pending-interactions", { sessionId: "other" })
-    ).toThrow("sessionId 必须是非空字符串");
+      invoke("sessions:pending-interactions", { taskId: "other" })
+    ).toThrow("taskId 必须是非空字符串");
     expect(() =>
       invoke("sessions:respond-interaction", "", "request", {
         kind: "approval",

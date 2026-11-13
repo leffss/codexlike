@@ -322,8 +322,8 @@ async function main() {
       return (
         (
           await window.codexlike.workbench.read({
-            kind: "session",
-            sessionId: session.id,
+            kind: "task",
+            taskId: session.id,
           })
         ).value.text === "Compact后保存并退出"
       );

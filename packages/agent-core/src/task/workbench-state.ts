@@ -3,8 +3,7 @@ import type { ThinkingEffort } from "../provider/language-model";
 
 /** 持久工作现场不包含执行状态、交互授权、provider 密钥或思考正文。 */
 export type WorkbenchTarget =
-  | { kind: "new"; projectId: string | null }
-  | { kind: "session"; sessionId: string };
+  { kind: "new"; projectId: string | null } | { kind: "task"; taskId: string };
 
 export interface TaskPreferences {
   providerProfileId: string;
@@ -50,9 +49,7 @@ export interface WorkbenchEntry {
 }
 
 export function workbenchKey(target: WorkbenchTarget): string {
-  // 持久化键已换 task 系（ADR 0014，新库从零开始）；输入形状的 kind: "session"
-  // 是 expand 阶段留给 desktop/ui 的旧结构，票 03 随桌面侧一并翻转。
-  return target.kind === "session"
-    ? JSON.stringify(["task", target.sessionId])
+  return target.kind === "task"
+    ? JSON.stringify(["task", target.taskId])
     : JSON.stringify(["new", target.projectId]);
 }

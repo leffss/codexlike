@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-  SessionEvent,
+  TaskEvent,
   StoredMessage,
   ToolCallRecord,
   TranscriptItem,
 } from "@codexlike/agent-core";
 
-import { applySessionEvent, initialTranscript } from "../src/lib/session-view";
+import { applyTaskEvent, initialTranscript } from "../src/lib/task-view";
 import { summarizeToolCall } from "../src/lib/tool-summary";
 
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
@@ -83,17 +83,17 @@ describe("initialTranscript（时间线 → 消息流初始状态）", () => {
   });
 });
 
-describe("applySessionEvent（工具事件归并）", () => {
+describe("applyTaskEvent（工具事件归并）", () => {
   it("tool-call 后卡片显示运行中，tool-result 填充输出并结束运行", () => {
-    let state = applySessionEvent([], {
+    let state = applyTaskEvent([], {
       type: "user-message",
       message: stored({ role: "user" }),
-    } satisfies SessionEvent);
-    state = applySessionEvent(state, {
+    } satisfies TaskEvent);
+    state = applyTaskEvent(state, {
       type: "assistant-start",
       messageId: "a1",
     });
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "tool-call",
       call: call({ output: "" }),
     });
@@ -105,7 +105,7 @@ describe("applySessionEvent（工具事件归并）", () => {
       output: "",
     });
 
-    state = applySessionEvent(state, {
+    state = applyTaskEvent(state, {
       type: "tool-result",
       call: call({ output: "已读 3 行" }),
     });
@@ -118,7 +118,7 @@ describe("applySessionEvent（工具事件归并）", () => {
   });
 
   it("当前执行错过 tool-call 时由 tool-result 补齐卡片；旧执行由信封层隔离", () => {
-    const state = applySessionEvent([], {
+    const state = applyTaskEvent([], {
       type: "tool-result",
       call: call({ id: "restored", output: "已读内容" }),
     });

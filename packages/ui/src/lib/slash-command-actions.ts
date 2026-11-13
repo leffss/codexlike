@@ -4,7 +4,7 @@ import {
   type SlashCommandName,
 } from "@codexlike/agent-core";
 
-import type { SessionStatusInfo } from "@codexlike/desktop/ipc";
+import type { TaskStatusInfo } from "@codexlike/desktop/ipc";
 
 /**
  * 斜杠命令 → UI 动作的纯函数分发。
@@ -13,23 +13,23 @@ import type { SessionStatusInfo } from "@codexlike/desktop/ipc";
  */
 
 export type SlashCommandAction =
-  | { type: "new-session" }
+  | { type: "new-task" }
   | { type: "compact" }
   | { type: "rename"; title: string }
   | { type: "rename-missing-argument" }
   | { type: "archive" }
   | { type: "select-model"; query: string }
   | { type: "status" }
-  | { type: "needs-session" };
+  | { type: "needs-task" };
 
 /** /new 可在草稿页使用；其余命令需要正式会话。归属由入口上下文决定。 */
 export function planSlashCommand(
   command: { name: SlashCommandName; argument: string },
-  hasSession: boolean
+  hasTask: boolean
 ): SlashCommandAction {
-  if (command.name === "new") return { type: "new-session" };
-  if (!hasSession) {
-    return { type: "needs-session" };
+  if (command.name === "new") return { type: "new-task" };
+  if (!hasTask) {
+    return { type: "needs-task" };
   }
   switch (command.name) {
     case "compact":
@@ -72,16 +72,15 @@ export function matchProfilesForModelSwitch(
 }
 
 /** 审批模式 → /status 中文文案（GLOSSARY「审批模式」：请求批准 / 帮我批准 / 完全访问） */
-const APPROVAL_MODE_LABELS: Record<SessionStatusInfo["approvalMode"], string> =
-  {
-    ask: "请求批准（ask）：编辑文件、执行命令与联网搜索前先询问",
-    assist: "帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问",
-    "full-access":
-      "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
-  };
+const APPROVAL_MODE_LABELS: Record<TaskStatusInfo["approvalMode"], string> = {
+  ask: "请求批准（ask）：编辑文件、执行命令与联网搜索前先询问",
+  assist: "帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问",
+  "full-access":
+    "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
+};
 
 /** /status 展示文案（中文） */
-export function formatSessionStatus(status: SessionStatusInfo): string {
+export function formatTaskStatus(status: TaskStatusInfo): string {
   const model =
     status.model === null
       ? "未选择（发送消息后记录所用模型）"

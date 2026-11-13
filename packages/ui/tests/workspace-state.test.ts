@@ -47,24 +47,24 @@ describe("工作台页面之上的状态", () => {
     let rejectWrite!: (error: Error) => void;
     const state = createWorkspaceState({
       read: async (target) =>
-        target.kind === "session" && target.sessionId === "loading"
+        target.kind === "task" && target.taskId === "loading"
           ? new Promise((resolve) => {
               release = resolve;
             })
           : structuredClone(entry),
       write: async (target, value) => {
-        if (target.kind === "session" && target.sessionId === "writing")
+        if (target.kind === "task" && target.taskId === "writing")
           return new Promise((_resolve, reject) => {
             rejectWrite = reject;
           });
         return { accepted: true, entry: value };
       },
     });
-    await state.loadSession("writing");
-    await state.loadSession("kept");
+    await state.loadTask("writing");
+    await state.loadTask("kept");
     state.setComposer("writing", "已删除目标写入中");
     await vi.waitFor(() => expect(rejectWrite).toBeTypeOf("function"));
-    const loading = state.loadSession("loading");
+    const loading = state.loadTask("loading");
     state.removeProject("p", ["loading", "writing"]);
     release(entry);
     rejectWrite(new Error("会话不存在"));
@@ -113,8 +113,8 @@ describe("工作台页面之上的状态", () => {
       },
     };
     const state = createWorkspaceState(port);
-    await state.loadSession("s1");
-    await state.loadSession("s2");
+    await state.loadTask("s1");
+    await state.loadTask("s2");
     state.setComposer("s1", "旧输入");
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     state.setComposer("s1", "最新输入");
@@ -133,8 +133,8 @@ describe("工作台页面之上的状态", () => {
     release();
     await flush;
     const restored = createWorkspaceState(port);
-    await restored.loadSession("s1");
-    await restored.loadSession("s2");
+    await restored.loadTask("s1");
+    await restored.loadTask("s2");
     expect(restored.composer("s1")).toBe("最新输入");
     expect(restored.composer("s2")).toBe("另一个会话");
     expect(restored.preferences("s1").thinkingEffort).toBe("high");
@@ -150,7 +150,7 @@ describe("工作台页面之上的状态", () => {
         }),
       write: async (_target, entry) => ({ accepted: true, entry }),
     });
-    const loading = state.loadSession("slow");
+    const loading = state.loadTask("slow");
     state.setComposer("slow", "加载期间新输入");
     release({
       revision: 5,
@@ -197,7 +197,7 @@ describe("工作台页面之上的状态", () => {
         return { accepted: true, entry };
       },
     });
-    await state.loadSession("s");
+    await state.loadTask("s");
     state.setComposer("s", "失败也不能丢");
     await expect(state.flush()).rejects.toThrow("磁盘");
     state.setPreferences("s", { thinkingEffort: "high" });

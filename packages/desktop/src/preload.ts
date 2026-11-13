@@ -27,9 +27,9 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
     search: (query, includeArchived) =>
       ipcRenderer.invoke(channels.search, query, includeArchived),
     selectWorkspace: () => ipcRenderer.invoke(channels.selectWorkspace),
-    messages: (sessionId) => ipcRenderer.invoke(channels.messages, sessionId),
+    messages: (taskId) => ipcRenderer.invoke(channels.messages, taskId),
     send: (
-      sessionId,
+      taskId,
       text,
       providerProfileId,
       mentionPaths,
@@ -38,64 +38,57 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
     ) =>
       ipcRenderer.invoke(
         channels.send,
-        sessionId,
+        taskId,
         text,
         providerProfileId,
         mentionPaths,
         thinkingEffort,
         approvalMode
       ),
-    interrupt: (sessionId) => ipcRenderer.invoke(channels.interrupt, sessionId),
-    queueResume: (sessionId) =>
-      ipcRenderer.invoke(channels.queueResume, sessionId),
-    queueClear: (sessionId) =>
-      ipcRenderer.invoke(channels.queueClear, sessionId),
-    queueRemove: (sessionId, itemId) =>
-      ipcRenderer.invoke(channels.queueRemove, sessionId, itemId),
-    queueUpdate: (sessionId, itemId, text, expectedText, mentionPaths) =>
+    interrupt: (taskId) => ipcRenderer.invoke(channels.interrupt, taskId),
+    queueResume: (taskId) => ipcRenderer.invoke(channels.queueResume, taskId),
+    queueClear: (taskId) => ipcRenderer.invoke(channels.queueClear, taskId),
+    queueRemove: (taskId, itemId) =>
+      ipcRenderer.invoke(channels.queueRemove, taskId, itemId),
+    queueUpdate: (taskId, itemId, text, expectedText, mentionPaths) =>
       ipcRenderer.invoke(
         channels.queueUpdate,
-        sessionId,
+        taskId,
         itemId,
         text,
         expectedText,
         mentionPaths
       ),
-    queueReorder: (sessionId, orderedIds) =>
-      ipcRenderer.invoke(channels.queueReorder, sessionId, orderedIds),
-    rename: (sessionId, title) =>
-      ipcRenderer.invoke(channels.rename, sessionId, title),
-    archive: (sessionId, archived) =>
-      ipcRenderer.invoke(channels.archive, sessionId, archived),
-    status: (sessionId) => ipcRenderer.invoke(channels.status, sessionId),
-    resources: (sessionId) => ipcRenderer.invoke(channels.resources, sessionId),
-    compact: (sessionId, providerProfileId) =>
-      ipcRenderer.invoke(channels.compact, sessionId, providerProfileId),
-    workspaceFiles: (sessionId) =>
-      ipcRenderer.invoke(channels.workspaceFiles, sessionId),
-    toolImage: (sessionId, toolCallId) =>
-      ipcRenderer.invoke(channels.toolImage, sessionId, toolCallId),
-    revokeAutoApprove: (sessionId) =>
-      ipcRenderer.invoke(channels.revokeAutoApprove, sessionId),
-    setApprovalMode: (sessionId, mode) =>
-      ipcRenderer.invoke(channels.setApprovalMode, sessionId, mode),
-    respondApproval: (sessionId, requestId, decision) =>
-      ipcRenderer.invoke(
-        channels.respondApproval,
-        sessionId,
-        requestId,
-        decision
-      ),
-    pendingApproval: (sessionId) =>
-      ipcRenderer.invoke(channels.pendingApproval, sessionId),
-    pendingApprovals: (sessionId) =>
-      ipcRenderer.invoke(channels.pendingApprovals, sessionId),
-    pendingInteractions: (sessionId) =>
-      ipcRenderer.invoke(channels.pendingInteractions, sessionId),
-    respondInteraction: (sessionId, requestId, response) =>
+    queueReorder: (taskId, orderedIds) =>
+      ipcRenderer.invoke(channels.queueReorder, taskId, orderedIds),
+    rename: (taskId, title) =>
+      ipcRenderer.invoke(channels.rename, taskId, title),
+    archive: (taskId, archived) =>
+      ipcRenderer.invoke(channels.archive, taskId, archived),
+    status: (taskId) => ipcRenderer.invoke(channels.status, taskId),
+    resources: (taskId) => ipcRenderer.invoke(channels.resources, taskId),
+    compact: (taskId, providerProfileId) =>
+      ipcRenderer.invoke(channels.compact, taskId, providerProfileId),
+    workspaceFiles: (taskId) =>
+      ipcRenderer.invoke(channels.workspaceFiles, taskId),
+    toolImage: (taskId, toolCallId) =>
+      ipcRenderer.invoke(channels.toolImage, taskId, toolCallId),
+    revokeAutoApprove: (taskId) =>
+      ipcRenderer.invoke(channels.revokeAutoApprove, taskId),
+    setApprovalMode: (taskId, mode) =>
+      ipcRenderer.invoke(channels.setApprovalMode, taskId, mode),
+    respondApproval: (taskId, requestId, decision) =>
+      ipcRenderer.invoke(channels.respondApproval, taskId, requestId, decision),
+    pendingApproval: (taskId) =>
+      ipcRenderer.invoke(channels.pendingApproval, taskId),
+    pendingApprovals: (taskId) =>
+      ipcRenderer.invoke(channels.pendingApprovals, taskId),
+    pendingInteractions: (taskId) =>
+      ipcRenderer.invoke(channels.pendingInteractions, taskId),
+    respondInteraction: (taskId, requestId, response) =>
       ipcRenderer.invoke(
         channels.respondInteraction,
-        sessionId,
+        taskId,
         requestId,
         response
       ),
@@ -213,15 +206,14 @@ const api: CodexLikeApi = {
     };
   },
   git: {
-    status: (sessionId) => ipcRenderer.invoke(IPC.git.status, sessionId),
-    diff: (sessionId, path, oldPath) =>
-      ipcRenderer.invoke(IPC.git.diff, sessionId, path, oldPath),
-    createBranch: (sessionId) =>
-      ipcRenderer.invoke(IPC.git.createBranch, sessionId),
-    generateCommitMessage: (sessionId, providerProfileId) =>
-      ipcRenderer.invoke(IPC.git.commitMessage, sessionId, providerProfileId),
-    commit: (sessionId, message) =>
-      ipcRenderer.invoke(IPC.git.commit, sessionId, message),
+    status: (taskId) => ipcRenderer.invoke(IPC.git.status, taskId),
+    diff: (taskId, path, oldPath) =>
+      ipcRenderer.invoke(IPC.git.diff, taskId, path, oldPath),
+    createBranch: (taskId) => ipcRenderer.invoke(IPC.git.createBranch, taskId),
+    generateCommitMessage: (taskId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.git.commitMessage, taskId, providerProfileId),
+    commit: (taskId, message) =>
+      ipcRenderer.invoke(IPC.git.commit, taskId, message),
   },
 };
 

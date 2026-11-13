@@ -200,7 +200,7 @@ it("编辑 IPC 原地更新：顺序与快照不动，事件推送全部窗口�
   expect(result.sequence).toBeGreaterThan(bad);
   for (const events of app.delivered) {
     expect(events.at(-1)).toMatchObject({
-      sessionId: id,
+      taskId: id,
       event: { type: "queue-changed", reason: "update", queue: result.queue },
     });
   }
@@ -242,7 +242,7 @@ it("迟到保存不复活已取出发送的条目：出队后编辑/删除/重�
   // UI 区分信号经事件推送：dequeue 携带锁定 id
   const dequeueEvents = app.delivered[0]!.filter(
     (envelope) =>
-      envelope.sessionId === id &&
+      envelope.taskId === id &&
       (envelope.event as any).type === "queue-changed" &&
       (envelope.event as any).reason === "dequeue"
   );
@@ -293,7 +293,7 @@ it("重排 IPC：暂停窗口内合法重排生效并持久化，清单不一致
     "乙",
   ]);
   expect(app.delivered[0]!.at(-1)).toMatchObject({
-    sessionId: id,
+    taskId: id,
     event: { type: "queue-changed", reason: "reorder" },
   });
   // 持久化：另开连接读同一库
@@ -335,7 +335,7 @@ it("删除 IPC 校验任务/条目身份；空闲暂停时向所有窗口推送�
   expect(result.paused).toBe(true);
   for (const events of app.delivered) {
     expect(events.at(-1)).toMatchObject({
-      sessionId: id,
+      taskId: id,
       event: {
         type: "queue-changed",
         reason: "remove",

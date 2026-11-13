@@ -20,9 +20,9 @@ export function registerWorkbenchHandlers(
   function targetOf(input: unknown): WorkbenchTarget {
     const target = input as WorkbenchTarget;
     if (
-      target?.kind === "session" &&
-      typeof target.sessionId === "string" &&
-      manager.list().some((s) => s.id === target.sessionId)
+      target?.kind === "task" &&
+      typeof target.taskId === "string" &&
+      manager.list().some((s) => s.id === target.taskId)
     )
       return target;
     if (
@@ -43,8 +43,8 @@ export function registerWorkbenchHandlers(
     const latest = manager.readWorkbench(key);
     if (latest) return latest;
     const session =
-      target.kind === "session"
-        ? manager.list().find((s) => s.id === target.sessionId)
+      target.kind === "task"
+        ? manager.list().find((s) => s.id === target.taskId)
         : null;
     const entry: WorkbenchEntry = {
       revision: 0,
@@ -107,7 +107,7 @@ export function registerWorkbenchHandlers(
       throw new Error("问答草稿不合法");
     const questionDrafts: WorkbenchValue["questionDrafts"] = {};
     const history =
-      checked.kind === "session" ? manager.interactions(checked.sessionId) : [];
+      checked.kind === "task" ? manager.interactions(checked.taskId) : [];
     for (const [id, draft] of Object.entries(questions)) {
       const item = history.find((item) => item.request.id === id);
       if (
@@ -182,11 +182,8 @@ export function registerWorkbenchHandlers(
       revision: entry.revision,
       value,
     });
-    if (accepted && checked.kind === "session")
-      manager.setApprovalMode(
-        checked.sessionId,
-        value.preferences.approvalMode
-      );
+    if (accepted && checked.kind === "task")
+      manager.setApprovalMode(checked.taskId, value.preferences.approvalMode);
     return { accepted, entry: manager.readWorkbench(workbenchKey(checked))! };
   });
   return {
@@ -194,16 +191,16 @@ export function registerWorkbenchHandlers(
     started(
       projectId: string | null,
       requestId: string,
-      sessionId: string,
+      taskId: string,
       preferences: WorkbenchValue["preferences"],
       defaultProfileId: string,
       acceptedText?: string
     ) {
       // 首次发送可能已完成且记录刚被用户移除；不能初始化悬挂工作现场。
-      if (!manager.list().some((session) => session.id === sessionId)) return;
+      if (!manager.list().some((session) => session.id === taskId)) return;
       const target: WorkbenchTarget = { kind: "new", projectId };
       const key = workbenchKey(target);
-      const sessionKey = workbenchKey({ kind: "session", sessionId });
+      const sessionKey = workbenchKey({ kind: "task", taskId });
       if (!manager.readWorkbench(sessionKey))
         manager.writeWorkbench(sessionKey, {
           revision: 0,

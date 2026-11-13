@@ -7,14 +7,11 @@ import {
 } from "react";
 
 import type { ProjectRecord } from "@codexlike/agent-core";
-import type { SessionListItem } from "@codexlike/desktop/ipc";
-import { SessionActivityBadge } from "./SessionActivityBadge";
-import {
-  SessionContextMenu,
-  type SessionMenuAnchor,
-} from "./SessionContextMenu";
+import type { TaskListItem } from "@codexlike/desktop/ipc";
+import { TaskActivityBadge } from "./TaskActivityBadge";
+import { TaskContextMenu, type TaskMenuAnchor } from "./TaskContextMenu";
 
-import { groupSessionsByProject } from "../lib/project-groups";
+import { groupTasksByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
 
 function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
@@ -79,8 +76,8 @@ function StandaloneIcon() {
  * 整理操作收进右键菜单，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
-export function SessionSidebar(props: {
-  sessions: SessionListItem[];
+export function TaskSidebar(props: {
+  tasks: TaskListItem[];
   projects: ProjectRecord[];
   onAddProject: () => void;
   onCreateInProject: (projectId: string) => void;
@@ -103,14 +100,12 @@ export function SessionSidebar(props: {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [menu, setMenu] = useState<{
-    sessionId: string;
-    projectId: SessionListItem["projectId"];
-    archivedAt: SessionListItem["archivedAt"];
-    anchor: SessionMenuAnchor;
+    taskId: string;
+    projectId: TaskListItem["projectId"];
+    archivedAt: TaskListItem["archivedAt"];
+    anchor: TaskMenuAnchor;
   } | null>(null);
-  const menuSession = props.sessions.find(
-    (session) => session.id === menu?.sessionId
-  );
+  const menuTask = props.tasks.find((task) => task.id === menu?.taskId);
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
       if (restoreFocus && menu) {
@@ -123,12 +118,12 @@ export function SessionSidebar(props: {
             : null;
         if (
           (active === document.body ||
-            activeMenu?.dataset.sessionId === menu.sessionId) &&
+            activeMenu?.dataset.sessionId === menu.taskId) &&
           !document.querySelector("[role='dialog'][aria-modal='true']")
         ) {
-          const sessionTarget = Array.from(
+          const taskTarget = Array.from(
             document.querySelectorAll<HTMLElement>("[data-session-select]")
-          ).find((element) => element.dataset.sessionId === menu.sessionId);
+          ).find((element) => element.dataset.sessionId === menu.taskId);
           const groupTarget = Array.from(
             document.querySelectorAll<HTMLElement>(
               "[data-testid='project-header']"
@@ -144,7 +139,7 @@ export function SessionSidebar(props: {
               : groupTarget;
           const target = menu.anchor.target.isConnected
             ? menu.anchor.target
-            : (sessionTarget ??
+            : (taskTarget ??
               fallback ??
               document.querySelector<HTMLElement>(
                 "[data-testid='new-session']"
@@ -160,9 +155,9 @@ export function SessionSidebar(props: {
   useLayoutEffect(() => {
     if (
       menu &&
-      (!menuSession ||
-        menuSession.projectId !== menu.projectId ||
-        menuSession.archivedAt !== menu.archivedAt ||
+      (!menuTask ||
+        menuTask.projectId !== menu.projectId ||
+        menuTask.archivedAt !== menu.archivedAt ||
         !menu.anchor.target.isConnected)
     ) {
       closeMenu(true);
@@ -176,7 +171,7 @@ export function SessionSidebar(props: {
     return () => window.clearInterval(timer);
   }, []);
 
-  const groups = groupSessionsByProject(props.sessions, props.projects);
+  const groups = groupTasksByProject(props.tasks, props.projects);
 
   function submitRename(id: string) {
     const title = editingTitle.trim();
@@ -196,40 +191,40 @@ export function SessionSidebar(props: {
     }
   }
 
-  function renderSessionItem(session: SessionListItem) {
-    const usedAt = session.lastUsedAt ?? session.createdAt;
+  function renderTaskItem(task: TaskListItem) {
+    const usedAt = task.lastUsedAt ?? task.createdAt;
     const relative = formatRelativeTime(usedAt, now);
     const absoluteTime = `最近使用：${new Date(usedAt).toLocaleString("zh-CN")}`;
 
-    const archived = session.archivedAt !== null;
+    const archived = task.archivedAt !== null;
 
     return (
       <li
-        key={session.id}
+        key={task.id}
         data-testid="session-row"
-        data-session-id={session.id}
-        className={`group/session relative mt-0.5 flex items-center rounded-md ${
-          session.id === props.currentId
+        data-session-id={task.id}
+        className={`group/task relative mt-0.5 flex items-center rounded-md ${
+          task.id === props.currentId
             ? "bg-selected text-fg"
             : "text-fg-muted hover:bg-hover hover:text-fg"
         }`}
         onContextMenu={(event) => {
-          if (editingId === session.id) return;
+          if (editingId === task.id) return;
           event.preventDefault();
           const target = event.currentTarget.querySelector<HTMLButtonElement>(
             "[data-session-select]"
           );
           if (!target) return;
           setMenu({
-            sessionId: session.id,
-            projectId: session.projectId,
-            archivedAt: session.archivedAt,
+            taskId: task.id,
+            projectId: task.projectId,
+            archivedAt: task.archivedAt,
             anchor: { x: event.clientX, y: event.clientY, target },
           });
         }}
         onKeyDown={(event) => {
           if (
-            editingId === session.id ||
+            editingId === task.id ||
             !(
               event.key === "ContextMenu" ||
               (event.shiftKey && event.key === "F10")
@@ -241,22 +236,22 @@ export function SessionSidebar(props: {
           const target = event.target as HTMLElement;
           const rect = target.getBoundingClientRect();
           setMenu({
-            sessionId: session.id,
-            projectId: session.projectId,
-            archivedAt: session.archivedAt,
+            taskId: task.id,
+            projectId: task.projectId,
+            archivedAt: task.archivedAt,
             anchor: { x: rect.left, y: rect.bottom, target },
           });
         }}
       >
-        {editingId === session.id ? (
+        {editingId === task.id ? (
           <input
             data-testid="rename-input"
             aria-label="会话名称"
             value={editingTitle}
             autoFocus
             onChange={(event) => setEditingTitle(event.target.value)}
-            onKeyDown={(event) => onRenameKeyDown(event, session.id)}
-            onBlur={() => submitRename(session.id)}
+            onKeyDown={(event) => onRenameKeyDown(event, task.id)}
+            onBlur={() => submitRename(task.id)}
             className="w-full rounded border border-accent bg-code-bg px-2 py-1.5 text-sm text-fg outline-none"
           />
         ) : (
@@ -264,25 +259,25 @@ export function SessionSidebar(props: {
             <button
               type="button"
               data-testid={archived ? "archived-session-item" : "session-item"}
-              data-session-id={session.id}
+              data-session-id={task.id}
               data-session-select="true"
-              aria-current={session.id === props.currentId ? "page" : undefined}
+              aria-current={task.id === props.currentId ? "page" : undefined}
               aria-haspopup="menu"
-              aria-expanded={menu?.sessionId === session.id}
+              aria-expanded={menu?.taskId === task.id}
               className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 pr-1 text-left text-sm"
-              onClick={() => props.onSelect(session.id)}
+              onClick={() => props.onSelect(task.id)}
             >
               <span
                 data-testid="session-label"
                 className="min-w-0 flex-1 truncate"
-                title={`${session.title}\n${relative} · ${absoluteTime}\n${session.workspacePath}`}
+                title={`${task.title}\n${relative} · ${absoluteTime}\n${task.workspacePath}`}
               >
-                {session.title}
+                {task.title}
               </span>
-              {session.workspaceMode === "worktree" && (
+              {task.workspaceMode === "worktree" && (
                 <span
                   data-testid="worktree-badge"
-                  title={`托管 Worktree：${session.workspacePath}`}
+                  title={`托管 Worktree：${task.workspacePath}`}
                   aria-label="worktree"
                   className="flex shrink-0 items-center text-worktree-fg"
                 >
@@ -303,27 +298,27 @@ export function SessionSidebar(props: {
                   <span className="sr-only">worktree</span>
                 </span>
               )}
-              <SessionActivityBadge session={session} compact />
+              <TaskActivityBadge task={task} compact />
             </button>
             <button
               type="button"
               data-testid="pin-button"
-              aria-pressed={session.pinned ?? false}
-              aria-label={session.pinned ? "取消置顶" : "置顶会话"}
-              title={session.pinned ? "取消置顶" : "置顶会话"}
+              aria-pressed={task.pinned ?? false}
+              aria-label={task.pinned ? "取消置顶" : "置顶会话"}
+              title={task.pinned ? "取消置顶" : "置顶会话"}
               className={`mr-1 flex h-6 w-5 shrink-0 items-center justify-center rounded hover:text-accent ${
-                session.pinned
+                task.pinned
                   ? "text-accent"
-                  : "pointer-events-none text-fg-muted opacity-0 group-hover/session:pointer-events-auto group-hover/session:opacity-100 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100"
+                  : "pointer-events-none text-fg-muted opacity-0 group-hover/task:pointer-events-auto group-hover/task:opacity-100 group-focus-within/task:pointer-events-auto group-focus-within/task:opacity-100"
               }`}
-              onClick={() => props.onPin(session.id, !session.pinned)}
+              onClick={() => props.onPin(task.id, !task.pinned)}
             >
               {/* 图钉两态：已置顶实心常显（accent 色），未置顶空心仅悬停出现 */}
               <svg
                 width="12"
                 height="12"
                 viewBox="0 0 24 24"
-                fill={session.pinned ? "currentColor" : "none"}
+                fill={task.pinned ? "currentColor" : "none"}
                 stroke="currentColor"
                 strokeWidth="1.8"
                 strokeLinecap="round"
@@ -345,8 +340,8 @@ export function SessionSidebar(props: {
     // 折叠只改变导航显示，不改变当前查看或待处理交互。
     const containsCurrent =
       props.currentId !== null &&
-      (group.active.some((session) => session.id === props.currentId) ||
-        group.archived.some((session) => session.id === props.currentId));
+      (group.active.some((task) => task.id === props.currentId) ||
+        group.archived.some((task) => task.id === props.currentId));
     const expanded =
       group.projectId === null
         ? !standaloneCollapsed
@@ -355,7 +350,7 @@ export function SessionSidebar(props: {
     const archivedOpen =
       expandedArchived.has(group.key) ||
       (containsCurrent &&
-        group.archived.some((session) => session.id === props.currentId));
+        group.archived.some((task) => task.id === props.currentId));
 
     return (
       <li key={group.key} className="mt-4 first:mt-2">
@@ -455,7 +450,7 @@ export function SessionSidebar(props: {
         {/* 无竖线缩进导轨：会话标题起点对齐原竖线位置（ml-7 + 行内 pl-2），为标题让出宽度 */}
         {expanded && (
           <div data-testid="group-sessions" className="ml-7">
-            <ul>{group.active.map((session) => renderSessionItem(session))}</ul>
+            <ul>{group.active.map((task) => renderTaskItem(task))}</ul>
             {group.archived.length > 0 && (
               <div>
                 <button
@@ -471,9 +466,7 @@ export function SessionSidebar(props: {
                 </button>
                 {archivedOpen && (
                   <ul className="mt-0.5" data-testid="archived-list">
-                    {group.archived.map((session) =>
-                      renderSessionItem(session)
-                    )}
+                    {group.archived.map((task) => renderTaskItem(task))}
                   </ul>
                 )}
               </div>
@@ -486,36 +479,33 @@ export function SessionSidebar(props: {
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface-muted">
-      {menu && menuSession && (
-        <SessionContextMenu
-          sessionId={menuSession.id}
+      {menu && menuTask && (
+        <TaskContextMenu
+          taskId={menuTask.id}
           anchor={menu.anchor}
           onClose={closeMenu}
           items={[
             {
               testId: "session-membership",
-              label: menuSession.projectId === null ? "移入项目" : "移出项目",
-              onSelect: () => props.onMembership(menuSession.id),
+              label: menuTask.projectId === null ? "移入项目" : "移出项目",
+              onSelect: () => props.onMembership(menuTask.id),
             },
             {
               testId: "rename-button",
               label: "重命名",
               onSelect: () => {
-                setEditingTitle(menuSession.title);
-                setEditingId(menuSession.id);
+                setEditingTitle(menuTask.title);
+                setEditingId(menuTask.id);
               },
             },
             {
               testId:
-                menuSession.archivedAt === null
+                menuTask.archivedAt === null
                   ? "archive-button"
                   : "unarchive-button",
-              label: menuSession.archivedAt === null ? "归档" : "恢复",
+              label: menuTask.archivedAt === null ? "归档" : "恢复",
               onSelect: () =>
-                props.onArchive(
-                  menuSession.id,
-                  menuSession.archivedAt === null
-                ),
+                props.onArchive(menuTask.id, menuTask.archivedAt === null),
             },
           ]}
         />

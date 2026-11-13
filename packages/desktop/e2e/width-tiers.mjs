@@ -454,11 +454,11 @@ async function main() {
       );
       assert(Math.abs(existing.width - draft.width) <= 1, "已有转新建不跳宽");
       await app.evaluate(({ ipcMain }) => {
-        const original = ipcMain._invokeHandlers.get("sessions:view");
-        ipcMain.removeHandler("sessions:view");
-        ipcMain.handle("sessions:view", async (event, ...args) => {
-          ipcMain.removeHandler("sessions:view");
-          ipcMain.handle("sessions:view", original);
+        const original = ipcMain._invokeHandlers.get("tasks:view");
+        ipcMain.removeHandler("tasks:view");
+        ipcMain.handle("tasks:view", async (event, ...args) => {
+          ipcMain.removeHandler("tasks:view");
+          ipcMain.handle("tasks:view", original);
           const result = await original(event, ...args);
           await new Promise((resolve) => {
             globalThis.widthViewRelease = resolve;
@@ -485,7 +485,7 @@ async function main() {
         const deadline = Date.now() + 5000;
         while (!globalThis.widthViewRelease) {
           if (Date.now() >= deadline)
-            throw new Error("sessions:view 加载闸门在5秒内未就绪");
+            throw new Error("tasks:view 加载闸门在5秒内未就绪");
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
         globalThis.widthViewRelease();

@@ -6,17 +6,17 @@
 import { join } from "node:path";
 
 /** 任务截图目录：<数据目录>/tasks/<任务id>/screenshots */
-export function taskScreenshotDir(dataDir: string, sessionId: string): string {
-  return join(dataDir, "tasks", sessionId, "screenshots");
+export function taskScreenshotDir(dataDir: string, taskId: string): string {
+  return join(dataDir, "tasks", taskId, "screenshots");
 }
 
 /** 单张截图文件路径：<截图目录>/<toolCallId>.png */
 export function screenshotPathFor(
   dataDir: string,
-  sessionId: string,
+  taskId: string,
   toolCallId: string
 ): string {
   // toolCallId 由模型端点生成（字母数字与连字符）；防御非法路径字符
   const safeId = toolCallId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return join(taskScreenshotDir(dataDir, sessionId), `${safeId}.png`);
+  return join(taskScreenshotDir(dataDir, taskId), `${safeId}.png`);
 }

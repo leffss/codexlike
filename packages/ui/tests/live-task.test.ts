@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import type { SessionEventEnvelope, SessionView } from "@codexlike/desktop/ipc";
-import { applySessionEvent } from "../src/lib/session-view";
-import { hydrateLiveSession, receiveLiveEvent } from "../src/lib/live-session";
+import type { TaskEventEnvelope, TaskView } from "@codexlike/desktop/ipc";
+import { applyTaskEvent } from "../src/lib/task-view";
+import { hydrateLiveTask, receiveLiveEvent } from "../src/lib/live-task";
 
 const activity = {
   running: true,
@@ -13,17 +13,17 @@ function delta(
   sequence: number,
   text: string,
   executionId = "e1"
-): SessionEventEnvelope {
+): TaskEventEnvelope {
   return {
-    sessionId: "a",
+    taskId: "a",
     executionId,
     sequence,
     activity,
     event: { type: "assistant-delta", messageId: "m1", delta: text },
   };
 }
-const snapshot: SessionView = {
-  sessionId: "a",
+const snapshot: TaskView = {
+  taskId: "a",
   executionId: "e1",
   sequence: 2,
   history: [],
@@ -39,25 +39,25 @@ it("终态完成时刻由消息提供，快照重放、错过增量与重启恢�
     content: "最终正文",
     createdAt: "2026-11-11T08:00:09.000Z",
   };
-  const terminal: SessionEventEnvelope = {
+  const terminal: TaskEventEnvelope = {
     ...delta(3, ""),
     event: { type: "assistant-done", message },
     activity: { ...activity, running: false, outcome: "completed" },
   };
-  const live = receiveLiveEvent(hydrateLiveSession(snapshot), terminal);
-  const replayed = hydrateLiveSession({
+  const live = receiveLiveEvent(hydrateLiveTask(snapshot), terminal);
+  const replayed = hydrateLiveTask({
     ...snapshot,
     events: [...snapshot.events, terminal],
     sequence: 3,
     activity: terminal.activity,
   });
-  const missed = hydrateLiveSession({
+  const missed = hydrateLiveTask({
     ...snapshot,
     events: [terminal],
     sequence: 3,
     activity: terminal.activity,
   });
-  const restarted = hydrateLiveSession({
+  const restarted = hydrateLiveTask({
     ...snapshot,
     executionId: null,
     sequence: 0,
@@ -73,32 +73,32 @@ it("终态完成时刻由消息提供，快照重放、错过增量与重启恢�
 });
 
 it("会话授权由快照恢复并随事件更新，不因等待、停止或旧会话事件清除", () => {
-  let state = hydrateLiveSession({ ...snapshot, autoApprove: true });
+  let state = hydrateLiveTask({ ...snapshot, autoApprove: true });
   expect(state.autoApprove).toBe(true);
-  const revoke: SessionEventEnvelope = {
+  const revoke: TaskEventEnvelope = {
     ...delta(3, ""),
     event: {
-      type: "session-auto-approve-changed",
-      sessionId: "a",
+      type: "task-auto-approve-changed",
+      taskId: "a",
       autoApprove: false,
     },
   };
-  expect(
-    receiveLiveEvent(state, { ...revoke, sessionId: "b" }).autoApprove
-  ).toBe(true);
+  expect(receiveLiveEvent(state, { ...revoke, taskId: "b" }).autoApprove).toBe(
+    true
+  );
   state = receiveLiveEvent(state, revoke);
   expect(state.autoApprove).toBe(false);
   expect(
     receiveLiveEvent(state, {
       ...revoke,
       event: {
-        type: "session-auto-approve-changed",
-        sessionId: "a",
+        type: "task-auto-approve-changed",
+        taskId: "a",
         autoApprove: true,
       },
     }).autoApprove
   ).toBe(false);
-  const restored = hydrateLiveSession({
+  const restored = hydrateLiveTask({
     ...snapshot,
     autoApprove: true,
     activity: { ...activity, running: false, outcome: "interrupted" },
@@ -107,12 +107,12 @@ it("会话授权由快照恢复并随事件更新，不因等待、停止或旧�
   expect(receiveLiveEvent(restored, revoke).autoApprove).toBe(false);
 });
 it("Compact启动和终态按水位接续并原子替换历史，切换快照与旧执行事件不重复不污染", () => {
-  const start: SessionEventEnvelope = {
+  const start: TaskEventEnvelope = {
     ...delta(3, "", "compact-1"),
     event: { type: "compact-start" },
     activity: { ...activity, operation: "compact" },
   };
-  const finished: SessionEventEnvelope = {
+  const finished: TaskEventEnvelope = {
     ...delta(4, "", "compact-1"),
     activity: {
       ...activity,
@@ -137,7 +137,7 @@ it("Compact启动和终态按水位接续并原子替换历史，切换快照与
       ],
     },
   };
-  const running = receiveLiveEvent(hydrateLiveSession(snapshot), start);
+  const running = receiveLiveEvent(hydrateLiveTask(snapshot), start);
   expect(running.executionId).toBe("compact-1");
   expect(running.activity.operation).toBe("compact");
   const done = receiveLiveEvent(running, finished);
@@ -152,7 +152,7 @@ it("Compact启动和终态按水位接续并原子替换历史，切换快照与
     })
   ).toEqual(done);
   expect(receiveLiveEvent(done, delta(6, "旧正文"))).toEqual(done);
-  const switched = hydrateLiveSession(
+  const switched = hydrateLiveTask(
     {
       ...snapshot,
       executionId: "compact-1",
@@ -166,7 +166,7 @@ it("Compact启动和终态按水位接续并原子替换历史，切换快照与
 });
 
 it("在停止清理期间切回仍接收中断终态，不能残留流式标记", () => {
-  const stopped = hydrateLiveSession({
+  const stopped = hydrateLiveTask({
     ...snapshot,
     activity: { ...activity, running: false, outcome: "interrupted" },
   });
@@ -196,10 +196,10 @@ it("在停止清理期间切回仍接收中断终态，不能残留流式标记"
   expect(closed.items[0]).not.toHaveProperty("streaming", true);
 });
 it("初始现场与订阅缓冲交错仍完整且无重，其他会话和旧执行迟到事件不能污染新执行", () => {
-  let state = hydrateLiveSession(snapshot, [
+  let state = hydrateLiveTask(snapshot, [
     delta(2, "第二段"),
     delta(3, "第三段"),
-    { ...delta(4, "其他会话"), sessionId: "b" },
+    { ...delta(4, "其他会话"), taskId: "b" },
   ]);
   expect(state.items).toMatchObject([
     { content: "第一段第二段第三段", streaming: true },
@@ -282,7 +282,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
       },
     },
   ];
-  const restored = hydrateLiveSession({
+  const restored = hydrateLiveTask({
     ...snapshot,
     executionId: null,
     sequence: 0,
@@ -297,7 +297,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
   ]);
   expect(restored.items.every((item) => item.seq > 0)).toBe(true);
 
-  // 同一轮的运行期事件流经同一 applySessionEvent 入口，产出同形状段序列
+  // 同一轮的运行期事件流经同一 applyTaskEvent 入口，产出同形状段序列
   const userMessage = history[0]?.message;
   const toolCallRecord = history[1]?.call;
   const assistantMessage = history[2]?.message;
@@ -308,15 +308,15 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
   ) {
     throw new Error("测试历史构造不完整");
   }
-  const liveEvents: Parameters<typeof applySessionEvent>[1][] = [
+  const liveEvents: Parameters<typeof applyTaskEvent>[1][] = [
     { type: "user-message", message: userMessage },
     { type: "tool-call", call: { ...toolCallRecord, output: "" } },
     { type: "tool-result", call: toolCallRecord },
     { type: "assistant-done", message: assistantMessage },
   ];
   const live = liveEvents.reduce(
-    (items, event) => applySessionEvent(items, event),
-    [] as ReturnType<typeof applySessionEvent>
+    (items, event) => applyTaskEvent(items, event),
+    [] as ReturnType<typeof applyTaskEvent>
   );
   expect(live.map((item) => item.kind)).toEqual(
     restored.items.map((item) => item.kind)
@@ -330,15 +330,15 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
   const reasoningEnvelope = (
     sequence: number,
     delta: string
-  ): SessionEventEnvelope => ({
-    sessionId: "a",
+  ): TaskEventEnvelope => ({
+    taskId: "a",
     executionId: "e1",
     sequence,
     activity,
     event: { type: "assistant-reasoning", messageId: "m1", delta },
   });
   // 运行中会话切走再切回：view = 执行起点快照（不含本轮）+ 内存事件重放
-  const switchedBack = hydrateLiveSession({
+  const switchedBack = hydrateLiveTask({
     ...snapshot,
     history: [],
     events: [
@@ -360,8 +360,8 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
   ).toHaveLength(1);
 
   // 重启后：内存事件缓冲消失，落盘终态消息（带 reasoning）经 transcript 恢复
-  const restarted = hydrateLiveSession({
-    sessionId: "a",
+  const restarted = hydrateLiveTask({
+    taskId: "a",
     executionId: null,
     sequence: 0,
     history: [
@@ -407,11 +407,11 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
 });
 
 it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回退队列", () => {
-  const view: SessionView = {
+  const view: TaskView = {
     ...snapshot,
     activity: { ...activity, running: false, outcome: "completed" },
   };
-  const changed: SessionEventEnvelope = {
+  const changed: TaskEventEnvelope = {
     ...delta(3, ""),
     activity: view.activity,
     event: {
@@ -422,26 +422,26 @@ it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回�
       sendingId: null,
     },
   };
-  const initial = hydrateLiveSession(view);
+  const initial = hydrateLiveTask(view);
   const next = receiveLiveEvent(initial, changed);
   expect(next.sequence).toBe(3);
   expect(next.queueState.paused).toBe(true);
   expect(next.items).toEqual(initial.items);
-  const buffered = hydrateLiveSession(view, [changed]);
+  const buffered = hydrateLiveTask(view, [changed]);
   expect(buffered).toMatchObject({
     sequence: next.sequence,
     queueState: next.queueState,
   });
   expect(receiveLiveEvent(next, changed)).toBe(next);
-  expect(
-    receiveLiveEvent(next, { ...changed, sessionId: "b", sequence: 4 })
-  ).toBe(next);
+  expect(receiveLiveEvent(next, { ...changed, taskId: "b", sequence: 4 })).toBe(
+    next
+  );
 });
 
 it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 id 不丢、出队后清空、切换恢复保持", () => {
   const item = {
     id: "q1",
-    sessionId: "a",
+    taskId: "a",
     position: 0,
     text: "正在发出的一条",
     mentionPaths: [],
@@ -451,11 +451,11 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
     createdAt: "2026-11-13T00:00:00Z",
   };
   // 取出发送：sending 事件携带锁定 id，条目仍在队列快照中
-  const idle: SessionView = {
+  const idle: TaskView = {
     ...snapshot,
     activity: { ...activity, running: false, outcome: "completed" },
   };
-  let state = hydrateLiveSession(idle);
+  let state = hydrateLiveTask(idle);
   state = receiveLiveEvent(state, {
     ...delta(3, ""),
     event: {
@@ -482,7 +482,7 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
   expect(state.queueState.sendingId).toBeNull();
   expect(state.queueState.queue).toEqual([]);
   // 切换/重开恢复：view 快照带回锁定 id（正在发出的条目仍区别显示）
-  const restored = hydrateLiveSession({
+  const restored = hydrateLiveTask({
     ...snapshot,
     queueState: { queue: [item], paused: false, sendingId: "q1" },
     activity: idle.activity,
@@ -494,7 +494,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   const queued = [
     {
       id: "q1",
-      sessionId: "a",
+      taskId: "a",
       position: 0,
       text: "排队第一条",
       mentionPaths: [],
@@ -505,7 +505,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
     },
   ];
   // 执行中入队：事件挂当前执行，队列快照更新
-  let state = hydrateLiveSession(snapshot);
+  let state = hydrateLiveTask(snapshot);
   const enqueued = receiveLiveEvent(state, {
     ...delta(3, ""),
     event: {
@@ -552,7 +552,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   });
   state = settled;
   const dequeued = receiveLiveEvent(state, {
-    sessionId: "a",
+    taskId: "a",
     executionId: "e2",
     sequence: 6,
     activity: { ...activity, running: true },
@@ -571,7 +571,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   expect(continued.items.at(-1)).toMatchObject({ content: "新回复" });
 
   // 切换会话快照恢复：view.queue 原样带回队列条与暂停态（票 02）
-  const restored = hydrateLiveSession({
+  const restored = hydrateLiveTask({
     ...snapshot,
     queueState: { queue: queued, paused: true, sendingId: null },
     activity: { ...activity, running: false, outcome: "completed" },

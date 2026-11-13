@@ -228,10 +228,10 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   await invoke("send", session.id, "排队一", app.profile.id);
   await invoke("send", session.id, "排队二", app.profile.id);
 
-  // 队列变更作为任务事件信封推送（复用 sessionId/sequence/executionId）
+  // 队列变更作为任务事件信封推送（复用 taskId/sequence/executionId）
   const queued = app.delivered.filter(
     (envelope) =>
-      envelope.sessionId === session.id &&
+      envelope.taskId === session.id &&
       (envelope.event as any).type === "queue-changed"
   );
   expect(queued.length).toBeGreaterThanOrEqual(2);
@@ -291,7 +291,7 @@ it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随�
   // 出队事件已推送（「甲」被取出发送）
   const dequeued = app.delivered.filter(
     (envelope) =>
-      envelope.sessionId === session.id &&
+      envelope.taskId === session.id &&
       (envelope.event as any).type === "queue-changed" &&
       (envelope.event as any).reason === "dequeue"
   );
@@ -334,7 +334,7 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   // 置暂停推送 queue-changed(pause) 事件信封（携带暂停后快照）
   const pauseEvents = app.delivered.filter(
     (envelope) =>
-      envelope.sessionId === session.id &&
+      envelope.taskId === session.id &&
       (envelope.event as any).type === "queue-changed" &&
       (envelope.event as any).reason === "pause"
   );

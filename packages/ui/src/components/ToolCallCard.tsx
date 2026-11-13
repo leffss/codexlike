@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useCollapseState } from "../lib/collapse-memory";
-import type { ToolCallSegment } from "../lib/session-view";
+import type { ToolCallSegment } from "../lib/task-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
@@ -19,8 +19,8 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     setImage(null);
     setFailed(false);
     if (!call.isError) {
-      window.codexlike.sessions
-        .toolImage(call.sessionId, call.id)
+      window.codexlike.tasks
+        .toolImage(call.taskId, call.id)
         .then((dataUrl) => {
           if (alive) {
             if (dataUrl === null) {
@@ -39,7 +39,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     return () => {
       alive = false;
     };
-  }, [call.id, call.sessionId, call.isError]);
+  }, [call.id, call.taskId, call.isError]);
 
   if (call.isError) {
     return null;

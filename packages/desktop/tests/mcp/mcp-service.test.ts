@@ -91,7 +91,7 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
     await service.addServer(fakeServerInput);
 
     const names = () =>
-      service.sessionTools().map((tool: ToolDefinition) => tool.name);
+      service.taskTools().map((tool: ToolDefinition) => tool.name);
     expect(names()).toContain("mcp_fake_echo");
 
     await service.setToolEnabled("mcp_fake_echo", false);
@@ -112,13 +112,13 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
   it("removeServer 断开连接并从 overview 消失；任务工具同步撤下", async () => {
     const service = newService();
     await service.addServer(fakeServerInput);
-    expect(service.sessionTools().length).toBeGreaterThan(0);
+    expect(service.taskTools().length).toBeGreaterThan(0);
 
     await service.removeServer(
       (await service.overview()).servers[0]!.config.id
     );
     expect((await service.overview()).servers).toEqual([]);
-    expect(service.sessionTools()).toEqual([]);
+    expect(service.taskTools()).toEqual([]);
   });
 
   it("连接失败的 server 不拖垮整体：failed 状态 + 中文原因可见，其余 server 正常", async () => {
@@ -148,7 +148,7 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
     expect(view.tools.length).toBe(3);
   });
 
-  it("sessionTools 与内置工具合并时内置优先（MCP 撞名跳过）", async () => {
+  it("taskTools 与内置工具合并时内置优先（MCP 撞名跳过）", async () => {
     const service = newService();
     await service.addServer(fakeServerInput);
     const builtin: ToolDefinition[] = [
@@ -160,7 +160,7 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
         execute: async () => ({ output: "builtin", isError: false }),
       },
     ];
-    const merged = service.sessionTools(builtin);
+    const merged = service.taskTools(builtin);
     expect(merged.filter((tool) => tool.name === "mcp_fake_echo")).toHaveLength(
       1
     );

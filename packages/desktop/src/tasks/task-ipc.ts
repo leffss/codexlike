@@ -82,7 +82,7 @@ export function registerTaskHandlers(options: {
     resourcesFor,
     queueStore = createMemoryInputQueueStore(),
   } = options;
-  // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
+  // 每条运行中的消息流登记一个 AbortController：停止按钮（tasks:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
@@ -90,7 +90,7 @@ export function registerTaskHandlers(options: {
   const membership = createTaskMembership(manager, management);
   const starts = new Map<string, Promise<TaskRecord>>();
   const workbench = registerWorkbenchHandlers(manager, profiles);
-  const liveSessions = createLiveTasks(manager);
+  const liveTasks = createLiveTasks(manager);
   const tasks = new Set<Promise<unknown>>();
   let exiting = false;
   let stopping = false;
@@ -128,10 +128,10 @@ export function registerTaskHandlers(options: {
   }
 
   function emit(
-    input: Pick<TaskEventEnvelope, "sessionId" | "executionId" | "event">
+    input: Pick<TaskEventEnvelope, "taskId" | "executionId" | "event">
   ): void {
-    const envelope = liveSessions.accept(
-      input.sessionId,
+    const envelope = liveTasks.accept(
+      input.taskId,
       input.executionId,
       input.event
     );
@@ -147,8 +147,8 @@ export function registerTaskHandlers(options: {
   // 则由主进程逐条消费。等待「本轮流结束」的消费循环经 streamWaiters 挂起，
   // 在流的 end() 钩子中释放（发一条、等其回复完成、再发下一条）。
   const streamWaiters = new Map<string, Set<() => void>>();
-  function releaseStreamWaiters(sessionId: string) {
-    const waiters = streamWaiters.get(sessionId);
+  function releaseStreamWaiters(taskId: string) {
+    const waiters = streamWaiters.get(taskId);
     if (!waiters) return;
     for (const release of waiters) release();
     waiters.clear();
@@ -156,15 +156,15 @@ export function registerTaskHandlers(options: {
   const queues = createTaskInputQueues({
     store: queueStore,
     // 退出冻结是宿主门控，不是用户暂停；不落盘，也不取下一条。
-    isBusy: (sessionId) =>
-      exiting || (management.execution(sessionId)?.running ?? false),
+    isBusy: (taskId) =>
+      exiting || (management.execution(taskId)?.running ?? false),
     // 队首还在读取凭据/准备发送时也算在途工作，退出需等它复查闸门后排空。
-    dispatch: (sessionId, entry, onSettled) =>
-      track(dispatchQueued(sessionId, entry, onSettled)),
-    onChange: (sessionId, reason, queue, paused, sendingId) => {
+    dispatch: (taskId, entry, onSettled) =>
+      track(dispatchQueued(taskId, entry, onSettled)),
+    onChange: (taskId, reason, queue, paused, sendingId) => {
       // 队列变更经任务事件信封推送（空闲修改也有信封可挂，票 03 acceptQueue），
       // 所有工作台窗口收到同一权威快照。
-      const envelope = liveSessions.acceptQueue(sessionId, {
+      const envelope = liveTasks.acceptQueue(taskId, {
         type: "queue-changed",
         reason,
         queue,
@@ -183,7 +183,7 @@ export function registerTaskHandlers(options: {
 
   /** 队列消费的发送：走发送主路径；启动成功即返回，流结束经 onSettled 回调。 */
   async function dispatchQueued(
-    sessionId: string,
+    taskId: string,
     entry: QueuedMessage,
     onSettled: () => void
   ) {
@@ -193,11 +193,11 @@ export function registerTaskHandlers(options: {
       settled = true;
       onSettled();
     };
-    const waiters = streamWaiters.get(sessionId) ?? new Set();
+    const waiters = streamWaiters.get(taskId) ?? new Set();
     waiters.add(release);
-    streamWaiters.set(sessionId, waiters);
+    streamWaiters.set(taskId, waiters);
     try {
-      await sendQueued(sessionId, entry);
+      await sendQueued(taskId, entry);
     } catch (error) {
       // 启动失败：注销等待（end() 可能已提前释放），条目由协调器保留
       waiters.delete(release);
@@ -206,24 +206,23 @@ export function registerTaskHandlers(options: {
   }
 
   // 消息与Compact共用占位、现场起点及中断清理，避免两套运行状态分叉。
-  function beginExecution(sessionId: string) {
-    management.assertCanExecute(sessionId);
+  function beginExecution(taskId: string) {
+    management.assertCanExecute(taskId);
     const executionId = randomUUID();
-    executions.set(sessionId, executionId);
-    const rollbackLive = liveSessions.begin(sessionId, executionId);
-    const controller = interrupts.begin(sessionId);
+    executions.set(taskId, executionId);
+    const rollbackLive = liveTasks.begin(taskId, executionId);
+    const controller = interrupts.begin(taskId);
     return {
       executionId,
       controller,
       rollbackLive,
       end() {
-        interrupts.end(sessionId, controller);
-        if (executions.get(sessionId) === executionId)
-          executions.delete(sessionId);
+        interrupts.end(taskId, controller);
+        if (executions.get(taskId) === executionId) executions.delete(taskId);
         // 流结束（完成/出错/中断）：唤醒等待本轮的消费循环并尝试取队首（票 01）
-        releaseStreamWaiters(sessionId);
+        releaseStreamWaiters(taskId);
         // 应用退出中断不等于插话完成：保留用户暂停，不在收尾时触发下一轮。
-        if (!stopping) queues.onIdle(sessionId);
+        if (!stopping) queues.onIdle(taskId);
       },
     };
   }
@@ -238,10 +237,10 @@ export function registerTaskHandlers(options: {
     if (typeof id !== "string" || typeof confirmed !== "boolean")
       throw new Error("移除项目：需要项目标识和明确确认");
     const result = membership.removeProject(id, confirmed);
-    for (const sessionId of result?.sessionIds ?? []) {
-      liveSessions.forget(sessionId);
-      queueStore.clear(sessionId);
-      void browserManager?.closeTask(sessionId).catch(() => {});
+    for (const taskId of result?.taskIds ?? []) {
+      liveTasks.forget(taskId);
+      queueStore.clear(taskId);
+      void browserManager?.closeTask(taskId).catch(() => {});
     }
     return result;
   });
@@ -260,25 +259,25 @@ export function registerTaskHandlers(options: {
   dualHandle(IPC.tasks.list, IPC.sessions.list, () =>
     manager.list().map((record) => ({
       ...record,
-      activity: liveSessions.activity(record.id),
+      activity: liveTasks.activity(record.id),
     }))
   );
-  dualHandle(IPC.tasks.view, IPC.sessions.view, (_e, sessionId: unknown) => {
-    if (typeof sessionId !== "string")
-      throw new Error("view：sessionId 必须是字符串");
-    const view = liveSessions.view(sessionId);
+  dualHandle(IPC.tasks.view, IPC.sessions.view, (_e, taskId: unknown) => {
+    if (typeof taskId !== "string")
+      throw new Error("view：taskId 必须是字符串");
+    const view = liveTasks.view(taskId);
     // 输入队列快照（票 01/02，review 重构收拢三元组）：切回任务时队列条原样恢复
     return view === null
       ? null
-      : { ...view, queueState: queueSnapshot(sessionId) };
+      : { ...view, queueState: queueSnapshot(taskId) };
   });
   dualHandle(
     IPC.tasks.markViewed,
     IPC.sessions.markViewed,
-    (_e, sessionId: unknown, sequence: unknown) => {
-      if (typeof sessionId !== "string" || typeof sequence !== "number")
+    (_e, taskId: unknown, sequence: unknown) => {
+      if (typeof taskId !== "string" || typeof sequence !== "number")
         throw new Error("查看水位参数不合法");
-      liveSessions.markViewed(sessionId, sequence);
+      liveTasks.markViewed(taskId, sequence);
     }
   );
   ipcMain.handle(
@@ -329,10 +328,10 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.execution,
     IPC.sessions.execution,
-    (_e, sessionId: unknown) => {
-      if (typeof sessionId !== "string")
-        throw new Error("execution：sessionId 必须是字符串");
-      return management.execution(sessionId);
+    (_e, taskId: unknown) => {
+      if (typeof taskId !== "string")
+        throw new Error("execution：taskId 必须是字符串");
+      return management.execution(taskId);
     }
   );
 
@@ -373,7 +372,7 @@ export function registerTaskHandlers(options: {
           const available = await profiles.list();
           await resumeAcceptedStart();
           const saved = manager.readWorkbench(
-            workbenchKey({ kind: "session", sessionId: previous.id })
+            workbenchKey({ kind: "task", taskId: previous.id })
           );
           workbench.started(
             request.projectId,
@@ -539,11 +538,11 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.messages,
     IPC.sessions.messages,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("messages：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("messages：taskId 必须是字符串");
       }
-      return manager.transcript(sessionId);
+      return manager.transcript(taskId);
     }
   );
 
@@ -557,25 +556,23 @@ export function registerTaskHandlers(options: {
    */
   async function deliverMessage(input: {
     source: "user" | "queue";
-    sessionId: unknown;
+    taskId: unknown;
     text: unknown;
     profileId?: unknown;
     mentionPaths?: unknown;
     thinkingEffort?: unknown;
     approvalMode?: unknown;
   }) {
-    const { source, sessionId, text } = input;
+    const { source, taskId, text } = input;
     const fromUser = source === "user";
     assertOpen();
-    if (typeof sessionId !== "string" || typeof text !== "string") {
+    if (typeof taskId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
     }
     if (text.trim() === "") {
       throw new Error("消息内容不能为空");
     }
-    const saved = manager.readWorkbench(
-      workbenchKey({ kind: "session", sessionId })
-    );
+    const saved = manager.readWorkbench(workbenchKey({ kind: "task", taskId }));
     const { approvalMode } = input;
     let profileId = input.profileId;
     let thinkingEffort = input.thinkingEffort;
@@ -596,7 +593,7 @@ export function registerTaskHandlers(options: {
     // 校验走 agent-core 统一入口（未传等价 auto，非法值以中文异常抛回渲染进程；
     // agent-core 发送入口同样校验，双保险）
     const effortSnapshot = parseThinkingEffort(thinkingEffort);
-    const session = manager.get(sessionId);
+    const session = manager.get(taskId);
     if (session === null) {
       throw new Error("任务不存在或已损坏");
     }
@@ -616,7 +613,7 @@ export function registerTaskHandlers(options: {
     // 输入队列（票 01）：任务忙时不再报错，而是入队（主进程单一真相）。
     // 入队即快照发送参数（Profile / 思考档位 / 审批模式 / @引用），消费按快照发。
     if (fromUser) {
-      const executionState = management.execution(sessionId);
+      const executionState = management.execution(taskId);
       // 等待用户交互（审批/问答，spec 用户故事 17 / Out of Scope）：UI 已禁用，
       // 直调 IPC 绕过 UI 的发送一律拒绝——明确中文报错，不入队也不触发消费
       //（排队消息会卡在无法消费的时机）。
@@ -624,7 +621,7 @@ export function registerTaskHandlers(options: {
         throw new Error("任务正在等待审批或问答，请先回应后再发送");
       }
       if (executionState?.running ?? false) {
-        queues.enqueue(sessionId, {
+        queues.enqueue(taskId, {
           text,
           mentionPaths: mentionPaths ?? [],
           providerProfileId: profile.id,
@@ -646,11 +643,11 @@ export function registerTaskHandlers(options: {
     assertOpen();
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
     const { executionId, controller, rollbackLive, end } =
-      beginExecution(sessionId);
+      beginExecution(taskId);
     // 插话（票 02）：暂停期间的直发消息已开始执行——回复结束（完成/出错/
     // 中断）时自动清除暂停标志并恢复队列消费（协调器 onIdle 兑现）。
-    if (fromUser && queues.isPaused(sessionId)) {
-      queues.beginInterjection(sessionId);
+    if (fromUser && queues.isPaused(taskId)) {
+      queues.beginInterjection(taskId);
     }
     try {
       // 先 await 第一个事件（user-message）：任务并发拒绝等启动错误
@@ -668,8 +665,8 @@ export function registerTaskHandlers(options: {
       const iterator = execution[Symbol.asyncIterator]();
       const first = await iterator.next();
       if (first.done !== true) {
-        manager.markUsed(sessionId);
-        emit({ sessionId, executionId, event: first.value });
+        manager.markUsed(taskId);
+        emit({ taskId, executionId, event: first.value });
       }
       track(
         (async () => {
@@ -678,12 +675,12 @@ export function registerTaskHandlers(options: {
             !head.done;
             head = await iterator.next()
           ) {
-            emit({ sessionId, executionId, event: head.value });
+            emit({ taskId, executionId, event: head.value });
           }
         })()
           .catch((error: unknown) => {
             // 防御：流中途的意外异常不应成为未处理 rejection
-            console.error("[sessions] 事件流意外终止", error);
+            console.error("[tasks] 事件流意外终止", error);
           })
           .finally(() => {
             // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
@@ -700,7 +697,7 @@ export function registerTaskHandlers(options: {
 
   /** 渲染层发送入口（sessions.send IPC）：忙时入队、等待用户交互时拒绝、空闲直发。 */
   async function send(
-    sessionId: unknown,
+    taskId: unknown,
     text: unknown,
     profileId?: unknown,
     mentionPaths?: unknown,
@@ -709,7 +706,7 @@ export function registerTaskHandlers(options: {
   ) {
     await deliverMessage({
       source: "user",
-      sessionId,
+      taskId,
       text,
       profileId,
       mentionPaths,
@@ -719,10 +716,10 @@ export function registerTaskHandlers(options: {
   }
 
   /** 队列消费的内部发送（review 重构）：参数取入队时快照，跳过入队与插话登记。 */
-  function sendQueued(sessionId: string, entry: QueuedMessage): Promise<void> {
+  function sendQueued(taskId: string, entry: QueuedMessage): Promise<void> {
     return deliverMessage({
       source: "queue",
-      sessionId,
+      taskId,
       text: entry.text,
       profileId: entry.providerProfileId,
       mentionPaths: entry.mentionPaths,
@@ -739,27 +736,27 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.interrupt,
     IPC.sessions.interrupt,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("interrupt：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("interrupt：taskId 必须是字符串");
       }
       // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲任务幂等返回 false
-      const interrupted = interrupts.interrupt(sessionId);
+      const interrupted = interrupts.interrupt(taskId);
       if (interrupted) {
-        liveSessions.stop(sessionId);
+        liveTasks.stop(taskId);
         // 停止路径（票 02）：排队消息存在时置队列暂停——队列原样保留、
         // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。
-        queues.pause(sessionId);
+        queues.pause(taskId);
       }
       return interrupted;
     }
   );
 
-  function assertQueueSession(sessionId: unknown): asserts sessionId is string {
+  function assertQueueSession(taskId: unknown): asserts taskId is string {
     assertOpen();
-    if (typeof sessionId !== "string" || !sessionId.trim())
+    if (typeof taskId !== "string" || !taskId.trim())
       throw new Error("队列操作：任务标识不合法");
-    const record = manager.list().find((item) => item.id === sessionId);
+    const record = manager.list().find((item) => item.id === taskId);
     if (!record) throw new Error("任务不存在或已移除");
     if (record.archivedAt !== null)
       throw new Error("任务已归档，请先恢复再操作队列");
@@ -769,28 +766,28 @@ export function registerTaskHandlers(options: {
       throw new Error("队列操作：条目标识不合法");
   }
   /** 队列状态快照（review 重构）：queue / paused / sendingId 三元组单点取数。 */
-  function queueSnapshot(sessionId: string): QueueSnapshot {
+  function queueSnapshot(taskId: string): QueueSnapshot {
     return {
-      queue: queues.snapshot(sessionId),
-      paused: queues.isPaused(sessionId),
-      sendingId: queues.sendingItem(sessionId),
+      queue: queues.snapshot(taskId),
+      paused: queues.isPaused(taskId),
+      sendingId: queues.sendingItem(taskId),
     };
   }
-  function queueResult(sessionId: string): QueueOperationResult {
+  function queueResult(taskId: string): QueueOperationResult {
     return {
-      sessionId,
-      sequence: liveSessions.view(sessionId)?.sequence ?? 0,
-      ...queueSnapshot(sessionId),
+      taskId,
+      sequence: liveTasks.view(taskId)?.sequence ?? 0,
+      ...queueSnapshot(taskId),
     };
   }
   dualHandle(
     IPC.tasks.queueRemove,
     IPC.sessions.queueRemove,
-    (_e, sessionId: unknown, id: unknown) => {
-      assertQueueSession(sessionId);
+    (_e, taskId: unknown, id: unknown) => {
+      assertQueueSession(taskId);
       assertQueueItemId(id);
-      queues.remove(sessionId, id);
-      return queueResult(sessionId);
+      queues.remove(taskId, id);
+      return queueResult(taskId);
     }
   );
   dualHandle(
@@ -798,13 +795,13 @@ export function registerTaskHandlers(options: {
     IPC.sessions.queueUpdate,
     (
       _e,
-      sessionId: unknown,
+      taskId: unknown,
       id: unknown,
       text: unknown,
       expectedText: unknown,
       mentionPaths: unknown
     ) => {
-      assertQueueSession(sessionId);
+      assertQueueSession(taskId);
       assertQueueItemId(id);
       if (typeof text !== "string" || text.trim() === "")
         throw new Error("消息内容不能为空");
@@ -817,73 +814,73 @@ export function registerTaskHandlers(options: {
       )
         throw new Error("queueUpdate：@引用 路径列表不合法");
       queues.update(
-        sessionId,
+        taskId,
         id,
         { text, mentionPaths: (mentionPaths as string[] | undefined) ?? [] },
         expectedText
       );
-      return queueResult(sessionId);
+      return queueResult(taskId);
     }
   );
   dualHandle(
     IPC.tasks.queueReorder,
     IPC.sessions.queueReorder,
-    (_e, sessionId: unknown, orderedIds: unknown) => {
-      assertQueueSession(sessionId);
+    (_e, taskId: unknown, orderedIds: unknown) => {
+      assertQueueSession(taskId);
       if (
         !Array.isArray(orderedIds) ||
         orderedIds.some((id) => typeof id !== "string" || !id.trim()) ||
         new Set(orderedIds).size !== orderedIds.length
       )
         throw new Error("重排：条目顺序清单不合法");
-      queues.reorder(sessionId, orderedIds as string[]);
-      return queueResult(sessionId);
+      queues.reorder(taskId, orderedIds as string[]);
+      return queueResult(taskId);
     }
   );
 
   dualHandle(
     IPC.tasks.queueResume,
     IPC.sessions.queueResume,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
       // 参数与任务校验统一走 assertQueueSession（review 重构），与其余队列操作一致
-      assertQueueSession(sessionId);
-      queues.resume(sessionId);
-      return queueResult(sessionId);
+      assertQueueSession(taskId);
+      queues.resume(taskId);
+      return queueResult(taskId);
     }
   );
 
   dualHandle(
     IPC.tasks.queueClear,
     IPC.sessions.queueClear,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      assertQueueSession(sessionId);
-      queues.clearQueue(sessionId);
-      return queueResult(sessionId);
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      assertQueueSession(taskId);
+      queues.clearQueue(taskId);
+      return queueResult(taskId);
     }
   );
 
   dualHandle(
     IPC.tasks.rename,
     IPC.sessions.rename,
-    (_e: IpcMainInvokeEvent, sessionId: unknown, title: unknown) => {
-      if (typeof sessionId !== "string" || typeof title !== "string") {
+    (_e: IpcMainInvokeEvent, taskId: unknown, title: unknown) => {
+      if (typeof taskId !== "string" || typeof title !== "string") {
         throw new Error("rename：参数不合法");
       }
-      return manager.rename(sessionId, title);
+      return manager.rename(taskId, title);
     }
   );
 
   dualHandle(
     IPC.tasks.archive,
     IPC.sessions.archive,
-    (_e: IpcMainInvokeEvent, sessionId: unknown, archived: unknown) => {
-      if (typeof sessionId !== "string" || typeof archived !== "boolean") {
+    (_e: IpcMainInvokeEvent, taskId: unknown, archived: unknown) => {
+      if (typeof taskId !== "string" || typeof archived !== "boolean") {
         throw new Error("archive：参数不合法");
       }
       // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
-      const result = management.archive(sessionId, archived);
+      const result = management.archive(taskId, archived);
       if (archived && result) {
-        void browserManager?.closeTask(sessionId).catch(() => {});
+        void browserManager?.closeTask(taskId).catch(() => {});
       }
       // 归档只整理记录，不触发磁盘回收（包括新模型隔离保留的旧 Worktree）。
       return result;
@@ -893,11 +890,11 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.toolImage,
     IPC.sessions.toolImage,
-    (_e: IpcMainInvokeEvent, sessionId: unknown, toolCallId: unknown) => {
-      if (typeof sessionId !== "string" || typeof toolCallId !== "string") {
+    (_e: IpcMainInvokeEvent, taskId: unknown, toolCallId: unknown) => {
+      if (typeof taskId !== "string" || typeof toolCallId !== "string") {
         throw new Error("toolImage：参数不合法");
       }
-      const path = screenshotPathFor(dataDir, sessionId, toolCallId);
+      const path = screenshotPathFor(dataDir, taskId, toolCallId);
       if (!existsSync(path)) {
         return null;
       }
@@ -908,13 +905,13 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.status,
     IPC.sessions.status,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("status：sessionId 必须是字符串");
+    async (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("status：taskId 必须是字符串");
       }
       const record = manager
         .list()
-        .find((candidate: TaskRecord) => candidate.id === sessionId);
+        .find((candidate: TaskRecord) => candidate.id === taskId);
       if (record === undefined) {
         return null;
       }
@@ -925,17 +922,17 @@ export function registerTaskHandlers(options: {
               (candidate: ProviderProfile) =>
                 candidate.id === record.providerProfileId
             );
-      const { active, last } = manager.resourceState(sessionId);
+      const { active, last } = manager.resourceState(taskId);
       return buildTaskStatus({
         record,
-        messages: manager.messages(sessionId),
+        messages: manager.messages(taskId),
         resources: active ?? resourcesFor(record).summary(),
         resourcePhase: active === null ? "preview" : "active",
         lastResources: last,
         providerProfileName: profile?.name ?? null,
         // 上下文告警阈值 = Profile 可配的上下文窗口 × 80%（未配置走 agent-core 默认 128k）
         contextWindowTokens: profile?.contextWindowTokens ?? null,
-        latestCompact: manager.latestCompact(sessionId),
+        latestCompact: manager.latestCompact(taskId),
       });
     }
   );
@@ -943,18 +940,18 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.resources,
     IPC.sessions.resources,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("resources：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("resources：taskId 必须是字符串");
       }
       const record = manager
         .list()
-        .find((candidate) => candidate.id === sessionId);
+        .find((candidate) => candidate.id === taskId);
       if (record === undefined) {
         return null;
       }
       return {
-        ...manager.resourceState(sessionId),
+        ...manager.resourceState(taskId),
         preview: resourcesFor(record).summary(),
       };
     }
@@ -963,17 +960,17 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.compact,
     IPC.sessions.compact,
-    (_e: IpcMainInvokeEvent, sessionId: unknown, profileId: unknown) =>
+    (_e: IpcMainInvokeEvent, taskId: unknown, profileId: unknown) =>
       track(
         (async () => {
           assertOpen();
-          if (typeof sessionId !== "string" || typeof profileId !== "string") {
+          if (typeof taskId !== "string" || typeof profileId !== "string") {
             throw new Error("compact：参数不合法");
           }
           if (profileId === "") {
             throw new Error("请先选择模型（Provider Profile）");
           }
-          const session = manager.get(sessionId);
+          const session = manager.get(taskId);
           if (session === null) {
             throw new Error("任务不存在或已损坏");
           }
@@ -985,31 +982,31 @@ export function registerTaskHandlers(options: {
           }
           await resumeAcceptedStart();
           assertOpen();
-          const { executionId, controller, end } = beginExecution(sessionId);
-          emit({ sessionId, executionId, event: { type: "compact-start" } });
+          const { executionId, controller, end } = beginExecution(taskId);
+          emit({ taskId, executionId, event: { type: "compact-start" } });
           try {
             const result = await session.compact({
               profile,
               signal: controller.signal,
             });
             emit({
-              sessionId,
+              taskId,
               executionId,
               event: {
                 type: "compact-finished",
                 outcome: "completed",
-                history: manager.transcript(sessionId),
+                history: manager.transcript(taskId),
               },
             });
             return { compactedMessages: result.compactedMessages };
           } catch (error) {
             emit({
-              sessionId,
+              taskId,
               executionId,
               event: {
                 type: "compact-finished",
                 outcome: controller.signal.aborted ? "interrupted" : "failed",
-                history: manager.transcript(sessionId),
+                history: manager.transcript(taskId),
                 error: error instanceof Error ? error.message : String(error),
               },
             });
@@ -1024,13 +1021,13 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.workspaceFiles,
     IPC.sessions.workspaceFiles,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("workspaceFiles：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("workspaceFiles：taskId 必须是字符串");
       }
       const record = manager
         .list()
-        .find((candidate: TaskRecord) => candidate.id === sessionId);
+        .find((candidate: TaskRecord) => candidate.id === taskId);
       if (record === undefined) {
         throw new Error("任务不存在或已损坏");
       }
@@ -1041,19 +1038,19 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.revokeAutoApprove,
     IPC.sessions.revokeAutoApprove,
-    (_e, sessionId: unknown) => {
-      if (typeof sessionId !== "string" || !sessionId.trim())
+    (_e, taskId: unknown) => {
+      if (typeof taskId !== "string" || !taskId.trim())
         throw new Error("revokeAutoApprove：参数不合法");
-      return manager.revokeAutoApprove(sessionId);
+      return manager.revokeAutoApprove(taskId);
     }
   );
 
   dualHandle(
     IPC.tasks.setApprovalMode,
     IPC.sessions.setApprovalMode,
-    (_e: IpcMainInvokeEvent, sessionId: unknown, mode: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("setApprovalMode：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown, mode: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("setApprovalMode：taskId 必须是字符串");
       }
       // IPC 边界不信任渲染进程：只接受三档枚举（ask / assist / full-access）
       if (
@@ -1064,7 +1061,7 @@ export function registerTaskHandlers(options: {
           "setApprovalMode：mode 必须是 ask / assist / full-access"
         );
       }
-      const key = workbenchKey({ kind: "session", sessionId });
+      const key = workbenchKey({ kind: "task", taskId });
       const saved = manager.readWorkbench(key);
       if (saved)
         manager.writeWorkbench(key, {
@@ -1077,18 +1074,18 @@ export function registerTaskHandlers(options: {
             },
           },
         });
-      return manager.setApprovalMode(sessionId, mode as ApprovalMode);
+      return manager.setApprovalMode(taskId, mode as ApprovalMode);
     }
   );
 
   dualHandle(
     IPC.tasks.pendingInteractions,
     IPC.sessions.pendingInteractions,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string" || sessionId.trim() === "") {
-        throw new Error("pendingInteractions：sessionId 必须是非空字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string" || taskId.trim() === "") {
+        throw new Error("pendingInteractions：taskId 必须是非空字符串");
       }
-      return manager.get(sessionId)?.pendingInteractions ?? [];
+      return manager.get(taskId)?.pendingInteractions ?? [];
     }
   );
 
@@ -1097,19 +1094,19 @@ export function registerTaskHandlers(options: {
     IPC.sessions.respondInteraction,
     (
       _e: IpcMainInvokeEvent,
-      sessionId: unknown,
+      taskId: unknown,
       requestId: unknown,
       response: unknown
     ) => {
       if (
-        typeof sessionId !== "string" ||
-        sessionId.trim() === "" ||
+        typeof taskId !== "string" ||
+        taskId.trim() === "" ||
         typeof requestId !== "string" ||
         requestId.trim() === ""
       ) {
         throw new Error("respondInteraction：参数不合法");
       }
-      const session = manager.get(sessionId);
+      const session = manager.get(taskId);
       if (session === null) {
         throw new Error("任务不存在或已损坏");
       }
@@ -1124,11 +1121,11 @@ export function registerTaskHandlers(options: {
     IPC.sessions.respondApproval,
     (
       _e: IpcMainInvokeEvent,
-      sessionId: unknown,
+      taskId: unknown,
       requestId: unknown,
       decision: unknown
     ) => {
-      if (typeof sessionId !== "string" || typeof requestId !== "string") {
+      if (typeof taskId !== "string" || typeof requestId !== "string") {
         throw new Error("respondApproval：参数不合法");
       }
       if (
@@ -1140,7 +1137,7 @@ export function registerTaskHandlers(options: {
           "respondApproval：decision 必须是 approve / reject / always"
         );
       }
-      const session = manager.get(sessionId);
+      const session = manager.get(taskId);
       if (session === null) {
         throw new Error("任务不存在或已损坏");
       }
@@ -1152,11 +1149,11 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.pendingApproval,
     IPC.sessions.pendingApproval,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("pendingApproval：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("pendingApproval：taskId 必须是字符串");
       }
-      const session = manager.get(sessionId);
+      const session = manager.get(taskId);
       // 任务不存在与无等待统一返回 null（切回任务时 UI 不渲染审批卡片）
       return session?.pendingApproval ?? null;
     }
@@ -1165,11 +1162,11 @@ export function registerTaskHandlers(options: {
   dualHandle(
     IPC.tasks.pendingApprovals,
     IPC.sessions.pendingApprovals,
-    (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      if (typeof sessionId !== "string") {
-        throw new Error("pendingApprovals：sessionId 必须是字符串");
+    (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      if (typeof taskId !== "string") {
+        throw new Error("pendingApprovals：taskId 必须是字符串");
       }
-      const session = manager.get(sessionId);
+      const session = manager.get(taskId);
       // 主任务与子代理可能并行等待审批（工单 13），全部返回供 UI 恢复多张审批卡片
       return session?.pendingApprovals ?? [];
     }
@@ -1210,7 +1207,7 @@ export function registerTaskHandlers(options: {
       releaseDeferredStarts();
       for (const id of executions.keys()) {
         interrupts.interrupt(id);
-        liveSessions.stop(id);
+        liveTasks.stop(id);
       }
       // 首次发送/异步profile查询也必须排空；它们复查退出闸门后拒绝启动。
       while (starts.size || tasks.size)

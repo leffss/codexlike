@@ -19,7 +19,7 @@ interface LiveExecution {
  * 重启后走 transcript 恢复，与这里的内存重放互不重复。
  */
 export function createLiveTasks(manager: TaskManager) {
-  const sessions = new Map<string, LiveExecution>();
+  const tasks = new Map<string, LiveExecution>();
   const idle = (): TaskActivity => ({
     running: false,
     waitingForUser: false,
@@ -27,7 +27,7 @@ export function createLiveTasks(manager: TaskManager) {
     unread: false,
   });
   function activity(id: string): TaskActivity {
-    const live = sessions.get(id);
+    const live = tasks.get(id);
     if (!live) {
       const last = manager.messages(id).at(-1);
       return { ...idle(), outcome: last?.aborted ? "interrupted" : null };
@@ -35,8 +35,8 @@ export function createLiveTasks(manager: TaskManager) {
     return { ...live.activity, unread: live.terminalAt > live.viewed };
   }
   function begin(id: string, executionId: string) {
-    const previous = sessions.get(id);
-    sessions.set(id, {
+    const previous = tasks.get(id);
+    tasks.set(id, {
       executionId,
       history: manager.transcript(id),
       events: [],
@@ -47,10 +47,10 @@ export function createLiveTasks(manager: TaskManager) {
       activity: { ...idle(), running: true },
     });
     return () => {
-      const live = sessions.get(id);
+      const live = tasks.get(id);
       if (live?.executionId !== executionId || live.events.length > 0) return;
-      if (previous) sessions.set(id, previous);
-      else sessions.delete(id);
+      if (previous) tasks.set(id, previous);
+      else tasks.delete(id);
     };
   }
   function accept(
@@ -58,7 +58,7 @@ export function createLiveTasks(manager: TaskManager) {
     executionId: string,
     event: TaskEventEnvelope["event"]
   ): TaskEventEnvelope | null {
-    const live = sessions.get(id);
+    const live = tasks.get(id);
     if (
       !live ||
       live.executionId !== executionId ||
@@ -76,7 +76,7 @@ export function createLiveTasks(manager: TaskManager) {
         "tool-result",
         "interaction-resolved",
         "approval-resolved",
-        "session-auto-approve-changed",
+        "task-auto-approve-changed",
         "subagent-report",
         "subagent-tool",
         // 输入队列变更（票 01）：停止期间入队仍要推送队列快照
@@ -124,7 +124,7 @@ export function createLiveTasks(manager: TaskManager) {
         !live.stopped && (manager.get(id)?.pendingInteractions.length ?? 0) > 0;
     }
     const envelope: TaskEventEnvelope = {
-      sessionId: id,
+      taskId: id,
       executionId,
       sequence: live.sequence,
       event,
@@ -138,9 +138,9 @@ export function createLiveTasks(manager: TaskManager) {
     id: string,
     event: Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>
   ): TaskEventEnvelope | null {
-    if (!sessions.has(id)) {
+    if (!tasks.has(id)) {
       if (!manager.list().some((record) => record.id === id)) return null;
-      sessions.set(id, {
+      tasks.set(id, {
         executionId: randomUUID(),
         history: manager.transcript(id),
         events: [],
@@ -151,14 +151,14 @@ export function createLiveTasks(manager: TaskManager) {
         activity: activity(id),
       });
     }
-    return accept(id, sessions.get(id)!.executionId, event);
+    return accept(id, tasks.get(id)!.executionId, event);
   }
   function view(id: string): TaskView | null {
     const record = manager.list().find((record) => record.id === id);
     if (!record) return null;
-    const live = sessions.get(id);
+    const live = tasks.get(id);
     return {
-      sessionId: id,
+      taskId: id,
       autoApprove: record.autoApprove ?? false,
       executionId: live?.executionId ?? null,
       sequence: live?.sequence ?? 0,
@@ -169,7 +169,7 @@ export function createLiveTasks(manager: TaskManager) {
     };
   }
   function markViewed(id: string, sequence: number) {
-    const live = sessions.get(id);
+    const live = tasks.get(id);
     if (
       !Number.isSafeInteger(sequence) ||
       sequence < 0 ||
@@ -179,7 +179,7 @@ export function createLiveTasks(manager: TaskManager) {
     if (live) live.viewed = Math.max(live.viewed, sequence);
   }
   function stop(id: string) {
-    const live = sessions.get(id);
+    const live = tasks.get(id);
     if (!live || live.terminalAt > 0) return;
     live.stopped = true;
     live.activity = {
@@ -198,7 +198,7 @@ export function createLiveTasks(manager: TaskManager) {
     markViewed,
     stop,
     forget(id: string) {
-      sessions.delete(id);
+      tasks.delete(id);
     },
   };
 }

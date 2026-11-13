@@ -460,7 +460,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         deleteWorkbench.run(workbenchKey({ kind: "new", projectId }));
         for (const member of members)
           deleteWorkbench.run(
-            workbenchKey({ kind: "session", sessionId: String(member.id) })
+            workbenchKey({ kind: "task", taskId: String(member.id) })
           );
         // 成功创建意图保留墓碑，避免移入后移除的独立草稿因重试重建任务。
         db.prepare(

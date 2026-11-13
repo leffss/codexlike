@@ -11,7 +11,7 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
-import { SessionAutoApproveStatus } from "../components/SessionAutoApproveStatus";
+import { TaskAutoApproveStatus } from "../components/TaskAutoApproveStatus";
 import {
   WorkspaceModeSelector,
   WorkspaceSharingNotice,
@@ -20,16 +20,16 @@ import type {
   QueuedMessage,
   QueueOperationResult,
   QueueSnapshot,
-  SessionEventEnvelope,
-  SessionListItem,
+  TaskEventEnvelope,
+  TaskListItem,
   ProjectRemoval,
 } from "@codexlike/desktop/ipc";
 import {
   EMPTY_QUEUE_STATE,
-  hydrateLiveSession,
+  hydrateLiveTask,
   receiveLiveEvent,
-  type LiveSession,
-} from "../lib/live-session";
+  type LiveTask,
+} from "../lib/live-task";
 
 import {
   evaluateContextWarning,
@@ -37,7 +37,7 @@ import {
   type ApprovalMode,
   type ProviderProfile,
   type ProjectRecord,
-  type SessionResourcesView,
+  type TaskResourcesView,
   type ThinkingEffort,
   type WorkbenchTarget,
 } from "@codexlike/agent-core";
@@ -47,28 +47,28 @@ import { ChangesPanel } from "../components/ChangesPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
-import { SessionSidebar } from "../components/SessionSidebar";
-import { SessionSearch } from "../components/SessionSearch";
+import { TaskSidebar } from "../components/TaskSidebar";
+import { TaskSearch } from "../components/TaskSearch";
 import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
-import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
 import {
   appendLocalSegment,
   mergeInteractions,
   type MessageSegment,
-} from "../lib/session-view";
+} from "../lib/task-view";
 import {
-  formatSessionStatus,
+  formatTaskStatus,
   matchProfilesForModelSwitch,
   planSlashCommand,
 } from "../lib/slash-command-actions";
 
 /** 取回编辑会话（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
-interface QueueEditSession {
-  sessionId: string;
+interface QueueEditTask {
+  taskId: string;
   itemId: string;
   originalText: string;
   savedDraft: string;
@@ -97,13 +97,13 @@ export function WorkspacePage(props: {
     workspaceState.version
   );
   const loadingRef = useRef<{
-    sessionId: string;
+    taskId: string;
     generation: number;
-    events: SessionEventEnvelope[];
+    events: TaskEventEnvelope[];
   } | null>(null);
-  const liveRef = useRef<LiveSession | null>(null);
+  const liveRef = useRef<LiveTask | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [revoking, setRevoking] = useState<ReadonlySet<string>>(
     () => new Set()
   );
@@ -124,17 +124,18 @@ export function WorkspacePage(props: {
    * originalText 为载入时的原文（主进程 CAS 校验）；savedDraft 为进入编辑前
    * 的输入框草稿，取消编辑或切走会话时还原，不丢用户文字。
    */
-  const [queueEdit, setQueueEdit] = useState<QueueEditSession | null>(null);
+  const [queueEdit, setQueueEdit] = useState<QueueEditTask | null>(null);
   /** 编辑会话的即时读数：事件回调里不读过期的渲染帧状态 */
-  const queueEditRef = useRef<QueueEditSession | null>(null);
+  const queueEditRef = useRef<QueueEditTask | null>(null);
   queueEditRef.current = queueEdit;
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [recordsRevision, setRecordsRevision] = useState(0);
-  const [membershipSession, setMembershipSession] =
-    useState<SessionListItem | null>(null);
+  const [membershipTask, setMembershipTask] = useState<TaskListItem | null>(
+    null
+  );
   const [removingProject, setRemovingProject] = useState<ProjectRecord | null>(
     null
   );
@@ -162,11 +163,11 @@ export function WorkspacePage(props: {
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const [changesOpen, setChangesOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
-  const [resources, setResources] = useState<SessionResourcesView | null>(null);
+  const [resources, setResources] = useState<TaskResourcesView | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
   const resourceRequestRef = useRef(0);
-  const sessionRequestRef = useRef(0);
+  const taskRequestRef = useRef(0);
   /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
   const [fullAccessPending, setFullAccessPending] = useState(false);
   /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
@@ -183,8 +184,8 @@ export function WorkspacePage(props: {
   );
 
   currentIdRef.current = currentId;
-  /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；sessions 列表随事件刷新） */
-  const current = sessions.find((session) => session.id === currentId) ?? null;
+  /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；tasks 列表随事件刷新） */
+  const current = tasks.find((task) => task.id === currentId) ?? null;
   const pending = currentId === null ? [] : workspaceState.pending(currentId);
   const interaction = pending[0];
   const displayMessages =
@@ -192,17 +193,17 @@ export function WorkspacePage(props: {
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
   // 新建、加载与已有会话始终使用同一档位；滚动条宽度由消息流实际测量。
-  const contentWidthClass = SESSION_CONTENT_WIDTH_CLASS;
+  const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
   const contentPadding = {
-    paddingRight: "calc(1rem + var(--session-scrollbar-gutter, 0px))",
+    paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
   };
 
   const listRequestRef = useRef(0);
-  const refreshSessions = useCallback(async () => {
+  const refreshTasks = useCallback(async () => {
     const request = ++listRequestRef.current;
-    const list = await window.codexlike.sessions.list();
-    if (listRequestRef.current === request) setSessions(list);
+    const list = await window.codexlike.tasks.list();
+    if (listRequestRef.current === request) setTasks(list);
     return list;
   }, []);
 
@@ -223,15 +224,13 @@ export function WorkspacePage(props: {
     setRevoking(new Set(revokingRef.current));
     setRevokeErrors((errors) => ({ ...errors, [id]: null }));
     try {
-      const record = await window.codexlike.sessions.revokeAutoApprove(id);
+      const record = await window.codexlike.tasks.revokeAutoApprove(id);
       // 落盘成功才更新，按原会话标识归并，切换查看不会改错会话。
       listRequestRef.current += 1;
-      setSessions((list) =>
-        list.map((session) =>
-          session.id === id ? { ...session, ...record } : session
-        )
+      setTasks((list) =>
+        list.map((task) => (task.id === id ? { ...task, ...record } : task))
       );
-      if (liveRef.current?.sessionId === id)
+      if (liveRef.current?.taskId === id)
         liveRef.current = {
           ...liveRef.current,
           autoApprove: record.autoApprove ?? false,
@@ -248,15 +247,14 @@ export function WorkspacePage(props: {
   }
 
   /** 最新请求胜出；同时校验会话与请求代数，防止 A→B→A 的旧结果串线。 */
-  const refreshResources = useCallback(async (sessionId: string) => {
+  const refreshResources = useCallback(async (taskId: string) => {
     const request = ++resourceRequestRef.current;
     const isCurrent = () =>
-      currentIdRef.current === sessionId &&
-      resourceRequestRef.current === request;
+      currentIdRef.current === taskId && resourceRequestRef.current === request;
     setResourcesLoading(true);
     setResourcesError(null);
     try {
-      const view = await window.codexlike.sessions.resources(sessionId);
+      const view = await window.codexlike.tasks.resources(taskId);
       if (!isCurrent()) return;
       setResources(view);
       if (view === null) setResourcesError("会话资源不可用");
@@ -288,13 +286,12 @@ export function WorkspacePage(props: {
    * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）× 80%，
    * 超阈值在输入区上方常驻中文告警（/compact 后重估自然消失）；查询失败静默不打扰。
    */
-  const refreshContextWarning = useCallback(async (sessionId: string) => {
-    const sessionRequest = sessionRequestRef.current;
+  const refreshContextWarning = useCallback(async (taskId: string) => {
+    const taskRequest = taskRequestRef.current;
     const isCurrent = () =>
-      currentIdRef.current === sessionId &&
-      sessionRequestRef.current === sessionRequest;
+      currentIdRef.current === taskId && taskRequestRef.current === taskRequest;
     try {
-      const status = await window.codexlike.sessions.status(sessionId);
+      const status = await window.codexlike.tasks.status(taskId);
       if (!isCurrent()) return;
       setContextWarning(
         status === null
@@ -309,22 +306,22 @@ export function WorkspacePage(props: {
     }
   }, []);
 
-  const openSession = useCallback(
+  const openTask = useCallback(
     async (id: string) => {
-      reportWorkbenchTarget({ kind: "session", sessionId: id });
+      reportWorkbenchTarget({ kind: "task", taskId: id });
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
       // 编辑中的排队消息随会话归属：切走先还原该会话的输入框草稿，不丢文字（票 03）
       const editing = queueEditRef.current;
-      if (editing !== null && editing.sessionId !== id)
-        workspaceState.setComposer(editing.sessionId, editing.savedDraft);
+      if (editing !== null && editing.taskId !== id)
+        workspaceState.setComposer(editing.taskId, editing.savedDraft);
       setQueueEdit(null);
       setCurrentId(id);
-      workspaceState.activeSessionId = id;
+      workspaceState.activeTaskId = id;
       currentIdRef.current = id;
-      const request = ++sessionRequestRef.current;
+      const request = ++taskRequestRef.current;
       const isCurrent = () =>
-        currentIdRef.current === id && sessionRequestRef.current === request;
+        currentIdRef.current === id && taskRequestRef.current === request;
       setMessages([]);
       setQueueState(EMPTY_QUEUE_STATE);
       setWorkspaceFiles([]);
@@ -336,26 +333,24 @@ export function WorkspacePage(props: {
       setLoading(true);
       setStreaming(false);
       const buffer = {
-        sessionId: id,
+        taskId: id,
         generation: request,
-        events: [] as SessionEventEnvelope[],
+        events: [] as TaskEventEnvelope[],
       };
       loadingRef.current = buffer;
       const snapshotVersion = workspaceState.version();
       try {
         const [view] = await Promise.all([
-          window.codexlike.sessions.view(id),
-          workspaceState.loadSession(id),
+          window.codexlike.tasks.view(id),
+          workspaceState.loadTask(id),
         ]);
         if (!isCurrent()) return;
         if (!view) throw new Error("会话不存在或已损坏");
-        const live = hydrateLiveSession(view, buffer.events);
+        const live = hydrateLiveTask(view, buffer.events);
         liveRef.current = live;
-        setSessions((list) =>
-          list.map((session) =>
-            session.id === id
-              ? { ...session, autoApprove: live.autoApprove }
-              : session
+        setTasks((list) =>
+          list.map((task) =>
+            task.id === id ? { ...task, autoApprove: live.autoApprove } : task
           )
         );
         workspaceState.reconcile(
@@ -371,9 +366,9 @@ export function WorkspacePage(props: {
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
         );
-        void window.codexlike.sessions
+        void window.codexlike.tasks
           .markViewed(id, live.sequence)
-          .then(() => refreshSessions());
+          .then(() => refreshTasks());
       } catch (error) {
         if (!isCurrent()) return;
         setMessages(
@@ -392,7 +387,7 @@ export function WorkspacePage(props: {
       void refreshContextWarning(id);
       // @引用 菜单候选：随会话（工作区）切换重新枚举
       try {
-        const files = await window.codexlike.sessions.workspaceFiles(id);
+        const files = await window.codexlike.tasks.workspaceFiles(id);
         if (isCurrent()) setWorkspaceFiles(files);
       } catch {
         if (isCurrent()) setWorkspaceFiles([]);
@@ -401,7 +396,7 @@ export function WorkspacePage(props: {
     [
       refreshContextWarning,
       refreshResources,
-      refreshSessions,
+      refreshTasks,
       reportWorkbenchTarget,
       workspaceState,
     ]
@@ -411,32 +406,30 @@ export function WorkspacePage(props: {
     let active = true;
     void (async () => {
       const [list, profileList, projectList] = await Promise.all([
-        window.codexlike.sessions.list(),
+        window.codexlike.tasks.list(),
         window.codexlike.providerProfiles.list(),
         window.codexlike.projects.list(),
       ]);
       if (active) setProjects(projectList);
       if (!active) return;
-      setSessions(list);
+      setTasks(list);
       setProfiles(profileList);
       // 冷启动恢复（票03）：第一优先级取启动现场的工作台目标——记住的会话
       // （归档照常恢复）或新建草稿入口（连同项目关联，草稿文本由 workbench_state
       // 既有机制恢复）。项目已删除的草稿目标视为失效，走回退链。
       // 真冷启动守卫（对照下方回退链守卫的语义）：只在无已打开会话、无草稿时
       // 恢复并上报。currentIdRef 在重挂后恒为 null（组件级），故「无已打开会话」
-      // 由 App 级 workspaceState.activeSessionId 承载——切设置页卸载本页后重挂
+      // 由 App 级 workspaceState.activeTaskId 承载——切设置页卸载本页后重挂
       // 时它仍是用户最后查看的会话，不得以挂载时刻固化的启动目标抢占，否则
       // 拉回旧会话并把它重新写回启动现场。
       const target = initialTargetRef.current;
       const coldStart =
-        workspaceState.activeSessionId === null &&
+        workspaceState.activeTaskId === null &&
         workspaceState.activeDraftProjectId === undefined;
-      if (coldStart && target?.kind === "session") {
-        const remembered = list.find(
-          (session) => session.id === target.sessionId
-        );
+      if (coldStart && target?.kind === "task") {
+        const remembered = list.find((task) => task.id === target.taskId);
         if (remembered !== undefined) {
-          await openSession(remembered.id);
+          await openTask(remembered.id);
           return;
         }
       } else if (coldStart && target?.kind === "new") {
@@ -445,43 +438,43 @@ export function WorkspacePage(props: {
           projectId === null ||
           projectList.some((project) => project.id === projectId)
         ) {
-          await startCreateSession(projectId);
+          await startCreateTask(projectId);
           return;
         }
       }
       // 回退链（现状不变）：内存活动会话 → 排序最前的未归档会话；都没有则停在新建草稿入口
       const latest =
-        list.find((session) => session.id === workspaceState.activeSessionId) ??
-        list.find((session) => session.archivedAt === null);
+        list.find((task) => task.id === workspaceState.activeTaskId) ??
+        list.find((task) => task.archivedAt === null);
       if (
         latest !== undefined &&
         currentIdRef.current === null &&
         workspaceState.activeDraftProjectId === undefined
       ) {
-        await openSession(latest.id);
+        await openTask(latest.id);
       }
     })();
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：initialTarget/activeSessionId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
-  }, [openSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：initialTarget/activeTaskId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
+  }, [openTask]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
-    return window.codexlike.onSessionEvent((envelope) => {
-      const { sessionId, event } = envelope;
-      if (sessionId === currentIdRef.current) {
-        if (loadingRef.current?.sessionId === sessionId) {
+    return window.codexlike.onTaskEvent((envelope) => {
+      const { taskId, event } = envelope;
+      if (taskId === currentIdRef.current) {
+        if (loadingRef.current?.taskId === taskId) {
           loadingRef.current.events.push(envelope);
-        } else if (liveRef.current?.sessionId === sessionId) {
+        } else if (liveRef.current?.taskId === taskId) {
           const previous = liveRef.current;
           const live = receiveLiveEvent(previous, { ...envelope });
           if (live === previous) return;
           liveRef.current = live;
           if (event.type === "compact-finished") {
             workspaceState.reconcile(
-              sessionId,
+              taskId,
               live.items.flatMap((item) =>
                 item.kind === "interaction" ? [item.interaction] : []
               ),
@@ -499,9 +492,9 @@ export function WorkspacePage(props: {
             live.activity.running && live.activity.operation === "compact"
           );
           if (!live.activity.running)
-            void window.codexlike.sessions
-              .markViewed(sessionId, live.sequence)
-              .then(() => refreshSessions());
+            void window.codexlike.tasks
+              .markViewed(taskId, live.sequence)
+              .then(() => refreshTasks());
         }
         if (
           event.type === "assistant-start" ||
@@ -512,7 +505,7 @@ export function WorkspacePage(props: {
           event.type === "assistant-aborted" ||
           event.type === "error"
         ) {
-          void refreshResources(sessionId);
+          void refreshResources(taskId);
         }
         if (
           event.type === "compact-finished" ||
@@ -521,23 +514,23 @@ export function WorkspacePage(props: {
           event.type === "error"
         ) {
           // 每轮回复结束（完成/中断/出错）后重估上下文告警
-          void refreshContextWarning(sessionId);
+          void refreshContextWarning(taskId);
         }
       }
-      if (event.type === "session-auto-approve-changed") {
+      if (event.type === "task-auto-approve-changed") {
         // 废弃事件之前发起的列表查询，避免旧快照覆盖已持久化的授权状态。
         listRequestRef.current += 1;
-        setSessions((list) =>
-          list.map((session) =>
-            session.id === sessionId
-              ? { ...session, autoApprove: event.autoApprove }
-              : session
+        setTasks((list) =>
+          list.map((task) =>
+            task.id === taskId
+              ? { ...task, autoApprove: event.autoApprove }
+              : task
           )
         );
       }
       if (
         event.type === "user-message" ||
-        event.type === "session-auto-approve-changed" ||
+        event.type === "task-auto-approve-changed" ||
         event.type === "compact-start" ||
         event.type === "compact-finished" ||
         event.type === "assistant-done" ||
@@ -547,20 +540,15 @@ export function WorkspacePage(props: {
         event.type === "interaction-resolved"
       ) {
         // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
-        void refreshSessions();
+        void refreshTasks();
       }
     });
-  }, [
-    refreshSessions,
-    refreshContextWarning,
-    refreshResources,
-    workspaceState,
-  ]);
+  }, [refreshTasks, refreshContextWarning, refreshResources, workspaceState]);
 
   useEffect(
     () => () => {
       // 页面卸载后的迟到加载不能写回新工作台页面。
-      sessionRequestRef.current += 1;
+      taskRequestRef.current += 1;
       resourceRequestRef.current += 1;
       currentIdRef.current = null;
     },
@@ -568,14 +556,14 @@ export function WorkspacePage(props: {
   );
 
   /** 入口只恢复该项目/独立入口草稿，不调用创建 IPC。 */
-  async function startCreateSession(projectId: string | null = null) {
-    const request = ++sessionRequestRef.current;
+  async function startCreateTask(projectId: string | null = null) {
+    const request = ++taskRequestRef.current;
     setLoading(true);
     try {
       await workspaceState.flush();
       await workspaceState.loadNewDraft(projectId, profiles[0]?.id ?? "");
     } catch (error) {
-      if (sessionRequestRef.current === request) {
+      if (taskRequestRef.current === request) {
         setLoading(false);
         pushLocalStatus(
           `恢复草稿失败：${error instanceof Error ? error.message : String(error)}`
@@ -583,15 +571,15 @@ export function WorkspacePage(props: {
       }
       return;
     }
-    if (sessionRequestRef.current !== request) return;
+    if (taskRequestRef.current !== request) return;
     // 进入新建草稿也更新启动现场（票03）：重开回到同一草稿状态（含项目关联）
     reportWorkbenchTarget({ kind: "new", projectId });
     workspaceState.activeDraftProjectId = projectId;
-    workspaceState.activeSessionId = null;
+    workspaceState.activeTaskId = null;
     setDraftProjectId(projectId);
     setCurrentId(null);
     currentIdRef.current = null;
-    sessionRequestRef.current += 1;
+    taskRequestRef.current += 1;
     resourceRequestRef.current += 1;
     loadingRef.current = null;
     setMessages([]);
@@ -606,7 +594,7 @@ export function WorkspacePage(props: {
 
   async function addProject() {
     try {
-      const path = await window.codexlike.sessions.selectWorkspace();
+      const path = await window.codexlike.tasks.selectWorkspace();
       if (path === null) return;
       await window.codexlike.projects.add(path);
       setProjects(await window.codexlike.projects.list());
@@ -619,7 +607,7 @@ export function WorkspacePage(props: {
 
   async function selectDraftWorkspace() {
     if (!draft || draft.projectId !== null || draft.busy) return;
-    const path = await window.codexlike.sessions.selectWorkspace();
+    const path = await window.codexlike.tasks.selectWorkspace();
     if (path !== null)
       workspaceState.editNewDraft(null, { workspacePath: path });
   }
@@ -641,11 +629,11 @@ export function WorkspacePage(props: {
     workspaceState.editNewDraft(projectId, { busy: true, error: null });
     try {
       await workspaceState.flush();
-      const record = await window.codexlike.sessions.start(request);
+      const record = await window.codexlike.tasks.start(request);
       await workspaceState.completeNewDraft(projectId);
-      await refreshSessions();
+      await refreshTasks();
       if (workspaceState.activeDraftProjectId === projectId) {
-        await openSession(record.id);
+        await openTask(record.id);
       }
     } catch (error) {
       workspaceState.editNewDraft(projectId, {
@@ -671,7 +659,7 @@ export function WorkspacePage(props: {
     const composerSnapshot = workspaceState.composer(currentId);
     try {
       await workspaceState.flush();
-      await window.codexlike.sessions.send(
+      await window.codexlike.tasks.send(
         currentId,
         text,
         selectedProfileId,
@@ -703,7 +691,7 @@ export function WorkspacePage(props: {
       return;
     }
     try {
-      await window.codexlike.sessions.interrupt(currentId);
+      await window.codexlike.tasks.interrupt(currentId);
     } catch (error) {
       pushLocalStatus(
         `停止失败：${error instanceof Error ? error.message : String(error)}`
@@ -718,12 +706,12 @@ export function WorkspacePage(props: {
    */
   async function runQueueOperation(
     failure: string,
-    invoke: (sessionId: string) => Promise<QueueOperationResult>
+    invoke: (taskId: string) => Promise<QueueOperationResult>
   ) {
-    const sessionId = currentId;
-    if (sessionId === null) return;
+    const taskId = currentId;
+    if (taskId === null) return;
     try {
-      setQueueState(await invoke(sessionId));
+      setQueueState(await invoke(taskId));
     } catch (error) {
       pushLocalStatus(
         `${failure}：${error instanceof Error ? error.message : String(error)}`
@@ -733,44 +721,44 @@ export function WorkspacePage(props: {
 
   /** 队列暂停手动恢复（票 02）：清暂停标志并立即从队首继续逐条消费。 */
   function resumeQueue() {
-    return runQueueOperation("恢复队列失败", (sessionId) =>
-      window.codexlike.sessions.queueResume(sessionId)
+    return runQueueOperation("恢复队列失败", (taskId) =>
+      window.codexlike.tasks.queueResume(taskId)
     );
   }
 
   /** 队列清空（票 02）：作废全部排队消息并清暂停标志，队列条消失。 */
   function clearQueue() {
-    return runQueueOperation("清空队列失败", (sessionId) =>
-      window.codexlike.sessions.queueClear(sessionId)
+    return runQueueOperation("清空队列失败", (taskId) =>
+      window.codexlike.tasks.queueClear(taskId)
     );
   }
 
   /** 删除单条排队消息（票 03）：立即作废，不会被消费。 */
   function removeQueueItem(itemId: string) {
-    return runQueueOperation("删除排队消息失败", (sessionId) =>
-      window.codexlike.sessions.queueRemove(sessionId, itemId)
+    return runQueueOperation("删除排队消息失败", (taskId) =>
+      window.codexlike.tasks.queueRemove(taskId, itemId)
     );
   }
 
   /** 拖拽重排（票 03）：提交仍在排队条目的完整新顺序，顺序即时生效并持久化。 */
   function reorderQueue(orderedIds: string[]) {
-    return runQueueOperation("调整发送顺序失败", (sessionId) =>
-      window.codexlike.sessions.queueReorder(sessionId, orderedIds)
+    return runQueueOperation("调整发送顺序失败", (taskId) =>
+      window.codexlike.tasks.queueReorder(taskId, orderedIds)
     );
   }
 
   /** 点击排队消息取回编辑（票 03）：内容载入输入框；正在发出的条目锁定不可编辑。 */
   function startQueueItemEdit(item: QueuedMessage) {
-    if (currentId === null || item.sessionId !== currentId) return;
+    if (currentId === null || item.taskId !== currentId) return;
     if (item.id === queueState.sendingId) return;
     const editing = queueEditRef.current;
     // 切换编辑目标时沿用最早保存的草稿（当前输入框已是另一条排队内容）
     const savedDraft =
-      editing?.sessionId === currentId
+      editing?.taskId === currentId
         ? editing.savedDraft
         : workspaceState.composer(currentId);
     setQueueEdit({
-      sessionId: currentId,
+      taskId: currentId,
       itemId: item.id,
       originalText: item.text,
       savedDraft,
@@ -783,8 +771,8 @@ export function WorkspacePage(props: {
     const editing = queueEditRef.current;
     if (editing === null) return;
     setQueueEdit(null);
-    if (currentIdRef.current === editing.sessionId)
-      workspaceState.setComposer(editing.sessionId, editing.savedDraft);
+    if (currentIdRef.current === editing.taskId)
+      workspaceState.setComposer(editing.taskId, editing.savedDraft);
   }
 
   /**
@@ -795,24 +783,24 @@ export function WorkspacePage(props: {
   async function saveQueueEdit(text: string, mentionPaths: string[]) {
     const editing = queueEditRef.current;
     if (editing === null) return;
-    const { sessionId, itemId, originalText } = editing;
-    const composerSnapshot = workspaceState.composer(sessionId);
+    const { taskId, itemId, originalText } = editing;
+    const composerSnapshot = workspaceState.composer(taskId);
     try {
-      const result = await window.codexlike.sessions.queueUpdate(
-        sessionId,
+      const result = await window.codexlike.tasks.queueUpdate(
+        taskId,
         itemId,
         text,
         originalText,
         mentionPaths.length === 0 ? undefined : mentionPaths
       );
-      if (currentIdRef.current === sessionId) setQueueState(result);
+      if (currentIdRef.current === taskId) setQueueState(result);
       setQueueEdit(null);
-      if (workspaceState.composer(sessionId) === composerSnapshot)
-        workspaceState.setComposer(sessionId, "");
+      if (workspaceState.composer(taskId) === composerSnapshot)
+        workspaceState.setComposer(taskId, "");
     } catch (error) {
       // 保存被拒：编辑会话结束，文本留在输入框，用户可重新取回或直接发送
       setQueueEdit(null);
-      if (currentIdRef.current === sessionId)
+      if (currentIdRef.current === taskId)
         pushLocalStatus(
           `保存排队消息失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
         );
@@ -822,7 +810,7 @@ export function WorkspacePage(props: {
   // 编辑目标被消费/移除/他窗口操作时结束编辑会话：文本保留在输入框（票 03）
   useEffect(() => {
     if (queueEdit === null || loading) return;
-    if (currentId === null || queueEdit.sessionId !== currentId) return;
+    if (currentId === null || queueEdit.taskId !== currentId) return;
     const item = queueState.queue.find(
       (entry) => entry.id === queueEdit.itemId
     );
@@ -841,16 +829,16 @@ export function WorkspacePage(props: {
   }, [queueState, queueEdit, currentId, loading]);
 
   /** 重命名按钮及命令共享记录刷新，已展开搜索不得保留旧标题。 */
-  async function renameSession(id: string, title: string, announce = false) {
-    const generation = sessionRequestRef.current;
+  async function renameTask(id: string, title: string, announce = false) {
+    const generation = taskRequestRef.current;
     try {
-      await window.codexlike.sessions.rename(id, title);
+      await window.codexlike.tasks.rename(id, title);
       setRecordsRevision((value) => value + 1);
-      await refreshSessions();
+      await refreshTasks();
       if (
         announce &&
         currentIdRef.current === id &&
-        sessionRequestRef.current === generation
+        taskRequestRef.current === generation
       )
         pushLocalStatus(`会话已重命名为「${title}」`);
     } catch (error) {
@@ -861,21 +849,18 @@ export function WorkspacePage(props: {
   }
 
   /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
-  async function archiveSession(id: string, archived: boolean) {
-    const generation = sessionRequestRef.current;
+  async function archiveTask(id: string, archived: boolean) {
+    const generation = taskRequestRef.current;
     try {
-      await window.codexlike.sessions.archive(id, archived);
+      await window.codexlike.tasks.archive(id, archived);
       setRecordsRevision((value) => value + 1);
-      const list = await refreshSessions();
-      if (
-        currentIdRef.current !== id ||
-        sessionRequestRef.current !== generation
-      )
+      const list = await refreshTasks();
+      if (currentIdRef.current !== id || taskRequestRef.current !== generation)
         return;
       if (archived) {
-        const next = list.find((session) => session.archivedAt === null);
-        if (next) await openSession(next.id);
-        else startCreateSession();
+        const next = list.find((task) => task.archivedAt === null);
+        if (next) await openTask(next.id);
+        else startCreateTask();
       }
     } catch (error) {
       pushLocalStatus(
@@ -887,22 +872,22 @@ export function WorkspacePage(props: {
   async function projectRemoved(result: ProjectRemoval) {
     // 宿主已提交后立即清掉可发送目标与加载代数；迟到view不能恢复删除记录。
     const affected =
-      result.sessionIds.includes(currentIdRef.current ?? "") ||
+      result.taskIds.includes(currentIdRef.current ?? "") ||
       workspaceState.activeDraftProjectId === result.projectId;
-    workspaceState.removeProject(result.projectId, result.sessionIds);
+    workspaceState.removeProject(result.projectId, result.taskIds);
     setProjects((previous) =>
       previous.filter((item) => item.id !== result.projectId)
     );
-    setSessions((previous) =>
-      previous.filter((item) => !result.sessionIds.includes(item.id))
+    setTasks((previous) =>
+      previous.filter((item) => !result.taskIds.includes(item.id))
     );
     setRecordsRevision((value) => value + 1);
     if (affected) {
       // 03恢复草稿是异步的：先同步断开删除目标，不能留着旧composer等待flush。
-      sessionRequestRef.current += 1;
+      taskRequestRef.current += 1;
       resourceRequestRef.current += 1;
       currentIdRef.current = null;
-      workspaceState.activeSessionId = null;
+      workspaceState.activeTaskId = null;
       workspaceState.activeDraftProjectId = undefined;
       setCurrentId(null);
       setDraftProjectId(undefined);
@@ -917,13 +902,13 @@ export function WorkspacePage(props: {
       setContextWarning(null);
       setFullAccessPending(false);
     }
-    const generation = sessionRequestRef.current;
+    const generation = taskRequestRef.current;
     try {
-      const list = await refreshSessions();
-      if (affected && sessionRequestRef.current === generation) {
-        const next = list.find((session) => session.archivedAt === null);
-        if (next) await openSession(next.id);
-        else await startCreateSession();
+      const list = await refreshTasks();
+      if (affected && taskRequestRef.current === generation) {
+        const next = list.find((task) => task.archivedAt === null);
+        if (next) await openTask(next.id);
+        else await startCreateTask();
       }
     } catch (error) {
       // 删除已提交，不能将后续列表读取失败误报成删除失败并让用户重复确认。
@@ -938,12 +923,12 @@ export function WorkspacePage(props: {
       current !== null
     );
     switch (action.type) {
-      case "needs-session":
+      case "needs-task":
         pushLocalStatus("该命令需要先选择一个会话");
         return;
-      case "new-session": {
+      case "new-task": {
         // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
-        void startCreateSession(current?.projectId ?? draft?.projectId ?? null);
+        void startCreateTask(current?.projectId ?? draft?.projectId ?? null);
         return;
       }
       case "compact": {
@@ -956,14 +941,14 @@ export function WorkspacePage(props: {
           pushLocalStatus("压缩需要先选择模型（Provider Profile）");
           return;
         }
-        const compactSessionId = current!.id;
-        const compactGeneration = sessionRequestRef.current;
+        const compactTaskId = current!.id;
+        const compactGeneration = taskRequestRef.current;
         const compactIsCurrent = () =>
-          currentIdRef.current === compactSessionId &&
-          sessionRequestRef.current === compactGeneration;
+          currentIdRef.current === compactTaskId &&
+          taskRequestRef.current === compactGeneration;
         setCompacting(true);
         try {
-          const result = await window.codexlike.sessions.compact(
+          const result = await window.codexlike.tasks.compact(
             current!.id,
             selectedProfileId
           );
@@ -983,14 +968,14 @@ export function WorkspacePage(props: {
         return;
       }
       case "rename": {
-        await renameSession(current!.id, action.title, true);
+        await renameTask(current!.id, action.title, true);
         return;
       }
       case "rename-missing-argument":
         pushLocalStatus("用法：/rename 新名称");
         return;
       case "archive": {
-        await archiveSession(current!.id, true);
+        await archiveTask(current!.id, true);
         return;
       }
       case "select-model": {
@@ -1015,24 +1000,24 @@ export function WorkspacePage(props: {
         return;
       }
       case "status": {
-        const sessionId = current!.id;
-        const request = sessionRequestRef.current;
+        const taskId = current!.id;
+        const request = taskRequestRef.current;
         try {
-          const status = await window.codexlike.sessions.status(sessionId);
+          const status = await window.codexlike.tasks.status(taskId);
           if (
-            currentIdRef.current !== sessionId ||
-            sessionRequestRef.current !== request
+            currentIdRef.current !== taskId ||
+            taskRequestRef.current !== request
           )
             return;
           if (status === null) {
             pushLocalStatus("会话不存在或已损坏");
           } else {
-            pushLocalStatus(formatSessionStatus(status));
+            pushLocalStatus(formatTaskStatus(status));
           }
         } catch (error) {
           if (
-            currentIdRef.current !== sessionId ||
-            sessionRequestRef.current !== request
+            currentIdRef.current !== taskId ||
+            taskRequestRef.current !== request
           )
             return;
           pushLocalStatus(
@@ -1057,7 +1042,7 @@ export function WorkspacePage(props: {
     }
     // 取回编辑优先（票 03）：编辑中的提交是原地更新该条，不是新消息/入队
     const editing = queueEditRef.current;
-    if (editing !== null && editing.sessionId === currentId) {
+    if (editing !== null && editing.taskId === currentId) {
       if (submission.kind === "slash-command") {
         pushLocalStatus("编辑中的排队消息不能是命令（输入已保留）");
         return;
@@ -1143,15 +1128,15 @@ export function WorkspacePage(props: {
           onCancel={() => setFullAccessPending(false)}
         />
       )}
-      {membershipSession && (
+      {membershipTask && (
         <MembershipDialog
-          key={membershipSession.id}
-          session={membershipSession}
+          key={membershipTask.id}
+          task={membershipTask}
           projects={projects}
-          onClose={() => setMembershipSession(null)}
+          onClose={() => setMembershipTask(null)}
           onChanged={async () => {
             setRecordsRevision((value) => value + 1);
-            await refreshSessions();
+            await refreshTasks();
           }}
         />
       )}
@@ -1160,37 +1145,33 @@ export function WorkspacePage(props: {
           key={removingProject.id}
           project={removingProject}
           memberCount={
-            sessions.filter(
-              (session) => session.projectId === removingProject.id
-            ).length
+            tasks.filter((task) => task.projectId === removingProject.id).length
           }
           onClose={() => setRemovingProject(null)}
           onRemoved={projectRemoved}
         />
       )}
-      <SessionSidebar
+      <TaskSidebar
         projects={projects}
         onRemoveProject={(id) =>
           setRemovingProject(projects.find((item) => item.id === id) ?? null)
         }
         onAddProject={() => void addProject()}
-        onCreateInProject={startCreateSession}
-        sessions={sessions}
+        onCreateInProject={startCreateTask}
+        tasks={tasks}
         currentId={currentId}
-        onSelect={(id) => void openSession(id)}
-        onCreate={() => void startCreateSession()}
+        onSelect={(id) => void openTask(id)}
+        onCreate={() => void startCreateTask()}
         creating={creating}
-        onRename={(id, title) => void renameSession(id, title)}
-        onArchive={(id, archived) => void archiveSession(id, archived)}
+        onRename={(id, title) => void renameTask(id, title)}
+        onArchive={(id, archived) => void archiveTask(id, archived)}
         onMembership={(id) =>
-          setMembershipSession(
-            sessions.find((session) => session.id === id) ?? null
-          )
+          setMembershipTask(tasks.find((task) => task.id === id) ?? null)
         }
         onPin={(id, pinned) => {
-          void window.codexlike.sessions
+          void window.codexlike.tasks
             .setPinned(id, pinned)
-            .then(refreshSessions)
+            .then(refreshTasks)
             .catch((error: unknown) =>
               pushLocalStatus(`置顶失败：${String(error)}`)
             );
@@ -1214,16 +1195,16 @@ export function WorkspacePage(props: {
             );
         }}
       />
-      {/* 会话容器（票 05）：内容列宽度分档（@min-[864px]/session 等）以本栏为
+      {/* 会话容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
           断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
           （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
           不触发断点切换导致内容列跳宽 */}
-      <section className="@container/session flex min-w-0 flex-1">
+      <section className="@container/task flex min-w-0 flex-1">
         <div
           className="flex min-w-0 flex-1 flex-col"
           style={
             {
-              "--session-scrollbar-gutter": `${scrollbarGutter}px`,
+              "--task-scrollbar-gutter": `${scrollbarGutter}px`,
             } as CSSProperties
           }
         >
@@ -1248,9 +1229,9 @@ export function WorkspacePage(props: {
                     : "未选择会话")}
               </span>
               <div className="shrink-0 whitespace-nowrap">
-                <SessionSearch
+                <TaskSearch
                   recordsRevision={recordsRevision}
-                  onSelect={(id) => void openSession(id)}
+                  onSelect={(id) => void openTask(id)}
                 />
               </div>
               <button
@@ -1395,7 +1376,7 @@ export function WorkspacePage(props: {
             )}
           <MessageStream
             key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-            sessionId={currentId}
+            taskId={currentId}
             questionDraft={(requestId) =>
               currentId === null
                 ? undefined
@@ -1446,12 +1427,12 @@ export function WorkspacePage(props: {
                       workspacePath: draft.workspacePath,
                       workspaceMode: draft.workspaceMode ?? "local",
                     }
-                  : { sessionId: current!.id }
+                  : { taskId: current!.id }
               }
             />
           )}
           {current && (
-            <SessionAutoApproveStatus
+            <TaskAutoApproveStatus
               autoApprove={current.autoApprove ?? false}
               busy={revoking.has(current.id)}
               error={revokeErrors[current.id] ?? null}
@@ -1483,9 +1464,9 @@ export function WorkspacePage(props: {
                   interaction.request.sessionId,
                   interaction.request.id,
                   response,
-                  (sessionId, requestId, payload) =>
-                    window.codexlike.sessions.respondInteraction(
-                      sessionId,
+                  (taskId, requestId, payload) =>
+                    window.codexlike.tasks.respondInteraction(
+                      taskId,
                       requestId,
                       payload
                     )
@@ -1536,7 +1517,7 @@ export function WorkspacePage(props: {
               streaming={streaming}
               queueState={currentId === null ? EMPTY_QUEUE_STATE : queueState}
               queueEditingItemId={
-                queueEdit !== null && queueEdit.sessionId === currentId
+                queueEdit !== null && queueEdit.taskId === currentId
                   ? queueEdit.itemId
                   : null
               }
@@ -1584,8 +1565,8 @@ export function WorkspacePage(props: {
             {changesOpen && current !== null && (
               <ChangesPanel
                 key={current.id}
-                sessionId={current.id}
-                sessionTitle={current.title}
+                taskId={current.id}
+                taskTitle={current.title}
                 selectedProfileId={selectedProfileId}
                 onClose={() => setChangesOpen(false)}
               />

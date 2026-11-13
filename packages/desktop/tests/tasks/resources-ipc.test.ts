@@ -144,11 +144,11 @@ describe("规范与技能 IPC", () => {
     });
   });
 
-  it("拒绝伪造 sessionId 参数，不允许以任意文件路径作为读取入口", () => {
+  it("拒绝伪造 taskId 参数，不允许以任意文件路径作为读取入口", () => {
     setup();
     expect(() =>
       invoke(IPC.sessions.resources, { path: "C:/private/SKILL.md" })
-    ).toThrow("sessionId 必须是字符串");
+    ).toThrow("taskId 必须是字符串");
     expect(invoke(IPC.sessions.resources, "C:/private/SKILL.md")).toBeNull();
   });
 });

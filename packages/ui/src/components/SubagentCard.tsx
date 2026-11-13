@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
-import type { SubagentSegment } from "../lib/session-view";
+import type { SubagentSegment } from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";

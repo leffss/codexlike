@@ -251,10 +251,10 @@ async function main() {
     assert(model.requestCount() === 3, "搜索与重启不自动发模型请求");
     // 在真实IPC返回边界加闸门：仍查询真实SQL，只控制应答顺序，不伪造结果。
     await app.evaluate(({ ipcMain }) => {
-      const original = ipcMain._invokeHandlers.get("sessions:search");
+      const original = ipcMain._invokeHandlers.get("tasks:search");
       globalThis.searchGate = null;
-      ipcMain.removeHandler("sessions:search");
-      ipcMain.handle("sessions:search", async (event, query, archived) => {
+      ipcMain.removeHandler("tasks:search");
+      ipcMain.handle("tasks:search", async (event, query, archived) => {
         const result = await original(event, query, archived);
         const gate = globalThis.searchGate;
         if (gate && gate.query === query && !gate.entered) {

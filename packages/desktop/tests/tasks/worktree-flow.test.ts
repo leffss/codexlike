@@ -147,7 +147,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
   const target = { projectId: project.id, workspaceMode: "local" };
   expect(await invoke("sessions:workspace-sharing", target)).toMatchObject({
     workspacePath: app.repo,
-    runningSessions: [{ id: standalone.id }],
+    runningTasks: [{ id: standalone.id }],
   });
   const alias = join(app.root, "repo-alias");
   symlinkSync(app.repo, alias, "junction");
@@ -157,7 +157,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
         projectId: null,
         workspacePath: alias,
       })
-    ).runningSessions.map((item: any) => item.id)
+    ).runningTasks.map((item: any) => item.id)
   ).toEqual([standalone.id]);
   const sibling = join(app.root, "repo-other");
   mkdirSync(sibling);
@@ -167,7 +167,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
         projectId: null,
         workspacePath: sibling,
       })
-    ).runningSessions
+    ).runningTasks
   ).toEqual([]);
   expect(
     (
@@ -175,7 +175,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
         ...target,
         workspaceMode: "worktree",
       })
-    ).runningSessions
+    ).runningTasks
   ).toEqual([]);
   const local = await invoke("sessions:start", {
     ...target,
@@ -188,8 +188,8 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
   expect((await invoke("sessions:execution", local.id)).running).toBe(true);
   expect(
     (
-      await invoke("sessions:workspace-sharing", { sessionId: local.id })
-    ).runningSessions.map((item: any) => item.id)
+      await invoke("sessions:workspace-sharing", { taskId: local.id })
+    ).runningTasks.map((item: any) => item.id)
   ).toEqual([standalone.id]);
   const isolated = await invoke("sessions:start", {
     projectId: project.id,
@@ -198,8 +198,8 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
     text: "隔离",
   });
   expect(
-    (await invoke("sessions:workspace-sharing", { sessionId: isolated.id }))
-      .runningSessions
+    (await invoke("sessions:workspace-sharing", { taskId: isolated.id }))
+      .runningTasks
   ).toEqual([]);
   for (const record of [standalone, local, isolated]) {
     await invoke("sessions:interrupt", record.id);

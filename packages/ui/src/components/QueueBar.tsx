@@ -1,7 +1,7 @@
 import type { DragEvent, ReactNode } from "react";
 
 import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
-import { EMPTY_QUEUE_STATE } from "../lib/live-session";
+import { EMPTY_QUEUE_STATE } from "../lib/live-task";
 
 /** 队列条最多直接预览的条目数：超过折叠为「+N 更多」（spec 用户故事 4） */
 const PREVIEW_LIMIT = 5;

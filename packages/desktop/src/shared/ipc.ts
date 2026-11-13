@@ -258,9 +258,9 @@ export const IPC = {
 } as const;
 
 /**
- * 任务→任务改名（票 03）expand 兼容：以下旧类型名是 UI 正在 import 的
- * 反向别名，指向更名后的正式类型；字段级命名（sessionId、sessionIds、
- * runningSessions、kind:"session" 等）一并暂留旧名，随票 04/06 定稿与清零。
+ * 会话→任务改名（票 03）expand 兼容：以下旧类型名是渲染层曾 import 的
+ * 反向别名，指向更名后的正式类型；字段级命名（taskId、taskIds、
+ * runningTasks、kind: "task" 等）已随票 04 定稿，别名本身待票 06 清零。
  */
 export type SessionEventEnvelope = TaskEventEnvelope;
 export type SessionActivity = TaskActivity;
@@ -271,7 +271,7 @@ export type SessionExecutionState = TaskExecutionState;
 
 /** 事件流信封：按任务 ID 多路复用 */
 export interface TaskEventEnvelope {
-  sessionId: string;
+  taskId: string;
   /** 本次宿主执行的稳定标识，结束后不复用。 */
   executionId: string;
   /** 任务内单调递增，跨执行不重置；快照含 <= sequence 的全部事件。 */
@@ -310,7 +310,7 @@ export interface TaskActivity {
 export type TaskListItem = TaskRecord & { activity?: TaskActivity };
 
 export interface TaskView {
-  sessionId: string;
+  taskId: string;
   autoApprove?: boolean;
   executionId: string | null;
   sequence: number;
@@ -336,7 +336,7 @@ export type QueueSnapshot = Pick<
 
 /** 队列操作结果（票 02/03）：操作生效后的队列快照、暂停标志与正在发出条目 */
 export interface QueueOperationResult {
-  sessionId: string;
+  taskId: string;
   sequence: number;
   queue: QueuedMessage[];
   paused: boolean;
@@ -345,7 +345,7 @@ export interface QueueOperationResult {
 
 export interface ProjectRemoval {
   projectId: string;
-  sessionIds: string[];
+  taskIds: string[];
 }
 
 /** 一个草稿意图沿用同一个 requestId 重试；成功后重试仅返回原任务，不重放消息。 */
@@ -363,7 +363,7 @@ export interface StartTaskInput {
 }
 
 export type WorkspaceSharingTarget =
-  | { sessionId: string }
+  | { taskId: string }
   | {
       projectId: string | null;
       workspacePath?: string;
@@ -372,12 +372,12 @@ export type WorkspaceSharingTarget =
 
 export interface WorkspaceSharingView {
   workspacePath: string | null;
-  runningSessions: { id: string; title: string }[];
+  runningTasks: { id: string; title: string }[];
 }
 
 /** 宿主权威运行信息；与当前页面无关，等待回应也视为执行中。 */
 export interface TaskExecutionState {
-  sessionId: string;
+  taskId: string;
   executionId: string | null;
   running: boolean;
   waitingForUser: boolean;
@@ -445,16 +445,16 @@ export interface TaskApi {
   start(input: StartTaskInput): Promise<TaskRecord>;
   /** 仅调整归属；null 移出项目，移入由宿主校验实际目录及活动状态。 */
   setProject(
-    sessionId: string,
+    taskId: string,
     projectId: string | null
   ): Promise<TaskRecord | null>;
-  execution(sessionId: string): Promise<TaskExecutionState | null>;
-  view(sessionId: string): Promise<TaskView | null>;
+  execution(taskId: string): Promise<TaskExecutionState | null>;
+  view(taskId: string): Promise<TaskView | null>;
   /** 只确认用户已经看到的水位，不消费更新之后产生的完成提醒。 */
-  markViewed(sessionId: string, sequence: number): Promise<void>;
-  setPinned(sessionId: string, pinned: boolean): Promise<TaskRecord | null>;
+  markViewed(taskId: string, sequence: number): Promise<void>;
+  setPinned(taskId: string, pinned: boolean): Promise<TaskRecord | null>;
   /** 只在用户主动查看时调用；发送由宿主自动登记，后台刷新不调用。 */
-  markUsed(sessionId: string): Promise<TaskRecord | null>;
+  markUsed(taskId: string): Promise<TaskRecord | null>;
   /** 读取同实际目录的其他运行任务；不锁定并行，不创建工作区。 */
   workspaceSharing(
     target: WorkspaceSharingTarget
@@ -466,7 +466,7 @@ export interface TaskApi {
   /** 原生目录选择器；取消返回 null */
   selectWorkspace(): Promise<string | null>;
   /** 指定任务的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */
-  messages(sessionId: string): Promise<TranscriptItem[]>;
+  messages(taskId: string): Promise<TranscriptItem[]>;
   /**
    * 发送消息：成功即启动流式回复（事件经 onSessionEvent 推送）。
    * mentionPaths 为消息中 @引用 的工作区相对路径，内容由主进程读取附加进模型上下文。
@@ -477,7 +477,7 @@ export interface TaskApi {
    * Profile 不存在 / 引用路径不合法等启动失败仍以异常抛回。
    */
   send(
-    sessionId: string,
+    taskId: string,
     text: string,
     providerProfileId?: string,
     mentionPaths?: string[],
@@ -490,25 +490,25 @@ export interface TaskApi {
    * 排队消息存在时队列原样保留并进入队列暂停（票 02）。
    * 任务空闲时幂等返回 false。
    */
-  interrupt(sessionId: string): Promise<boolean>;
+  interrupt(taskId: string): Promise<boolean>;
   /**
    * 输入队列手动恢复（票 02）：清除队列暂停标志并立即从队首继续逐条消费；
    * 返回操作生效后的队列快照与暂停标志（未暂停时幂等无副作用）。
    */
-  queueResume(sessionId: string): Promise<QueueOperationResult>;
+  queueResume(taskId: string): Promise<QueueOperationResult>;
   /**
    * 输入队列清空（票 02）：作废删除全部排队消息并清除暂停标志（无残留）；
    * 返回操作生效后的队列快照与暂停标志。
    */
-  queueClear(sessionId: string): Promise<QueueOperationResult>;
+  queueClear(taskId: string): Promise<QueueOperationResult>;
   /** 立即作废指定排队消息；已发出或跨任务条目拒绝修改。 */
-  queueRemove(sessionId: string, itemId: string): Promise<QueueOperationResult>;
+  queueRemove(taskId: string, itemId: string): Promise<QueueOperationResult>;
   /**
    * 原地编辑排队消息（票 03）：内容更新、位置与参数快照不变。
    * expectedText 为取回编辑时的原文（CAS）：他窗口先改或条目已取出发送则拒绝。
    */
   queueUpdate(
-    sessionId: string,
+    taskId: string,
     itemId: string,
     text: string,
     expectedText: string,
@@ -516,37 +516,37 @@ export interface TaskApi {
   ): Promise<QueueOperationResult>;
   /** 拖拽重排（票 03）：orderedIds 须为仍在排队条目的完整排列。 */
   queueReorder(
-    sessionId: string,
+    taskId: string,
     orderedIds: string[]
   ): Promise<QueueOperationResult>;
   /** 重命名（/rename 与侧栏等效 UI 操作共用）；任务不存在返回 null */
-  rename(sessionId: string, title: string): Promise<TaskRecord | null>;
+  rename(taskId: string, title: string): Promise<TaskRecord | null>;
   /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
-  archive(sessionId: string, archived: boolean): Promise<TaskRecord | null>;
+  archive(taskId: string, archived: boolean): Promise<TaskRecord | null>;
   /** /status 数据；任务不存在返回 null */
-  status(sessionId: string): Promise<TaskStatusInfo | null>;
+  status(taskId: string): Promise<TaskStatusInfo | null>;
   /** 只返回资源元数据与加载记录，不返回全部技能正文。 */
-  resources(sessionId: string): Promise<TaskResourcesView | null>;
+  resources(taskId: string): Promise<TaskResourcesView | null>;
   /**
    * /compact：用所选 Provider Profile 的模型压缩历史为摘要（保留最近 3 轮）。
    * 压缩失败（模型错误 / 历史过短 / 任务正忙）以异常抛回，原历史不受损，可重试。
    */
   compact(
-    sessionId: string,
+    taskId: string,
     providerProfileId: string
   ): Promise<{ compactedMessages: number }>;
   /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
-  workspaceFiles(sessionId: string): Promise<string[]>;
+  workspaceFiles(taskId: string): Promise<string[]>;
   /**
    * 工具调用截图（browser_screenshot）的图片数据：`data:image/png;base64,…`。
    * 文件不存在（其它数据目录 / 已清理 / 非截图调用）返回 null。
    */
-  toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
+  toolImage(taskId: string, toolCallId: string): Promise<string | null>;
   /** 仅撤销持久任务授权；启用只能来自有效的执行审批响应。 */
-  revokeAutoApprove(sessionId: string): Promise<TaskRecord>;
+  revokeAutoApprove(taskId: string): Promise<TaskRecord>;
   /** 切换审批模式（ask / assist / full-access），只对下一次发送生效；任务不存在返回 null */
   setApprovalMode(
-    sessionId: string,
+    taskId: string,
     mode: ApprovalMode
   ): Promise<TaskRecord | null>;
   /**
@@ -554,19 +554,19 @@ export interface TaskApi {
    * 转发统一交互，没有等待中的请求或 id 不匹配时返回 false。
    */
   respondApproval(
-    sessionId: string,
+    taskId: string,
     requestId: string,
     decision: ApprovalDecision
   ): Promise<boolean>;
   /** 当前等待审批的请求（UI 切回任务时恢复审批卡片）；无等待或任务不存在返回 null */
-  pendingApproval(sessionId: string): Promise<ApprovalRequest | null>;
+  pendingApproval(taskId: string): Promise<ApprovalRequest | null>;
   /** 全部等待审批的请求（含子代理并行等待，工单 13）；无等待返回空数组 */
-  pendingApprovals(sessionId: string): Promise<ApprovalRequest[]>;
+  pendingApprovals(taskId: string): Promise<ApprovalRequest[]>;
   /** 全部待处理交互；切回任务时与实时事件合并，已结束请求不重新激活。 */
-  pendingInteractions(sessionId: string): Promise<InteractionRecord[]>;
+  pendingInteractions(taskId: string): Promise<InteractionRecord[]>;
   /** false 表示请求已结束或不存在；校验失败抛错且不消耗请求。 */
   respondInteraction(
-    sessionId: string,
+    taskId: string,
     requestId: string,
     response: InteractionResponse
   ): Promise<boolean>;
@@ -630,21 +630,17 @@ export interface CodexLikeApi {
   /** 改动面板 + git 集成（工单 05） */
   git: {
     /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */
-    status(sessionId: string): Promise<GitStatus>;
+    status(taskId: string): Promise<GitStatus>;
     /** 单文件改动（新旧两侧全文）；oldPath 为重命名场景的原路径 */
-    diff(
-      sessionId: string,
-      path: string,
-      oldPath?: string
-    ): Promise<GitFileDiff>;
+    diff(taskId: string, path: string, oldPath?: string): Promise<GitFileDiff>;
     /** 创建（或切换到已存在的）codexlike/<任务名> 分支 */
-    createBranch(sessionId: string): Promise<GitBranchResult>;
+    createBranch(taskId: string): Promise<GitBranchResult>;
     /** 模型按任务内容生成提交消息草稿（可编辑后提交）；失败抛中文异常 */
     generateCommitMessage(
-      sessionId: string,
+      taskId: string,
       providerProfileId: string
     ): Promise<string>;
     /** 提交当前全部变更；无变更时 committed=false */
-    commit(sessionId: string, message: string): Promise<GitCommitResult>;
+    commit(taskId: string, message: string): Promise<GitCommitResult>;
   };
 }
