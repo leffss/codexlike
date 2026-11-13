@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { WindowState } from "@codexlike/desktop/ipc";
+import type { WorkbenchTarget } from "@codexlike/agent-core";
 import { createWorkspaceState } from "./lib/workspace-state";
 import { subscribeWindowState } from "./lib/window-state";
 import { ApplicationExit } from "./components/ApplicationExit";
@@ -10,6 +11,17 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 type View = "workspace" | "settings";
+
+/**
+ * 顶层视图切换：即时上报启动现场（票03，低频事件不防抖），
+ * 重开回到退出前所在视图；上报失败不阻塞界面。
+ */
+function switchViewWithReport(view: View, setView: (view: View) => void) {
+  setView(view);
+  window.codexlike.launchState.setView(view).catch((error) => {
+    console.error(`保存顶层视图现场失败：${String(error)}`);
+  });
+}
 
 /** 同一行标题栏：品牌空白区拖动，右侧主题 / 设置 / 窗口按钮不可拖动。 */
 function Header(props: { view: View; onSwitch: (view: View) => void }) {
@@ -100,8 +112,13 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
   );
 }
 
-function AppShell() {
-  const [view, setView] = useState<View>("workspace");
+function AppShell(props: {
+  /** 启动现场的顶层视图（票03）；缺省为工作区 */
+  initialView?: View;
+  /** 启动现场的工作台目标（票03）：冷启动恢复的第一优先级 */
+  initialTarget?: WorkbenchTarget | null;
+}) {
+  const [view, setView] = useState<View>(props.initialView ?? "workspace");
   const [workspaceState] = useState(() =>
     createWorkspaceState(window.codexlike.workbench)
   );
@@ -121,12 +138,16 @@ function AppShell() {
   return (
     <div className="flex h-full flex-col">
       <ApplicationExit state={workspaceState}>
-        <Header view={view} onSwitch={setView} />
+        <Header
+          view={view}
+          onSwitch={(next) => switchViewWithReport(next, setView)}
+        />
         <main className="min-h-0 flex-1">
           {view === "workspace" ? (
             <WorkspacePage
               state={workspaceState}
-              onOpenSettings={() => setView("settings")}
+              onOpenSettings={() => switchViewWithReport("settings", setView)}
+              initialTarget={props.initialTarget}
             />
           ) : (
             <SettingsPage />
@@ -137,10 +158,16 @@ function AppShell() {
   );
 }
 
-export function App() {
+export function App(props: {
+  initialView?: View;
+  initialTarget?: WorkbenchTarget | null;
+}) {
   return (
     <ThemeProvider>
-      <AppShell />
+      <AppShell
+        initialView={props.initialView}
+        initialTarget={props.initialTarget}
+      />
     </ThemeProvider>
   );
 }

@@ -33,8 +33,14 @@ import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
 import type { ExitState } from "../lifecycle/application-exit";
+import type {
+  LaunchState,
+  LaunchView,
+} from "../launch-state/launch-state-store";
 export type { ExitState };
 export type WindowState = { maximized: boolean };
+// 启动现场（票03）：冷启动查询与目标/视图上报的类型契约
+export type { LaunchState, LaunchView };
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
 export type { SessionStatusInfo };
@@ -155,6 +161,12 @@ export const IPC = {
   themeSettings: {
     get: "theme-settings:get",
     set: "theme-settings:set",
+  },
+  /** 启动现场（票03）：冷启动查询 + 工作台目标/视图变更上报（低频事件即时落盘） */
+  launchState: {
+    get: "launch-state:get",
+    setWorkbenchTarget: "launch-state:set-workbench-target",
+    setView: "launch-state:set-view",
   },
   /** MCP servers（工单 12）：配置 + 连接状态 + 工具启停 */
   mcp: {
@@ -515,6 +527,14 @@ export interface CodexLikeApi {
     get(): Promise<ThemeName | null>;
     /** 保存主题偏好（light / dark），立即生效并同步原生窗口底色 */
     set(theme: ThemeName): Promise<ThemeName>;
+  };
+  launchState: {
+    /** 启动现场（无文件/损坏返回 null）；冷启动恢复工作台目标与视图初始值 */
+    get(): Promise<LaunchState | null>;
+    /** 上报工作台目标变更（切换会话 / 进出新建草稿），与窗口现场合并落盘 */
+    setWorkbenchTarget(target: WorkbenchTarget): Promise<LaunchState>;
+    /** 上报顶层视图变更（工作区 / 设置），与目标、窗口现场合并落盘 */
+    setView(view: LaunchView): Promise<LaunchState>;
   };
   mcp: {
     /** 全部 MCP server：配置 + 连接状态 + 发现到的工具（含启停） */

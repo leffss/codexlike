@@ -1,18 +1,32 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 
-import { App } from './App';
-import './styles.css';
+import { App } from "./App";
+import type { LaunchState } from "@codexlike/desktop/ipc";
+import "./styles.css";
 // highlight.js token 色不再全局导入 github-dark.css：
 // 已在 styles.css 以 --hl-* 变量随 data-theme 主题化（ADR 0006）
 
-const container = document.getElementById('root');
+const container = document.getElementById("root");
 if (!container) {
-  throw new Error('找不到 #root 挂载点');
+  throw new Error("找不到 #root 挂载点");
+}
+const root = createRoot(container);
+
+function render(launchState: LaunchState | null) {
+  root.render(
+    <StrictMode>
+      <App
+        initialView={
+          launchState?.view === "settings" ? "settings" : "workspace"
+        }
+        initialTarget={launchState?.workbenchTarget ?? null}
+      />
+    </StrictMode>
+  );
 }
 
-createRoot(container).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// 启动现场（票03）：首帧渲染前读现场——顶层视图初始值取启动现场，避免先闪
+// 工作区再跳设置页（不走 localStorage 镜像，现场文件随数据目录隔离）。
+// 读取失败按无现场渲染，不挡启动。
+window.codexlike.launchState.get().then(render, () => render(null));
