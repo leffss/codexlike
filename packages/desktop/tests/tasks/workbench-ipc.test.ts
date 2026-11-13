@@ -204,7 +204,7 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
   const app = setup();
   const model = await provider(app);
   const project = await invoke("projects:add", app.workspace);
-  expect(existsSync(join(app.home, "sessions"))).toBe(false);
+  expect(existsSync(join(app.home, "tasks"))).toBe(false);
   expect(await invoke("sessions:list")).toEqual([]);
   const request = {
     requestId: "draft-standalone",
@@ -224,7 +224,7 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
     workspaceOriginPath: null,
   });
   expect(first.workspacePath).toBe(
-    join(app.home, "sessions", first.id, "workspace")
+    join(app.home, "tasks", first.id, "workspace")
   );
   expect(statSync(first.workspacePath).isDirectory()).toBe(true);
   await waitFor(async () =>
@@ -276,7 +276,7 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
 it("目录与首条消息建立失败可用同一草稿重试，无空任务且只清理本次空专用目录", async () => {
   const app = setup();
   await provider(app);
-  const blocker = join(app.home, "sessions");
+  const blocker = join(app.home, "tasks");
   writeFileSync(blocker, "用户已有文件");
   const request = { requestId: "retry", projectId: null, text: "开始任务" };
   await expect(invoke("sessions:start", request)).rejects.toThrow("专用目录");
@@ -380,7 +380,7 @@ it("拒绝伪造项目、目录覆盖和非法设置，不创建任务或目录"
     ).rejects.toThrow();
   }
   expect(await invoke("sessions:list")).toEqual([]);
-  expect(existsSync(join(app.home, "sessions"))).toBe(false);
+  expect(existsSync(join(app.home, "tasks"))).toBe(false);
 });
 
 it("各新建入口草稿经宿主保存，真实关闭重开 SQLite 后恢复且不产生历史", async () => {
@@ -418,7 +418,7 @@ it("各新建入口草稿经宿主保存，真实关闭重开 SQLite 后恢复�
     "项目入口未发送"
   );
   expect(await invoke("sessions:list")).toEqual([]);
-  expect(existsSync(join(app.home, "sessions"))).toBe(false);
+  expect(existsSync(join(app.home, "tasks"))).toBe(false);
 });
 
 it("成功首次发送只消费同一意图，失败保留设置；迟到保存不能复活已消费草稿", async () => {
