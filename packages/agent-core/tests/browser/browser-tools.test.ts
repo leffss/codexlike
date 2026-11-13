@@ -137,7 +137,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("导航失败");
     expect(result.output).toContain("ERR_CONNECTION_REFUSED");
-    // 会话仍可用
+    // 任务仍可用
     const ok = await navigate.execute(
       { url: `${fixture.origin}/form` },
       context("call-8")

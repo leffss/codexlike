@@ -1,5 +1,5 @@
 /**
- * 会话域类型（见 GLOSSARY.md「会话」「工作区」「工具注册表」）。
+ * 任务域类型（见 GLOSSARY.md「任务」「工作区」「工具注册表」）。
  * 全部可 JSON 序列化：TaskEvent 经 Electron IPC 转发到渲染进程，
  * StoredMessage / TaskRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
  */
@@ -15,7 +15,7 @@ import type {
 } from "../interaction/types";
 
 /**
- * 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
+ * 任务运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
  * `waiting-approval` 工具执行暂停、等待用户审批（spec 用户故事 10，侧栏可见）
  */
 export type TaskStatus =
@@ -23,18 +23,18 @@ export type TaskStatus =
 
 /**
  * 审批模式三档：`ask` 请求批准 / `assist` 帮我批准 / `full-access` 完全访问。
- * 会话级、可随时切换、随会话记录持久化（恢复用）。
+ * 任务级、可随时切换、随任务记录持久化（恢复用）。
  * 定义在 ./approval（工单 04 审批状态机），本文件经 import 引用。
  */
 
 /**
- * 会话运行位置（GLOSSARY「托管 Worktree」）：`local` 本目录直跑（默认）；
- * `worktree` 托管 Worktree 隔离副本——workspacePath 指向 `~/.codexlike/worktrees/<会话id>`，
- * 由宿主在会话创建前先检出（agent-core 的 worktree 模块），落库后恢复天然指向原副本。
+ * 任务运行位置（GLOSSARY「托管 Worktree」）：`local` 本目录直跑（默认）；
+ * `worktree` 托管 Worktree 隔离副本——workspacePath 指向 `~/.codexlike/worktrees/<任务id>`，
+ * 由宿主在任务创建前先检出（agent-core 的 worktree 模块），落库后恢复天然指向原副本。
  */
 export type WorkspaceMode = "local" | "worktree";
 
-/** 显式项目；不依赖会话存在，工作区目录不要求是 Git 仓库。 */
+/** 显式项目；不依赖任务存在，工作区目录不要求是 Git 仓库。 */
 export interface ProjectRecord {
   id: string;
   name: string;
@@ -46,10 +46,10 @@ export interface ProjectRecord {
   createdAt: string;
 }
 
-/** 会话记录（sessions 表一行；重启恢复的数据来源） */
+/** 任务记录（sessions 表一行；重启恢复的数据来源） */
 export interface TaskRecord {
   id: string;
-  /** 管理归属；null 为独立会话，绝不从目录推导。 */
+  /** 管理归属；null 为独立任务，绝不从目录推导。 */
   projectId: string | null;
   /** 首次发送幂等键；宿主生成草稿后提交，成功后随记录持久保存。 */
   creationRequestId?: string | null;
@@ -67,10 +67,10 @@ export interface TaskRecord {
   model: string | null;
   /** 审批模式：切换对下次发送生效，当前轮冻结；新建与旧库默认 assist。 */
   approvalMode: ApprovalMode;
-  /** 本会话自动批准执行审批；未设置等价 false，不改变文件访问边界。 */
+  /** 本任务自动批准执行审批；未设置等价 false，不改变文件访问边界。 */
   autoApprove?: boolean;
   status: TaskStatus;
-  /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
+  /** 归档时间（ISO 8601）；null = 未归档。归档的任务不在侧栏默认列表显示（/archive） */
   archivedAt: string | null;
   /** ISO 8601 */
   createdAt: string;
@@ -84,7 +84,7 @@ export interface TaskRecord {
 
 /**
  * 遗留审批决定的兼容类型，不再作为运行时授权来源。
- * 新审批历史使用 InteractionRecord；会话授权保存为 TaskRecord.autoApprove。
+ * 新审批历史使用 InteractionRecord；任务授权保存为 TaskRecord.autoApprove。
  */
 export interface ApprovalDecisionRecord {
   id: string;
@@ -128,7 +128,7 @@ export interface StoredMessage {
   createdAt: string;
 }
 
-/** 会话时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
+/** 任务时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
 export type TranscriptItem =
   | { kind: "message"; message: StoredMessage }
   | { kind: "tool-call"; call: ToolCallRecord }
@@ -167,7 +167,7 @@ export interface CompactResult {
 }
 
 /**
- * 会话事件流：agent-core 聚合的流式事件，desktop 主进程按会话 ID 多路复用转发给渲染进程。
+ * 任务事件流：agent-core 聚合的流式事件，desktop 主进程按任务 ID 多路复用转发给渲染进程。
  * 一次 sendMessage 的事件序列（正常路径）：
  * `user-message → assistant-start → assistant-delta* → assistant-done`
  */
@@ -192,7 +192,7 @@ export type TaskEvent =
   | { type: "assistant-done"; message: StoredMessage }
   /** 用户中断：已生成的部分文本保留为助手消息 */
   | { type: "assistant-aborted"; message: StoredMessage }
-  /** 模型 API 出错：中文提示落为 error 消息，会话可继续使用 */
+  /** 模型 API 出错：中文提示落为 error 消息，任务可继续使用 */
   | { type: "error"; message: StoredMessage }
   /**
    * 模型发起了工具调用（执行开始前；output 为空串，UI 卡片显示运行中）。
@@ -203,11 +203,11 @@ export type TaskEvent =
   | { type: "tool-result"; call: ToolCallRecord }
   /**
    * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
-   * 发出后会话进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
+   * 发出后任务进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。
    * 子代理的命令审批（工单 13）同样走本事件（request.subagentId 标注来源）。
    */
   | { type: "approval-request"; request: ApprovalRequest }
-  /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本会话总是允许） */
+  /** 审批已响应：UI 据此把审批卡片转为结果态（批准 / 拒绝 / 本任务总是允许） */
   | { type: "approval-resolved"; requestId: string; decision: ApprovalDecision }
   /**
    * 子代理委派进入排队（工单 13，GLOSSARY「子代理」）：并发上限满，

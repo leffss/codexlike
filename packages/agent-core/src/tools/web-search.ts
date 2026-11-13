@@ -125,7 +125,7 @@ export function createTavilySearchSource(
 export interface WebSearchToolOptions {
   /**
    * 解析当前搜索源：每次工具调用时取值（null = 未配置，返回中文错误指引），
-   * 因此设置页改 key 后无需重启会话即可生效。
+   * 因此设置页改 key 后无需重启任务即可生效。
    */
   searchSource: () => SearchSource | null;
 }

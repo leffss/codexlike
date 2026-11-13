@@ -46,7 +46,7 @@ export interface SkillLoadRecord {
 export interface ResourceSnapshotSummary {
   catalog: ResourceCatalog;
   loaded: SkillLoadRecord[];
-  /** 主会话规范、索引与已加载文本的 token 估算，不含历史消息。 */
+  /** 主任务规范、索引与已加载文本的 token 估算，不含历史消息。 */
   estimatedTokens: number;
 }
 

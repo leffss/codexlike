@@ -122,7 +122,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
       // 只驱动流走完
     }
 
-    // 双参工厂拿到档位快照：签名与 agent-session / subagent 的注入点对齐，
+    // 双参工厂拿到档位快照：签名与 agent-task / subagent 的注入点对齐，
     // 注入方不再因 TS 参数逆变静默丢弃 thinkingEffort
     expect(factoryOptions).toEqual([{ thinkingEffort: "high" }]);
     persistence.close();
@@ -237,7 +237,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     });
     const session = manager.create({ workspacePath: "C:\work\demo" });
 
-    // 手工落库一份交错的记录（真实路径由会话循环产生；此处验证合并语义）
+    // 手工落库一份交错的记录（真实路径由任务循环产生；此处验证合并语义）
     persistence.insertMessage({
       id: "m1",
       sessionId: session.id,
@@ -308,7 +308,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     expect(session.record.approvalMode).toBe("ask");
     expect(manager.list()[0]?.approvalMode).toBe("ask");
 
-    // 不存在的会话返回 null
+    // 不存在的任务返回 null
     expect(manager.setApprovalMode("nope", "full-access")).toBeNull();
     persistence.close();
   });
@@ -322,7 +322,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
 
     const created = manager.create({ workspacePath: "C:\work\demo" });
 
-    // 未 get 实例化前切换模式（IPC 可先于会话打开发生）
+    // 未 get 实例化前切换模式（IPC 可先于任务打开发生）
     manager.setApprovalMode(created.id, "full-access");
     const restored = manager.get(created.id)!;
     expect(restored.record.approvalMode).toBe("full-access");
@@ -381,7 +381,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     expect(first.setApprovalMode("nope", "full-access")).toBeNull();
     persistence1.close();
 
-    // 等价重启：审批模式随会话记录恢复
+    // 等价重启：审批模式随任务记录恢复
     const persistence2 = createSqliteTaskStore(dbPath);
     const second = createTaskManager({
       persistence: persistence2,

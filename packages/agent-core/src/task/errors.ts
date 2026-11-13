@@ -1,6 +1,6 @@
 import { APICallError, RetryError } from "ai";
 
-/** 把模型请求错误转成用户可读的中文提示（保留原始报错原文）；主会话与子代理共用 */
+/** 把模型请求错误转成用户可读的中文提示（保留原始报错原文）；主任务与子代理共用 */
 export function describeModelError(error: unknown): string {
   if (error instanceof APICallError) {
     const where =

@@ -596,7 +596,7 @@ describe("AgentTask.compact（手动压缩）", () => {
       "被引用的文件内容"
     );
 
-    // 等价重启：同一持久层重建会话（manager.get 的恢复路径）
+    // 等价重启：同一持久层重建任务（manager.get 的恢复路径）
     const restored = createAgentTask({
       record: taskRecord(),
       persistence,

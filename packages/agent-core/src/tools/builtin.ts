@@ -1,11 +1,11 @@
-import { createApplyPatchTool } from './apply-patch';
-import { createGlobTool } from './glob';
-import { createGrepTool } from './grep';
-import { createReadFileTool } from './read-file';
-import { createTerminalTool, type TerminalShell } from './terminal';
-import type { ToolDefinition } from './types';
-import { createWebSearchTool, type WebSearchToolOptions } from './web-search';
-import { createWriteFileTool } from './write-file';
+import { createApplyPatchTool } from "./apply-patch";
+import { createGlobTool } from "./glob";
+import { createGrepTool } from "./grep";
+import { createReadFileTool } from "./read-file";
+import { createTerminalTool, type TerminalShell } from "./terminal";
+import type { ToolDefinition } from "./types";
+import { createWebSearchTool, type WebSearchToolOptions } from "./web-search";
+import { createWriteFileTool } from "./write-file";
 
 export interface BuiltinToolsOptions {
   /** 宿主环境变量（终端工具按白名单过滤后透传） */
@@ -23,10 +23,12 @@ export interface BuiltinToolsOptions {
 
 /**
  * 内置工具（spec「工具注册表与内置工具」；浏览器/MCP 在工单 11-12 加入）。
- * 工具本身无状态：工作区路径经 ToolExecutionContext 逐会话注入，
- * 因此同一组工具实例可被多个会话共享。
+ * 工具本身无状态：工作区路径经 ToolExecutionContext 逐任务注入，
+ * 因此同一组工具实例可被多个任务共享。
  */
-export function createBuiltinTools(options: BuiltinToolsOptions = {}): ToolDefinition[] {
+export function createBuiltinTools(
+  options: BuiltinToolsOptions = {}
+): ToolDefinition[] {
   const tools: ToolDefinition[] = [
     createReadFileTool(),
     createWriteFileTool(),

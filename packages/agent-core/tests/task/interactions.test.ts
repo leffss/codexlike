@@ -672,7 +672,7 @@ describe("用户交互公开 seam", () => {
     expect(
       restored.create({ workspacePath: workspace }).record.autoApprove
     ).toBe(false);
-    // 未缓存会话也可撤销，返回新记录供空闲UI同步。
+    // 未缓存任务也可撤销，返回新记录供空闲UI同步。
     const uncached = createTaskManager({ persistence: reopened });
     expect(uncached.revokeAutoApprove(session.id).autoApprove).toBe(false);
     expect(uncached.get(session.id)?.record.autoApprove).toBe(false);

@@ -14,9 +14,9 @@ export function createInteractionController(options: {
   emit(event: TaskEvent): void;
   waiting(waiting: boolean, persisted?: boolean): void;
   answered(snapshot: QuestionAnswerSnapshot): void;
-  /** 所属会话实时授权；不参与冻结的审批模式/路径权限。 */
+  /** 所属任务实时授权；不参与冻结的审批模式/路径权限。 */
   autoApprove?(sessionId: string): boolean;
-  /** 仅在授权事务提交后更新会话内存并发布状态事件。 */
+  /** 仅在授权事务提交后更新任务内存并发布状态事件。 */
   autoApproved?(sessionId: string): void;
 }) {
   const waiters = new Map<

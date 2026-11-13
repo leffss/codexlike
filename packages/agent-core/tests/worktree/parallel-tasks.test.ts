@@ -21,8 +21,8 @@ import { createWorktreeService } from "../../src/worktree/worktree-service";
 
 /**
  * 托管 Worktree 集成（验收场景 5 + 恢复等价性）：
- * 同一 git 仓库上「本目录直跑」与「worktree 模式」两个会话并行改动互不干扰；
- * worktree 会话重启恢复后仍指向原 worktree 副本（workspacePath 落库即天然成立，
+ * 同一 git 仓库上「本目录直跑」与「worktree 模式」两个任务并行改动互不干扰；
+ * worktree 任务重启恢复后仍指向原 worktree 副本（workspacePath 落库即天然成立，
  * 此处以等价性测试锁定行为）。
  */
 const dirs: string[] = [];
@@ -59,7 +59,7 @@ afterAll(() => {
   }
 });
 
-/** 双会话各自携带不同 profile（id 用于模型工厂分发，避免共享状态的时序竞态） */
+/** 双任务各自携带不同 profile（id 用于模型工厂分发，避免共享状态的时序竞态） */
 const localProfile: ProviderProfile = {
   id: "profile-local",
   name: "GLM",
@@ -140,7 +140,7 @@ function writeThenTextModel(
   });
 }
 
-/** 每个 profile id 对应的模型工厂（会话创建前注册，避免并行时序竞态） */
+/** 每个 profile id 对应的模型工厂（任务创建前注册，避免并行时序竞态） */
 const modelFactories = new Map<string, () => MockLanguageModelV4>();
 
 /** 打开的 SQLite 库句柄（Windows 上不 close 会锁住临时目录，afterAll 统一释放） */
@@ -195,7 +195,7 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
       workspaceMode: "worktree",
     });
 
-    // 两个会话并行写同名文件（各自模型脚本写不同内容）
+    // 两个任务并行写同名文件（各自模型脚本写不同内容）
     modelFactories.set("profile-local", () =>
       writeThenTextModel("feature.txt", "local-change")
     );
@@ -213,20 +213,20 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
     );
     await Promise.all([localEvents, wtEvents]);
 
-    // local 会话的文件落在主仓库目录
+    // local 任务的文件落在主仓库目录
     expect(readFileSync(join(repo, "feature.txt"), "utf8")).toBe(
       "local-change"
     );
-    // worktree 会话的文件落在隔离副本，内容互不覆盖
+    // worktree 任务的文件落在隔离副本，内容互不覆盖
     expect(readFileSync(join(wt.path, "feature.txt"), "utf8")).toBe(
       "worktree-change"
     );
     expect(readFileSync(join(repo, "feature.txt"), "utf8")).toBe(
       "local-change"
     );
-    // 主仓库工作区不出现 worktree 会话的独有文件（隔离性）
+    // 主仓库工作区不出现 worktree 任务的独有文件（隔离性）
     expect(existsSync(join(wt.path, "README.md"))).toBe(true);
-    // git 状态互不污染：主仓库只有 local 会话的新文件
+    // git 状态互不污染：主仓库只有 local 任务的新文件
     const status = git(repo, "status", "--porcelain").trim();
     expect(status).toBe("?? feature.txt");
   });
@@ -261,7 +261,7 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
     );
     expect(existsSync(join(wt.path, "first.txt"))).toBe(true);
 
-    // 等价应用重启：同一库文件上的新 manager 恢复会话
+    // 等价应用重启：同一库文件上的新 manager 恢复任务
     const second = makeManager(dbPath);
     const restored = second.get(wtId);
     expect(restored).not.toBeNull();

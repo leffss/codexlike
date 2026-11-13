@@ -188,7 +188,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
       ["assistant", "你好，世界"],
     ]);
 
-    // 会话记录：模型选择已持久化，状态回到 idle
+    // 任务记录：模型选择已持久化，状态回到 idle
     const stored = persistence.listTasks().at(0);
     expect(stored?.providerProfileId).toBe("profile-1");
     expect(stored?.model).toBe("glm-4.7");
@@ -221,7 +221,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     expect(secondPrompt).toContain("第一轮回答");
     expect(secondPrompt).toContain("第二问");
 
-    // 恢复场景：用同库重建会话（等价应用重启后续聊），历史仍然续上
+    // 恢复场景：用同库重建任务（等价应用重启后续聊），历史仍然续上
     const restored = createAgentTask({
       record: persistence.listTasks().at(0)!,
       persistence,
@@ -290,7 +290,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     expect(messages[1]?.aborted).toBe(true);
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
-    // 会话可继续：下一轮正常完成
+    // 任务可继续：下一轮正常完成
     const second = await collect(
       session.sendMessage({ text: "再来一次", profile })
     );
@@ -345,7 +345,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     ]);
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
-    // 会话可继续使用，且 error 提示不进入第二轮上下文
+    // 任务可继续使用，且 error 提示不进入第二轮上下文
     const second = await collect(
       session.sendMessage({ text: "第二问", profile })
     );
@@ -388,14 +388,14 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
 
     const first = session.sendMessage({ text: "慢消息", profile });
     const firstIterator = first[Symbol.asyncIterator]();
-    await firstIterator.next(); // user-message 事件已产出，会话进入 streaming
+    await firstIterator.next(); // user-message 事件已产出，任务进入 streaming
 
     await expect(
       collect(session.sendMessage({ text: "并发消息", profile }))
     ).rejects.toThrow("仍在回复中");
 
     openGate();
-    // 消费完第一个流，会话回到可用状态
+    // 消费完第一个流，任务回到可用状态
     let last: TaskEvent | undefined;
     for (
       let head = await firstIterator.next();

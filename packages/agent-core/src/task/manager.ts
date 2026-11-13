@@ -32,18 +32,18 @@ import type {
 export interface CreateTaskManagerOptions {
   persistence: TaskPersistence;
   /**
-   * 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
+   * 任务可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
    * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
    */
   tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /**
-   * 子代理编排配置（工单 13）：传入即向会话工具表追加 spawn_subagent。
+   * 子代理编排配置（工单 13）：传入即向任务工具表追加 spawn_subagent。
    * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
    */
   subagents?: SubagentsConfig;
   /**
    * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
-   * options 携带本条消息的思考档位快照（与 agent-session / subagent 的同名
+   * options 携带本条消息的思考档位快照（与 agent-task / subagent 的同名
    * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
    */
   languageModelFor?: (
@@ -51,7 +51,7 @@ export interface CreateTaskManagerOptions {
     options?: { thinkingEffort?: ThinkingEffort }
   ) => LanguageModel;
   /**
-   * 会话系统提示工厂（AGENTS.md 发现 → 组装由宿主注入，agent-core 不依赖 fs）。
+   * 任务系统提示工厂（AGENTS.md 发现 → 组装由宿主注入，agent-core 不依赖 fs）。
    * create 与 get 恢复时各调用一次。
    */
   systemPromptFor?: (record: TaskRecord) => string;
@@ -64,10 +64,10 @@ export interface CreateTaskManagerOptions {
 }
 
 /**
- * 会话管理器：desktop 主进程的装配入口。
- * - `create`：新建会话（绑定工作区）并落库；
+ * 任务管理器：desktop 主进程的装配入口。
+ * - `create`：新建任务（绑定工作区）并落库；
  * - `list` / `messages`：直接读持久层（应用启动时渲染侧栏与消息历史）；
- * - `get`：惰性恢复会话对象（读历史重建上下文；残留 streaming 状态重置为 idle）；
+ * - `get`：惰性恢复任务对象（读历史重建上下文；残留 streaming 状态重置为 idle）；
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
 export interface TaskManager {
@@ -103,23 +103,23 @@ export interface TaskManager {
      * local 模式不传（origin 恒为 null，工作区即原始目录）。
      */
     workspaceOriginPath?: string;
-    /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
+    /** 任务 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
     id?: string;
   }): AgentTask;
-  /** 全部会话记录（含已归档），置顶优先、最近使用倒序。 */
+  /** 全部任务记录（含已归档），置顶优先、最近使用倒序。 */
   list(): TaskRecord[];
   search(query: string, includeArchived?: boolean): TaskSearchResult[];
-  /** 指定会话的消息历史（读持久层，不实例化会话对象） */
+  /** 指定任务的消息历史（读持久层，不实例化任务对象） */
   messages(sessionId: string): StoredMessage[];
   /** 持久交互记录不随上下文压缩消失；仅用于历史与草稿归属校验，不恢复等待。 */
   interactions(
     sessionId: string
   ): import("../interaction/types").InteractionRecord[];
-  /** 指定会话的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
+  /** 指定任务的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
   transcript(sessionId: string): TranscriptItem[];
-  /** 惰性恢复会话对象；不存在返回 null；同 id 返回缓存实例 */
+  /** 惰性恢复任务对象；不存在返回 null；同 id 返回缓存实例 */
   get(sessionId: string): AgentTask | null;
-  /** 只读缓存实例的运行/最近一轮摘要；未实例化会话返回空状态。 */
+  /** 只读缓存实例的运行/最近一轮摘要；未实例化任务返回空状态。 */
   resourceState(sessionId: string): TaskResourceState;
   /** /rename：更新标题并落库；不存在返回 null */
   rename(sessionId: string, title: string): TaskRecord | null;
@@ -130,7 +130,7 @@ export interface TaskManager {
    * 不改变最近使用时间；不存在返回 null。
    */
   setApprovalMode(sessionId: string, mode: ApprovalMode): TaskRecord | null;
-  /** 撤销本会话自动批准，立即作用后续审批；未知会话抛错。 */
+  /** 撤销本任务自动批准，立即作用后续审批；未知任务抛错。 */
   revokeAutoApprove(sessionId: string): TaskRecord;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
@@ -318,7 +318,7 @@ export function createTaskManager(
     }) {
       const timestamp = now();
       const record: TaskRecord = {
-        // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
+        // worktree 模式：宿主先检出托管 Worktree、以同一任务 id 落库（目录名 = 任务 id）
         id: id ?? generateId(),
         projectId,
         creationRequestId,
@@ -329,7 +329,7 @@ export function createTaskManager(
         providerProfileId: null,
         model: null,
         status: "idle",
-        // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
+        // 新建任务默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
         approvalMode,
         autoApprove: false,
         archivedAt: null,

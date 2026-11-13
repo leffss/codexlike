@@ -78,7 +78,7 @@ describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
     });
     expect(manager.list().at(0)?.title).toBe("修登录 bug");
 
-    // 不存在的会话返回 null
+    // 不存在的任务返回 null
     expect(manager.rename("nope", "x")).toBeNull();
     persistence.close();
   });
@@ -168,7 +168,7 @@ describe("TaskManager 系统提示注入（systemPromptFor）", () => {
       content: "规范：C:\\work\\demo",
     });
 
-    // 等价重启：恢复的会话同样注入系统提示
+    // 等价重启：恢复的任务同样注入系统提示
     const persistence2 = createSqliteTaskStore(dbPath);
     const second = createTaskManager({
       persistence: persistence2,

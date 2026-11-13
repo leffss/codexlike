@@ -476,7 +476,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     );
     expect(result?.call.isError).toBe(true);
     expect(result?.call.output).toContain("mcp_fake_crash");
-    // 不产生 error 事件（会话存活）、正常收尾
+    // 不产生 error 事件（任务存活）、正常收尾
     expect(events.some((e) => e.type === "error")).toBe(false);
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
@@ -563,7 +563,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     );
     expect(first.at(-1)?.type).toBe("assistant-done");
 
-    // 设置页禁用 echo → 第二条消息模型仍调它 → 「未注册」可读错误回填，会话不崩
+    // 设置页禁用 echo → 第二条消息模型仍调它 → 「未注册」可读错误回填，任务不崩
     gate = "off";
     const second = await collect(
       session.sendMessage({ text: "第二轮", profile })

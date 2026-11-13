@@ -4,13 +4,13 @@
  * - `ask` 请求批准：写入、终端命令、联网搜索一律暂停等待用户审批（只读工具放行）；
  * - `assist` 帮我批准：工作区内写入与联网自动放行，终端命令仅危险黑名单命中时审批；
  * - `full-access` 完全访问：全自动，且放开工作区文件边界（可读写本地任意文件）。
- * autoApprove 是独立实时会话授权，仅跳过执行审批，不放宽文件边界，也不替答问答。
- * 遗留命令首词授权不再使用；兼容入口 always 仍仅批准一次（会话授权需显式 scope: session）。
+ * autoApprove 是独立实时任务授权，仅跳过执行审批，不放宽文件边界，也不替答问答。
+ * 遗留命令首词授权不再使用；兼容入口 always 仍仅批准一次（任务授权需显式 scope: session）。
  * 本文件浏览器安全（无 Node 内置模块），UI 与主进程共用类型。
  */
 import type { ToolPermission } from "../tools/types";
 
-/** 审批模式（会话级权限档位，可随时切换、对下一次发送生效，当前轮冻结） */
+/** 审批模式（任务级权限档位，可随时切换、对下一次发送生效，当前轮冻结） */
 export type ApprovalMode = "ask" | "assist" | "full-access";
 
 /** 全部档位值（IPC 校验、UI 选项、持久化白名单共用；顺序 = 严格 → 宽松） */
@@ -48,7 +48,7 @@ export interface ApprovalRequest {
   commandWord: string;
   /** ISO 8601 */
   createdAt: string;
-  /** 由子代理发起的审批（工单 13）：审批卡片据此标注来源；主会话审批缺省 */
+  /** 由子代理发起的审批（工单 13）：审批卡片据此标注来源；主任务审批缺省 */
   subagentId?: string;
 }
 
@@ -135,7 +135,7 @@ export function isRiskyCommand(command: string): boolean {
  */
 export function decideApproval(input: {
   mode: ApprovalMode;
-  /** 实时会话授权，与本轮冻结的模式分离；只跳过执行审批。 */
+  /** 实时任务授权，与本轮冻结的模式分离；只跳过执行审批。 */
   autoApprove?: boolean;
   permission: ToolPermission;
   toolName: string;

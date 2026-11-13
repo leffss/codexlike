@@ -16,7 +16,7 @@ import { createAgentTask } from "../../src/task/agent-task";
 import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
-/** 主会话 Profile（sendMessage 携带；「同主模型」回退路径用到） */
+/** 主任务 Profile（sendMessage 携带；「同主模型」回退路径用到） */
 const profile: ProviderProfile = {
   id: "main-profile",
   name: "GLM",
@@ -234,9 +234,9 @@ interface SubagentThinkingHarnessOptions {
 }
 
 /**
- * 装配带子代理的会话并记录两级模型工厂调用：
- * 主会话与子代理的 languageModelFor 均为 (profile, options) 双参签名，
- * 子代理的档位继承链 = 主会话工具上下文 → 编排器快照 → 子代理模型工厂。
+ * 装配带子代理的任务并记录两级模型工厂调用：
+ * 主任务与子代理的 languageModelFor 均为 (profile, options) 双参签名，
+ * 子代理的档位继承链 = 主任务工具上下文 → 编排器快照 → 子代理模型工厂。
  */
 function makeSubagentThinkingSession(
   options: SubagentThinkingHarnessOptions,
@@ -274,7 +274,7 @@ function makeSubagentThinkingSession(
   return { session, persistence, mainModel, subModel };
 }
 
-/** 主会话脚本：一轮 spawn_subagent 委派 → 一轮汇总文本 */
+/** 主任务脚本：一轮 spawn_subagent 委派 → 一轮汇总文本 */
 function delegateThenSummarize(task: string): ScriptedStep[] {
   return [
     {
@@ -312,7 +312,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
       })
     );
 
-    // 主会话两轮 + 子代理一轮；子代理调用必须用独立 Profile + 继承档位
+    // 主任务两轮 + 子代理一轮；子代理调用必须用独立 Profile + 继承档位
     const subCalls = factoryCalls.filter(
       (call) => call.profile.id === subProfile.id
     );
@@ -480,7 +480,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
         started?.type === "subagent-start" ? started.subagentId : undefined
       );
     }
-    // 主会话自己的 reasoning 仍在 assistant-reasoning（互不串流）
+    // 主任务自己的 reasoning 仍在 assistant-reasoning（互不串流）
     const mainReasoning = events.filter(
       (event) => event.type === "assistant-reasoning"
     );
@@ -500,7 +500,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
         event.type === "tool-result" && event.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.output).toBe("调研报告正文");
-    // 主会话 assistant 正文与落库消息均不含子代理思考
+    // 主任务 assistant 正文与落库消息均不含子代理思考
     expect(
       events
         .filter((event) => event.type === "assistant-delta")
@@ -590,7 +590,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     // 报告（output）与思考（reasoning）分离；思考全文多段拼接
     expect(calls[0]?.output).toBe("调研报告");
     expect(calls[0]?.reasoning).toBe("子代理的思考全文（第二段）");
-    // 消息表不含子代理思考（主会话 assistant 正文不混入）
+    // 消息表不含子代理思考（主任务 assistant 正文不混入）
     const messagesJson = JSON.stringify(persistence.listMessages("session-1"));
     expect(messagesJson).not.toContain("子代理的思考全文");
   });
@@ -687,7 +687,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     );
     expect(report?.ok).toBe(false);
     expect(report?.report).not.toContain("不应到达的报告");
-    // 主会话以中断态收尾，不残留挂起
+    // 主任务以中断态收尾，不残留挂起
     expect(events.at(-1)?.type).toBe("assistant-aborted");
   });
 });
@@ -698,7 +698,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
     writeFileSync(join(workspace, "note.txt"), "子代理思考测试预置内容");
 
     const seenBodies: string[] = [];
-    /** 按请求序号分流：主会话委派 → 子代理思考+工具 → 子代理收尾 → 主会话汇总 */
+    /** 按请求序号分流：主任务委派 → 子代理思考+工具 → 子代理收尾 → 主任务汇总 */
     const fetchSpy = async (
       _input: string | URL | Request,
       init?: RequestInit
@@ -729,7 +729,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         );
       };
       if (index === 1) {
-        // 主会话第一轮：委派
+        // 主任务第一轮：委派
         return framesFor(
           [
             {
@@ -775,7 +775,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         // 子代理第二轮（工具结果回填）：正文报告
         return framesFor([{ content: "子代理最终报告" }], "stop");
       }
-      // 主会话第二轮：汇总
+      // 主任务第二轮：汇总
       return framesFor([{ content: "收到报告" }], "stop");
     };
 

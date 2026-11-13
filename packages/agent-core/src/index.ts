@@ -7,7 +7,7 @@
 // - `./node`（node.ts）：Node 宿主（Electron 主进程）专用，
 //   含任务对象、任务管理器与 SQLite 持久化（依赖 node:sqlite 等 Node API）。
 //
-// 「会话→任务」改名 expand 阶段（ADR 0014）：task 系新名为正式名，
+// 「任务→任务」改名 expand 阶段（ADR 0014）：task 系新名为正式名，
 // 各处以 `Xxx as SessionXxx` 保留旧名 re-export 别名，desktop/ui 既有 import
 // 不改即可编译；票 06（contract 阶段）统一删除别名。
 export type {

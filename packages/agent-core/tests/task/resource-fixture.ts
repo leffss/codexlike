@@ -4,7 +4,7 @@ import type {
   SkillLoadRecord,
 } from "../../src/context/resource-types";
 
-/** 会话边界的磁盘资源替身；文件发现与预算由资源模块自己的测试验证。 */
+/** 任务边界的磁盘资源替身；文件发现与预算由资源模块自己的测试验证。 */
 export function fakeResourceSnapshot(
   systemPrompt = "本轮规范与技能目录",
   bodies: Record<string, string> = {

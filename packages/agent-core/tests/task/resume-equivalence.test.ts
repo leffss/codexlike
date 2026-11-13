@@ -12,7 +12,7 @@ import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
 /**
- * 会话快照恢复等价性（工单 06 AC：恢复后「继续」在既有历史上续跑，上下文与原一致）。
+ * 任务快照恢复等价性（工单 06 AC：恢复后「继续」在既有历史上续跑，上下文与原一致）。
  * 接缝：createAgentTask 公共接口——给定含工具轮次、@引用、被中断回复的完整历史，
  * 「重启恢复后续跑」发给模型的 prompt 必须与「不重启直接续跑」完全一致。
  */
@@ -200,7 +200,7 @@ describe("会话快照恢复等价性", () => {
       gate
     );
 
-    // 原会话的模型可切换：跑历史用 historyModel，续跑换 inPlaceModel（记录原地续跑的 prompt）
+    // 原任务的模型可切换：跑历史用 historyModel，续跑换 inPlaceModel（记录原地续跑的 prompt）
     const resumedInPlace = scriptedModel([
       { kind: "text", deltas: ["原地续跑"] },
     ]);
@@ -234,7 +234,7 @@ describe("会话快照恢复等价性", () => {
     }
     openGate();
 
-    // 恢复会话在历史定格时构造（等价应用重启：读库重建上下文）
+    // 恢复任务在历史定格时构造（等价应用重启：读库重建上下文）
     const restoredRecord = persistence.listTasks().at(0)!;
     expect(restoredRecord.providerProfileId).toBe("profile-1");
     expect(restoredRecord.model).toBe("glm-4.7");
@@ -251,11 +251,11 @@ describe("会话快照恢复等价性", () => {
       now: fakeClock(),
     });
 
-    // 路径 A（不重启）：原会话对象直接续跑（内存上下文：含 @引用 组装后的 user 消息）
+    // 路径 A（不重启）：原任务对象直接续跑（内存上下文：含 @引用 组装后的 user 消息）
     activeModel = resumedInPlace;
     await collect(session.sendMessage({ text: "继续", profile }));
 
-    // 路径 B（重启恢复）：恢复的会话续跑
+    // 路径 B（重启恢复）：恢复的任务续跑
     await collect(restoredSession.sendMessage({ text: "继续", profile }));
 
     // 两条路径发给模型的 prompt 必须完全一致（mentions 内容、工具轮、中断消息都不丢）

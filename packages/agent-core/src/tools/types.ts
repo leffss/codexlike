@@ -1,6 +1,6 @@
 /**
  * 工具域类型（GLOSSARY「工具注册表」）。
- * 全部可 JSON 序列化：ToolCallRecord 与会话事件、IPC、UI 卡片共用。
+ * 全部可 JSON 序列化：ToolCallRecord 与任务事件、IPC、UI 卡片共用。
  * 本文件浏览器安全（无 Node 内置模块），实现（fs/child_process）在 ./node 出口。
  */
 import type { ApprovalMode } from "../task/approval";
@@ -16,15 +16,15 @@ import type { ThinkingEffort } from "../provider/language-model";
  */
 export type ToolPermission = "readonly" | "write" | "command" | "network";
 
-/** 工具执行上下文：会话循环在每次调用时提供（工作区边界与会话级资源随之逐会话生效） */
+/** 工具执行上下文：任务循环在每次调用时提供（工作区边界与任务级资源随之逐任务生效） */
 export interface ToolExecutionContext {
-  /** 会话绑定的工作区目录（绝对路径） */
+  /** 任务绑定的工作区目录（绝对路径） */
   workspacePath: string;
   /** 当前审批模式：full-access 档文件工具放开工作区边界（ADR 0004），其余档强制边界 */
   approvalMode: ApprovalMode;
-  /** 调用所属会话：会话级资源（如浏览器 context/Cookie）按它隔离复用 */
+  /** 调用所属任务：任务级资源（如浏览器 context/Cookie）按它隔离复用 */
   sessionId: string;
-  /** 会话中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
+  /** 任务中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
   signal?: AbortSignal;
   /**
    * 本次 sendMessage 的 Provider Profile（工单 13）：
@@ -33,7 +33,7 @@ export interface ToolExecutionContext {
   profile?: ProviderProfile;
   /**
    * 本次 sendMessage 固定的思考档位快照（GLOSSARY「思考档位」，思考档位 03）：
-   * 与 profile 同一通道由主会话工具执行入口转发；spawn_subagent 委派入队时
+   * 与 profile 同一通道由主任务工具执行入口转发；spawn_subagent 委派入队时
    * 以此捕获快照（排队/运行/全部工具轮次均用它），其余工具可忽略。
    */
   thinkingEffort?: ThinkingEffort;
@@ -85,7 +85,7 @@ export interface ToolDefinition {
   execute(args: unknown, context: ToolExecutionContext): Promise<ToolResult>;
 }
 
-/** 工具调用记录（tool_calls 表一行；会话事件与 UI 卡片共用形状） */
+/** 工具调用记录（tool_calls 表一行；任务事件与 UI 卡片共用形状） */
 export interface ToolCallRecord {
   /** 模型给定的 tool call id */
   id: string;

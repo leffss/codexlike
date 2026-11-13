@@ -36,7 +36,7 @@ export interface AgentsMdDiscovery {
 export interface DiscoverAgentsInstructionsOptions {
   /** 全局目录；默认 CODEXLIKE_HOME（02 的 E2E 隔离钩子）或 ~/.codexlike */
   globalDir?: string;
-  /** 会话绑定的工作区目录 */
+  /** 任务绑定的工作区目录 */
   workspacePath: string;
   /** 逐层遍历的终点（默认工作区目录本身） */
   cwd?: string;
@@ -221,7 +221,7 @@ export function discoverAgentsInstructions(
 }
 
 /**
- * 把发现结果组装为会话系统提示。
+ * 把发现结果组装为任务系统提示。
  * 无 AGENTS.md 时返回空串（不注入系统提示，保持既有消息流行为）；
  * 有则注入拼接后的规范文本。后续若需要基础身份提示，在此处统一追加。
  */

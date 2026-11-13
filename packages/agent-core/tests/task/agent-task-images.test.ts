@@ -195,7 +195,7 @@ describe("工具结果附图（截图回填模型：多模态附图 / 纯文本�
     const { events, model } = await runSession({}, captured);
 
     expect(events.at(-1)?.type).toBe("assistant-done");
-    // 工具执行上下文带 sessionId / toolCallId（会话级浏览器与截图文件命名依赖它们）
+    // 工具执行上下文带 sessionId / toolCallId（任务级浏览器与截图文件命名依赖它们）
     expect(captured[0]?.sessionId).toBe("session-shot");
     expect(captured[0]?.toolCallId).toBe("call-1");
 

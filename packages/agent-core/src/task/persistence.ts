@@ -18,7 +18,7 @@ import type {
 } from "./types";
 
 /**
- * 会话持久化接口（spec「会话与持久化」节）。
+ * 任务持久化接口（spec「任务与持久化」节）。
  * 以接口注入：生产环境用 SQLite 文件库（`~/.codexlike/`），
  * 测试可换内存库或内存实现（ADR-0002：agent-core 可用 Node 内置 API，不依赖 Electron）。
  *
@@ -32,7 +32,7 @@ export interface TaskPersistence {
   ): boolean;
   insertProject(record: ProjectRecord): void;
   listProjects(): ProjectRecord[];
-  /** 单事务删除显式所属会话及关联记录；返回准确影响集合，不访问文件系统。 */
+  /** 单事务删除显式所属任务及关联记录；返回准确影响集合，不访问文件系统。 */
   removeProject(projectId: string): string[];
   isRemovedCreationRequest(requestId: string): boolean;
   setProjectCollapsed(projectId: string, collapsed: boolean): void;
@@ -53,15 +53,15 @@ export interface TaskPersistence {
     interaction: InteractionRecord,
     snapshot?: QuestionAnswerSnapshot
   ): boolean;
-  /** 有效 pending 审批才能授予会话权限；同事务结算该会话全部 pending 审批，问答不变。 */
+  /** 有效 pending 审批才能授予任务权限；同事务结算该任务全部 pending 审批，问答不变。 */
   approveTaskInteraction(
     sessionId: string,
     requestId: string,
     resolvedAt: string
   ): InteractionRecord[] | null;
   /**
-   * /compact 落地（工单 08）：单事务内把会话消息历史整体替换（摘要 + 保留轮次），
-   * 并追加 compact 记录；pruneToolCallsBefore 同时清理该会话中更早的工具调用记录
+   * /compact 落地（工单 08）：单事务内把任务消息历史整体替换（摘要 + 保留轮次），
+   * 并追加 compact 记录；pruneToolCallsBefore 同时清理该任务中更早的工具调用记录
    * （被压缩轮次的工具卡片随历史一起折叠进摘要）。事务保证压缩结果原子可见——
    * 旧历史要么完整保留、要么完整被替换。
    */
@@ -71,16 +71,16 @@ export interface TaskPersistence {
     compact: CompactRecord,
     pruneToolCallsBefore?: string
   ): void;
-  /** 全部会话，置顶优先、用户最近使用倒序；后台更新不重排。 */
+  /** 全部任务，置顶优先、用户最近使用倒序；后台更新不重排。 */
   listTasks(): TaskRecord[];
   searchTasks(query: string, includeArchived?: boolean): TaskSearchResult[];
-  /** 指定会话的全部消息，按写入顺序；未知会话返回空数组 */
+  /** 指定任务的全部消息，按写入顺序；未知任务返回空数组 */
   listMessages(sessionId: string): StoredMessage[];
-  /** 指定会话的 compact 记录，按时间正序（最后一条为当前生效摘要） */
+  /** 指定任务的 compact 记录，按时间正序（最后一条为当前生效摘要） */
   listCompacts(sessionId: string): CompactRecord[];
   /** 工具调用记录（一次调用完成时写入一条完整记录） */
   insertToolCall(call: ToolCallRecord): void;
-  /** 指定会话的工具调用记录，按写入顺序 */
+  /** 指定任务的工具调用记录，按写入顺序 */
   listToolCalls(sessionId: string): ToolCallRecord[];
   /** 遗留命令首词记录（兼容旧数据；不参与运行时授权；重复写入幂等）。 */
   insertApproval(sessionId: string, commandWord: string): void;
@@ -217,7 +217,7 @@ interface ToolCallRow {
 }
 
 /**
- * 基于 node:sqlite（Node 22.13+ / Electron 45 内置，无原生编译依赖）的会话存储。
+ * 基于 node:sqlite（Node 22.13+ / Electron 45 内置，无原生编译依赖）的任务存储。
  * 单条语句写入即单个事务（SQLite 语义），断电安全。
  * 测试传 `:memory:` 得到内存库。
  */
@@ -374,7 +374,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           : (LEGACY_APPROVAL_MODE_MAP[row.approval_mode] ?? "assist"),
       // 运行位置：非法/缺失值恢复为 local（本目录直跑）
       workspaceMode: row.workspace_mode === "worktree" ? "worktree" : "local",
-      // 原始仓库路径（ADR 0005）：旧库 / local 会话 / 旧 worktree 会话均为 null
+      // 原始仓库路径（ADR 0005）：旧库 / local 任务 / 旧 worktree 任务均为 null
       workspaceOriginPath: row.workspace_origin_path ?? null,
       archivedAt: row.archived_at,
       createdAt: row.created_at,
@@ -462,7 +462,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           deleteWorkbench.run(
             workbenchKey({ kind: "session", sessionId: String(member.id) })
           );
-        // 成功创建意图保留墓碑，避免移入后移除的独立草稿因重试重建会话。
+        // 成功创建意图保留墓碑，避免移入后移除的独立草稿因重试重建任务。
         db.prepare(
           "INSERT OR IGNORE INTO removed_creation_requests SELECT creation_request_id FROM tasks WHERE project_id = ? AND creation_request_id IS NOT NULL"
         ).run(projectId);

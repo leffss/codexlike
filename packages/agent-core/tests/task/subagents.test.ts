@@ -165,8 +165,8 @@ interface SubagentHarnessOptions {
 }
 
 /**
- * 装配带子代理的会话：主/子模型用不同 mock（profile.id 区分），
- * 工具集为内置六件（不含 spawn_subagent，由会话按 subagents 配置追加）。
+ * 装配带子代理的任务：主/子模型用不同 mock（profile.id 区分），
+ * 工具集为内置六件（不含 spawn_subagent，由任务按 subagents 配置追加）。
  */
 function makeSubagentSession(options: SubagentHarnessOptions) {
   const mainModel = scriptedModel(options.main);
@@ -599,7 +599,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     // 子代理模型被真实调用（独立上下文，一次 doStream 出报告）
     expect(subModel.doStreamCalls).toHaveLength(1);
     const subPrompt = subModel.doStreamCalls[0]!.prompt;
-    // 独立上下文：含任务描述，不含主会话消息原文
+    // 独立上下文：含任务描述，不含主任务消息原文
     const subPromptJson = JSON.stringify(subPrompt);
     expect(subPromptJson).toContain("调研本仓库的测试框架并总结");
     expect(subPromptJson).not.toContain("帮我调研一下测试框架");
@@ -618,7 +618,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     const secondPrompt = JSON.stringify(mainModel.doStreamCalls[1]!.prompt);
     expect(secondPrompt).toContain("调研报告：本项目使用 vitest");
 
-    // 主会话正常收尾，子代理调用记录落库（报告随 output 持久化）
+    // 主任务正常收尾，子代理调用记录落库（报告随 output 持久化）
     expect(events.at(-1)?.type).toBe("assistant-done");
     const stored = persistence
       .listToolCalls("session-1")
@@ -682,7 +682,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(rejected?.call.isError).toBe(true);
     expect(rejected?.call.output).toContain("未注册");
 
-    // 子代理最终报告回流（未被套娃调用破坏），主会话正常收尾
+    // 子代理最终报告回流（未被套娃调用破坏），主任务正常收尾
     const reportEvent = events.find(
       (e): e is Extract<TaskEvent, { type: "subagent-report" }> =>
         e.type === "subagent-report"
@@ -782,7 +782,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
         events.filter((e) => e.type === "subagent-start").length === 4
     );
 
-    // 释放剩余全部：4 份报告各自回流为 tool-result，主会话收尾
+    // 释放剩余全部：4 份报告各自回流为 tool-result，主任务收尾
     for (let i = 1; i < 4; i += 1) {
       releases[i]?.();
     }
@@ -1095,7 +1095,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     );
     expect(report?.ok).toBe(false);
 
-    // 主会话不崩：正常收尾、无 error 事件、会话状态回 idle
+    // 主任务不崩：正常收尾、无 error 事件、任务状态回 idle
     expect(events.at(-1)?.type).toBe("assistant-done");
     expect(events.filter((e) => e.type === "error")).toHaveLength(0);
     const stored = persistence
@@ -1175,7 +1175,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       session.respondApproval(approvalRequest!.interaction.request.id, "always")
     ).toBe(true);
 
-    // 消费剩余事件：审批卡片转结果态、命令真实执行、报告回流、主会话收尾
+    // 消费剩余事件：审批卡片转结果态、命令真实执行、报告回流、主任务收尾
     for (
       let head = await iterator.next();
       !head.done;
@@ -1300,7 +1300,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(events.some((e) => e.type === "subagent-start")).toBe(true);
     expect(session.resourceState.active?.loaded).toHaveLength(1);
 
-    // 中断主会话：子代理的模型流随 signal 以 AbortError 终止，事件流收尾不卡死
+    // 中断主任务：子代理的模型流随 signal 以 AbortError 终止，事件流收尾不卡死
     controller.abort();
     for (
       let head = await iterator.next();
@@ -1320,7 +1320,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.isError).toBe(true);
-    // 主会话以中断态收尾（02 的语义），无 error
+    // 主任务以中断态收尾（02 的语义），无 error
     expect(events.at(-1)?.type).toBe("assistant-aborted");
     expect(events.filter((e) => e.type === "error")).toHaveLength(0);
     expect(session.resourceState.active).toBeNull();

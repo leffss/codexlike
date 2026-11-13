@@ -3,7 +3,7 @@ import { generateText, type LanguageModel } from "ai";
 import type { StoredMessage } from "../task/types";
 
 /**
- * 一键 commit 的消息生成（spec「git 集成」）：commit 消息默认由模型按会话内容生成，
+ * 一键 commit 的消息生成（spec「git 集成」）：commit 消息默认由模型按任务内容生成，
  * 用户在面板中可编辑。走一次**不发工具**的 LLM 请求（generateText，纯文本往返）。
  */
 
@@ -19,7 +19,7 @@ export function buildCommitMessagePrompt(
   messages: Pick<StoredMessage, "role" | "content">[],
   changedFiles: string[]
 ): string {
-  // error 是给用户看的中文提示，不属于会话内容；只取最近 20 条、每条截 400 字符
+  // error 是给用户看的中文提示，不属于任务内容；只取最近 20 条、每条截 400 字符
   const recent = messages
     .filter((message) => message.role !== "error")
     .slice(-MAX_MESSAGES)

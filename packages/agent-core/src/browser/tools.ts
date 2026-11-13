@@ -1,7 +1,7 @@
 /**
  * 五件浏览器工具（spec「工具注册表与内置工具」）：browser_navigate / browser_click /
  * browser_type / browser_screenshot / browser_read。headless Chromium 由
- * BrowserTaskManager 会话级复用；权限划分——navigate/screenshot/read 是信息获取
+ * BrowserTaskManager 任务级复用；权限划分——navigate/screenshot/read 是信息获取
  * （readonly），click/type 可能触发表单等交互副作用（command）。
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import type { BrowserTaskManager } from "./manager";
 
 export interface BrowserToolsOptions {
   manager: BrowserTaskManager;
-  /** 截图保存目录（按会话；默认 <系统临时目录>/codexlike-screenshots/<会话>） */
+  /** 截图保存目录（按任务；默认 <系统临时目录>/codexlike-screenshots/<任务>） */
   screenshotDirFor?: (sessionId: string) => string;
 }
 
@@ -73,7 +73,7 @@ export function createBrowserTools(
     options.screenshotDirFor ??
     ((sessionId: string) => join(tmpdir(), "codexlike-screenshots", sessionId));
 
-  /** 未导航会话的统一引导错误 */
+  /** 未导航任务的统一引导错误 */
   async function requireOpenedPage(context: ToolExecutionContext) {
     await manager.prepare();
     const page = await manager.pageFor(context.sessionId);
@@ -132,7 +132,7 @@ export function createBrowserTools(
           });
         } catch (error) {
           // 失败后页面停在 chrome-error://，后续导航会被其挂起的任务打断——
-          // 整页换新（同一 context，Cookie 保留）是最可靠复位，会话保持可用
+          // 整页换新（同一 context，Cookie 保留）是最可靠复位，任务保持可用
           await manager.resetPage(context.sessionId).catch(() => {});
           throw error;
         }

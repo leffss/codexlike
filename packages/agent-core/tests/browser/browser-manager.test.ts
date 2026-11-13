@@ -11,7 +11,7 @@ import {
 import { startFixtureServer, type FixtureServer } from "./fixture-server";
 
 /**
- * 真实 Chromium 的会话级生命周期测试（本机需有 playwright Chromium 缓存；
+ * 真实 Chromium 的任务级生命周期测试（本机需有 playwright Chromium 缓存；
  * 首次拉起较慢，整个文件共享一次 launch）。
  */
 describe("BrowserTaskManager（会话级浏览器实例）", () => {

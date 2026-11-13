@@ -168,7 +168,7 @@ async function collect(
   return events;
 }
 
-/** 装配会话：factoryCalls 记录模型工厂每次调用的 (profile, options) */
+/** 装配任务：factoryCalls 记录模型工厂每次调用的 (profile, options) */
 function makeSession(
   model: MockLanguageModelV4,
   factoryCalls?: {
@@ -269,7 +269,7 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
         })
       )
     ).rejects.toThrow("无效的思考档位");
-    // 入口拒绝：不落任何消息、会话保持可用
+    // 入口拒绝：不落任何消息、任务保持可用
     expect(persistence.listMessages("session-1")).toEqual([]);
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
     const second = await collect(

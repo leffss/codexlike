@@ -75,7 +75,7 @@ function textRound(
   });
 }
 
-/** 工具调用轮流式（finishReason 为 tool-calls，工具由会话循环执行后回填） */
+/** 工具调用轮流式（finishReason 为 tool-calls，工具由任务循环执行后回填） */
 function toolCallRound(
   toolCalls: { toolCallId: string; toolName: string; input: unknown }[]
 ) {

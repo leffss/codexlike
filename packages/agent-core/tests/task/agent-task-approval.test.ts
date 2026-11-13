@@ -295,7 +295,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
       events.push(event);
       if (event.type === "interaction-request") {
         requests.push(event.interaction.request);
-        // 等待审批期间：会话落库状态为 waiting-user（侧栏可见），pendingApproval 可查
+        // 等待审批期间：任务落库状态为 waiting-user（侧栏可见），pendingApproval 可查
         statusesAtRequest.push(persistence.listTasks()[0]!.status);
         expect(session.pendingApproval?.id).toBe(event.interaction.request.id);
         expect(
@@ -337,7 +337,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
       "assistant-delta",
       "assistant-done",
     ]);
-    // 审批结束后会话回到收尾状态 idle
+    // 审批结束后任务回到收尾状态 idle
     expect(persistence.listTasks()[0]!.status).toBe("idle");
     expect(session.pendingApproval).toBeNull();
   });
@@ -630,7 +630,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(firstResult?.call.isError).toBe(true);
     expect(existsSync(join(workspace, "x.txt"))).toBe(false);
 
-    // 会话中途切换（不重启、不重建对象）：对下一次工具调用立即生效
+    // 任务中途切换（不重启、不重建对象）：对下一次工具调用立即生效
     session.setApprovalMode("full-access");
     expect(session.record.approvalMode).toBe("full-access");
 

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import type { TaskRecord, StoredMessage } from "../../src/task/types";
 
-/** 最小合法会话记录（固定时间戳避免测试不稳定） */
+/** 最小合法任务记录（固定时间戳避免测试不稳定） */
 function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: "session-1",
@@ -354,7 +354,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
 
   it("旧库迁移：工单 03 时代 schema（无 approval_mode / approvals 表）打开后自动补齐", () => {
     const dbPath = tempDbPath();
-    // 手工建 03 时代的旧 schema 并写入一行旧会话
+    // 手工建 03 时代的旧 schema 并写入一行旧任务
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
       CREATE TABLE tasks (

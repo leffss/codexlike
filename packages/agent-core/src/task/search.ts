@@ -9,7 +9,7 @@ export interface TaskSearchResult {
   archivedAt: string | null;
 }
 
-/** 直接查询持久历史；EXISTS 保证同一会话多条消息命中也只返回一次。 */
+/** 直接查询持久历史；EXISTS 保证同一任务多条消息命中也只返回一次。 */
 export function createTaskSearch(db: DatabaseSync) {
   const statement = db.prepare(`
     SELECT s.id, s.title, s.project_id, p.name AS project_name, s.archived_at

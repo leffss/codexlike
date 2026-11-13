@@ -1,6 +1,6 @@
 /**
- * 会话级浏览器生命周期（spec：浏览器实例会话级复用——同一会话共享上下文/Cookie，
- * 会话结束关闭）。全进程共享一个 headless Chromium，每个会话一个独立 BrowserContext
+ * 任务级浏览器生命周期（spec：浏览器实例任务级复用——同一任务共享上下文/Cookie，
+ * 任务结束关闭）。全进程共享一个 headless Chromium，每个任务一个独立 BrowserContext
  * （Cookie/localStorage 互不串扰），context 内固定一个 Page（工具组的「当前页」）。
  */
 import {
@@ -28,16 +28,16 @@ export interface BrowserTaskManagerOptions {
 export interface BrowserTaskManager {
   /** 确保 Chromium 就绪（必要时下载安装）；onProgress 接收下载进度，缺省走构造时 progress */
   prepare(onProgress?: (line: string) => void): Promise<void>;
-  /** 获取会话页面：首次调用确保 Chromium 就绪（必要时下载）并创建独立 context */
+  /** 获取任务页面：首次调用确保 Chromium 就绪（必要时下载）并创建独立 context */
   pageFor(sessionId: string): Promise<Page>;
   /**
-   * 丢弃会话当前页面、在同一 context 上开新页（Cookie 等状态保留）。
+   * 丢弃任务当前页面、在同一 context 上开新页（Cookie 等状态保留）。
    * 导航失败后页面可能停在 chrome-error:// 并打断后续导航——整页换新是最可靠复位。
    */
   resetPage(sessionId: string): Promise<Page>;
-  /** 会话结束：关闭其 context（页面与 Cookie 随之释放）；未打开的会话安全返回 */
+  /** 任务结束：关闭其 context（页面与 Cookie 随之释放）；未打开的任务安全返回 */
   closeSession(sessionId: string): Promise<void>;
-  /** 应用退出：关闭 Chromium 与全部会话 context；可重复调用 */
+  /** 应用退出：关闭 Chromium 与全部任务 context；可重复调用 */
   close(): Promise<void>;
 }
 
