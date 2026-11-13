@@ -405,3 +405,66 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
     throw new Error("恢复后的第二段应为思考段");
   expect(restoredThinking.streaming).toBeUndefined();
 });
+
+it("输入队列随事件与快照接续（票 01）：入队更新快照，出队开启新执行起点，不进消息流", () => {
+  const queued = [
+    {
+      id: "q1",
+      sessionId: "a",
+      position: 0,
+      text: "排队第一条",
+      mentionPaths: [],
+      providerProfileId: "p1",
+      thinkingEffort: "auto" as const,
+      approvalMode: "ask" as const,
+      createdAt: "2026-11-13T00:00:00Z",
+    },
+  ];
+  // 执行中入队：事件挂当前执行，队列快照更新
+  let state = hydrateLiveSession(snapshot);
+  const enqueued = receiveLiveEvent(state, {
+    ...delta(3, ""),
+    event: { type: "queue-changed", reason: "enqueue", queue: queued },
+  });
+  expect(enqueued.queue.map((item) => item.text)).toEqual(["排队第一条"]);
+  // 队列事件不进消息流
+  expect(enqueued.items).toEqual(state.items);
+
+  // 回复结束（running=false）后出队发送：queue-changed 挂新执行，
+  // 视为明确执行起点接续（与 user-message 同级的 starts）
+  const settled = receiveLiveEvent(enqueued, {
+    ...delta(4, ""),
+    event: {
+      type: "assistant-done",
+      message: {
+        id: "m1",
+        sessionId: "a",
+        role: "assistant",
+        content: "完成",
+        createdAt: "2026-11-13T00:00:01Z",
+      },
+    },
+    activity: { ...activity, running: false, outcome: "completed" },
+  });
+  state = settled;
+  const dequeued = receiveLiveEvent(state, {
+    sessionId: "a",
+    executionId: "e2",
+    sequence: 5,
+    activity: { ...activity, running: true },
+    event: { type: "queue-changed", reason: "dequeue", queue: [] },
+  });
+  expect(dequeued.queue).toEqual([]);
+  expect(dequeued.executionId).toBe("e2");
+  // 新执行起点后的正文事件照常接续
+  const continued = receiveLiveEvent(dequeued, delta(6, "新回复", "e2"));
+  expect(continued.items.at(-1)).toMatchObject({ content: "新回复" });
+
+  // 切换会话快照恢复：view.queue 原样带回队列条
+  const restored = hydrateLiveSession({
+    ...snapshot,
+    queue: queued,
+    activity: { ...activity, running: false, outcome: "completed" },
+  });
+  expect(restored.queue.map((item) => item.text)).toEqual(["排队第一条"]);
+});

@@ -24,6 +24,8 @@ import {
 } from "../lib/composer-menu";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
+import { QueueBar } from "./QueueBar";
+import type { QueuedMessage } from "@codexlike/desktop/ipc";
 
 /** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
 const APPROVAL_MODE_OPTIONS: {
@@ -133,6 +135,8 @@ export function MessageComposer(props: {
    * （空态 2xl / 有内容三档由 WorkspacePage 单点选择下发）。
    */
   contentWidthClass?: string;
+  /** 当前会话的输入队列（票 01）：输入框上方只读队列条；空时不渲染 */
+  queue?: QueuedMessage[];
 }) {
   const contentWidthClass =
     props.contentWidthClass ?? SESSION_CONTENT_WIDTH_CLASS;
@@ -300,6 +304,8 @@ export function MessageComposer(props: {
       }}
     >
       <div className={contentWidthClass}>
+        {/* 输入队列条（票 01）：输入框上方只读预览，回复结束后自动逐条发出 */}
+        <QueueBar queue={props.queue ?? []} />
         {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
         <form
           data-testid="composer-card"

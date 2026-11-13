@@ -1,4 +1,5 @@
 import type {
+  QueuedMessage,
   SessionActivity,
   SessionEventEnvelope,
   SessionView,
@@ -17,6 +18,8 @@ export interface LiveSession {
   sequence: number;
   activity: SessionActivity;
   items: MessageSegment[];
+  /** 输入队列快照（票 01）：随 queue-changed 事件与 view 快照接续，不进消息流 */
+  queue: QueuedMessage[];
 }
 
 function applyLiveEvent(
@@ -26,6 +29,7 @@ function applyLiveEvent(
   if (event.type === "compact-start") return items;
   if (event.type === "compact-finished")
     return initialTranscript(event.history);
+  if (event.type === "queue-changed") return items;
   return applySessionEvent(items, event);
 }
 
@@ -41,7 +45,11 @@ export function receiveLiveEvent(
     return state;
   const starts =
     envelope.event.type === "user-message" ||
-    envelope.event.type === "compact-start";
+    envelope.event.type === "compact-start" ||
+    // 出队发送（票 01）开启新一轮执行：queue-changed 挂在发送轮的新
+    // executionId 上，与 user-message 同为明确执行起点。
+    (envelope.event.type === "queue-changed" &&
+      envelope.event.reason === "dequeue");
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [
@@ -70,6 +78,10 @@ export function receiveLiveEvent(
     sequence: envelope.sequence,
     activity: envelope.activity,
     items: applyLiveEvent(state.items, envelope.event),
+    queue:
+      envelope.event.type === "queue-changed"
+        ? envelope.event.queue
+        : state.queue,
   };
 }
 
@@ -88,6 +100,7 @@ export function hydrateLiveSession(
     sequence: view.sequence,
     activity: view.activity,
     items: mergeInteractions(items, view.pendingInteractions),
+    queue: view.queue ?? [],
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

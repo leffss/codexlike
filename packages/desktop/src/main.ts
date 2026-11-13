@@ -50,6 +50,7 @@ import {
 } from "./theme/theme-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
+import { createSqliteInputQueueStore } from "./sessions/input-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
 import { registerWindowControls } from "./window/window-controls";
 import { registerNavigationPolicy } from "./window/navigation-policy";
@@ -499,6 +500,10 @@ void app.whenReady().then(async () => {
     },
   });
   registerMcpHandlers(mcpService);
+  // 输入队列（票 01 / ADR 0013）：与 session-workbench.db 同库的独立连接
+  const queueStore = createSqliteInputQueueStore(
+    join(dataDir(), "session-workbench.db")
+  );
   const sessionRuntime = registerSessionHandlers({
     manager,
     profiles: store,
@@ -507,6 +512,7 @@ void app.whenReady().then(async () => {
     browserManager,
     worktreeService,
     resourcesFor,
+    queueStore,
   });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
@@ -516,7 +522,10 @@ void app.whenReady().then(async () => {
   registerApplicationExit({
     window: mainWindow,
     runtime: sessionRuntime,
-    closeStorage: () => persistence.close(),
+    closeStorage: () => {
+      persistence.close();
+      queueStore.close();
+    },
     releaseResources: async () => {
       await Promise.allSettled([mcpService.shutdown(), browserManager.close()]);
     },

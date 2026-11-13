@@ -25,6 +25,12 @@ import {
 import type { ProfileStore } from "../profiles/profile-store";
 import type { SessionExitRuntime } from "../lifecycle/application-exit";
 import { createInterruptRegistry } from "./interrupt-registry";
+import {
+  createMemoryInputQueueStore,
+  createSessionInputQueues,
+  type InputQueueStore,
+  type QueuedMessage,
+} from "./input-queue";
 import { registerWorkbenchHandlers } from "./workbench-ipc";
 import { createLiveSessions } from "./live-sessions";
 import { createSessionManagement } from "./session-management";
@@ -54,6 +60,8 @@ export function registerSessionHandlers(options: {
   worktreeService: WorktreeService;
   /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
   resourcesFor: (record: SessionRecord) => AgentResourceSnapshot;
+  /** 输入队列持久化（票 01 / ADR 0013）：同一 SQLite 库的独立连接；缺省内存（单测装配）。 */
+  queueStore?: InputQueueStore;
 }): SessionExitRuntime {
   const {
     manager,
@@ -63,6 +71,7 @@ export function registerSessionHandlers(options: {
     browserManager,
     worktreeService,
     resourcesFor,
+    queueStore = createMemoryInputQueueStore(),
   } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（sessions:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
@@ -111,6 +120,65 @@ export function registerSessionHandlers(options: {
     }
   }
 
+  // 输入队列（票 01 / ADR 0013）：会话忙时 send 入队，执行结束或入队时空闲
+  // 则由主进程逐条消费。等待「本轮流结束」的消费循环经 streamWaiters 挂起，
+  // 在流的 end() 钩子中释放（发一条、等其回复完成、再发下一条）。
+  const streamWaiters = new Map<string, Set<() => void>>();
+  function releaseStreamWaiters(sessionId: string) {
+    const waiters = streamWaiters.get(sessionId);
+    if (!waiters) return;
+    for (const release of waiters) release();
+    waiters.clear();
+  }
+  const queues = createSessionInputQueues({
+    store: queueStore,
+    isBusy: (sessionId) => management.execution(sessionId)?.running ?? false,
+    dispatch: dispatchQueued,
+    onChange: (sessionId, reason, queue) => {
+      // 队列变更经会话事件信封推送；无活跃执行（理论边界）时无信封可挂，
+      // 渲染层切回会话时经 view 快照兜底。
+      const executionId = executions.get(sessionId);
+      if (executionId === undefined) return;
+      emit({
+        sessionId,
+        executionId,
+        event: { type: "queue-changed", reason, queue },
+      });
+    },
+  });
+
+  /** 队列消费的发送：走 send 主路径；启动成功即返回，流结束经 onSettled 回调。 */
+  async function dispatchQueued(
+    sessionId: string,
+    entry: QueuedMessage,
+    onSettled: () => void
+  ) {
+    let settled = false;
+    const release = () => {
+      if (settled) return;
+      settled = true;
+      onSettled();
+    };
+    const waiters = streamWaiters.get(sessionId) ?? new Set();
+    waiters.add(release);
+    streamWaiters.set(sessionId, waiters);
+    try {
+      await send(
+        sessionId,
+        entry.text,
+        entry.providerProfileId,
+        entry.mentionPaths,
+        entry.thinkingEffort,
+        entry.approvalMode,
+        true
+      );
+    } catch (error) {
+      // 启动失败：注销等待（end() 可能已提前释放），条目由协调器保留
+      waiters.delete(release);
+      throw error;
+    }
+  }
+
   // 消息与Compact共用占位、现场起点及中断清理，避免两套运行状态分叉。
   function beginExecution(sessionId: string) {
     management.assertCanExecute(sessionId);
@@ -126,6 +194,9 @@ export function registerSessionHandlers(options: {
         interrupts.end(sessionId, controller);
         if (executions.get(sessionId) === executionId)
           executions.delete(sessionId);
+        // 流结束（完成/出错/中断）：唤醒等待本轮的消费循环并尝试取队首（票 01）
+        releaseStreamWaiters(sessionId);
+        queues.onIdle(sessionId);
       },
     };
   }
@@ -142,6 +213,7 @@ export function registerSessionHandlers(options: {
     const result = membership.removeProject(id, confirmed);
     for (const sessionId of result?.sessionIds ?? []) {
       liveSessions.forget(sessionId);
+      queueStore.clear(sessionId);
       void browserManager?.closeSession(sessionId).catch(() => {});
     }
     return result;
@@ -166,7 +238,11 @@ export function registerSessionHandlers(options: {
   ipcMain.handle(IPC.sessions.view, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("view：sessionId 必须是字符串");
-    return liveSessions.view(sessionId);
+    const view = liveSessions.view(sessionId);
+    // 输入队列快照（票 01）：切回会话时队列条原样恢复
+    return view === null
+      ? null
+      : { ...view, queue: queues.snapshot(sessionId) };
   });
   ipcMain.handle(
     IPC.sessions.markViewed,
@@ -431,7 +507,9 @@ export function registerSessionHandlers(options: {
     profileId?: unknown,
     mentionPaths?: unknown,
     thinkingEffort?: unknown,
-    approvalMode?: unknown
+    approvalMode?: unknown,
+    /** 队列消费内部调用：会话忙时不得再入队（避免自我吞掉），竞态以启动失败保留条目 */
+    fromQueue = false
   ) {
     assertOpen();
     if (typeof sessionId !== "string" || typeof text !== "string") {
@@ -474,6 +552,19 @@ export function registerSessionHandlers(options: {
     );
     if (profile === undefined) {
       throw new Error("所选 Provider Profile 不存在，请重新选择模型");
+    }
+
+    // 输入队列（票 01）：会话忙时不再报错，而是入队（主进程单一真相）。
+    // 入队即快照发送参数（Profile / 思考档位 / 审批模式 / @引用），消费按快照发。
+    if (!fromQueue && (management.execution(sessionId)?.running ?? false)) {
+      queues.enqueue(sessionId, {
+        text,
+        mentionPaths: (mentionPaths as string[] | undefined) ?? [],
+        providerProfileId: profile.id,
+        thinkingEffort: effortSnapshot,
+        approvalMode: approvalSnapshot as ApprovalMode,
+      });
+      return;
     }
 
     // @引用 内容在主进程读取（路径限制在工作区内），失败以中文异常抛回

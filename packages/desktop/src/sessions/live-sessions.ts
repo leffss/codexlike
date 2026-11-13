@@ -81,6 +81,8 @@ export function createLiveSessions(manager: SessionManager) {
         "session-auto-approve-changed",
         "subagent-report",
         "subagent-tool",
+        // 输入队列变更（票 01）：停止期间入队仍要推送队列快照
+        "queue-changed",
       ].includes(event.type)
     )
       return null;

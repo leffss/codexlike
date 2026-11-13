@@ -342,9 +342,8 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
       .archivedAt
   ).toBeNull();
   expect(await invoke("sessions:execution", session.id)).toEqual(state);
-  await expect(
-    invoke("sessions:send", session.id, "重复发送", model.profile.id)
-  ).rejects.toThrow("执行或等待");
+  // 忙时 send 不再报错而是入队（票 01 输入队列）：执行通道不被覆盖，executionId 稳定
+  await invoke("sessions:send", session.id, "重复发送", model.profile.id);
   expect((await invoke("sessions:execution", session.id)).executionId).toBe(
     state.executionId
   );

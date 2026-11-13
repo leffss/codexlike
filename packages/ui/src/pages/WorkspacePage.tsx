@@ -17,6 +17,7 @@ import {
   WorkspaceSharingNotice,
 } from "../components/WorkspaceModeControl";
 import type {
+  QueuedMessage,
   SessionEventEnvelope,
   SessionListItem,
   ProjectRemoval,
@@ -97,6 +98,7 @@ export function WorkspacePage(props: {
   >({});
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageSegment[]>([]);
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
@@ -274,6 +276,7 @@ export function WorkspacePage(props: {
       const isCurrent = () =>
         currentIdRef.current === id && sessionRequestRef.current === request;
       setMessages([]);
+      setQueue([]);
       setWorkspaceFiles([]);
       setResources(null);
       setContextWarning(null);
@@ -313,6 +316,7 @@ export function WorkspacePage(props: {
           snapshotVersion
         );
         setMessages(live.items);
+        setQueue(live.queue);
         setStreaming(live.activity.running);
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
@@ -403,6 +407,7 @@ export function WorkspacePage(props: {
             ...live.items,
             ...prev.filter((item) => item.kind === "status"),
           ]);
+          setQueue(live.queue);
           setStreaming(live.activity.running);
           setCompacting(
             live.activity.running && live.activity.operation === "compact"
@@ -563,10 +568,11 @@ export function WorkspacePage(props: {
   }
 
   async function send(text: string, mentionPaths: string[]) {
+    // 回复进行中不再拦截（票 01 输入队列）：主进程忙时入队、空闲时直接发送；
+    // 等待用户交互（pending）期间仍禁用（spec 用户故事 17）。
     if (
       currentId === null ||
       selectedProfileId === "" ||
-      streaming ||
       compacting ||
       loading ||
       workspaceState.pending(currentId).length > 0
@@ -1285,12 +1291,14 @@ export function WorkspacePage(props: {
                 current?.archivedAt != null ||
                 creating ||
                 profiles.length === 0 ||
-                streaming ||
+                // streaming 不再禁用（票 01 输入队列）：忙时 Enter 直接入队；
+                // 等待用户交互（pending）期间维持禁用（spec 用户故事 17）。
                 compacting ||
                 loading ||
                 pending.length > 0
               }
               streaming={streaming}
+              queue={currentId === null ? [] : queue}
               onStop={() => void stop()}
               hint={composerHint}
               approvalMode={

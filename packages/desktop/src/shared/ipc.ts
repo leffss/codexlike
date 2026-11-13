@@ -25,6 +25,7 @@ import type {
 } from "@codexlike/agent-core";
 
 import type { SessionStatusInfo } from "../sessions/status";
+import type { QueueChangeReason, QueuedMessage } from "../sessions/input-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
@@ -42,6 +43,8 @@ export type { SubagentSettings };
 export type { TerminalShell };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
+// 输入队列（票 01）：队列条与事件载荷的公共形状
+export type { QueuedMessage, QueueChangeReason };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -186,6 +189,12 @@ export interface SessionEventEnvelope {
         outcome: "completed" | "failed" | "interrupted";
         history: TranscriptItem[];
         error?: string;
+      }
+    | {
+        /** 输入队列变更（票 01）：入队 / 出队发送；queue 为变更后完整快照 */
+        type: "queue-changed";
+        reason: QueueChangeReason;
+        queue: QueuedMessage[];
       };
   activity: SessionActivity;
 }
@@ -210,6 +219,8 @@ export interface SessionView {
   events: SessionEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: SessionActivity;
+  /** 输入队列快照（票 01）：切换会话时队列条原样恢复 */
+  queue?: QueuedMessage[];
 }
 
 export interface ProjectRemoval {
@@ -341,7 +352,9 @@ export interface CodexLikeApi {
      * mentionPaths 为消息中 @引用 的工作区相对路径，内容由主进程读取附加进模型上下文。
      * thinkingEffort 为本条消息的思考档位快照（GLOSSARY「思考档位」）：
      * 缺省按 auto 处理；主进程只接受五档枚举，非法值以中文异常抛回。
-     * 会话正在回复中 / Profile 不存在 / 引用文件不可读等启动失败以异常抛回。
+     * 会话忙时（回复进行中 / 等待用户回应）不再报错，而是入队该会话的
+     * 输入队列（含发送参数快照，票 01），回复结束后由主进程自动逐条发出。
+     * Profile 不存在 / 引用路径不合法等启动失败仍以异常抛回。
      */
     send(
       sessionId: string,
