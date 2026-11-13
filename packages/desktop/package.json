@@ -51,6 +51,7 @@
     "test:e2e:worked-history": "node e2e/worked-history.mjs",
     "test:e2e:width": "node e2e/width-tiers.mjs",
     "test:e2e:window": "node e2e/window-controls.mjs",
+    "test:e2e:launch-state": "node e2e/launch-state.mjs",
     "test:e2e:external-links": "node e2e/external-links.mjs",
     "test:e2e:scroll": "node e2e/scroll-following.mjs",
     "test:e2e:entries": "node e2e/entry-consistency.mjs",

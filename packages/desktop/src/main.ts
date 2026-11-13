@@ -9,6 +9,7 @@ import {
   Menu,
   nativeTheme,
   safeStorage,
+  screen,
   type IpcMainInvokeEvent,
 } from "electron";
 
@@ -48,6 +49,11 @@ import {
   type ThemeName,
   type ThemeSettingsStore,
 } from "./theme/theme-settings-store";
+import {
+  createLaunchStateStore,
+  type LaunchState,
+} from "./launch-state/launch-state-store";
+import { resolveLaunchBounds } from "./launch-state/display-geometry";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
 import { createSqliteInputQueueStore } from "./sessions/input-queue-store";
@@ -99,8 +105,11 @@ function applyNativeTheme(theme: ThemeName | null): void {
   nativeTheme.themeSource = resolved;
 }
 
-function createMainWindow(theme: ThemeName | null): BrowserWindow {
-  const win = new BrowserWindow({
+function createMainWindow(
+  theme: ThemeName | null,
+  launch: LaunchState | null
+): BrowserWindow {
+  const options: Electron.BrowserWindowConstructorOptions = {
     width: 1280,
     height: 800,
     title: "CodexLike",
@@ -112,7 +121,24 @@ function createMainWindow(theme: ThemeName | null): BrowserWindow {
       nodeIntegration: false,
       sandbox: false, // preload 需要 require('electron') 的 contextBridge
     },
-  });
+  };
+  // 启动现场（票01）：有有效现场则按恢复 bounds 建窗（显示器校验纯函数负责
+  // 无交集回退与尺寸收紧）；无现场维持现有默认 1280×800 居中。
+  if (launch !== null) {
+    Object.assign(
+      options,
+      resolveLaunchBounds({
+        saved: launch.bounds,
+        workAreas: screen.getAllDisplays().map((display) => display.workArea),
+        primaryWorkArea: screen.getPrimaryDisplay().workArea,
+      })
+    );
+  }
+  const win = new BrowserWindow(options);
+  // maximized 为真：先按正常态 bounds 建窗再 maximize（取消最大化可回到现场 bounds）
+  if (launch !== null && launch.maximized) {
+    win.maximize();
+  }
 
   registerWindowControls(win);
 
@@ -520,7 +546,11 @@ void app.whenReady().then(async () => {
   // 输入队列恢复（票 04 / ADR 0013）：主进程服务与凭据装配完成后启用，
   // 不依赖窗口、view 或渲染层加载；暂停态队列由持久标志保持不消费。
   sessionRuntime.startInputQueues();
-  mainWindow = createMainWindow(themePreference);
+  // 启动现场（票01）：与主题同构的建窗前时序——先读现场再建窗；无现场或
+  // 损坏（null）维持默认 1280×800 居中。
+  const launchStateStore = createLaunchStateStore({ dir: dataDir() });
+  const launchState = await launchStateStore.get();
+  mainWindow = createMainWindow(themePreference, launchState);
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
   registerApplicationExit({
