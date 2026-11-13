@@ -6,7 +6,7 @@ import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
 
 async function assertSearchLayout(window) {
   const layout = await window
-    .getByTestId("session-search-input")
+    .getByTestId("task-search-input")
     .evaluate((input) => {
       const panel = input.closest("section");
       const label = input.closest("label");
@@ -20,7 +20,7 @@ async function assertSearchLayout(window) {
         .querySelector('[role="status"]')
         .getBoundingClientRect();
       const actions = panel
-        .querySelector('[data-testid="session-search-refresh"]')
+        .querySelector('[data-testid="task-search-refresh"]')
         .parentElement.getBoundingClientRect();
       return {
         descriptionBottom: description.bottom,
@@ -48,7 +48,7 @@ async function assertSearchLayout(window) {
 }
 
 async function main() {
-  const root = mkdtempSync(join(tmpdir(), "codexlike-session-search-"));
+  const root = mkdtempSync(join(tmpdir(), "codexlike-task-search-"));
   const homeDir = join(root, "home");
   const workspaceDir = join(root, "折叠项目");
   mkdirSync(workspaceDir);
@@ -66,7 +66,7 @@ async function main() {
     let window;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     window.setDefaultTimeout(8000);
-    await window.getByTestId("session-search-toggle").click();
+    await window.getByTestId("task-search-toggle").click();
     for (const width of [1280, 1000]) {
       await app.evaluate(
         ({ BrowserWindow }, width) =>
@@ -93,7 +93,7 @@ async function main() {
       BrowserWindow.getAllWindows()[0].setContentSize(1280, 800)
     );
     await window.waitForFunction(() => innerWidth === 1280);
-    await window.getByTestId("session-search-input").press("Escape");
+    await window.getByTestId("task-search-input").press("Escape");
     await window.getByTestId("add-project").click();
     await window.getByTestId("project-group").waitFor();
     await window.getByTestId("settings-open").click();
@@ -109,7 +109,7 @@ async function main() {
     async function create(title, project = false) {
       if (project) await window.getByTestId("project-group").hover();
       await window
-        .getByTestId(project ? "project-new-session" : "new-session")
+        .getByTestId(project ? "project-new-task" : "new-task")
         .click();
       if (!project) await window.getByTestId("draft-select-workspace").click();
       await window.getByTestId("composer-input").fill(title);
@@ -118,14 +118,14 @@ async function main() {
       await window.getByTestId("composer-send").waitFor();
     }
     const item = (title) =>
-      window.getByTestId("session-item").filter({ hasText: title });
-    const results = () => window.getByTestId("session-search-result");
+      window.getByTestId("task-item").filter({ hasText: title });
+    const results = () => window.getByTestId("task-search-result");
     async function search(text) {
-      if (!(await window.getByTestId("session-search-input").isVisible()))
-        await window.getByTestId("session-search-toggle").click();
-      await window.getByTestId("session-search-input").fill(text);
+      if (!(await window.getByTestId("task-search-input").isVisible()))
+        await window.getByTestId("task-search-toggle").click();
+      await window.getByTestId("task-search-input").fill(text);
       await window
-        .getByTestId("session-search-status")
+        .getByTestId("task-search-status")
         .filter({ hasText: /找到|没有匹配|输入标题/ })
         .waitFor();
       await assertSearchLayout(window);
@@ -133,13 +133,13 @@ async function main() {
     await create("项目任务", true);
     await create("同目录独立任务");
     await create("待归档任务");
-    const projectId = await item("项目任务").getAttribute("data-session-id");
+    const projectId = await item("项目任务").getAttribute("data-task-id");
     const standaloneId =
-      await item("同目录独立任务").getAttribute("data-session-id");
-    const archivedId = await item("待归档任务").getAttribute("data-session-id");
+      await item("同目录独立任务").getAttribute("data-task-id");
+    const archivedId = await item("待归档任务").getAttribute("data-task-id");
     await item("待归档任务").click({ button: "right" });
     await window
-      .getByTestId("session-context-menu")
+      .getByTestId("task-context-menu")
       .getByTestId("archive-button")
       .click();
     await item("待归档任务").waitFor({ state: "detached" });
@@ -148,7 +148,7 @@ async function main() {
     await search("星河");
     assert(
       (await results().count()) === 2,
-      "正文搜索覆盖折叠项目与独立会话，默认排除归档"
+      "正文搜索覆盖折叠项目与独立任务，默认排除归档"
     );
     assert(
       (await results().filter({ hasText: "项目任务" }).textContent()).includes(
@@ -159,7 +159,7 @@ async function main() {
     assert(
       (
         await results().filter({ hasText: "同目录独立任务" }).textContent()
-      ).includes("独立会话"),
+      ).includes("独立任务"),
       "同目录独立归属不混淆"
     );
     const beforeOpen = await window.evaluate(() =>
@@ -185,7 +185,7 @@ async function main() {
       "搜索打开不得改变最近使用顺序"
     );
     await search("星河");
-    await window.getByTestId("session-search-archived").check();
+    await window.getByTestId("task-search-archived").check();
     await results().filter({ hasText: "待归档任务" }).waitFor();
     assert((await results().count()) === 3, "归档开关立即纳入归档结果");
     assert(
@@ -204,21 +204,21 @@ async function main() {
       "归档历史可看不可发送"
     );
     await window
-      .getByTestId("archived-session-item")
+      .getByTestId("archived-task-item")
       .filter({ hasText: "待归档任务" })
       .click({ button: "right" });
     await window
-      .getByTestId("session-context-menu")
+      .getByTestId("task-context-menu")
       .getByTestId("unarchive-button")
       .click();
     await item("待归档任务").waitFor();
     await search("星河");
-    await window.getByTestId("session-search-archived").uncheck();
+    await window.getByTestId("task-search-archived").uncheck();
     await results().filter({ hasText: "待归档任务" }).waitFor();
-    await window.getByTestId("session-search-toggle").click();
+    await window.getByTestId("task-search-toggle").click();
     await item("同目录独立任务").click({ button: "right" });
     await window
-      .getByTestId("session-context-menu")
+      .getByTestId("task-context-menu")
       .getByTestId("rename-button")
       .click();
     await window.getByTestId("rename-input").fill("唯一标题100%_新名");
@@ -227,8 +227,8 @@ async function main() {
     await search("唯一标题100%_");
     assert((await results().count()) === 1, "特殊字符按字面查询重命名后的标题");
     assert(
-      (await results().getAttribute("data-session-id")) === standaloneId,
-      "标题结果为正确会话"
+      (await results().getAttribute("data-task-id")) === standaloneId,
+      "标题结果为正确任务"
     );
     await search("secret-never-searchable");
     assert((await results().count()) === 0, "私密配置不进入搜索");
@@ -240,7 +240,7 @@ async function main() {
     window.setDefaultTimeout(8000);
     await search("星河-3");
     assert(
-      (await results().getAttribute("data-session-id")) === archivedId,
+      (await results().getAttribute("data-task-id")) === archivedId,
       "真实进程重开读取SQLite历史"
     );
     await results().click();
@@ -274,11 +274,11 @@ async function main() {
         },
         { query, reject }
       );
-      if (!(await window.getByTestId("session-search-input").isVisible()))
-        await window.getByTestId("session-search-toggle").click();
-      await window.getByTestId("session-search-input").fill(query);
+      if (!(await window.getByTestId("task-search-input").isVisible()))
+        await window.getByTestId("task-search-toggle").click();
+      await window.getByTestId("task-search-input").fill(query);
       await window
-        .getByTestId("session-search-status")
+        .getByTestId("task-search-status")
         .filter({ hasText: "正在搜索" })
         .waitFor();
       await assertSearchLayout(window);
@@ -299,7 +299,7 @@ async function main() {
     await holdQuery("星河-1", true);
     await releaseQuery();
     await window
-      .getByTestId("session-search-status")
+      .getByTestId("task-search-status")
       .filter({ hasText: "搜索失败" })
       .waitFor();
     await assertSearchLayout(window);
@@ -307,12 +307,12 @@ async function main() {
     await holdQuery("星河-1");
     await search("星河-2");
     assert(
-      (await results().getAttribute("data-session-id")) === standaloneId,
+      (await results().getAttribute("data-task-id")) === standaloneId,
       "新查询先返回正确结果"
     );
     await releaseQuery();
     assert(
-      (await results().getAttribute("data-session-id")) === standaloneId,
+      (await results().getAttribute("data-task-id")) === standaloneId,
       "旧查询迟到不能覆盖新查询"
     );
     await holdQuery("星河-1");
@@ -323,13 +323,13 @@ async function main() {
     await search("星河-2");
     await releaseQuery();
     assert(
-      (await results().getAttribute("data-session-id")) === standaloneId,
+      (await results().getAttribute("data-task-id")) === standaloneId,
       "旧查询失败不清除新结果"
     );
     assert(
-      !(
-        await window.getByTestId("session-search-status").textContent()
-      ).includes("失败"),
+      !(await window.getByTestId("task-search-status").textContent()).includes(
+        "失败"
+      ),
       "迟到错误不污染当前状态"
     );
     await results().click();
@@ -337,7 +337,7 @@ async function main() {
       .getByTestId("message-assistant")
       .filter({ hasText: "持久正文星河-2" })
       .waitFor();
-    // 后台运行场景仍从原归档恢复的会话发起。
+    // 后台运行场景仍从原归档恢复的任务发起。
     await search("星河-3");
     await results().click();
     await window
@@ -360,7 +360,7 @@ async function main() {
       (id) => window.codexlike.sessions.execution(id),
       archivedId
     );
-    assert(execution.running, "搜索打开其他会话不停止后台执行");
+    assert(execution.running, "搜索打开其他任务不停止后台执行");
     finishBackground();
     console.log(
       "[e2e] 跨归属正文/标题、折叠、归档查看恢复、字面字符、真实重开与后台执行通过"

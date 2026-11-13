@@ -1,10 +1,10 @@
 // E2E 容器分档宽度（票 05，spec「宽度与布局」用户故事 31–35）：
-// 内容列以会话容器（中栏，而非浏览器视口）为断点三档分宽，
+// 内容列以任务容器（中栏，而非浏览器视口）为断点三档分宽，
 // 头部 / 消息流共用同一内容列，输入卡片左右各外扩 8px，
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
 // 1) 新建、已有与加载中使用同一三档内容列，工作区信息也与消息流对齐。
-// 2) 窗口内容区 1280px（会话容器 992px ≥864）→ 4xl 档：
+// 2) 窗口内容区 1280px（任务容器 992px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
 // 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
 //    头部 / 消息流左右缘对齐，输入卡片外扩；用户气泡右对齐内容列右缘。
@@ -23,7 +23,7 @@ import {
   startMockProvider,
 } from "./helpers.mjs";
 
-/** 档位换算依据：侧栏固定 w-72（288px），窗口内容区宽 - 288 = 会话容器宽 */
+/** 档位换算依据：侧栏固定 w-72（288px），窗口内容区宽 - 288 = 任务容器宽 */
 const SIDEBAR_WIDTH = 288;
 const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
 
@@ -120,7 +120,7 @@ async function assertAligned(window, contentTestId, label) {
   await assertViewportLayout(window, label);
   const content = await window.getByTestId(contentTestId).boundingBox();
   assert(content !== null, `${label}：内容列必须可见`);
-  for (const testId of ["session-header-content", "workspace-path"]) {
+  for (const testId of ["task-header-content", "workspace-path"]) {
     const box = await window.getByTestId(testId).boundingBox();
     assert(box !== null, `${label}：${testId} 必须可见`);
     assert(
@@ -160,7 +160,7 @@ async function main() {
     await window.getByTestId("settings-open").waitFor();
     await assertViewportLayout(window, "冷启动");
 
-    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
+    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建任务
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     await assertViewportLayout(window, "设置页");
@@ -177,21 +177,21 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
-    // 固定窗口内容区 1280×800：会话容器 = 1280 - 288 = 992px
+    // 固定窗口内容区 1280×800：任务容器 = 1280 - 288 = 992px
     await resizeWindow(app, 1280, 800);
 
-    // 场景 1：新建草稿与已有会话采用相同 4xl 档，不再单独收窄。
+    // 场景 1：新建草稿与已有任务采用相同 4xl 档，不再单独收窄。
     const emptyBox = await window.getByTestId("message-empty").boundingBox();
     assert(emptyBox !== null, "空态提示必须可见");
     assert(
       emptyBox.width > 768 && emptyBox.width <= 896,
       `新建草稿应采用 4xl 内容列（>768 且 ≤896）：实测 ${emptyBox.width}`
     );
-    await assertAligned(window, "message-empty", "新建会话");
+    await assertAligned(window, "message-empty", "新建任务");
     const emptyGutter = await window
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
-    await window.screenshot({ path: join(screenshots, "new-session.png") });
+    await window.screenshot({ path: join(screenshots, "new-task.png") });
 
     // 发送消息 → mock 返回宽表格 + 长代码行
     await window.getByTestId("composer-input").fill("来一个大宽表格");
@@ -296,7 +296,7 @@ async function main() {
       `容器收窄后内容列应变窄：${tierBase.width} < ${tier4.width}`
     );
 
-    await assertAligned(window, "message-list", "基础档已有会话");
+    await assertAligned(window, "message-list", "基础档已有任务");
 
     // 两轮回复在低窗口内溢出：复制反馈的 sr-only 元素不得越过消息流撑大文档。
     // 真实内容溢出时滚动槽仍保持原宽度，输入区和标题不横跳。
@@ -313,7 +313,7 @@ async function main() {
         gutter: el.offsetWidth - el.clientWidth,
         overflowing: el.scrollHeight > el.clientHeight,
       }));
-    assert(scrolling.overflowing, "真实长会话应产生纵向滚动");
+    assert(scrolling.overflowing, "真实长任务应产生纵向滚动");
     assert(scrolling.gutter === emptyGutter, "出现滚动条不能改变稳定槽宽度");
     const afterScroll = await assertAligned(window, "message-list", "滚动后");
     assert(
@@ -329,7 +329,7 @@ async function main() {
     await resizeWindow(app, 1600, 900);
     const closed = await assertAligned(window, "message-list", "面板关闭");
     const headerHeight = (
-      await window.getByTestId("session-header-content").boundingBox()
+      await window.getByTestId("task-header-content").boundingBox()
     ).height;
     for (const [toggle, panel] of [
       ["resources-toggle", "resources-panel"],
@@ -342,7 +342,7 @@ async function main() {
       const panelBox = await window.getByTestId(panel).boundingBox();
       assert(opened.x + opened.width <= panelBox.x, `${panel} 不能覆盖主列`);
       const header = await window
-        .getByTestId("session-header-content")
+        .getByTestId("task-header-content")
         .boundingBox();
       assert(
         Math.abs(header.height - headerHeight) <= 1,
@@ -354,7 +354,7 @@ async function main() {
         .evaluate((el) => el.clientWidth);
       assert(
         Math.abs(opened.width - (streamWidth - STREAM_PADDING - 192)) <= 1,
-        "面板打开仍使用外层会话容器的6xl档留白"
+        "面板打开仍使用外层任务容器的6xl档留白"
       );
       await window.screenshot({ path: join(screenshots, `${panel}.png`) });
       await window.getByTestId(toggle).click();
@@ -381,13 +381,13 @@ async function main() {
         "message-list",
         `${width} 双面板`
       );
-      const title = await window.getByTestId("session-title").boundingBox();
+      const title = await window.getByTestId("task-title").boundingBox();
       assert(
         title.width >= 40,
         `${width} 双面板标题不能被压成零宽：${title.width}`
       );
       for (const testId of [
-        "session-search-toggle",
+        "task-search-toggle",
         "resources-toggle",
         "changes-toggle",
       ]) {
@@ -428,8 +428,8 @@ async function main() {
       await window.getByTestId("resources-panel").waitFor({ state: "hidden" });
     }
 
-    // 同一真实会话通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
-    const session = window.getByTestId("session-item").first();
+    // 同一真实任务通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
+    const session = window.getByTestId("task-item").first();
     for (const [width, height, min, max] of [
       [1000, 800, expectedFull - 2, expectedFull + 2],
       [1280, 800, 769, 896],
@@ -441,7 +441,7 @@ async function main() {
         "message-list",
         `${width} 已有`
       );
-      await window.getByTestId("new-session").click();
+      await window.getByTestId("new-task").click();
       await window.getByTestId("draft-select-workspace").waitFor();
       const draft = await assertAligned(
         window,

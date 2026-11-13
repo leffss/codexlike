@@ -1,6 +1,6 @@
 // E2E 浏览器工具（工单 11）：启动真实 Electron 应用 → mock 模型依次调用
 // browser_navigate（打开本 E2E 自带的 fixture 页）→ browser_screenshot（整页截图）
-// → 最终文本。断言：工具卡片渲染、截图真实落盘到会话数据目录、截图卡片内嵌图片
+// → 最终文本。断言：工具卡片渲染、截图真实落盘到任务数据目录、截图卡片内嵌图片
 // （IPC 读回 dataURL）回填给模型的 tool result 为文本降级（未设附图开关）。
 // 运行：pnpm test:e2e:browser（先全仓 build；本机需已有 Chromium 缓存或首次自动下载）。
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -60,7 +60,7 @@ async function main() {
 
   let app;
   try {
-    // 1) 预置 Profile + 建会话
+    // 1) 预置 Profile + 建任务
     const launched = await launchApp({ homeDir });
     app = launched.app;
     const window = launched.window;
@@ -76,7 +76,7 @@ async function main() {
     await window.getByText("Mock").first().waitFor();
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
-    console.log("[e2e] 应用启动、Profile 与会话就绪");
+    console.log("[e2e] 应用启动、Profile 与任务就绪");
 
     // 2) 发消息 → mock 模型依次调 navigate / screenshot
     await window.getByTestId("composer-input").fill("打开 fixture 页并截图");

@@ -49,24 +49,21 @@ export async function expandWorkedHistory(window, index = 0) {
   throw new Error(`无法展开第 ${index} 个已工作折叠区`);
 }
 
-/** 操作指定行的 portal 菜单；右键不应隐式切换当前会话。 */
-export async function sessionMenu(window, item) {
-  const id = await item.getAttribute("data-session-id");
-  assert(id, "菜单目标必须有稳定会话 ID");
+/** 操作指定行的 portal 菜单；右键不应隐式切换当前任务。 */
+export async function taskMenu(window, item) {
+  const id = await item.getAttribute("data-task-id");
+  assert(id, "菜单目标必须有稳定任务 ID");
   await item.click({ button: "right" });
-  const menu = window.getByTestId("session-context-menu");
+  const menu = window.getByTestId("task-context-menu");
   await menu.waitFor();
-  assert(
-    (await menu.getAttribute("data-session-id")) === id,
-    "菜单绑定目标 ID"
-  );
+  assert((await menu.getAttribute("data-task-id")) === id, "菜单绑定目标 ID");
   return menu;
 }
 
 /**
  * 强制悬浮生效：Chromium 对静止鼠标 + 侧栏持续重渲染（IPC 事件流）下的
  * :hover 重算不确定，且 Playwright 的 click/hover 重试不重发 mousemove——
- * :hover 一旦失效，悬浮操作永远显示不出（实测被 project-session-count
+ * :hover 一旦失效，悬浮操作永远显示不出（实测被 project-task-count
  * 持续拦截 30s 超时）。先位移再归位，用两次 mousemove 强制浏览器重算。
  */
 export async function hoverFor(window, locator) {
@@ -121,7 +118,7 @@ export async function hoverClick(window, locator, message = "悬浮按钮") {
  */
 export async function projectAction(
   window,
-  action = "project-new-session",
+  action = "project-new-task",
   header = window.getByTestId("project-header")
 ) {
   await hoverClick(window, header.getByTestId(action), `悬浮操作 ${action}`);
@@ -146,7 +143,7 @@ export async function assertSemanticOverlay(dialog) {
   );
 }
 
-/** 正常退出走票08确认/保存屏障；兜底只清理本次启动的进程树，不能误杀其他会话。 */
+/** 正常退出走票08确认/保存屏障；兜底只清理本次启动的进程树，不能误杀其他任务。 */
 export async function closeApp(app) {
   if (!app) return;
   const child = app.process();
@@ -186,7 +183,7 @@ export async function closeApp(app) {
   }
 }
 
-/** 仅准备新草稿；不预造空会话，也不发送额外模型请求。权限必须由场景显式选择。 */
+/** 仅准备新草稿；不预造空任务，也不发送额外模型请求。权限必须由场景显式选择。 */
 export async function prepareDraft(
   window,
   { project = false, worktree = false, approvalMode = "ask" } = {}
@@ -202,7 +199,7 @@ export async function prepareDraft(
     }
     await projectAction(window);
   } else {
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
   }
   if (worktree)
@@ -217,7 +214,7 @@ export async function prepareDraft(
     (await window
       .getByTestId("approval-mode-select")
       .getAttribute("data-value")) === "ask",
-    "新会话从 ask 开始"
+    "新任务从 ask 开始"
   );
   if (approvalMode !== "ask")
     await selectComposerOption(window, "approval-mode-select", approvalMode);

@@ -412,7 +412,7 @@ async function main() {
     );
     check(
       afterUI.assistantVisible && afterUI.userVisible,
-      "点击外链后原会话消息必须保留"
+      "点击外链后原任务消息必须保留"
     );
     check(
       afterUI.composerEditable && afterUI.draft === DRAFT,

@@ -154,7 +154,7 @@ async function main() {
       (await panel.textContent()).includes("rm codexlike-e2e-nonexistent"),
       "审批面板未显示命令原文"
     );
-    await window.getByTestId("session-item").getByText("等待用户").waitFor();
+    await window.getByTestId("task-item").getByText("等待用户").waitFor();
     const approve = panel.getByTestId("approval-approve");
     assert(
       (await approve.textContent()) === "批准本次",
@@ -347,7 +347,7 @@ async function main() {
     const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
-    await window.getByTestId("session-item").click();
+    await window.getByTestId("task-item").click();
     await waitMode(window, "full-access");
     await waitHistory(window, "已批准");
     console.log("[e2e] 重启恢复审批档位和只读批准历史");

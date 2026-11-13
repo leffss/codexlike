@@ -1,8 +1,8 @@
 // E2E（工单 13）：spawn_subagent 子代理委派的真实应用冒烟。
 // 路径：建 Profile（本地 mock 按请求特征分流主/子两级）→ 设置页子代理配置区
-// （并发上限改为 2 保存）→ 建会话 → 委派调研 → 嵌套卡片运行→完成、报告可展开 →
+// （并发上限改为 2 保存）→ 建任务 → 委派调研 → 嵌套卡片运行→完成、报告可展开 →
 // 断言主请求的 system 委派策略与 spawn_subagent 描述契约；子请求独立上下文
-// （含 task、不含主会话原文和主策略）且工具表无 spawn_subagent（防递归）
+// （含 task、不含主任务原文和主策略）且工具表无 spawn_subagent（防递归）
 // → 主模型第二轮收到报告（回流）→ 重启后嵌套卡片恢复（报告持久化）。
 // mock 固定返回委派调用，只验证提示与链路，不证明真实模型会自主选择委派。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:subagents（先 pnpm build）。
@@ -69,8 +69,8 @@ function hasDelegateReport(request) {
 /**
  * 场景脚本（按请求特征分流三级）：
  * - 子代理请求（system 含子代理标记）→ SSE 回文本报告；
- * - 主会话请求且消息含委派指令 → SSE 回 spawn_subagent tool_call；
- * - 主会话请求且消息含报告（工具结果回填后）→ SSE 回汇总文本。
+ * - 主任务请求且消息含委派指令 → SSE 回 spawn_subagent tool_call；
+ * - 主任务请求且消息含报告（工具结果回填后）→ SSE 回汇总文本。
  * 全部请求体由骨架记录（seenBodies，主/子两级上下文隔离的真实证据）。
  */
 async function main() {
@@ -82,12 +82,12 @@ async function main() {
         ctx.textRound(`${REPORT_MARKER}：调研完成，共 3 个入口。`);
         return;
       }
-      // 主会话第二轮：报告已作为对应调用的工具结果回填。
+      // 主任务第二轮：报告已作为对应调用的工具结果回填。
       if (isMainRequest(request) && hasDelegateReport(request)) {
         ctx.textRound("子代理的报告已汇总。");
         return;
       }
-      // 主会话第一轮：发起 spawn_subagent 委派
+      // 主任务第一轮：发起 spawn_subagent 委派
       if (isMainRequest(request)) {
         ctx.toolCallRound(DELEGATE_CALL_ID, "spawn_subagent", {
           task: DELEGATE_TASK,
@@ -117,7 +117,7 @@ async function main() {
     await profileForm.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Mock").first().waitFor();
 
-    // 2) 子代理配置区：并发上限改为 2 保存（对后续会话生效）
+    // 2) 子代理配置区：并发上限改为 2 保存（对后续任务生效）
     const concurrencyInput = window.getByTestId("subagent-concurrency-input");
     await concurrencyInput.fill("2");
     await window.getByTestId("subagent-settings-save").click();
@@ -133,7 +133,7 @@ async function main() {
     );
     console.log("[e2e] 设置页子代理配置区：并发上限 2 已保存");
 
-    // 3) 建会话 + 委派调研
+    // 3) 建任务 + 委派调研
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
     const composer = window.getByTestId("composer-input");
@@ -220,7 +220,7 @@ async function main() {
         request.messages.every(
           (message) => !messageText(message).includes(MAIN_TASK)
         ),
-        "子代理请求不应包含主会话历史"
+        "子代理请求不应包含主任务历史"
       );
       assert(
         !roleText(request, "system").includes(DELEGATION_POLICY_HEADING),
@@ -243,7 +243,7 @@ async function main() {
       "[e2e] 子代理独立上下文 + 主策略隔离 + 防递归（真实请求体验证）"
     );
 
-    // 6) 主模型第二轮：报告作为对应 spawn 调用的工具结果回流主会话上下文。
+    // 6) 主模型第二轮：报告作为对应 spawn 调用的工具结果回流主任务上下文。
     const mainSecondRound = mainRequests.find(hasDelegateReport);
     assert(
       mainSecondRound !== undefined,
@@ -256,7 +256,7 @@ async function main() {
       null,
       { timeout: 20_000 }
     );
-    console.log("[e2e] 报告回流主会话上下文（第二轮请求体验证）");
+    console.log("[e2e] 报告回流主任务上下文（第二轮请求体验证）");
 
     // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）。
     // 票 04：完成的轮默认收起折叠区、子代理卡完成自动收起——先展开再断言
@@ -266,10 +266,10 @@ async function main() {
     });
     app = relaunchedApp;
     await relaunchedWindow
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .first()
       .waitFor({ timeout: 15_000 });
-    await relaunchedWindow.getByTestId("session-item").first().click();
+    await relaunchedWindow.getByTestId("task-item").first().click();
     await relaunchedWindow
       .getByTestId("message-user")
       .first()

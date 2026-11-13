@@ -14,7 +14,7 @@ import {
   closeApp,
   launchApp,
   projectAction,
-  sessionMenu,
+  taskMenu,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -57,13 +57,13 @@ async function main() {
     await window.getByText("Membership Mock", { exact: true }).waitFor();
     await window.getByTestId("settings-back").click();
     const item = (title) =>
-      window.getByTestId("session-item").filter({ hasText: title });
+      window.getByTestId("task-item").filter({ hasText: title });
     const standalone = () =>
       window.getByTestId("standalone-header").locator("..");
     const project = () => window.getByTestId("project-header").locator("..");
     async function create(title, inProject = false) {
       if (inProject) await projectAction(window);
-      else await window.getByTestId("new-session").click();
+      else await window.getByTestId("new-task").click();
       if (!inProject)
         await window.getByTestId("draft-select-workspace").click();
       await window.getByTestId("composer-input").fill(title);
@@ -74,14 +74,14 @@ async function main() {
     await create("待移动");
     await window.getByTestId("composer-input").fill("保留当前草稿");
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
         window
-          .getByTestId("session-item")
+          .getByTestId("task-item")
           .and(window.locator('[aria-current="page"]'))
       )
     )
-      .getByTestId("session-membership")
+      .getByTestId("task-membership")
       .click();
     await assertSemanticOverlay(window.getByTestId("membership-dialog"));
     await window
@@ -89,7 +89,7 @@ async function main() {
       .selectOption({ label: "项目" });
     await window.getByTestId("membership-confirm").click();
     await project()
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "待移动" })
       .waitFor();
     assert(
@@ -98,26 +98,26 @@ async function main() {
       "移入不丢草稿"
     );
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
         window
-          .getByTestId("session-item")
+          .getByTestId("task-item")
           .and(window.locator('[aria-current="page"]'))
       )
     )
-      .getByTestId("session-membership")
+      .getByTestId("task-membership")
       .click();
     await window.getByTestId("membership-confirm").click();
     await standalone()
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "待移动" })
       .waitFor();
     await create("归档所属", true);
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
         window
-          .getByTestId("session-item")
+          .getByTestId("task-item")
           .and(window.locator('[aria-current="page"]'))
       )
     )
@@ -146,14 +146,14 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("interaction-panel").waitFor();
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
         window
-          .getByTestId("session-item")
+          .getByTestId("task-item")
           .and(window.locator('[aria-current="page"]'))
       )
     )
-      .getByTestId("session-membership")
+      .getByTestId("task-membership")
       .click();
     await window.getByTestId("membership-confirm").click();
     await window
@@ -174,28 +174,28 @@ async function main() {
       .getByTestId("interaction-panel")
       .waitFor({ state: "detached" });
     await window.getByTestId("composer-send").waitFor();
-    await window.getByTestId("session-search-toggle").click();
-    await window.getByTestId("session-search-input").fill("当前所属");
-    await window.getByTestId("session-search-result").waitFor();
+    await window.getByTestId("task-search-toggle").click();
+    await window.getByTestId("task-search-input").fill("当前所属");
+    await window.getByTestId("task-search-result").waitFor();
     await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     await window
-      .getByTestId("session-search-result")
+      .getByTestId("task-search-result")
       .waitFor({ state: "detached" });
-    await window.getByTestId("session-search-toggle").click();
+    await window.getByTestId("task-search-toggle").click();
     await window
       .getByTestId("message-user")
       .filter({ hasText: "待移动" })
       .waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 1,
+      (await window.getByTestId("task-item").count()) === 1,
       "所属含归档移除，同目录独立保留"
     );
     assert(
       (await window.getByTestId("composer-input").inputValue()) ===
         "保留当前草稿",
-      "幸存会话草稿不被清理"
+      "幸存任务草稿不被清理"
     );
     assert(
       readFileSync(marker, "utf8") === "项目移除不删除文件",
@@ -210,11 +210,11 @@ async function main() {
       "重开没有项目悬挂记录"
     );
     assert(model.requestCount() === 5, "整理不重放模型请求");
-    await window.getByTestId("composer-input").fill("幸存会话继续");
+    await window.getByTestId("composer-input").fill("幸存任务继续");
     await window.getByTestId("composer-send").click();
     await window
       .getByTestId("message-user")
-      .filter({ hasText: "幸存会话继续" })
+      .filter({ hasText: "幸存任务继续" })
       .waitFor();
     await window.getByTestId("composer-send").waitFor();
     await window.getByTestId("add-project").click();

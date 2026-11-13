@@ -1,8 +1,8 @@
 // E2E（工单 05：改动面板 + git 集成）：真实 Electron 应用走完整 git 链路——
-// git repo 工作区（预置基线提交）→ 建会话 → 消息驱动 write_file 产生真实变更
-// → 改动面板列出「新增」文件 → 点开 Monaco 双栏 diff → 一键创建 codexlike/<会话名> 分支
+// git repo 工作区（预置基线提交）→ 建任务 → 消息驱动 write_file 产生真实变更
+// → 改动面板列出「新增」文件 → 点开 Monaco 双栏 diff → 一键创建 codexlike/<任务名> 分支
 // → 模型生成提交消息（可编辑）→ 一键提交 → 面板刷新干净 + git 命令行侧验证落库
-// → 再开非 git 工作区会话，断言面板降级提示不报错。
+// → 再开非 git 工作区任务，断言面板降级提示不报错。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:changes（先全仓 build）。
 import { execFileSync } from "node:child_process";
 import {
@@ -82,7 +82,7 @@ async function main() {
     git(repo, "commit", "-m", "基线提交");
     mkdirSync(plain);
 
-    // 1) 启动 → 配置 Profile → 建会话 → 消息驱动 write_file（真实写盘）
+    // 1) 启动 → 配置 Profile → 建任务 → 消息驱动 write_file（真实写盘）
     const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
@@ -109,7 +109,7 @@ async function main() {
       .getByText("文件已创建。")
       .waitFor({ timeout: 20_000 });
     assert(existsSync(join(repo, "e2e-change.txt")), "write_file 未真实落盘");
-    console.log("[e2e] 会话产生真实文件变更");
+    console.log("[e2e] 任务产生真实文件变更");
 
     // 2) 打开改动面板 → 列表出现「新增」标识的文件
     await window.getByTestId("changes-toggle").click();
@@ -144,7 +144,7 @@ async function main() {
     await panel.getByTestId("changes-back").click();
     console.log("[e2e] Monaco 双栏 diff 渲染（原/新两侧）");
 
-    // 4) 一键创建分支 codexlike/<会话名> → 成功反馈
+    // 4) 一键创建分支 codexlike/<任务名> → 成功反馈
     await panel.getByTestId("changes-create-branch").click();
     await panel
       .getByTestId("changes-branch-feedback")

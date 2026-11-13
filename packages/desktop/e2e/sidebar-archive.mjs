@@ -16,7 +16,7 @@ import {
   hoverFor,
   launchApp,
   projectAction,
-  sessionMenu,
+  taskMenu,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -82,15 +82,15 @@ async function assertProjectHierarchy(window) {
     "项目"
   );
   const child = await textAppearance(
-    project.getByTestId("session-item").filter({ hasText: "项目任务" }),
+    project.getByTestId("task-item").filter({ hasText: "项目任务" }),
     "项目任务"
   );
   assert(
     child.x >= heading.x + 8,
-    `子会话文字应明显位于项目文字右侧：${JSON.stringify({ heading, child })}`
+    `子任务文字应明显位于项目文字右侧：${JSON.stringify({ heading, child })}`
   );
   assert(heading.weight >= 600, "项目名称使用清晰的半粗字重");
-  const colors = await window.getByTestId("session-list").evaluate((node) => {
+  const colors = await window.getByTestId("task-list").evaluate((node) => {
     const probe = document.createElement("span");
     node.append(probe);
     const result = {};
@@ -102,8 +102,8 @@ async function assertProjectHierarchy(window) {
     return result;
   });
   assert(heading.color === colors.fg, "项目名称使用主题主前景色");
-  assert(child.color !== heading.color, "非当前会话保持较弱的前景层级");
-  const guide = await project.getByTestId("group-sessions").evaluate((node) => {
+  assert(child.color !== heading.color, "非当前任务保持较弱的前景层级");
+  const guide = await project.getByTestId("group-tasks").evaluate((node) => {
     const style = getComputedStyle(node);
     return {
       width: Number.parseFloat(style.borderLeftWidth),
@@ -119,7 +119,7 @@ async function assertProjectHierarchy(window) {
       guide.color === colors.line &&
       guide.style === "solid" &&
       guide.height > 0,
-    `展开会话使用淡色竖向引导线：${JSON.stringify(guide)}`
+    `展开任务使用淡色竖向引导线：${JSON.stringify(guide)}`
   );
   const projectBox = await project.boundingBox();
   const standaloneBox = await window
@@ -129,20 +129,19 @@ async function assertProjectHierarchy(window) {
     standaloneBox.y - (projectBox.y + projectBox.height) >= 16,
     "项目排在独立分区之前，两者保留至少 16px 间距"
   );
-  const selected = project.getByTestId("session-row").filter({
-    has: window.getByTestId("session-item").filter({ hasText: "项目次任务" }),
+  const selected = project.getByTestId("task-row").filter({
+    has: window.getByTestId("task-item").filter({ hasText: "项目次任务" }),
   });
   assert(
-    (await selected
-      .getByTestId("session-item")
-      .getAttribute("aria-current")) === "page",
-    "当前项目会话保持选中语义"
+    (await selected.getByTestId("task-item").getAttribute("aria-current")) ===
+      "page",
+    "当前项目任务保持选中语义"
   );
   assert(
     (await selected.evaluate(
       (node) => getComputedStyle(node).backgroundColor
     )) === colors.selected,
-    "当前会话仍使用主题选中底色"
+    "当前任务仍使用主题选中底色"
   );
   for (const locator of [project, project.getByTestId("project-header")]) {
     assert(
@@ -195,7 +194,7 @@ async function main() {
     async function create(title, project = false) {
       if (project) await projectAction(window);
       else {
-        await window.getByTestId("new-session").click();
+        await window.getByTestId("new-task").click();
         await window.getByTestId("draft-select-workspace").click();
       }
       await window.getByTestId("composer-input").fill(title);
@@ -205,31 +204,31 @@ async function main() {
     }
     const item = (title, archived = false) =>
       window
-        .getByTestId(archived ? "archived-session-item" : "session-item")
+        .getByTestId(archived ? "archived-task-item" : "task-item")
         .filter({ hasText: title });
     const group = () => window.getByTestId("standalone-header").locator("..");
     const project = () => window.getByTestId("project-header").locator("..");
-    const menu = () => window.getByTestId("session-context-menu");
+    const menu = () => window.getByTestId("task-context-menu");
     const currentId = () =>
       window
-        .getByTestId("session-row")
+        .getByTestId("task-row")
         .locator('[aria-current="page"]')
-        .getAttribute("data-session-id");
+        .getAttribute("data-task-id");
     const row = (id) =>
       window
-        .getByTestId("session-row")
-        .and(window.locator(`[data-session-id="${id}"]`));
+        .getByTestId("task-row")
+        .and(window.locator(`[data-task-id="${id}"]`));
     const records = () =>
       window.evaluate(() => window.codexlike.sessions.list());
     const order = (scope, archived = false) =>
       scope
-        .getByTestId(archived ? "archived-session-item" : "session-item")
+        .getByTestId(archived ? "archived-task-item" : "task-item")
         .evaluateAll((nodes) => nodes.map((node) => node.dataset.sessionId));
     const timestamps = async () =>
       Object.fromEntries((await records()).map((s) => [s.id, s.lastUsedAt]));
     async function action(title, testId, archived = false) {
       await (
-        await sessionMenu(window, item(title, archived))
+        await taskMenu(window, item(title, archived))
       )
         .getByTestId(testId)
         .click();
@@ -243,7 +242,7 @@ async function main() {
     }
     async function neutral() {
       await window.getByTestId("composer-input").focus();
-      await window.getByTestId("session-title").hover();
+      await window.getByTestId("task-title").hover();
     }
     async function assertFocused(testId) {
       assert(
@@ -264,34 +263,32 @@ async function main() {
     console.log(`[e2e:sidebar] 截图目录 ${screenshotDir}`);
     async function assertSingleLineTitles() {
       const sidebarWidth = await window
-        .getByTestId("session-row")
+        .getByTestId("task-row")
         .first()
         .evaluate((row) => row.closest("aside").getBoundingClientRect().width);
       assert(
         Math.abs(sidebarWidth - 288) <= 1,
         `侧栏宽度为 288px：${sidebarWidth}`
       );
-      const layouts = await window
-        .getByTestId("session-row")
-        .evaluateAll((rows) =>
-          rows.map((row) => {
-            const label = row.querySelector('[data-testid="session-label"]');
-            const rect = label.getBoundingClientRect();
-            const box = row.getBoundingClientRect();
-            const neighbors = row.querySelectorAll(
-              '[data-testid="worktree-badge"], [data-testid="session-activity"], [data-testid="pin-button"]'
-            );
-            return {
-              width: rect.width,
-              height: box.height,
-              overflow: row.scrollWidth > row.clientWidth + 1,
-              overlap: [...neighbors].some(
-                (node) => rect.right > node.getBoundingClientRect().left + 1
-              ),
-              nowrap: getComputedStyle(label).whiteSpace === "nowrap",
-            };
-          })
-        );
+      const layouts = await window.getByTestId("task-row").evaluateAll((rows) =>
+        rows.map((row) => {
+          const label = row.querySelector('[data-testid="task-label"]');
+          const rect = label.getBoundingClientRect();
+          const box = row.getBoundingClientRect();
+          const neighbors = row.querySelectorAll(
+            '[data-testid="worktree-badge"], [data-testid="task-activity"], [data-testid="pin-button"]'
+          );
+          return {
+            width: rect.width,
+            height: box.height,
+            overflow: row.scrollWidth > row.clientWidth + 1,
+            overlap: [...neighbors].some(
+              (node) => rect.right > node.getBoundingClientRect().left + 1
+            ),
+            nowrap: getComputedStyle(label).whiteSpace === "nowrap",
+          };
+        })
+      );
       for (const layout of layouts)
         assert(
           layout.width >= 120 &&
@@ -302,7 +299,7 @@ async function main() {
           `标题单行且不被图标遮挡：${JSON.stringify(layout)}`
         );
     }
-    const longTitle = "验证会话标题在侧栏单行中保留足够的可读空间";
+    const longTitle = "验证任务标题在侧栏单行中保留足够的可读空间";
     await action("独立A", "rename-button");
     await window.getByTestId("rename-input").fill(longTitle);
     await window.getByTestId("rename-input").press("Enter");
@@ -312,7 +309,7 @@ async function main() {
         (span) => span.textContent === title
       );
       const rect = label.getBoundingClientRect();
-      const row = node.closest('[data-testid="session-row"]');
+      const row = node.closest('[data-testid="task-row"]');
       return {
         titleWidth: rect.width,
         rowWidth: row.getBoundingClientRect().width,
@@ -322,10 +319,10 @@ async function main() {
     console.log("[e2e:sidebar] 长标题布局", titleLayout);
     assert(
       titleLayout.titleWidth >= titleLayout.rowWidth * 0.75,
-      `普通会话标题至少获得行宽的 75%：${JSON.stringify(titleLayout)}`
+      `普通任务标题至少获得行宽的 75%：${JSON.stringify(titleLayout)}`
     );
     assert(titleLayout.rowHeight <= 34, "长标题保持单行高度");
-    // 同一真实项目下两条会话：非当前行显示层级，当前行保留最强高亮。
+    // 同一真实项目下两条任务：非当前行显示层级，当前行保留最强高亮。
     await select("项目次任务");
     for (const theme of ["light", "dark"]) {
       if (
@@ -368,25 +365,25 @@ async function main() {
     await item("独立A").waitFor();
     await select("独立B");
 
-    const aId = await item("独立A").getAttribute("data-session-id");
-    const bId = await item("独立B").getAttribute("data-session-id");
+    const aId = await item("独立A").getAttribute("data-task-id");
+    const bId = await item("独立B").getAttribute("data-task-id");
     const projectId = await window
       .getByTestId("project-header")
       .getAttribute("data-project-id");
     assert(projectId, "项目头暴露稳定项目 ID");
     assert(
-      (await window.getByTestId("session-row").count()) === 4,
-      "所有活跃行统一 session-row"
+      (await window.getByTestId("task-row").count()) === 4,
+      "所有活跃行统一 task-row"
     );
     assert(
       (await window.getByTestId("pin-button").count()) === 4,
-      "两类会话都有置顶入口"
+      "两类任务都有置顶入口"
     );
     for (const id of [
-      "session-new",
-      "session-archive",
-      "session-restore",
-      "session-membership",
+      "task-new",
+      "task-archive",
+      "task-restore",
+      "task-membership",
     ])
       assert(
         (await window.getByTestId(id).count()) === 0,
@@ -394,17 +391,17 @@ async function main() {
       );
     assert(
       await window
-        .getByTestId("session-title")
+        .getByTestId("task-title")
         .evaluate((node) => Number(getComputedStyle(node).fontWeight) >= 600),
       "当前标题使用粗体"
     );
 
     await neutral();
     assert(
-      (await window.getByTestId("session-time").count()) === 0,
+      (await window.getByTestId("task-time").count()) === 0,
       "时间不占用标题行宽度"
     );
-    for (const label of await window.getByTestId("session-label").all()) {
+    for (const label of await window.getByTestId("task-label").all()) {
       const tooltip = await label.getAttribute("title");
       assert(tooltip.includes(await label.textContent()), "提示包含完整标题");
       assert(tooltip.includes("最近使用："), "提示保留最近使用时间");
@@ -413,18 +410,18 @@ async function main() {
       await assertAction(pin, false, "默认置顶不可见且不可命中");
     const header = window.getByTestId("project-header");
     assert(
-      (await header.getByTestId("project-session-count").textContent()) === "2",
+      (await header.getByTestId("project-task-count").textContent()) === "2",
       "项目显示活跃数量"
     );
     assert(
       (await window
         .getByTestId("standalone-header")
-        .getByTestId("project-session-count")
+        .getByTestId("project-task-count")
         .textContent()) === "2",
       "独立分区显示活跃数量"
     );
     await assertAction(
-      header.getByTestId("project-new-session"),
+      header.getByTestId("project-new-task"),
       false,
       "默认隐藏项目新建"
     );
@@ -440,7 +437,7 @@ async function main() {
       "仅悬浮行显示置顶"
     );
     const hoveredTitleWidth = (
-      await row(aId).getByTestId("session-label").boundingBox()
+      await row(aId).getByTestId("task-label").boundingBox()
     ).width;
     await assertAction(
       row(bId).getByTestId("pin-button"),
@@ -448,23 +445,23 @@ async function main() {
       "相邻行不跟随悬浮"
     );
     assert(
-      (
-        await row(bId).getByTestId("session-label").getAttribute("title")
-      ).includes("最近使用："),
+      (await row(bId).getByTestId("task-label").getAttribute("title")).includes(
+        "最近使用："
+      ),
       "相邻行仍保留时间提示"
     );
     await assertAction(
-      header.getByTestId("project-new-session"),
+      header.getByTestId("project-new-task"),
       false,
       "行悬浮不展示项目操作"
     );
     await hoverFor(window, header);
     assert(
-      !(await header.getByTestId("project-session-count").isVisible()),
+      !(await header.getByTestId("project-task-count").isVisible()),
       "仅项目头悬浮隐藏计数"
     );
     await assertAction(
-      header.getByTestId("project-new-session"),
+      header.getByTestId("project-new-task"),
       true,
       "项目头悬浮展示新建"
     );
@@ -484,14 +481,14 @@ async function main() {
     );
     assert(
       Math.abs(
-        (await row(aId).getByTestId("session-label").boundingBox()).width -
+        (await row(aId).getByTestId("task-label").boundingBox()).width -
           hoveredTitleWidth
       ) < 1,
       "键盘焦点与悬停不改变标题宽度"
     );
     await window.getByTestId("project-group").focus();
     await assertAction(
-      header.getByTestId("project-new-session"),
+      header.getByTestId("project-new-task"),
       true,
       "项目头键盘焦点展示新建"
     );
@@ -501,7 +498,7 @@ async function main() {
       "项目头键盘焦点展示移除"
     );
     assert(
-      !(await header.getByTestId("project-session-count").isVisible()),
+      !(await header.getByTestId("project-task-count").isVisible()),
       "项目头键盘焦点隐藏计数"
     );
     await neutral();
@@ -526,8 +523,8 @@ async function main() {
       "查看不更新最近使用时间"
     );
 
-    // 非当前会话的右键和键盘菜单均绑定目标 ID，不能隐式切换。
-    await sessionMenu(window, item("独立A"));
+    // 非当前任务的右键和键盘菜单均绑定目标 ID，不能隐式切换。
+    await taskMenu(window, item("独立A"));
     assert((await currentId()) === bId, "非当前右键不切换");
     assert(
       await menu().evaluate((node) => node.parentElement === document.body),
@@ -537,17 +534,17 @@ async function main() {
       (await row(aId).getByTestId("rename-button").count()) === 0,
       "整理操作不留在行内"
     );
-    await assertFocused("session-membership");
+    await assertFocused("task-membership");
     await window.keyboard.press("ArrowUp");
     await assertFocused("archive-button");
     await window.keyboard.press("ArrowDown");
-    await assertFocused("session-membership");
+    await assertFocused("task-membership");
     await window.keyboard.press("ArrowDown");
     await assertFocused("rename-button");
     await window.keyboard.press("End");
     await assertFocused("archive-button");
     await window.keyboard.press("Home");
-    await assertFocused("session-membership");
+    await assertFocused("task-membership");
     await window.keyboard.press("Escape");
     await menu().waitFor({ state: "detached" });
     assert(
@@ -557,7 +554,7 @@ async function main() {
     await item("独立A").press("Shift+F10");
     await menu().waitFor();
     assert(
-      (await menu().getAttribute("data-session-id")) === aId &&
+      (await menu().getAttribute("data-task-id")) === aId &&
         (await currentId()) === bId,
       "Shift+F10 打开目标菜单且不切换"
     );
@@ -568,20 +565,20 @@ async function main() {
     await item("独立A改名").waitFor();
     assert(
       (await currentId()) === bId &&
-        (await item("独立A改名").getAttribute("data-session-id")) === aId,
+        (await item("独立A改名").getAttribute("data-task-id")) === aId,
       "键盘重命名只操作非当前目标 ID"
     );
     await action("独立A改名", "rename-button");
     await window.getByTestId("rename-input").fill("独立A");
     await window.getByTestId("rename-input").press("Enter");
     await item("独立A").waitFor();
-    await action("独立A", "session-membership");
+    await action("独立A", "task-membership");
     await window
       .getByTestId("membership-target")
       .selectOption({ label: "项目" });
     await window.getByTestId("membership-confirm").click();
     await project()
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立A" })
       .waitFor();
     assert(
@@ -589,10 +586,10 @@ async function main() {
         (await currentId()) === bId,
       "非当前移入操作正确 ID 且不切换"
     );
-    await action("独立A", "session-membership");
+    await action("独立A", "task-membership");
     await window.getByTestId("membership-confirm").click();
     await group()
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立A" })
       .waitFor();
     assert(
@@ -626,7 +623,7 @@ async function main() {
         .waitForFunction(
           () => {
             const node = document.querySelector(
-              '[data-testid="session-context-menu"]'
+              '[data-testid="task-context-menu"]'
             );
             return (
               node &&
@@ -657,33 +654,33 @@ async function main() {
       );
       await window.keyboard.press("Escape");
     }
-    await sessionMenu(window, item("独立A"));
-    await window.getByTestId("session-title").click();
+    await taskMenu(window, item("独立A"));
+    await window.getByTestId("task-title").click();
     await menu().waitFor({ state: "detached" });
-    await sessionMenu(window, item("独立A"));
+    await taskMenu(window, item("独立A"));
     await window.getByTestId("composer-input").focus();
     await menu().waitFor({ state: "detached" });
-    await sessionMenu(window, item("独立A"));
+    await taskMenu(window, item("独立A"));
     await window.getByTestId("message-stream").hover();
     await window.mouse.wheel(0, 100);
     await menu().waitFor({ state: "detached" });
-    await sessionMenu(window, item("独立A"));
+    await taskMenu(window, item("独立A"));
     await window.keyboard.press("Tab");
     await menu().waitFor({ state: "detached" });
-    await sessionMenu(window, item("独立A"));
+    await taskMenu(window, item("独立A"));
     await app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0];
       const [width, height] = win.getSize();
       win.setSize(width - 20, height - 20);
     });
     await menu().waitFor({ state: "detached" });
-    assert((await currentId()) === bId, "取消菜单始终保持原会话");
+    assert((await currentId()) === bId, "取消菜单始终保持原任务");
 
     await select("项目次任务");
     const projectCurrent = await currentId();
     await action("独立A", "archive-button");
     await item("独立A").waitFor({ state: "detached" });
-    assert((await currentId()) === projectCurrent, "非当前归档不切换当前会话");
+    assert((await currentId()) === projectCurrent, "非当前归档不切换当前任务");
     await action("独立B", "archive-button");
     await item("独立B").waitFor({ state: "detached" });
     await group().getByTestId("toggle-archived").click();
@@ -702,13 +699,13 @@ async function main() {
       "归档查看不更新时间"
     );
     assert(
-      (await window.getByTestId("session-row").count()) === 4,
+      (await window.getByTestId("task-row").count()) === 4,
       "归档与活跃统一行定位"
     );
     assert(
       (await window
         .getByTestId("standalone-header")
-        .getByTestId("project-session-count")
+        .getByTestId("project-task-count")
         .textContent()) === "0 · 归档 2",
       "计数区分活跃与归档"
     );
@@ -736,16 +733,16 @@ async function main() {
     );
     await assertSingleLineTitles();
     await select("独立B");
-    assert((await order(group()))[0] === aId, "查看其他会话不越过置顶");
+    assert((await order(group()))[0] === aId, "查看其他任务不越过置顶");
     await hoverClick(window, row(aId).getByTestId("pin-button"), "置顶按钮");
     assert((await order(group()))[0] === bId, "取消置顶恢复最近发送顺序");
     await select("独立A");
-    assert((await order(group()))[0] === bId, "查看旧会话不改变顺序");
+    assert((await order(group()))[0] === bId, "查看旧任务不改变顺序");
     await item("独立A").focus();
     await row(aId).getByTestId("pin-button").click();
     await select("独立B");
     await window.getByTestId("project-group").click();
-    assert((await item("项目任务").count()) === 0, "折叠隐藏项目会话");
+    assert((await item("项目任务").count()) === 0, "折叠隐藏项目任务");
     await action("独立B", "archive-button");
     await item("独立B").waitFor({ state: "detached" });
     await window
@@ -762,8 +759,8 @@ async function main() {
     await action("独立B", "unarchive-button", true);
     await item("独立B").waitFor();
     assert(
-      (await group().getByTestId("session-item").count()) === 2,
-      "同目录独立会话恢复不归入项目"
+      (await group().getByTestId("task-item").count()) === 2,
+      "同目录独立任务恢复不归入项目"
     );
     await window.getByTestId("composer-input").fill("/archive");
     await window.getByTestId("composer-send").click();
@@ -806,7 +803,7 @@ async function main() {
     await project().getByTestId("toggle-archived").click();
     await action("项目任务", "unarchive-button", true);
     await project()
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "项目任务" })
       .waitFor();
     assert(
@@ -827,10 +824,10 @@ async function main() {
       "发送才更新最近使用时间"
     );
     assert(
-      (
-        await project().getByTestId("session-item").first().textContent()
-      ).includes("项目任务"),
-      "发送将项目会话移到最近使用首位"
+      (await project().getByTestId("task-item").first().textContent()).includes(
+        "项目任务"
+      ),
+      "发送将项目任务移到最近使用首位"
     );
     const waitingId = await window
       .getByTestId("interaction-panel")
@@ -884,7 +881,7 @@ async function main() {
       await item("独立A").evaluate((node) => node === document.activeElement),
       "关闭归属弹窗回到非当前触发行"
     );
-    assert((await currentId()) !== aId, "键盘弹窗取消不改变当前会话");
+    assert((await currentId()) !== aId, "键盘弹窗取消不改变当前任务");
     console.log("[e2e] Shift+F10/Enter 归属弹窗初始焦点与 Escape 返回通过");
     // 公开归档 IPC 只加可控等待，仍转发真实宿主处理，不直接改库。
     await app.evaluate(({ ipcMain }) => {
@@ -906,11 +903,11 @@ async function main() {
       await app.evaluate(() => globalThis.sidebarArchiveGate.entered),
       "真实归档请求进入等待闸门"
     );
-    await sessionMenu(window, item("独立A"));
+    await taskMenu(window, item("独立A"));
     await app.evaluate(() => globalThis.sidebarArchiveGate.release());
     await item("独立A").waitFor({ state: "detached" });
     await menu().waitFor({ state: "detached", timeout: 3000 });
-    assert((await currentId()) !== aId, "异步归档和菜单失效不切换当前会话");
+    assert((await currentId()) !== aId, "异步归档和菜单失效不切换当前任务");
     if (!(await item("独立A", true).isVisible()))
       await group().getByTestId("toggle-archived").click();
     await action("独立A", "unarchive-button", true);

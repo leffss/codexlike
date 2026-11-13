@@ -81,16 +81,16 @@ async function main() {
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目A");
     await window.getByTestId("composer-send").click();
-    const a = window.getByTestId("session-item").filter({ hasText: "项目A" });
+    const a = window.getByTestId("task-item").filter({ hasText: "项目A" });
     await a.waitFor();
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "项目A前半段。" })
       .waitFor();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("独立B");
     await window.getByTestId("composer-send").click();
-    const b = window.getByTestId("session-item").filter({ hasText: "独立B" });
+    const b = window.getByTestId("task-item").filter({ hasText: "独立B" });
     await b.waitFor();
     await until(() => gates.has("独立B"), "B模型收到请求");
     gates
@@ -115,7 +115,7 @@ async function main() {
       content: "审批后的成果",
     });
     await a
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "等待用户" })
       .waitFor();
     await a.click();
@@ -123,8 +123,8 @@ async function main() {
     const requestId = await window
       .getByTestId("interaction-panel")
       .getAttribute("data-interaction-id");
-    const aId = await a.getAttribute("data-session-id");
-    const bId = await b.getAttribute("data-session-id");
+    const aId = await a.getAttribute("data-task-id");
+    const bId = await b.getAttribute("data-task-id");
     const wrong = await window.evaluate(
       async ({ id, requestId }) =>
         window.codexlike.sessions.respondInteraction(id, requestId, {
@@ -133,7 +133,7 @@ async function main() {
         }),
       { id: bId, requestId }
     );
-    assert(wrong === false, "跨会话响应不会批准A");
+    assert(wrong === false, "跨任务响应不会批准A");
     assert(
       (await window.getByTestId("tool-call-card").count()) === 1,
       "后台工具开始仍完整建卡"
@@ -156,7 +156,7 @@ async function main() {
       ],
     });
     await a
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "等待用户" })
       .waitFor();
     await a.click();
@@ -187,7 +187,7 @@ async function main() {
     await until(() => gates.has("A-final"), "问答恢复A模型");
     gates.get("独立B").finishWith("stop");
     await b
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "完成未查看" })
       .waitFor();
     await b.click();
@@ -195,7 +195,7 @@ async function main() {
       .getByTestId("message-assistant")
       .filter({ hasText: "独立B前半段。" })
       .waitFor();
-    await b.getByTestId("session-activity").waitFor({ state: "hidden" });
+    await b.getByTestId("task-activity").waitFor({ state: "hidden" });
     await a.click();
     await window
       .getByTestId("message-assistant")
@@ -203,7 +203,7 @@ async function main() {
       .waitFor();
     await window.getByTestId("composer-stop").click();
     await a
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "已中断" })
       .waitFor();
     await until(() => gates.get("A-final").res.destroyed, "显式停止关闭模型流");
@@ -212,13 +212,13 @@ async function main() {
       aId
     );
     assert(stopped.activity.outcome === "interrupted", "停止终态由宿主保存");
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("失败C");
     await window.getByTestId("composer-send").click();
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "失败C" })
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "失败" })
       .waitFor();
     await a.click();
@@ -260,7 +260,7 @@ async function main() {
       "审批与问答工具结果无丢失无重复"
     );
     console.log(
-      "[e2e] live sessions：未完成A→B→A、后台工具/审批/问答、跨会话响应隔离、未查看/失败/中断通过"
+      "[e2e] live sessions：未完成A→B→A、后台工具/审批/问答、跨任务响应隔离、未查看/失败/中断通过"
     );
   } finally {
     if (app) await closeApp(app);

@@ -1,5 +1,5 @@
 // E2E（票 05）：忙时输入区收口——双按钮并排、按钮入队生效、斜杠命令提示。
-// 路径：设置页建 Profile（本地 mock SSE）→ 建会话
+// 路径：设置页建 Profile（本地 mock SSE）→ 建任务
 // ① 回复流式进行中，输入框有内容 →「加入队列」（主操作）与「停止」并排，无发送按钮
 // ② 点「加入队列」与 Enter 等效：消息入队，队列条显示预览
 // ③ 清空输入 → 仅停止按钮（与现状一致）
@@ -147,7 +147,7 @@ async function main() {
     await input.press("Enter");
     await window
       .getByTestId("message-status")
-      .filter({ hasText: "会话状态" })
+      .filter({ hasText: "任务状态" })
       .first()
       .waitFor({ timeout: 10_000 });
     console.log("[e2e] 空闲后：单发送按钮回归，保留的命令原样执行");

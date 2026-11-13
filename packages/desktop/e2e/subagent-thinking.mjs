@@ -1,6 +1,6 @@
 // E2E 思考档位 03：子代理快照继承与折叠展示全链路。
 // 路径：双 Profile（主 mock-main / 子代理独立 mock-sub，同一本地 mock 按 model 分流）
-// → 设置页把子代理模型指向独立 Profile → 会话选 high 档委派 → 断言：
+// → 设置页把子代理模型指向独立 Profile → 任务选 high 档委派 → 断言：
 // 1) 主/子请求 body 都带 high 档字段（独立 Profile 使用 + 档位继承，无静默映射）；
 // 2) 子代理运行中把胶囊切到 off：子代理后续轮次（工具回填后的第二轮）仍是 high 快照，
 //    下一条新消息才用 off（证明切档真实生效但不影响已触发任务）；
@@ -56,7 +56,7 @@ async function main() {
         ctx.textRound(REPORT_TEXT);
         return;
       }
-      // 主会话：含报告标记的轮次（第二轮汇总 + 后续历史轮）→ 汇总文本；
+      // 主任务：含报告标记的轮次（第二轮汇总 + 后续历史轮）→ 汇总文本；
       // 委派指令轮 → spawn_subagent；新档位验证轮 → 文本
       if (body.includes("新档位验证消息")) {
         ctx.textRound("新档位消息已收到");
@@ -124,7 +124,7 @@ async function main() {
     assert(saved?.includes("已保存") === true, `子代理设置保存失败：${saved}`);
     console.log("[e2e] 子代理独立 Profile（mock-sub）已配置");
 
-    // 3) 建会话 → 选 high 档 → 委派（触发子代理）
+    // 3) 建任务 → 选 high 档 → 委派（触发子代理）
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
@@ -148,7 +148,7 @@ async function main() {
     await selectComposerOption(window, "thinking-effort-select", "off");
     console.log("[e2e] 子代理运行中已把档位切到 off（只对下一条消息生效）");
 
-    // 5) 等全部 4 个请求到达（子代理第二轮 + 主会话第二轮）
+    // 5) 等全部 4 个请求到达（子代理第二轮 + 主任务第二轮）
     for (let tick = 0; tick < 150 && seenBodies.length < 4; tick++) {
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -159,7 +159,7 @@ async function main() {
       mainFirst.model === "mock-main" &&
         mainFirst.thinking?.type === "enabled" &&
         mainFirst.reasoning_effort === "high",
-      `主会话请求应为 mock-main + high 档：${seenBodies[0]}`
+      `主任务请求应为 mock-main + high 档：${seenBodies[0]}`
     );
     assert(
       subFirst.thinking?.type === "enabled" &&
@@ -186,11 +186,11 @@ async function main() {
       seenBodies[2].includes(NOTE_CONTENT),
       "子代理第二轮应含工具结果（note.txt 内容）"
     );
-    // 主会话第二轮：报告回流
+    // 主任务第二轮：报告回流
     assert(
       seenBodies[3].includes(REPORT_TEXT) &&
         seenBodies[3].includes("mock-main"),
-      `主会话第二轮应收到子代理报告：${seenBodies[3]}`
+      `主任务第二轮应收到子代理报告：${seenBodies[3]}`
     );
     console.log(
       "[e2e] 主/子请求 body：high 档继承、快照不受运行中切档影响、思考不回传"

@@ -129,11 +129,11 @@ async function main() {
       "首次发送前不得创建分支"
     );
     assert(
-      (await window.getByTestId("session-item").count()) === 0,
-      "首次发送前无会话"
+      (await window.getByTestId("task-item").count()) === 0,
+      "首次发送前无任务"
     );
     assert(
-      (await window.getByTestId("new-session-dialog").count()) === 0,
+      (await window.getByTestId("new-task-dialog").count()) === 0,
       "不恢复模式弹窗"
     );
     await selectComposerOption(window, "approval-mode-select", "assist");
@@ -178,7 +178,7 @@ async function main() {
     const fixedMode = workspacePath.getByTestId("workspace-mode");
     assert(
       (await fixedMode.textContent()).includes("Worktree"),
-      "正式会话模式标签位于顶部路径行内"
+      "正式任务模式标签位于顶部路径行内"
     );
     const modeTitle = (await fixedMode.getAttribute("title")) ?? "";
     assert(
@@ -192,13 +192,13 @@ async function main() {
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
-      "无风险正式会话不渲染底部提示容器"
+      "无风险正式任务不渲染底部提示容器"
     );
     await window.screenshot({
       path: join(screenshots, "existing-session.png"),
     });
 
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").waitFor();
     assert(
       (await window.getByTestId("draft-workspace-mode").count()) === 0,
@@ -209,8 +209,8 @@ async function main() {
       "独立草稿不显示已固定模式标签"
     );
 
-    // 只让真实 IPC 检查失败一次；同一正式会话再次发送，靠事件订阅刷新恢复。
-    // 不切换 target、不重挂组件、不新增会话，避免掩盖 effect 订阅回归。
+    // 只让真实 IPC 检查失败一次；同一正式任务再次发送，靠事件订阅刷新恢复。
+    // 不切换 target、不重挂组件、不新增任务，避免掩盖 effect 订阅回归。
     await app.evaluate(({ ipcMain }) => {
       const channel = "tasks:workspace-sharing";
       const original = ipcMain._invokeHandlers.get(channel);
@@ -226,7 +226,7 @@ async function main() {
     });
     try {
       await window
-        .getByTestId("session-item")
+        .getByTestId("task-item")
         .filter({ hasText: "隔离写入" })
         .click();
       const sharingError = window
@@ -255,8 +255,8 @@ async function main() {
         .getByTestId("workspace-sharing-notice")
         .waitFor({ state: "detached" });
       assert(
-        (await window.getByTestId("session-item").count()) === 1,
-        "真实发送触发刷新清除检查错误，且不额外创建会话"
+        (await window.getByTestId("task-item").count()) === 1,
+        "真实发送触发刷新清除检查错误，且不额外创建任务"
       );
     } finally {
       await app.evaluate(({ ipcMain }) => {
@@ -268,7 +268,7 @@ async function main() {
     }
 
     // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("共享等待");
     await window.getByTestId("composer-send").click();
@@ -280,7 +280,7 @@ async function main() {
     await sharingWarning.waitFor();
     assert(
       (await sharingWarning.textContent()).includes("共享文件"),
-      "同目录独立会话不遗漏，风险显示在底部提示容器内"
+      "同目录独立任务不遗漏，风险显示在底部提示容器内"
     );
     assert(
       (await workspaceInfo.getByTestId("workspace-sharing-notice").count()) ===
@@ -305,11 +305,11 @@ async function main() {
       .filter({ hasText: "任务已完成" })
       .waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 3,
+      (await window.getByTestId("task-item").count()) === 3,
       "共享提示不锁死项目并行"
     );
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "共享等待" })
       .click();
     await window.getByTestId("composer-stop").click();
@@ -319,7 +319,7 @@ async function main() {
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir: plain }));
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "隔离写入" })
       .click();
     assert(
@@ -331,7 +331,7 @@ async function main() {
     await window.getByTestId("add-project").click();
     await projectAction(
       window,
-      "project-new-session",
+      "project-new-task",
       window.getByTestId("project-header").filter({ hasText: "plain" })
     );
     await window.getByTestId("draft-workspace-mode").selectOption("worktree");
@@ -350,14 +350,14 @@ async function main() {
       "失败保留草稿"
     );
     assert(
-      (await window.getByTestId("session-item").count()) === 3,
-      "失败无空会话"
+      (await window.getByTestId("task-item").count()) === 3,
+      "失败无空任务"
     );
     await window.getByTestId("draft-workspace-mode").selectOption("local");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 4,
+      (await window.getByTestId("task-item").count()) === 4,
       "非Git本地模式可重试"
     );
     assert(
