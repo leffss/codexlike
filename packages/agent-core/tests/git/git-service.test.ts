@@ -159,7 +159,7 @@ describe("git 服务：diffFile（单文件新旧两侧内容）", () => {
   });
 });
 
-describe("git 服务：createTaskBranch（codexlike/<会话名> 分支）", () => {
+describe("git 服务：createTaskBranch（codexlike/<任务名> 分支）", () => {
   it("创建并切换到新分支，created=true", async () => {
     const repo = makeRepo();
     const service = createGitService(repo);
@@ -214,14 +214,14 @@ describe("git 服务：commitAll（一键提交全部变更）", () => {
     expect(result.reason).toContain("没有可提交的变更");
   });
 
-  it("提交落在当前分支（如 codexlike/* 会话分支）", async () => {
+  it("提交落在当前分支（如 codexlike/* 任务分支）", async () => {
     const repo = makeRepo();
     const service = createGitService(repo);
-    await service.createTaskBranch("codexlike/会话一");
+    await service.createTaskBranch("codexlike/任务一");
     writeFileSync(join(repo, "work.txt"), "工作成果");
-    await service.commitAll("会话分支上的提交");
+    await service.commitAll("任务分支上的提交");
     expect(git(repo, "branch", "--contains", "HEAD").trim()).toBe(
-      "* codexlike/会话一"
+      "* codexlike/任务一"
     );
   });
 });

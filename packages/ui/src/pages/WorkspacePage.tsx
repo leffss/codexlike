@@ -66,7 +66,7 @@ import {
   planSlashCommand,
 } from "../lib/slash-command-actions";
 
-/** 取回编辑会话（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
+/** 取回编辑任务（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
 interface QueueEditTask {
   taskId: string;
   itemId: string;
@@ -75,8 +75,8 @@ interface QueueEditTask {
 }
 
 /**
- * 主界面三栏装配：会话列表 / 消息流 / 输入框。
- * 会话与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
+ * 主界面三栏装配：任务列表 / 消息流 / 输入框。
+ * 任务与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
  * 斜杠命令与 @引用 在发送前经解析层分发（工单 07）。
  */
 export function WorkspacePage(props: {
@@ -120,12 +120,12 @@ export function WorkspacePage(props: {
   const [queueState, setQueueState] =
     useState<QueueSnapshot>(EMPTY_QUEUE_STATE);
   /**
-   * 取回编辑会话（票 03）：点击排队消息把内容载入输入框，保存原地更新。
+   * 取回编辑任务（票 03）：点击排队消息把内容载入输入框，保存原地更新。
    * originalText 为载入时的原文（主进程 CAS 校验）；savedDraft 为进入编辑前
-   * 的输入框草稿，取消编辑或切走会话时还原，不丢用户文字。
+   * 的输入框草稿，取消编辑或切走任务时还原，不丢用户文字。
    */
   const [queueEdit, setQueueEdit] = useState<QueueEditTask | null>(null);
-  /** 编辑会话的即时读数：事件回调里不读过期的渲染帧状态 */
+  /** 编辑任务的即时读数：事件回调里不读过期的渲染帧状态 */
   const queueEditRef = useRef<QueueEditTask | null>(null);
   queueEditRef.current = queueEdit;
   const [streaming, setStreaming] = useState(false);
@@ -184,7 +184,7 @@ export function WorkspacePage(props: {
   );
 
   currentIdRef.current = currentId;
-  /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；tasks 列表随事件刷新） */
+  /** 当前任务记录（审批模式选择器 / 改动面板 / 顶栏共用；tasks 列表随事件刷新） */
   const current = tasks.find((task) => task.id === currentId) ?? null;
   const pending = currentId === null ? [] : workspaceState.pending(currentId);
   const interaction = pending[0];
@@ -192,7 +192,7 @@ export function WorkspacePage(props: {
     currentId === null
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
-  // 新建、加载与已有会话始终使用同一档位；滚动条宽度由消息流实际测量。
+  // 新建、加载与已有任务始终使用同一档位；滚动条宽度由消息流实际测量。
   const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
   const contentPadding = {
@@ -208,7 +208,7 @@ export function WorkspacePage(props: {
   }, []);
 
   /**
-   * 工作台目标上报启动现场（票03）：切换会话 / 进出新建草稿时即时落盘
+   * 工作台目标上报启动现场（票03）：切换任务 / 进出新建草稿时即时落盘
    * （低频事件不防抖），重开回到退出前正在查看的目标；失败不阻塞界面。
    */
   const reportWorkbenchTarget = useCallback((target: WorkbenchTarget) => {
@@ -225,7 +225,7 @@ export function WorkspacePage(props: {
     setRevokeErrors((errors) => ({ ...errors, [id]: null }));
     try {
       const record = await window.codexlike.tasks.revokeAutoApprove(id);
-      // 落盘成功才更新，按原会话标识归并，切换查看不会改错会话。
+      // 落盘成功才更新，按原任务标识归并，切换查看不会改错任务。
       listRequestRef.current += 1;
       setTasks((list) =>
         list.map((task) => (task.id === id ? { ...task, ...record } : task))
@@ -246,7 +246,7 @@ export function WorkspacePage(props: {
     }
   }
 
-  /** 最新请求胜出；同时校验会话与请求代数，防止 A→B→A 的旧结果串线。 */
+  /** 最新请求胜出；同时校验任务与请求代数，防止 A→B→A 的旧结果串线。 */
   const refreshResources = useCallback(async (taskId: string) => {
     const request = ++resourceRequestRef.current;
     const isCurrent = () =>
@@ -257,7 +257,7 @@ export function WorkspacePage(props: {
       const view = await window.codexlike.tasks.resources(taskId);
       if (!isCurrent()) return;
       setResources(view);
-      if (view === null) setResourcesError("会话资源不可用");
+      if (view === null) setResourcesError("任务资源不可用");
     } catch (error) {
       if (!isCurrent()) return;
       setResources(null);
@@ -311,7 +311,7 @@ export function WorkspacePage(props: {
       reportWorkbenchTarget({ kind: "task", taskId: id });
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
-      // 编辑中的排队消息随会话归属：切走先还原该会话的输入框草稿，不丢文字（票 03）
+      // 编辑中的排队消息随任务归属：切走先还原该任务的输入框草稿，不丢文字（票 03）
       const editing = queueEditRef.current;
       if (editing !== null && editing.taskId !== id)
         workspaceState.setComposer(editing.taskId, editing.savedDraft);
@@ -345,7 +345,7 @@ export function WorkspacePage(props: {
           workspaceState.loadTask(id),
         ]);
         if (!isCurrent()) return;
-        if (!view) throw new Error("会话不存在或已损坏");
+        if (!view) throw new Error("任务不存在或已损坏");
         const live = hydrateLiveTask(view, buffer.events);
         liveRef.current = live;
         setTasks((list) =>
@@ -374,7 +374,7 @@ export function WorkspacePage(props: {
         setMessages(
           appendLocalSegment([], {
             kind: "error",
-            content: `读取会话失败：${error instanceof Error ? error.message : String(error)}`,
+            content: `读取任务失败：${error instanceof Error ? error.message : String(error)}`,
           })
         );
       } finally {
@@ -385,7 +385,7 @@ export function WorkspacePage(props: {
       }
       if (!isCurrent()) return;
       void refreshContextWarning(id);
-      // @引用 菜单候选：随会话（工作区）切换重新枚举
+      // @引用 菜单候选：随任务（工作区）切换重新枚举
       try {
         const files = await window.codexlike.tasks.workspaceFiles(id);
         if (isCurrent()) setWorkspaceFiles(files);
@@ -414,14 +414,14 @@ export function WorkspacePage(props: {
       if (!active) return;
       setTasks(list);
       setProfiles(profileList);
-      // 冷启动恢复（票03）：第一优先级取启动现场的工作台目标——记住的会话
+      // 冷启动恢复（票03）：第一优先级取启动现场的工作台目标——记住的任务
       // （归档照常恢复）或新建草稿入口（连同项目关联，草稿文本由 workbench_state
       // 既有机制恢复）。项目已删除的草稿目标视为失效，走回退链。
-      // 真冷启动守卫（对照下方回退链守卫的语义）：只在无已打开会话、无草稿时
-      // 恢复并上报。currentIdRef 在重挂后恒为 null（组件级），故「无已打开会话」
+      // 真冷启动守卫（对照下方回退链守卫的语义）：只在无已打开任务、无草稿时
+      // 恢复并上报。currentIdRef 在重挂后恒为 null（组件级），故「无已打开任务」
       // 由 App 级 workspaceState.activeTaskId 承载——切设置页卸载本页后重挂
-      // 时它仍是用户最后查看的会话，不得以挂载时刻固化的启动目标抢占，否则
-      // 拉回旧会话并把它重新写回启动现场。
+      // 时它仍是用户最后查看的任务，不得以挂载时刻固化的启动目标抢占，否则
+      // 拉回旧任务并把它重新写回启动现场。
       const target = initialTargetRef.current;
       const coldStart =
         workspaceState.activeTaskId === null &&
@@ -442,7 +442,7 @@ export function WorkspacePage(props: {
           return;
         }
       }
-      // 回退链（现状不变）：内存活动会话 → 排序最前的未归档会话；都没有则停在新建草稿入口
+      // 回退链（现状不变）：内存活动任务 → 排序最前的未归档任务；都没有则停在新建草稿入口
       const latest =
         list.find((task) => task.id === workspaceState.activeTaskId) ??
         list.find((task) => task.archivedAt === null);
@@ -460,7 +460,7 @@ export function WorkspacePage(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：initialTarget/activeTaskId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
   }, [openTask]);
 
-  // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
+  // 订阅任务事件流：只归并当前打开任务的消息，其余任务仅刷新侧栏状态
   useEffect(() => {
     return window.codexlike.onTaskEvent((envelope) => {
       const { taskId, event } = envelope;
@@ -670,7 +670,7 @@ export function WorkspacePage(props: {
       if (workspaceState.composer(currentId) === composerSnapshot)
         workspaceState.setComposer(currentId, "");
     } catch (error) {
-      // 启动失败（含显式技能解析/加载错误）：只在发起会话仍打开时提示。
+      // 启动失败（含显式技能解析/加载错误）：只在发起任务仍打开时提示。
       if (currentIdRef.current !== currentId) return;
       setStreaming(false);
       void refreshResources(currentId);
@@ -683,7 +683,7 @@ export function WorkspacePage(props: {
     }
   }
 
-  /** 停止按钮：打断当前会话运行中的本轮（流式输出中断 / 工具子进程终止）。
+  /** 停止按钮：打断当前任务运行中的本轮（流式输出中断 / 工具子进程终止）。
    *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。
    *  排队消息存在时队列进入暂停（票 02），队列条显示恢复/清空操作。 */
   async function stop() {
@@ -700,7 +700,7 @@ export function WorkspacePage(props: {
   }
 
   /**
-   * 队列操作共享包装（review 重构）：守卫会话在场 → 调用 IPC → 整块应用
+   * 队列操作共享包装（review 重构）：守卫任务在场 → 调用 IPC → 整块应用
    * 返回的队列快照 → 失败以中文提示。恢复/清空/删除/重排共用；
    * 后续队列变更经事件流接续，操作结果快照先行落到本地状态。
    */
@@ -798,7 +798,7 @@ export function WorkspacePage(props: {
       if (workspaceState.composer(taskId) === composerSnapshot)
         workspaceState.setComposer(taskId, "");
     } catch (error) {
-      // 保存被拒：编辑会话结束，文本留在输入框，用户可重新取回或直接发送
+      // 保存被拒：编辑任务结束，文本留在输入框，用户可重新取回或直接发送
       setQueueEdit(null);
       if (currentIdRef.current === taskId)
         pushLocalStatus(
@@ -807,7 +807,7 @@ export function WorkspacePage(props: {
     }
   }
 
-  // 编辑目标被消费/移除/他窗口操作时结束编辑会话：文本保留在输入框（票 03）
+  // 编辑目标被消费/移除/他窗口操作时结束编辑任务：文本保留在输入框（票 03）
   useEffect(() => {
     if (queueEdit === null || loading) return;
     if (currentId === null || queueEdit.taskId !== currentId) return;
@@ -840,7 +840,7 @@ export function WorkspacePage(props: {
         currentIdRef.current === id &&
         taskRequestRef.current === generation
       )
-        pushLocalStatus(`会话已重命名为「${title}」`);
+        pushLocalStatus(`任务已重命名为「${title}」`);
     } catch (error) {
       pushLocalStatus(
         `重命名失败：${error instanceof Error ? error.message : String(error)}`
@@ -848,7 +848,7 @@ export function WorkspacePage(props: {
     }
   }
 
-  /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的会话。 */
+  /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的任务。 */
   async function archiveTask(id: string, archived: boolean) {
     const generation = taskRequestRef.current;
     try {
@@ -924,7 +924,7 @@ export function WorkspacePage(props: {
     );
     switch (action.type) {
       case "needs-task":
-        pushLocalStatus("该命令需要先选择一个会话");
+        pushLocalStatus("该命令需要先选择一个任务");
         return;
       case "new-task": {
         // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
@@ -1010,7 +1010,7 @@ export function WorkspacePage(props: {
           )
             return;
           if (status === null) {
-            pushLocalStatus("会话不存在或已损坏");
+            pushLocalStatus("任务不存在或已损坏");
           } else {
             pushLocalStatus(formatTaskStatus(status));
           }
@@ -1108,13 +1108,13 @@ export function WorkspacePage(props: {
 
   const composerHint =
     current?.archivedAt != null
-      ? "已归档 · 历史只读，恢复会话后可继续发送"
+      ? "已归档 · 历史只读，恢复任务后可继续发送"
       : profiles.length === 0
         ? "尚未配置模型，请先前往设置页添加模型"
         : compacting
           ? "正在压缩历史，请稍候…"
           : currentId === null && !draft
-            ? "新建或选择一个会话后开始对话"
+            ? "新建或选择一个任务后开始对话"
             : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
   return (
@@ -1195,7 +1195,7 @@ export function WorkspacePage(props: {
             );
         }}
       />
-      {/* 会话容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
+      {/* 任务容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
           断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
           （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
           不触发断点切换导致内容列跳宽 */}
@@ -1214,19 +1214,19 @@ export function WorkspacePage(props: {
           >
             {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
             <div
-              data-testid="session-header-content"
+              data-testid="task-header-content"
               className={`${contentWidthClass} flex items-center gap-2`}
             >
               <span
-                data-testid="session-title"
+                data-testid="task-title"
                 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
               >
                 {current?.title ??
                   (draft
                     ? draft.projectId === null
-                      ? "新建独立会话"
-                      : `新建项目会话 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
-                    : "未选择会话")}
+                      ? "新建独立任务"
+                      : `新建项目任务 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
+                    : "未选择任务")}
               </span>
               <div className="shrink-0 whitespace-nowrap">
                 <TaskSearch

@@ -5,12 +5,7 @@
 
 /** 内置命令名（spec：/new /compact /rename /archive /model /status） */
 export type SlashCommandName =
-  | 'new'
-  | 'compact'
-  | 'rename'
-  | 'archive'
-  | 'model'
-  | 'status';
+  "new" | "compact" | "rename" | "archive" | "model" | "status";
 
 export interface SlashCommandDef {
   readonly name: SlashCommandName;
@@ -22,33 +17,33 @@ export interface SlashCommandDef {
 
 export const SLASH_COMMANDS: readonly SlashCommandDef[] = [
   {
-    name: 'new',
-    description: '在当前工作区新建会话',
+    name: "new",
+    description: "在当前工作区新建任务",
     argumentHint: null,
   },
   {
-    name: 'compact',
-    description: '压缩历史为摘要（保留最近 3 轮）',
+    name: "compact",
+    description: "压缩历史为摘要（保留最近 3 轮）",
     argumentHint: null,
   },
   {
-    name: 'rename',
-    description: '重命名当前会话',
-    argumentHint: '新名称',
+    name: "rename",
+    description: "重命名当前任务",
+    argumentHint: "新名称",
   },
   {
-    name: 'archive',
-    description: '归档当前会话（不在侧栏显示）',
+    name: "archive",
+    description: "归档当前任务（不在侧栏显示）",
     argumentHint: null,
   },
   {
-    name: 'model',
-    description: '切换模型（Provider Profile）',
-    argumentHint: '名称关键词',
+    name: "model",
+    description: "切换模型（Provider Profile）",
+    argumentHint: "名称关键词",
   },
   {
-    name: 'status',
-    description: '查看上下文用量与会话状态',
+    name: "status",
+    description: "查看上下文用量与任务状态",
     argumentHint: null,
   },
 ];

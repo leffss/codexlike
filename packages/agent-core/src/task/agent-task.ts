@@ -227,10 +227,10 @@ function commandOfToolInput(input: unknown): string | undefined {
 
 /** 压缩请求的系统指令（一次性总结任务，不注入 AGENTS.md 的 coding 系统提示） */
 const COMPACT_SYSTEM_PROMPT = [
-  "你是对话历史压缩器。请把提供的会话历史压缩为一份摘要，",
+  "你是对话历史压缩器。请把提供的任务历史压缩为一份摘要，",
   "供后续对话作为上下文继续任务。要求：",
   "- 保留任务目标、关键决策与结论、涉及的文件路径与命令、尚未完成的事项；",
-  "- 保留用户问答中的答案、自定义文本、跳过状态与关键决策，区分主会话与子代理来源；",
+  "- 保留用户问答中的答案、自定义文本、跳过状态与关键决策，区分主任务与子代理来源；",
   "- 丢弃寒暄、重复与无关内容；",
   "- 直接输出摘要正文，不要任何前后缀说明。",
 ].join("\n");
@@ -241,7 +241,7 @@ function serializeContextForCompaction(messages: ModelMessage[]): string {
     const role = message.role === "assistant" ? "assistant" : "user";
     return `[${role}] ${message.content}`;
   });
-  return `以下是一次 coding agent 会话的既有对话历史（按时间顺序）：\n\n${lines.join("\n\n")}`;
+  return `以下是一次 coding agent 任务的既有对话历史（按时间顺序）：\n\n${lines.join("\n\n")}`;
 }
 
 /**
@@ -699,7 +699,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                     isError = true;
                   } else if (decision === "reject") {
                     output =
-                      "工具调用被用户拒绝：用户未批准在当前会话执行该命令。可以改用只读工具继续，或向用户说明计划并询问如何调整。";
+                      "工具调用被用户拒绝：用户未批准在当前任务执行该命令。可以改用只读工具继续，或向用户说明计划并询问如何调整。";
                     isError = true;
                   } else {
                     // 授权已由交互控制器提交；执行仍沿用本轮冻结的文件访问模式。
@@ -867,7 +867,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
 
     async compact({ profile, signal }) {
       if (busy) {
-        throw new Error("会话正在回复或压缩中，请等待完成后再操作");
+        throw new Error("任务正在回复或压缩中，请等待完成后再操作");
       }
       const keptStart = keptRoundsStart(context);
       if (keptStart === 0) {

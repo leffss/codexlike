@@ -59,7 +59,7 @@ afterEach(() => {
   }
 });
 
-describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
+describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
   it("项目置顶跨重启保存且不改变创建顺序，旧项目幂等补列默认关闭", () => {
     const path = tempDbPath();
     const raw = new DatabaseSync(path);
@@ -99,7 +99,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     );
     reopened.close();
   });
-  it("插入的会话与消息可原样读回（内存库）", () => {
+  it("插入的任务与消息可原样读回（内存库）", () => {
     const store = createSqliteTaskStore(":memory:");
 
     store.insertTask(taskRecord());
@@ -171,12 +171,12 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     expect(store.listTasks()[1]?.status).toBe("streaming");
   });
 
-  it("未写入过的会话消息查询返回空数组", () => {
+  it("未写入过的任务消息查询返回空数组", () => {
     const store = createSqliteTaskStore(":memory:");
     expect(store.listMessages("nope")).toEqual([]);
   });
 
-  it("审批模式随会话落库：insert 读回一致，updateTask 补丁生效", () => {
+  it("审批模式随任务落库：insert 读回一致，updateTask 补丁生效", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(taskRecord({ approvalMode: "ask" }));
     expect(store.listTasks()[0]?.approvalMode).toBe("ask");
@@ -228,7 +228,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     store.close();
   });
 
-  it("运行模式（local/worktree）随会话落库：insert 读回一致，updateTask 补丁生效", () => {
+  it("运行模式（local/worktree）随任务落库：insert 读回一致，updateTask 补丁生效", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(taskRecord({ workspaceMode: "worktree" }));
     expect(store.listTasks()[0]?.workspaceMode).toBe("worktree");
@@ -240,7 +240,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     expect(store.listTasks()[0]?.workspaceMode).toBe("local");
   });
 
-  it("worktree 会话的原始仓库路径（workspaceOriginPath）随会话落库读回；local 会话为 null（ADR 0005）", () => {
+  it("worktree 任务的原始仓库路径（workspaceOriginPath）随任务落库读回；local 任务为 null（ADR 0005）", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(
       taskRecord({
@@ -279,7 +279,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO tasks VALUES ('legacy-wt', '旧worktree会话', 'C:\\home\\.codexlike\\worktrees\\legacy-wt', NULL, NULL, 'idle', 'assist', 'worktree', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-wt', '旧worktree任务', 'C:\\home\\.codexlike\\worktrees\\legacy-wt', NULL, NULL, 'idle', 'assist', 'worktree', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -301,7 +301,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     store.close();
   });
 
-  it("旧库迁移：无 workspace_mode 列的旧会话恢复为 local（本目录直跑）", () => {
+  it("旧库迁移：无 workspace_mode 列的旧任务恢复为 local（本目录直跑）", () => {
     const dbPath = tempDbPath();
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
@@ -315,7 +315,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO tasks VALUES ('legacy-wt', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-wt', '旧任务', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -324,7 +324,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     store.close();
   });
 
-  it("「总是允许」记忆入库：幂等（同词不重复）、按会话隔离、重开库完整恢复", () => {
+  it("「总是允许」记忆入库：幂等（同词不重复）、按任务隔离、重开库完整恢复", () => {
     const dbPath = tempDbPath();
     const first = createSqliteTaskStore(dbPath);
     first.insertTask(taskRecord({ id: "session-a" }));
@@ -367,7 +367,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO tasks VALUES ('legacy-1', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-1', '旧任务', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 

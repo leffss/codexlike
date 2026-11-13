@@ -70,12 +70,12 @@ describe("resolveComposerSubmission（发送时解析）", () => {
   });
 
   it("命令与参数之间允许任意空白，参数为剩余文本（trim 后）", () => {
-    const result = resolveComposerSubmission("/rename   新会话名称  ");
+    const result = resolveComposerSubmission("/rename   新任务名称  ");
     expect(result).toEqual({
       kind: "slash-command",
       name: "rename",
-      argument: "新会话名称",
-      raw: "/rename   新会话名称",
+      argument: "新任务名称",
+      raw: "/rename   新任务名称",
     });
   });
 

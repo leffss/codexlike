@@ -168,7 +168,7 @@ describe("web_search 工具", () => {
     return { source, searches } as const;
   }
 
-  it("未配置搜索源：返回中文错误（不抛出、会话不崩）", async () => {
+  it("未配置搜索源：返回中文错误（不抛出、任务不崩）", async () => {
     const tool = createWebSearchTool({ searchSource: () => null });
     const result = await tool.execute({ query: "anything" }, context);
     expect(result.isError).toBe(true);

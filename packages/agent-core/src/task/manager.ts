@@ -302,7 +302,7 @@ export function createTaskManager(
     },
     removeUnstarted(sessionId) {
       if (persistence.listMessages(sessionId).length)
-        throw new Error("不能回滚已有历史的会话");
+        throw new Error("不能回滚已有历史的任务");
       persistence.removeUnstartedTask(sessionId);
       cache.delete(sessionId);
     },
@@ -416,7 +416,7 @@ export function createTaskManager(
     rename(sessionId, title) {
       const trimmed = title.trim();
       if (trimmed === "") {
-        throw new Error("会话名称不能为空");
+        throw new Error("任务名称不能为空");
       }
       return patchRecord(sessionId, { title: trimmed, updatedAt: now() });
     },
@@ -446,7 +446,7 @@ export function createTaskManager(
         return { ...cached.record };
       }
       const next = patchRecord(sessionId, { autoApprove: false });
-      if (!next) throw new Error(`会话不存在：${sessionId}`);
+      if (!next) throw new Error(`任务不存在：${sessionId}`);
       return next;
     },
 

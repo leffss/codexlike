@@ -172,8 +172,8 @@ async function collect(
   return events;
 }
 
-describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
-  it("local 与 worktree 会话各自写文件互不干扰，主仓库不含 worktree 的改动", async () => {
+describe("托管 Worktree 集成（同一仓库双任务并行）", () => {
+  it("local 与 worktree 任务各自写文件互不干扰，主仓库不含 worktree 的改动", async () => {
     const repo = makeRepo();
     const home = makeDir("codexlike-par-home-");
     const worktreeService = createWorktreeService({
@@ -231,7 +231,7 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
     expect(status).toBe("?? feature.txt");
   });
 
-  it("worktree 会话重启恢复后仍指向原 worktree，续跑改动仍发生在副本内", async () => {
+  it("worktree 任务重启恢复后仍指向原 worktree，续跑改动仍发生在副本内", async () => {
     const repo = makeRepo();
     const home = makeDir("codexlike-par-home-");
     const worktreeService = createWorktreeService({

@@ -59,7 +59,7 @@ afterEach(() => {
   }
 });
 
-describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
+describe("TaskManager /rename 与 /archive（任务管理命令）", () => {
   it("create 默认未归档；rename 更新标题并落库", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({
@@ -123,7 +123,7 @@ describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
     )`);
     legacy
       .prepare(
-        "INSERT INTO tasks VALUES ('s1', '旧会话', 'C:\\work\\demo', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')"
+        "INSERT INTO tasks VALUES ('s1', '旧任务', 'C:\\work\\demo', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')"
       )
       .run();
     legacy.close();
@@ -143,7 +143,7 @@ describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
 });
 
 describe("TaskManager 系统提示注入（systemPromptFor）", () => {
-  it("create 与 get 恢复都会话注入 systemPromptFor 的系统提示", async () => {
+  it("create 与 get 恢复都任务注入 systemPromptFor 的系统提示", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codexlike-sys-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "codexlike.db");
@@ -282,7 +282,7 @@ describe("TaskManager compact 支持（工单 08）", () => {
     persistence.close();
   });
 
-  it("压缩后 manager.get 恢复的会话继续对话，上下文含摘要", async () => {
+  it("压缩后 manager.get 恢复的任务继续对话，上下文含摘要", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const model = dualModel();
     const manager = createTaskManager({

@@ -214,7 +214,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("ask 请求批准：拒绝写入 → 拒绝结果回填模型，文件不落盘，会话正常继续", async () => {
+  it("ask 请求批准：拒绝写入 → 拒绝结果回填模型，文件不落盘，任务正常继续", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {
@@ -374,7 +374,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("assist 帮我批准：拒绝危险命令 → 拒绝结果回填模型，会话正常继续到最终回复", async () => {
+  it("assist 帮我批准：拒绝危险命令 → 拒绝结果回填模型，任务正常继续到最终回复", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {
@@ -505,7 +505,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(readFileSync(outsideFile, "utf8")).toBe("越界");
   });
 
-  it("「本会话总是允许」不再写记忆（ADR 0004）：ask 档同首词命令每次都询问", async () => {
+  it("「本任务总是允许」不再写记忆（ADR 0004）：ask 档同首词命令每次都询问", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {
@@ -699,7 +699,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(persistence.listToolCalls("session-1")).toHaveLength(1);
   });
 
-  it("等待审批期间会话被中断（signal abort）：视为拒绝，生成器不卡死", async () => {
+  it("等待审批期间任务被中断（signal abort）：视为拒绝，生成器不卡死", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {

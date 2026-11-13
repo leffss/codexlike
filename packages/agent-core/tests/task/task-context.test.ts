@@ -76,7 +76,7 @@ function fakeClock() {
 }
 
 describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
-  it("缓存会话每条消息刷新资源规范，并与旧静态 systemPrompt 兼容", async () => {
+  it("缓存任务每条消息刷新资源规范，并与旧静态 systemPrompt 兼容", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const model = scriptedModel(["收到"]);
     let revision = "第一版规范";
@@ -143,13 +143,13 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     persistence.close();
   });
 
-  it("资源状态只在运行时 active，结束保留无正文摘要；查询未恢复会话不实例化", async () => {
+  it("资源状态只在运行时 active，结束保留无正文摘要；查询未恢复任务不实例化", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     persistence.insertTask(taskRecord());
     const uninstantiated = createTaskManager({
       persistence,
       systemPromptFor: () => {
-        throw new Error("不应实例化会话");
+        throw new Error("不应实例化任务");
       },
       resourcesFor: () => {
         throw new Error("不应读取资源");
@@ -377,7 +377,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     ]);
   });
 
-  it("多轮会话中 @引用 只附加在所属那条消息上", async () => {
+  it("多轮任务中 @引用 只附加在所属那条消息上", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
     persistence.insertTask(record);

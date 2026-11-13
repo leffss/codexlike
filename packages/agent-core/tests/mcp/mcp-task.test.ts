@@ -449,7 +449,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     expect(events.some((e) => e.type === "interaction-request")).toBe(true);
   });
 
-  it("server 崩溃：错误作为工具结果返回模型，会话存活继续到最终回复", async () => {
+  it("server 崩溃：错误作为工具结果返回模型，任务存活继续到最终回复", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-"));
     const manager = await connectedFakeManager();
     const model = scriptedModel([
@@ -457,7 +457,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
         kind: "tool",
         calls: [{ toolCallId: "c1", toolName: "mcp_fake_crash", input: {} }],
       },
-      { kind: "text", deltas: ["server 崩了，但会话还在"] },
+      { kind: "text", deltas: ["server 崩了，但任务还在"] },
     ]);
     const { session } = makeTask(
       model,
@@ -481,7 +481,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("调用超时：超时错误回填模型，会话继续（不无限等待）", async () => {
+  it("调用超时：超时错误回填模型，任务继续（不无限等待）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-"));
     const manager = createMcpManager({
       servers: () => [
@@ -509,7 +509,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
           },
         ],
       },
-      { kind: "text", deltas: ["超时了但会话没死"] },
+      { kind: "text", deltas: ["超时了但任务没死"] },
     ]);
     const { session } = makeTask(
       model,
@@ -530,7 +530,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("tools 支持工厂函数逐次解析：设置页启停 MCP 工具对后续会话消息即时生效", async () => {
+  it("tools 支持工厂函数逐次解析：设置页启停 MCP 工具对后续任务消息即时生效", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-"));
     const manager = await connectedFakeManager();
     const disabled = new Set<string>();

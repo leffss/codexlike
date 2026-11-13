@@ -307,7 +307,7 @@ describe("worktree 创建", () => {
     expect(existsSync(info.path)).toBe(true);
   });
 
-  it("目标目录已存在时中文报错（会话 id 冲突防御）", async () => {
+  it("目标目录已存在时中文报错（任务 id 冲突防御）", async () => {
     const repo = makeRepo();
     const home = makeWorktreesDir();
     mkdirSync(join(home, "worktrees", "session-dup"), { recursive: true });
