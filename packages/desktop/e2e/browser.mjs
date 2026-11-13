@@ -119,16 +119,16 @@ async function main() {
       .waitFor({ timeout: 60_000 });
     console.log("[e2e] 截图卡片内嵌图片渲染（写盘 → toolImage IPC → img）");
 
-    // 3) 截图真实落盘到会话数据目录（约定路径）
-    const sessionsDir = join(homeDir, "sessions");
+    // 3) 截图真实落盘到任务数据目录（约定路径，票 03 换 tasks 系）
+    const tasksDir = join(homeDir, "tasks");
     const shotFile = await (async () => {
       const fs = await import("node:fs");
-      for (const entry of fs.readdirSync(sessionsDir, {
+      for (const entry of fs.readdirSync(tasksDir, {
         withFileTypes: true,
       })) {
         if (!entry.isDirectory()) continue;
         const candidate = join(
-          sessionsDir,
+          tasksDir,
           entry.name,
           "screenshots",
           "call-e2e-shot.png"
@@ -139,7 +139,7 @@ async function main() {
     })();
     assert(
       shotFile !== null,
-      `截图未落盘到 ${sessionsDir}/*/screenshots/call-e2e-shot.png`
+      `截图未落盘到 ${tasksDir}/*/screenshots/call-e2e-shot.png`
     );
     console.log(`[e2e] 截图已落盘：${shotFile}`);
 

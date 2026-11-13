@@ -81,7 +81,7 @@ describe("buildTaskStatus（/status 数据组装）", () => {
       sources: ["C:\\Users\\u\\.codexlike\\AGENTS.md"],
       truncated: false,
     });
-    // 审批模式：/status 显示会话真实档位
+    // 审批模式：/status 显示任务真实档位
     expect(status.approvalMode).toBe("assist");
   });
 
@@ -170,7 +170,7 @@ describe("buildTaskStatus（/status 数据组装）", () => {
     expect(after.messageCount).toBe(2);
   });
 
-  it("审批模式随会话记录透传（ask / full-access）", () => {
+  it("审批模式随任务记录透传（ask / full-access）", () => {
     for (const mode of ["ask", "full-access"] as const) {
       const status = buildTaskStatus({
         record: record({ approvalMode: mode }),
@@ -183,7 +183,7 @@ describe("buildTaskStatus（/status 数据组装）", () => {
     }
   });
 
-  it("无 AGENTS.md、未发过消息的最小会话", () => {
+  it("无 AGENTS.md、未发过消息的最小任务", () => {
     const status = buildTaskStatus({
       record: record({ model: null, providerProfileId: null }),
       messages: [],
@@ -277,7 +277,7 @@ describe("buildTaskStatus 已压缩标记（工单 08）", () => {
     });
   });
 
-  it("从未压缩的会话 compacted 为 null", () => {
+  it("从未压缩的任务 compacted 为 null", () => {
     const status = buildTaskStatus({
       record: record(),
       messages,

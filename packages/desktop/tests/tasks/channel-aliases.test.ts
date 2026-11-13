@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 /**
- * 会话→任务改名（票 03）的 expand 兼容：每个 tasks:* channel 与对应
+ * 任务→任务改名（票 03）的 expand 兼容：每个 tasks:* channel 与对应
  * sessions:* channel 必须注册同一 handler——现有 UI 与 e2e 经旧 channel
  * 调用不改仍绿，票 06 contract 阶段删除旧注册。
  */

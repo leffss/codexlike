@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { ApprovalMode, ThinkingEffort } from "@codexlike/agent-core/node";
 
 /**
- * 排队消息（GLOSSARY「排队消息」，票 01 / ADR 0013）：会话忙时用户提交的
- * 普通消息连同发送参数快照一起排队，会话空闲后由主进程按快照逐条发出。
+ * 排队消息（GLOSSARY「排队消息」，票 01 / ADR 0013）：任务忙时用户提交的
+ * 普通消息连同发送参数快照一起排队，任务空闲后由主进程按快照逐条发出。
  * 持久化形状见 spec「持久化形状」：顺序位置、消息文本、@引用、
  * Provider Profile、思考档位、审批模式、入队时间。
  */
@@ -27,9 +27,9 @@ export type QueueEnqueueInput = Omit<
   "id" | "sessionId" | "position" | "createdAt"
 >;
 
-/** 队列持久化接缝：生产用 SQLite（与会话消息同库，ADR 0013），测试注入内存实现。 */
+/** 队列持久化接缝：生产用 SQLite（与任务消息同库，ADR 0013），测试注入内存实现。 */
 export interface InputQueueStore {
-  /** 指定会话的排队消息，按 position 升序。 */
+  /** 指定任务的排队消息，按 position 升序。 */
   list(sessionId: string): QueuedMessage[];
   /** 追加一条（position 由 store 分配为当前最大 +1）。 */
   append(
@@ -50,7 +50,7 @@ export interface InputQueueStore {
    * 清单与队列子集不符（未知/重复）抛错，顺序不变。
    */
   reorder(sessionId: string, orderedIds: string[]): void;
-  /** 清空指定会话的队列。 */
+  /** 清空指定任务的队列。 */
   clear(sessionId: string): void;
   /** 队列暂停标志（票 02）：随队列持久化，重启后保持暂停（启动扫描见票 04）。 */
   isPaused(sessionId: string): boolean;
@@ -73,9 +73,9 @@ export type QueueChangeReason =
   | "sending";
 
 /**
- * 每会话独立的输入队列协调器（票 01 主干）。
- * - enqueue：入队（含参数快照）；入队时若会话已空闲则立即触发消费。
- * - onIdle：会话执行结束（activity running=false）后调用，空闲且非空则
+ * 每任务独立的输入队列协调器（票 01 主干）。
+ * - enqueue：入队（含参数快照）；入队时若任务已空闲则立即触发消费。
+ * - onIdle：任务执行结束（activity running=false）后调用，空闲且非空则
  *   从队首继续逐条消费（发一条、等其回复完成、再发下一条）。
  * 消费由注入的 dispatch 完成；启动失败时条目保留在队列（不丢），
  * 等待下一个触发点（下一次执行结束或下一次入队）。
@@ -100,7 +100,7 @@ export function createTaskInputQueues(deps: {
   store: InputQueueStore;
   isBusy: (sessionId: string) => boolean;
   /**
-   * 取队首发送：启动成功（消息已进入会话）即 resolve，此时回调 onSettled
+   * 取队首发送：启动成功（消息已进入任务）即 resolve，此时回调 onSettled
    * 尚未发生；本轮回复结束（完成/出错/中断）时调用 onSettled 恰好一次。
    * 启动失败以异常抛回（onSettled 不会被调用）。
    */
@@ -127,7 +127,7 @@ export function createTaskInputQueues(deps: {
   /**
    * 正在发出的条目（票 03）：pump 取队首发送前同步登记（主进程单一真相，
    * 不靠 UI disabled）——await 期间该条目不可编辑/删除/重排；发送启动完成
-   * 出队或启动失败解锁。每会话同时至多一条（消费逐条进行）。
+   * 出队或启动失败解锁。每任务同时至多一条（消费逐条进行）。
    */
   const sendingIds = new Map<string, string>();
   /**
@@ -205,7 +205,7 @@ export function createTaskInputQueues(deps: {
   }
 
   return {
-    /** 会话忙时用户提交普通消息：入队（含参数快照）；空闲时立即触发消费。 */
+    /** 任务忙时用户提交普通消息：入队（含参数快照）；空闲时立即触发消费。 */
     enqueue(sessionId: string, input: QueueEnqueueInput): QueuedMessage {
       const entry = store.append(sessionId, {
         ...input,
@@ -226,7 +226,7 @@ export function createTaskInputQueues(deps: {
       }
       void pump(sessionId);
     },
-    /** 删除只作用于仍在排队的本会话条目，不容许跨会话操作。 */
+    /** 删除只作用于仍在排队的本任务条目，不容许跨任务操作。 */
     remove(sessionId: string, id: string): void {
       if (sendingIds.get(sessionId) === id)
         throw new Error("该消息正在发出，不能删除");
@@ -259,7 +259,7 @@ export function createTaskInputQueues(deps: {
       return updated;
     },
     /**
-     * 重排（票 03）：orderedIds 必须恰好是本会话仍在排队（不含正在发出）
+     * 重排（票 03）：orderedIds 必须恰好是本任务仍在排队（不含正在发出）
      * 的全部条目 id 的一次排列——清单不完整或夹带未知 id 一律拒绝，
      * 异步入队/删除交错时不会遗漏或复活条目；合法则在排队子集内重排。
      * 权威校验在协调器（review 重构）：无重复/未知走共享校验，完整性单点补齐。
@@ -319,7 +319,7 @@ export function createTaskInputQueues(deps: {
       notify(sessionId, "clear");
     },
     /**
-     * 插话登记（票 02）：暂停期间的直发消息已开始执行（会话空闲走现有直发
+     * 插话登记（票 02）：暂停期间的直发消息已开始执行（任务空闲走现有直发
      * 路径），其回复结束时经 onIdle 自动恢复消费。幂等。
      */
     beginInterjection(sessionId: string): void {
@@ -330,7 +330,7 @@ export function createTaskInputQueues(deps: {
 
 export type TaskInputQueues = ReturnType<typeof createTaskInputQueues>;
 
-/** 内存队列存储：不传 queueStore 的装配（现有单测）与临时会话使用；生产走 SQLite。 */
+/** 内存队列存储：不传 queueStore 的装配（现有单测）与临时任务使用；生产走 SQLite。 */
 export function createMemoryInputQueueStore(): InputQueueStore {
   const rows = new Map<string, QueuedMessage[]>();
   const paused = new Set<string>();

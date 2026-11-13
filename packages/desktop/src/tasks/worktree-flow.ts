@@ -3,7 +3,7 @@ import type {
   WorkspaceMode,
 } from "@codexlike/agent-core/node";
 
-/** 仅由 sessions.start 使用：准备工作区事实，不另设创建正式会话的旁路。 */
+/** 仅由 sessions.start 使用：准备工作区事实，不另设创建正式任务的旁路。 */
 export async function prepareTaskWorkspace(options: {
   id: string;
   workspacePath: string;

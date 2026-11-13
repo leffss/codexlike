@@ -6,7 +6,7 @@ import { createInterruptRegistry } from "../../src/tasks/interrupt-registry";
  * 中断注册表（工单 06）：desktop 主进程为每条运行中的消息流登记 AbortController，
  * 停止按钮经 IPC 打断 → abort() 贯穿 agent-core 流式层与工具执行层。
  */
-describe("createInterruptRegistry（会话流的 AbortController 登记）", () => {
+describe("createInterruptRegistry（任务流的 AbortController 登记）", () => {
   it("begin 后 interrupt 返回 true，signal 被 abort", () => {
     const registry = createInterruptRegistry();
     const controller = registry.begin("session-1");
@@ -16,7 +16,7 @@ describe("createInterruptRegistry（会话流的 AbortController 登记）", () 
     expect(controller.signal.aborted).toBe(true);
   });
 
-  it("流结束（end）后 interrupt 返回 false；从未 begin 的会话也是 false", () => {
+  it("流结束（end）后 interrupt 返回 false；从未 begin 的任务也是 false", () => {
     const registry = createInterruptRegistry();
     const controller = registry.begin("session-1");
     registry.end("session-1", controller);
@@ -25,7 +25,7 @@ describe("createInterruptRegistry（会话流的 AbortController 登记）", () 
     expect(registry.interrupt("nope")).toBe(false);
   });
 
-  it("多会话并行互不干扰：只打断目标会话", () => {
+  it("多任务并行互不干扰：只打断目标任务", () => {
     const registry = createInterruptRegistry();
     const a = registry.begin("session-a");
     const b = registry.begin("session-b");
@@ -39,7 +39,7 @@ describe("createInterruptRegistry（会话流的 AbortController 登记）", () 
     expect(b.signal.aborted).toBe(true);
   });
 
-  it("同一会话流结束后可再次 begin；迟到的 end 不清掉下一条流的登记", () => {
+  it("同一任务流结束后可再次 begin；迟到的 end 不清掉下一条流的登记", () => {
     const registry = createInterruptRegistry();
     const first = registry.begin("session-1");
     registry.end("session-1", first);

@@ -30,7 +30,7 @@ vi.mock("electron", () => ({
 }));
 
 /**
- * 会话→任务改名（票 03）expand 兼容：preload 按新名暴露 tasks 命名空间与
+ * 任务→任务改名（票 03）expand 兼容：preload 按新名暴露 tasks 命名空间与
  * onTaskEvent；旧名 sessions / onSessionEvent 保留且必须仍走旧 channel
  * （e2e 对 sessions:* 的 handler 劫持依赖旧 channel 上的真实流量）。
  */

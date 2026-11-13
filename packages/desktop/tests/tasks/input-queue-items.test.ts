@@ -82,11 +82,11 @@ function harness(
 }
 
 describe.each(["memory", "sqlite"] as const)("队列条目操作（%s）", (kind) => {
-  it("删除立即作废：只删除本会话指定条目，后续不消费且重开存储不恢复", async () => {
+  it("删除立即作废：只删除本任务指定条目，后续不消费且重开存储不恢复", async () => {
     const app = harness(kind);
     const first = app.queues.enqueue("s1", input);
     app.queues.enqueue("s1", { ...input, text: "保留第二条" });
-    const other = app.queues.enqueue("s2", { ...input, text: "其他会话" });
+    const other = app.queues.enqueue("s2", { ...input, text: "其他任务" });
     expect(() => app.queues.remove("s1", other.id)).toThrow(/不存在|已发出/);
     app.queues.remove("s1", first.id);
     expect(app.queues.snapshot("s1").map((item) => item.text)).toEqual([
@@ -142,7 +142,7 @@ describe.each(["memory", "sqlite"] as const)("队列条目操作（%s）", (kind
     });
   });
 
-  it("编辑校验：原文不一致（他窗口先改）或条目不存在/跨会话时拒绝，原文保持", () => {
+  it("编辑校验：原文不一致（他窗口先改）或条目不存在/跨任务时拒绝，原文保持", () => {
     const app = harness(kind);
     const first = app.queues.enqueue("s1", input);
     expect(() =>
@@ -160,7 +160,7 @@ describe.each(["memory", "sqlite"] as const)("队列条目操作（%s）", (kind
       app.queues.update(
         "s2",
         first.id,
-        { text: "跨会话改写", mentionPaths: [] },
+        { text: "跨任务改写", mentionPaths: [] },
         input.text
       )
     ).toThrow(/不存在/);

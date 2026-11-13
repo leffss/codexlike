@@ -20,7 +20,7 @@ export function createTaskMembership(
     },
     setProject(sessionId: string, projectId: string | null) {
       const session = manager.list().find((item) => item.id === sessionId);
-      if (!session) throw new Error("会话不存在或已移除");
+      if (!session) throw new Error("任务不存在或已移除");
       management.assertInactive(sessionId);
       if (projectId !== null) {
         const project = manager
@@ -34,8 +34,8 @@ export function createTaskMembership(
         if (!source || !sameWorkspaceDirectory(source, project.workspacePath))
           throw new Error(
             session.workspaceMode === "worktree"
-              ? "Worktree 会话只能移回来源项目"
-              : "会话工作区与目标项目目录不匹配"
+              ? "Worktree 任务只能移回来源项目"
+              : "任务工作区与目标项目目录不匹配"
           );
       }
       return manager.setProject(sessionId, projectId);

@@ -5,11 +5,11 @@
  * agent-core 的流式输出（streamText abortSignal）与工具执行（子进程树终止）。
  */
 export interface InterruptRegistry {
-  /** 会话的一条消息流启动：返回登记的 AbortController（signal 传给 sendMessage） */
+  /** 任务的一条消息流启动：返回登记的 AbortController（signal 传给 sendMessage） */
   begin(sessionId: string): AbortController;
   /** 流结束：注销登记。带 controller 参数——迟到的旧流 finally 不清掉新流的登记 */
   end(sessionId: string, controller: AbortController): void;
-  /** 用户点停止：有活跃流则 abort 并返回 true；空闲会话返回 false（幂等） */
+  /** 用户点停止：有活跃流则 abort 并返回 true；空闲任务返回 false（幂等） */
   interrupt(sessionId: string): boolean;
 }
 

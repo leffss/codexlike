@@ -133,7 +133,7 @@ export function createLiveTasks(manager: TaskManager) {
     live.events.push(envelope);
     return envelope;
   }
-  /** 队列修改不等同于执行：空闲/重开后也延续会话水位，不伪造运行态。 */
+  /** 队列修改不等同于执行：空闲/重开后也延续任务水位，不伪造运行态。 */
   function acceptQueue(
     id: string,
     event: Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>

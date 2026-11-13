@@ -1,12 +1,13 @@
 /**
- * 会话截图的文件路径约定（工单 11）：截图工具与「读回图片」的 IPC handler 共用。
- * 约定式路径让重启后的历史截图卡片也能按 会话id+调用id 找回文件，无需登记表。
+ * 任务截图的文件路径约定（工单 11；session→task 改名随票 03 换目录）：
+ * 截图工具与「读回图片」的 IPC handler 共用。约定式路径让重启后的历史
+ * 截图卡片也能按 任务id+调用id 找回文件，无需登记表。
  */
 import { join } from "node:path";
 
-/** 会话截图目录：<数据目录>/sessions/<会话id>/screenshots */
+/** 任务截图目录：<数据目录>/tasks/<任务id>/screenshots */
 export function taskScreenshotDir(dataDir: string, sessionId: string): string {
-  return join(dataDir, "sessions", sessionId, "screenshots");
+  return join(dataDir, "tasks", sessionId, "screenshots");
 }
 
 /** 单张截图文件路径：<截图目录>/<toolCallId>.png */

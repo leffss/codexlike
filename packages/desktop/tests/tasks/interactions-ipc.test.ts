@@ -91,7 +91,7 @@ function invoke(name: string, ...args: unknown[]) {
 }
 
 describe("统一用户交互 IPC", () => {
-  it("撤销自动批准仅接受有效会话标识且幂等，不提供直接启用IPC", () => {
+  it("撤销自动批准仅接受有效任务标识且幂等，不提供直接启用IPC", () => {
     const { session } = setup();
     for (const id of ["", null, 1, {}])
       expect(() => invoke("sessions:revoke-auto-approve", id)).toThrow(
@@ -134,7 +134,7 @@ describe("统一用户交互 IPC", () => {
     }
     expect(invoke("projects:set-pinned", "missing", true)).toBeNull();
   });
-  it("会话授权拒绝非法和跨会话响应，重复不能重启授权，重开存储仍恢复授权与置顶", async () => {
+  it("任务授权拒绝非法和跨任务响应，重复不能重启授权，重开存储仍恢复授权与置顶", async () => {
     const { session, manager, reopen } = setup();
     const other = manager.create({
       workspacePath: session.record.workspacePath,
@@ -252,7 +252,7 @@ describe("统一用户交互 IPC", () => {
       await iterator.return?.();
     }
   });
-  it("仅合法响应能恢复所属会话，重复提交和跨会话响应均不消费请求", async () => {
+  it("仅合法响应能恢复所属任务，重复提交和跨任务响应均不消费请求", async () => {
     const { session, manager } = setup();
     const other = manager.create({
       workspacePath: session.record.workspacePath,
@@ -400,7 +400,7 @@ describe("统一用户交互 IPC", () => {
     }
   });
 
-  it("拒绝不合法的会话和请求标识，不把渲染层对象当作授权", () => {
+  it("拒绝不合法的任务和请求标识，不把渲染层对象当作授权", () => {
     setup();
     expect(() =>
       invoke("sessions:pending-interactions", { sessionId: "other" })
@@ -416,7 +416,7 @@ describe("统一用户交互 IPC", () => {
     ).toThrow("参数不合法");
   });
 
-  it("未知会话无待处理请求，也不能响应其他会话的请求", () => {
+  it("未知任务无待处理请求，也不能响应其他任务的请求", () => {
     setup();
     expect(invoke("sessions:pending-interactions", "unknown")).toEqual([]);
     expect(() =>
@@ -424,6 +424,6 @@ describe("统一用户交互 IPC", () => {
         kind: "approval",
         decision: "approve",
       })
-    ).toThrow("会话不存在或已损坏");
+    ).toThrow("任务不存在或已损坏");
   });
 });

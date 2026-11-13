@@ -9,8 +9,8 @@ import {
 } from "./input-queue";
 
 /**
- * 输入队列的 SQLite 持久化（票 01 / ADR 0013）：排队消息按会话存到
- * 与会话消息同一个库文件（task-workbench.db）。agent-core 不感知队列，
+ * 输入队列的 SQLite 持久化（票 01 / ADR 0013）：排队消息按任务存到
+ * 与任务消息同一个库文件（task-workbench.db）。agent-core 不感知队列，
  * 这里以独立连接开同一 db 建表（CREATE TABLE IF NOT EXISTS）；
  * 主进程单线程同步写，与 agent-core 连接不会并发争用。
  */

@@ -200,7 +200,7 @@ async function provider(
   return { profile, requests: () => requests, bodies };
 }
 
-it("首次发送才分配专用目录和会话；重复请求只执行一遍且归属始终显式", async () => {
+it("首次发送才分配专用目录和任务；重复请求只执行一遍且归属始终显式", async () => {
   const app = setup();
   const model = await provider(app);
   const project = await invoke("projects:add", app.workspace);
@@ -247,7 +247,7 @@ it("首次发送才分配专用目录和会话；重复请求只执行一遍且�
     requestId: "draft-matching",
     projectId: null,
     workspacePath: app.workspace,
-    text: "仍是独立会话",
+    text: "仍是独立任务",
   });
   expect(local).toMatchObject({
     projectId: project.id,
@@ -273,7 +273,7 @@ it("首次发送才分配专用目录和会话；重复请求只执行一遍且�
   expect(model.requests()).toBe(3);
 });
 
-it("目录与首条消息建立失败可用同一草稿重试，无空会话且只清理本次空专用目录", async () => {
+it("目录与首条消息建立失败可用同一草稿重试，无空任务且只清理本次空专用目录", async () => {
   const app = setup();
   await provider(app);
   const blocker = join(app.home, "sessions");
@@ -346,7 +346,7 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
   //（排队消息会卡在无法消费的时机），执行通道不被覆盖，executionId 稳定
   await expect(
     invoke("sessions:send", session.id, "重复发送", model.profile.id)
-  ).rejects.toThrow("会话正在等待审批或问答");
+  ).rejects.toThrow("任务正在等待审批或问答");
   expect((await invoke("sessions:execution", session.id)).executionId).toBe(
     state.executionId
   );
@@ -361,7 +361,7 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
   );
 });
 
-it("拒绝伪造项目、目录覆盖和非法设置，不创建会话或目录", async () => {
+it("拒绝伪造项目、目录覆盖和非法设置，不创建任务或目录", async () => {
   const app = setup();
   await provider(app);
   const project = await invoke("projects:add", app.workspace);
@@ -715,7 +715,7 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
   ).toBe("ask");
 });
 
-it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重开不复活授权且拒绝跨会话请求", async () => {
+it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重开不复活授权且拒绝跨任务请求", async () => {
   const app = setup();
   const model = await provider(app, true);
   const session = await invoke("sessions:start", {
@@ -790,7 +790,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
   const other = await invoke("sessions:start", {
     requestId: "other-draft",
     projectId: null,
-    text: "另一会话",
+    text: "另一任务",
   });
   await waitFor(() =>
     expect(invoke("sessions:execution", other.id).running).toBe(false)
@@ -808,7 +808,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
           value: { ...original.value, questionDrafts: invalidDrafts },
         }
       )
-    ).toThrow("问答草稿与会话请求不匹配");
+    ).toThrow("问答草稿与任务请求不匹配");
   }
   await invoke("sessions:send", session.id, "压缩后编辑", model.profile.id);
   await waitFor(() =>
@@ -977,7 +977,7 @@ it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍�
   expect(model.requests()).toBe(2);
 });
 
-it("独立与项目会话按用户使用排序、置顶优先，重开保留整理与归档历史", async () => {
+it("独立与项目任务按用户使用排序、置顶优先，重开保留整理与归档历史", async () => {
   let clock = "2026-11-11T01:00:00.000Z";
   const app = setup(() => clock);
   await provider(app);
@@ -1039,7 +1039,7 @@ it("独立与项目会话按用户使用排序、置顶优先，重开保留整�
   expect(ids()).toEqual([a.id, b.id]);
 });
 
-it("发送登记最近使用，后台增量与完成不抢走后来查看的会话位置", async () => {
+it("发送登记最近使用，后台增量与完成不抢走后来查看的任务位置", async () => {
   let clock = "2026-11-11T01:00:00.000Z";
   const app = setup(() => clock);
   let finish!: () => void;
@@ -1132,7 +1132,7 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
   expect(readFileSync(marker, "utf8")).toBe("未提交成果");
 });
 
-it("会话移入与移出只改变显式归属，SQLite重开后目录历史与偏好保持", async () => {
+it("任务移入与移出只改变显式归属，SQLite重开后目录历史与偏好保持", async () => {
   const app = setup();
   await provider(app);
   const project = invoke("projects:add", app.workspace);
@@ -1164,7 +1164,7 @@ it("会话移入与移出只改变显式归属，SQLite重开后目录历史与�
   expect(invoke("sessions:messages", record.id)).toEqual(history);
 });
 
-it("确认移除仅删除显式所属含归档记录，清除现场与首次发送重试而保留同目录独立会话", async () => {
+it("确认移除仅删除显式所属含归档记录，清除现场与首次发送重试而保留同目录独立任务", async () => {
   const app = setup();
   const model = await provider(app);
   const project = invoke("projects:add", app.workspace);
@@ -1423,7 +1423,7 @@ it("等待问答或宿主执行占位时不能移出移除，停止后才可整�
   expect(invoke("sessions:view", record.id)).not.toBeNull();
 });
 
-it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已删除会话", async () => {
+it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已删除任务", async () => {
   const app = setup();
   const model = await provider(app);
   const project = invoke("projects:add", app.workspace);
@@ -1553,7 +1553,7 @@ it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现�
   expect(invoke("sessions:view", record.id)).toBeNull();
 });
 
-it("同目录独立会话等待中仍可移除空项目，不能按目录误判运行保护范围", async () => {
+it("同目录独立任务等待中仍可移除空项目，不能按目录误判运行保护范围", async () => {
   const app = setup();
   await provider(app, true);
   const project = invoke("projects:add", app.workspace);

@@ -5,19 +5,19 @@ import {
   taskScreenshotDir,
 } from "../../src/tasks/screenshots";
 
-describe("会话截图路径约定（截图工具与读图 IPC 共用）", () => {
-  it("目录与会话隔离：sessions/<会话id>/screenshots", () => {
+describe("任务截图路径约定（截图工具与读图 IPC 共用）", () => {
+  it("目录与任务隔离：tasks/<任务id>/screenshots", () => {
     expect(taskScreenshotDir("C:\\data", "s-1")).toBe(
-      "C:\\data\\sessions\\s-1\\screenshots"
+      "C:\\data\\tasks\\s-1\\screenshots"
     );
   });
 
   it("文件名取 toolCallId；非法路径字符被替换（IPC 边界不信任渲染进程）", () => {
     expect(screenshotPathFor("C:\\data", "s-1", "call-9")).toBe(
-      "C:\\data\\sessions\\s-1\\screenshots\\call-9.png"
+      "C:\\data\\tasks\\s-1\\screenshots\\call-9.png"
     );
     const hostile = screenshotPathFor("C:\\data", "s-1", "..\\..\\evil");
-    expect(hostile.startsWith("C:\\data\\sessions\\s-1\\screenshots\\")).toBe(
+    expect(hostile.startsWith("C:\\data\\tasks\\s-1\\screenshots\\")).toBe(
       true
     );
     // 文件名部分不含路径分隔符：注入的 ..\ 无法逃出截图目录

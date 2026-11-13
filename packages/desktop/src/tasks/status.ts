@@ -9,7 +9,7 @@ import {
   type ResourceSnapshotSummary,
 } from "@codexlike/agent-core/node";
 
-/** /status 展示的会话状态（工单 07；审批模式自工单 04 起显示真实档位） */
+/** /status 展示的任务状态（工单 07；审批模式自工单 04 起显示真实档位） */
 export interface TaskStatusInfo {
   /** 最近一次发送消息所用模型 */
   model: string | null;

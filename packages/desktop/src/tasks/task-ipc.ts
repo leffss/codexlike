@@ -55,11 +55,11 @@ export function registerTaskHandlers(options: {
   manager: TaskManager;
   profiles: ProfileStore;
   getWindow: () => BrowserWindow | null;
-  /** 队列状态属于会话：所有工作台窗口都接收同一权威事件。 */
+  /** 队列状态属于任务：所有工作台窗口都接收同一权威事件。 */
   getWindows?: () => BrowserWindow[];
   /** 应用数据目录（截图读回的路径约定；工单 11） */
   dataDir: string;
-  /** 浏览器会话管理器（会话归档时释放其浏览器 context；工单 11） */
+  /** 浏览器任务管理器（任务归档时释放其浏览器 context；工单 11） */
   browserManager?: BrowserTaskManager;
   /** 托管 Worktree 服务：首次发送创建隔离副本，不按数量清理。 */
   worktreeService: WorktreeService;
@@ -115,7 +115,7 @@ export function registerTaskHandlers(options: {
   }
 
   /**
-   * 会话→任务改名（票 03）expand 兼容：同一 handler 同时挂正式 tasks:* 与
+   * 任务→任务改名（票 03）expand 兼容：同一 handler 同时挂正式 tasks:* 与
    * 旧 sessions:* 两个 channel 名，现有 UI 调用与 e2e 不改仍绿；票 06 删旧注册。
    */
   function dualHandle<Args extends unknown[]>(
@@ -143,7 +143,7 @@ export function registerTaskHandlers(options: {
     }
   }
 
-  // 输入队列（票 01 / ADR 0013）：会话忙时 send 入队，执行结束或入队时空闲
+  // 输入队列（票 01 / ADR 0013）：任务忙时 send 入队，执行结束或入队时空闲
   // 则由主进程逐条消费。等待「本轮流结束」的消费循环经 streamWaiters 挂起，
   // 在流的 end() 钩子中释放（发一条、等其回复完成、再发下一条）。
   const streamWaiters = new Map<string, Set<() => void>>();
@@ -162,7 +162,7 @@ export function registerTaskHandlers(options: {
     dispatch: (sessionId, entry, onSettled) =>
       track(dispatchQueued(sessionId, entry, onSettled)),
     onChange: (sessionId, reason, queue, paused, sendingId) => {
-      // 队列变更经会话事件信封推送（空闲修改也有信封可挂，票 03 acceptQueue），
+      // 队列变更经任务事件信封推送（空闲修改也有信封可挂，票 03 acceptQueue），
       // 所有工作台窗口收到同一权威快照。
       const envelope = liveSessions.acceptQueue(sessionId, {
         type: "queue-changed",
@@ -267,7 +267,7 @@ export function registerTaskHandlers(options: {
     if (typeof sessionId !== "string")
       throw new Error("view：sessionId 必须是字符串");
     const view = liveSessions.view(sessionId);
-    // 输入队列快照（票 01/02，review 重构收拢三元组）：切回会话时队列条原样恢复
+    // 输入队列快照（票 01/02，review 重构收拢三元组）：切回任务时队列条原样恢复
     return view === null
       ? null
       : { ...view, queueState: queueSnapshot(sessionId) };
@@ -352,12 +352,12 @@ export function registerTaskHandlers(options: {
     )
       throw new Error("首次发送需要草稿标识、项目归属和消息内容");
     if (manager.isRemovedCreationRequest(request.requestId))
-      return Promise.reject(new Error("原会话已移除，请新建会话后发送"));
+      return Promise.reject(new Error("原任务已移除，请新建任务后发送"));
     const pending = starts.get(request.requestId);
     if (pending)
       return pending.then((record) => {
         const current = manager.list().find((item) => item.id === record.id);
-        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        if (!current) throw new Error("原任务已移除，请新建任务后发送");
         return current;
       });
     const previous = manager
@@ -387,7 +387,7 @@ export function registerTaskHandlers(options: {
           );
         }
         const current = manager.list().find((item) => item.id === previous.id);
-        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        if (!current) throw new Error("原任务已移除，请新建任务后发送");
         return current;
       })();
       starts.set(request.requestId, task);
@@ -407,7 +407,7 @@ export function registerTaskHandlers(options: {
       )
         throw new Error("工作区模式必须是 local 或 worktree");
       if (request.projectId === null && request.workspaceMode === "worktree")
-        throw new Error("独立会话入口不支持直接创建 Worktree，请在项目内新建");
+        throw new Error("独立任务入口不支持直接创建 Worktree，请在项目内新建");
       const available = await profiles.list();
       await resumeAcceptedStart();
       assertOpen();
@@ -423,7 +423,7 @@ export function registerTaskHandlers(options: {
       if (request.projectId !== null && !project)
         throw new Error("项目不存在，请重新选择");
       if (project && request.workspacePath !== undefined)
-        throw new Error("项目会话使用项目目录，不能更换工作区");
+        throw new Error("项目任务使用项目目录，不能更换工作区");
       const id = randomUUID();
       let workspacePath = project?.workspacePath ?? request.workspacePath;
       if (workspacePath !== undefined) {
@@ -436,7 +436,7 @@ export function registerTaskHandlers(options: {
           mkdirSync(workspacePath, { recursive: true });
         } catch {
           throw new Error(
-            "无法创建独立会话专用目录，请检查应用数据目录权限后重试"
+            "无法创建独立任务专用目录，请检查应用数据目录权限后重试"
           );
         }
       }
@@ -486,7 +486,7 @@ export function registerTaskHandlers(options: {
           available[0]?.id ?? ""
         );
         const current = manager.list().find((item) => item.id === session.id);
-        if (!current) throw new Error("原会话已移除，请新建会话后发送");
+        if (!current) throw new Error("原任务已移除，请新建任务后发送");
         return current;
       } catch (error) {
         // 删除记录也会让历史为空；已成功的意图墓碑绝不能误当成创建失败并回收磁盘。
@@ -497,7 +497,7 @@ export function registerTaskHandlers(options: {
           manager.removeUnstarted(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
-              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式会话，可重试）`,
+              `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式任务，可重试）`,
               { cause: error }
             );
           }
@@ -550,7 +550,7 @@ export function registerTaskHandlers(options: {
   /**
    * 发送核心（review 重构拆分）：用户直发与队列消费共用——参数校验、参数快照、
    * 占位、流式事件泵。来源以具名 source 区分（取代 fromQueue 布尔尾参）：
-   * - user：渲染层直发。会话忙时改为入队（票 01）；等待用户交互时明确拒绝；
+   * - user：渲染层直发。任务忙时改为入队（票 01）；等待用户交互时明确拒绝；
    *   暂停期间的直发登记为插话（票 02）。
    * - queue：队列消费内部发送。不再入队（避免自我吞掉），也不算插话；
    *   参数取入队时的快照。竞态以启动失败保留条目。
@@ -598,7 +598,7 @@ export function registerTaskHandlers(options: {
     const effortSnapshot = parseThinkingEffort(thinkingEffort);
     const session = manager.get(sessionId);
     if (session === null) {
-      throw new Error("会话不存在或已损坏");
+      throw new Error("任务不存在或已损坏");
     }
     const approvalSnapshot =
       approvalMode ??
@@ -613,7 +613,7 @@ export function registerTaskHandlers(options: {
       throw new Error("所选 Provider Profile 不存在，请重新选择模型");
     }
 
-    // 输入队列（票 01）：会话忙时不再报错，而是入队（主进程单一真相）。
+    // 输入队列（票 01）：任务忙时不再报错，而是入队（主进程单一真相）。
     // 入队即快照发送参数（Profile / 思考档位 / 审批模式 / @引用），消费按快照发。
     if (fromUser) {
       const executionState = management.execution(sessionId);
@@ -621,7 +621,7 @@ export function registerTaskHandlers(options: {
       // 直调 IPC 绕过 UI 的发送一律拒绝——明确中文报错，不入队也不触发消费
       //（排队消息会卡在无法消费的时机）。
       if (executionState?.waitingForUser) {
-        throw new Error("会话正在等待审批或问答，请先回应后再发送");
+        throw new Error("任务正在等待审批或问答，请先回应后再发送");
       }
       if (executionState?.running ?? false) {
         queues.enqueue(sessionId, {
@@ -653,7 +653,7 @@ export function registerTaskHandlers(options: {
       queues.beginInterjection(sessionId);
     }
     try {
-      // 先 await 第一个事件（user-message）：会话并发拒绝等启动错误
+      // 先 await 第一个事件（user-message）：任务并发拒绝等启动错误
       // 在这里以异常抛回渲染进程；之后的事件异步推送。
       // 先落中间变量再取 [Symbol.asyncIterator]()：对象字面量后直接
       // 换行接 [ 会被读成索引访问（ASI 陷阱），也触发 no-unexpected-multiline。
@@ -743,7 +743,7 @@ export function registerTaskHandlers(options: {
       if (typeof sessionId !== "string") {
         throw new Error("interrupt：sessionId 必须是字符串");
       }
-      // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲会话幂等返回 false
+      // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲任务幂等返回 false
       const interrupted = interrupts.interrupt(sessionId);
       if (interrupted) {
         liveSessions.stop(sessionId);
@@ -758,11 +758,11 @@ export function registerTaskHandlers(options: {
   function assertQueueSession(sessionId: unknown): asserts sessionId is string {
     assertOpen();
     if (typeof sessionId !== "string" || !sessionId.trim())
-      throw new Error("队列操作：会话标识不合法");
+      throw new Error("队列操作：任务标识不合法");
     const record = manager.list().find((item) => item.id === sessionId);
-    if (!record) throw new Error("会话不存在或已移除");
+    if (!record) throw new Error("任务不存在或已移除");
     if (record.archivedAt !== null)
-      throw new Error("会话已归档，请先恢复再操作队列");
+      throw new Error("任务已归档，请先恢复再操作队列");
   }
   function assertQueueItemId(id: unknown): asserts id is string {
     if (typeof id !== "string" || !id.trim())
@@ -845,7 +845,7 @@ export function registerTaskHandlers(options: {
     IPC.tasks.queueResume,
     IPC.sessions.queueResume,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      // 参数与会话校验统一走 assertQueueSession（review 重构），与其余队列操作一致
+      // 参数与任务校验统一走 assertQueueSession（review 重构），与其余队列操作一致
       assertQueueSession(sessionId);
       queues.resume(sessionId);
       return queueResult(sessionId);
@@ -975,7 +975,7 @@ export function registerTaskHandlers(options: {
           }
           const session = manager.get(sessionId);
           if (session === null) {
-            throw new Error("会话不存在或已损坏");
+            throw new Error("任务不存在或已损坏");
           }
           const profile = (await profiles.list()).find(
             (candidate: ProviderProfile) => candidate.id === profileId
@@ -1032,7 +1032,7 @@ export function registerTaskHandlers(options: {
         .list()
         .find((candidate: TaskRecord) => candidate.id === sessionId);
       if (record === undefined) {
-        throw new Error("会话不存在或已损坏");
+        throw new Error("任务不存在或已损坏");
       }
       return listWorkspaceFiles(record.workspacePath);
     }
@@ -1111,7 +1111,7 @@ export function registerTaskHandlers(options: {
       }
       const session = manager.get(sessionId);
       if (session === null) {
-        throw new Error("会话不存在或已损坏");
+        throw new Error("任务不存在或已损坏");
       }
       assertOpen();
       // Core 以自身持有的请求校验响应，不能信任渲染层提供的题目、来源或授权范围。
@@ -1142,7 +1142,7 @@ export function registerTaskHandlers(options: {
       }
       const session = manager.get(sessionId);
       if (session === null) {
-        throw new Error("会话不存在或已损坏");
+        throw new Error("任务不存在或已损坏");
       }
       assertOpen();
       return session.respondApproval(requestId, decision);
@@ -1157,7 +1157,7 @@ export function registerTaskHandlers(options: {
         throw new Error("pendingApproval：sessionId 必须是字符串");
       }
       const session = manager.get(sessionId);
-      // 会话不存在与无等待统一返回 null（切回会话时 UI 不渲染审批卡片）
+      // 任务不存在与无等待统一返回 null（切回任务时 UI 不渲染审批卡片）
       return session?.pendingApproval ?? null;
     }
   );
@@ -1170,14 +1170,14 @@ export function registerTaskHandlers(options: {
         throw new Error("pendingApprovals：sessionId 必须是字符串");
       }
       const session = manager.get(sessionId);
-      // 主会话与子代理可能并行等待审批（工单 13），全部返回供 UI 恢复多张审批卡片
+      // 主任务与子代理可能并行等待审批（工单 13），全部返回供 UI 恢复多张审批卡片
       return session?.pendingApprovals ?? [];
     }
   );
 
   function continueInputQueues() {
     for (const record of manager.list()) {
-      // 跳过执行中的会话：此时 onIdle 会把在途插话误判为已完成而提前
+      // 跳过执行中的任务：此时 onIdle 会把在途插话误判为已完成而提前
       // 解除暂停；它们的轮次落定时由 end() 自然触发恢复。
       if (
         record.archivedAt === null &&

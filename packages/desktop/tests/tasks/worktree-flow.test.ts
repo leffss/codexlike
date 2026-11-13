@@ -246,7 +246,7 @@ it("非Git和Worktree目录创建失败保留用户文件，同请求修复后�
   expect(await invoke("sessions:list")).toHaveLength(2);
 });
 
-it("失败期间出现额外成果时保留副本并明确返回位置，不将失败显示为成功会话", async () => {
+it("失败期间出现额外成果时保留副本并明确返回位置，不将失败显示为成功任务", async () => {
   const app = await setup();
   const project = await invoke("projects:add", app.repo);
   writeFileSync(

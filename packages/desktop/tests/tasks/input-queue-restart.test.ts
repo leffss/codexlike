@@ -15,7 +15,7 @@ import { createSqliteInputQueueStore } from "../../src/tasks/input-queue-store";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
 import { listenMock } from "./mock-server";
 
-// 接缝：真实会话 IPC / 退出生命周期；只替换 Electron 通道与外部模型、系统加密。
+// 接缝：真实任务 IPC / 退出生命周期；只替换 Electron 通道与外部模型、系统加密。
 // 同一 SQLite 文件的两个生产连接实际关闭再重开，不借助 SQL 查询判断恢复状态。
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
@@ -163,7 +163,7 @@ async function setup() {
   return { open, profile, profiles, requests, reply, start, holdCredentials };
 }
 
-it("真实 SQLite 重开后由启动入口逐条消费，未创建窗口或查看会话也能推进", async () => {
+it("真实 SQLite 重开后由启动入口逐条消费，未创建窗口或查看任务也能推进", async () => {
   const app = await setup();
   const first = app.open();
   const id = await app.start("退出前执行");
@@ -192,7 +192,7 @@ it("真实 SQLite 重开后由启动入口逐条消费，未创建窗口或查�
   ).toEqual(["退出前执行", "恢复第一条", "恢复第二条"]);
 }, 30_000);
 
-it("失效 Profile 的会话只保留自己的队首，不阻塞其他会话恢复消费", async () => {
+it("失效 Profile 的任务只保留自己的队首，不阻塞其他任务恢复消费", async () => {
   const app = await setup();
   const doomed = await app.profiles.create({
     name: "重启前删除的模型",
@@ -201,8 +201,8 @@ it("失效 Profile 的会话只保留自己的队首，不阻塞其他会话恢�
     baseURL: "http://127.0.0.1:1/v1",
   });
   const first = app.open();
-  const failing = await app.start("失败会话首轮");
-  const healthy = await app.start("正常会话首轮");
+  const failing = await app.start("失败任务首轮");
+  const healthy = await app.start("正常任务首轮");
   await invoke("send", failing, "失效快照排队", doomed.id);
   await invoke("send", healthy, "正常快照排队", app.profile.id);
   await first.close();

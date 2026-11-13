@@ -24,7 +24,7 @@ export function createTaskManagement(
 
   function assertInactive(sessionId: string): void {
     if (execution(sessionId)?.running)
-      throw new Error("会话正在执行或等待用户回应，请先停止再整理");
+      throw new Error("任务正在执行或等待用户回应，请先停止再整理");
   }
 
   return {
@@ -32,9 +32,9 @@ export function createTaskManagement(
     assertInactive,
     assertCanExecute(sessionId: string) {
       const record = manager.list().find((item) => item.id === sessionId);
-      if (!record) throw new Error("会话不存在或已移除");
+      if (!record) throw new Error("任务不存在或已移除");
       if (record.archivedAt !== null)
-        throw new Error("会话已归档，请先恢复再发送");
+        throw new Error("任务已归档，请先恢复再发送");
       assertInactive(sessionId);
     },
     archive(sessionId: string, archived: boolean) {

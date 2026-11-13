@@ -18,8 +18,8 @@ import { createProfileStore } from "../../src/profiles/profile-store";
 import { listenMock } from "./mock-server";
 
 /**
- * 输入队列 IPC/会话层集成（票 01）：忙时 send 不再报错而是入队（主进程单一真相），
- * 队列变更作为会话事件信封推送，回复结束后自动逐条消费。
+ * 输入队列 IPC/任务层集成（票 01）：忙时 send 不再报错而是入队（主进程单一真相），
+ * 队列变更作为任务事件信封推送，回复结束后自动逐条消费。
  */
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => any>(),
@@ -221,14 +221,14 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
     projectId: null,
     text: "首轮任务",
   });
-  // 首轮回复保持进行中（不发 finish）→ 会话忙
+  // 首轮回复保持进行中（不发 finish）→ 任务忙
   await app.reply("首轮任务", "首轮进行中", null);
 
-  // 忙时 send 两条：不再抛「会话正在执行」，而是入队（主进程单一真相）
+  // 忙时 send 两条：不再抛「任务正在执行」，而是入队（主进程单一真相）
   await invoke("send", session.id, "排队一", app.profile.id);
   await invoke("send", session.id, "排队二", app.profile.id);
 
-  // 队列变更作为会话事件信封推送（复用 sessionId/sequence/executionId）
+  // 队列变更作为任务事件信封推送（复用 sessionId/sequence/executionId）
   const queued = app.delivered.filter(
     (envelope) =>
       envelope.sessionId === session.id &&
@@ -247,7 +247,7 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
     thinkingEffort: "auto",
     approvalMode: "ask",
   });
-  // view 快照：切回会话时队列原样可见
+  // view 快照：切回任务时队列原样可见
   const view = invoke("view", session.id);
   expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
     "排队一",
@@ -264,7 +264,7 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   await waitFor(() =>
     expect(invoke("execution", session.id).running).toBe(false)
   );
-  // 消费按入队顺序进入会话消息历史
+  // 消费按入队顺序进入任务消息历史
   const userTexts = invoke("messages", session.id)
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
@@ -377,7 +377,7 @@ it("暂停期间插话直发：插话回复结束后自动恢复队列消费", a
     expect(invoke("execution", session.id).running).toBe(false)
   );
 
-  // 暂停期间直接发新消息：会话空闲走直发（不排队、无需先解除暂停）
+  // 暂停期间直接发新消息：任务空闲走直发（不排队、无需先解除暂停）
   await invoke("send", session.id, "插话", app.profile.id);
   await waitFor(() => expect(app.hasRequest("插话")).toBe(true));
   expect(
@@ -482,7 +482,7 @@ it("等待用户交互（审批/问答）期间直调 send：明确中文报错�
   // UI 已禁用，此处直调 send 模拟绕过 UI 的路径：不得静默入队，明确中文报错
   await expect(
     invoke("send", session.id, "插话", app.profile.id)
-  ).rejects.toThrow("会话正在等待审批或问答");
+  ).rejects.toThrow("任务正在等待审批或问答");
   // 不入队：快照没有新条目，也没有新的 enqueue 事件
   expect(
     invoke("view", session.id).queueState.queue.map((item: any) => item.text)

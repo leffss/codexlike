@@ -29,7 +29,7 @@ export function sameWorkspaceDirectory(left: string, right: string): boolean {
   }
 }
 
-/** 只读取目录与宿主运行事实，不分配目录、不创建会话，也不是并行锁。 */
+/** 只读取目录与宿主运行事实，不分配目录、不创建任务，也不是并行锁。 */
 export function workspaceSharing(
   target: WorkspaceSharingTarget,
   manager: TaskManager,
@@ -41,7 +41,7 @@ export function workspaceSharing(
   let exclude: string | undefined;
   if ("sessionId" in target) {
     const session = manager.list().find((item) => item.id === target.sessionId);
-    if (!session) throw new Error("会话不存在");
+    if (!session) throw new Error("任务不存在");
     path = session.workspacePath;
     exclude = session.id;
   } else {
@@ -57,13 +57,13 @@ export function workspaceSharing(
         .find((item) => item.id === target.projectId);
       if (!project) throw new Error("项目不存在");
       if (target.workspacePath !== undefined)
-        throw new Error("项目会话不能更换工作区");
+        throw new Error("项目任务不能更换工作区");
       if (target.workspaceMode === "worktree")
         return { workspacePath: null, runningSessions: [] };
       path = project.workspacePath;
     } else {
       if (target.workspaceMode === "worktree")
-        throw new Error("独立会话入口不支持直接创建 Worktree");
+        throw new Error("独立任务入口不支持直接创建 Worktree");
       path = target.workspacePath;
     }
   }

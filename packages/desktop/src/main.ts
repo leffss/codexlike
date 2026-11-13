@@ -241,7 +241,7 @@ function assertValidInput(input: unknown) {
 /**
  * 注册搜索源设置的 IPC 指令（工单 10）。
  * web_search 工具的 searchSource 每次调用时解析内存缓存，
- * 因此设置页保存/清除 key 后无需重启即可对进行中的会话生效。
+ * 因此设置页保存/清除 key 后无需重启即可对进行中的任务生效。
  */
 function registerSearchSettingsHandlers(
   store: SearchSettingsStore,
@@ -391,7 +391,7 @@ function registerLaunchStateHandlers(store: LaunchStateStore): void {
     (_e: IpcMainInvokeEvent, input: unknown) => {
       // IPC 边界不信任渲染进程：目标形状校验后进 store
       if (!isWorkbenchTarget(input)) {
-        throw new Error("工作台目标必须是会话 id 或新建草稿 + 项目 id");
+        throw new Error("工作台目标必须是任务 id 或新建草稿 + 项目 id");
       }
       return store.patch({ workbenchTarget: input }).catch((error: unknown) => {
         throw error instanceof Error ? error : new Error(String(error));
@@ -420,7 +420,7 @@ void app.whenReady().then(async () => {
   );
 
   // 搜索源（工单 10）：key 存设置页（safeStorage 加密），内存缓存供 web_search 逐次解析；
-  // 未配置时 searchSource 为 null → 工具返回「未配置搜索源」中文指引，会话不崩。
+  // 未配置时 searchSource 为 null → 工具返回「未配置搜索源」中文指引，任务不崩。
   const searchSettings = createSearchSettingsStore({
     dir: dataDir(),
     safeStorage: asSafeStorageLike(),
@@ -450,14 +450,14 @@ void app.whenReady().then(async () => {
   const themeSettingsStore = createThemeSettingsStore({ dir: dataDir() });
   const themePreference = await themeSettingsStore.get();
   applyNativeTheme(themePreference);
-  // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
+  // 浏览器工具组（工单 11）：Playwright headless Chromium 任务级复用；
   // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
   const browserManager = createBrowserTaskManager({
     progress: (line) => console.log(`[browser] ${line}`),
   });
   const browserTools = createBrowserTools({
     manager: browserManager,
-    // 截图保存到会话数据目录（约定路径，重启后 UI 仍可读回）
+    // 截图保存到任务数据目录（约定路径，重启后 UI 仍可读回）
     screenshotDirFor: (sessionId) => taskScreenshotDir(dataDir(), sessionId),
   });
 
@@ -470,7 +470,7 @@ void app.whenReady().then(async () => {
   });
 
   // 子代理全局设置（工单 13）：内存缓存注入 SubagentsConfig（逐次解析），
-  // 设置页保存后对下一次委派即时生效（无需重启会话）
+  // 设置页保存后对下一次委派即时生效（无需重启任务）
   const subagentSettingsStore = createSubagentSettingsStore({ dir: dataDir() });
   const profileStore = createProfileStore({
     dir: dataDir(),
@@ -482,14 +482,14 @@ void app.whenReady().then(async () => {
   };
 
   // MCP（工单 12）：stdio server 的配置存储 + 连接管理；启动时连接全部已配置
-  // server（失败不拖垮应用，状态在设置页可见）。会话工具 = 内置 + 启用的 MCP 工具，
+  // server（失败不拖垮应用，状态在设置页可见）。任务工具 = 内置 + 启用的 MCP 工具，
   // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
   const mcpService = createMcpService({
     store: createMcpStore({ dir: dataDir(), safeStorage: asSafeStorageLike() }),
   });
   await mcpService.startup();
 
-  // 会话工具工厂（主会话与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
+  // 任务工具工厂（主任务与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
   const sessionTools = () => [
     ...mcpService.sessionTools(builtinTools),
     ...browserTools,
@@ -513,11 +513,11 @@ void app.whenReady().then(async () => {
     resourcesFor,
     attachToolImages,
     subagents: {
-      // 子代理工具集 = 完整会话工具（内置 + MCP + 浏览器，同一工厂逐次解析；
+      // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
       tools: sessionTools,
       settings: () => subagentSettings,
-      // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前会话所选）
+      // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
       resolveProfile: async () => {
         const profileId = subagentSettings.providerProfileId;
         if (profileId === null) {
@@ -532,19 +532,19 @@ void app.whenReady().then(async () => {
   });
   const store = profileStore;
 
-  // 托管 Worktree（工单 09）：worktree 模式会话的隔离副本根目录
+  // 托管 Worktree（工单 09）：worktree 模式任务的隔离副本根目录
   // （~/.codexlike/worktrees，CODEXLIKE_HOME 隔离由 dataDir 统一解析）
   const worktreeService = createWorktreeService({
     worktreesDir: join(dataDir(), "worktrees"),
   });
 
-  // manager 初始化已取消全部遗留交互；非空闲会话再恢复为 idle，不恢复工具执行。
+  // manager 初始化已取消全部遗留交互；非空闲任务再恢复为 idle，不恢复工具执行。
   // 同时兼容旧库的 waiting-approval 状态。
   for (const record of manager.list()) {
     if (record.status !== "idle") manager.get(record.id);
   }
 
-  // 新库不认识旧会话，不以此将旧 Worktree 当孤儿回收；磁盘文件独立保留。
+  // 新库不认识旧任务，不以此将旧 Worktree 当孤儿回收；磁盘文件独立保留。
 
   registerProviderProfileHandlers(store);
   registerSearchSettingsHandlers(searchSettings, refreshSearchSource);

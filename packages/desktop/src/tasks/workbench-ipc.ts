@@ -31,7 +31,7 @@ export function registerWorkbenchHandlers(
         manager.projects().some((p) => p.id === target.projectId))
     )
       return target;
-    throw new Error("持久工作现场的项目或会话不存在");
+    throw new Error("持久工作现场的项目或任务不存在");
   }
   async function read(target: WorkbenchTarget): Promise<WorkbenchEntry> {
     const key = workbenchKey(target);
@@ -118,7 +118,7 @@ export function registerWorkbenchHandlers(
         !draft.answers ||
         typeof draft.answers !== "object"
       )
-        throw new Error("问答草稿与会话请求不匹配");
+        throw new Error("问答草稿与任务请求不匹配");
       const answers: typeof draft.answers = {};
       for (const question of item.request.questions) {
         const answer = draft.answers[question.id];

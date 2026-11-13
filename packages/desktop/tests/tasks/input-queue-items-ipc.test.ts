@@ -165,7 +165,7 @@ it("编辑 IPC 原地更新：顺序与快照不动，事件推送全部窗口�
   // 身份与参数校验
   expect(() =>
     invoke("queue-update", "missing", first.id, "x", "排队甲")
-  ).toThrow(/会话不存在/);
+  ).toThrow(/任务不存在/);
   expect(() => invoke("queue-update", id, 5, "x", "排队甲")).toThrow(
     /条目标识/
   );
@@ -317,7 +317,7 @@ it("重排 IPC：暂停窗口内合法重排生效并持久化，清单不一致
   expect(app.requests).toEqual(["首轮任务", "丙", "甲", "乙"]);
 }, 30_000);
 
-it("删除 IPC 校验会话/条目身份；空闲暂停时向所有窗口推送权威快照，删除后不消费", async () => {
+it("删除 IPC 校验任务/条目身份；空闲暂停时向所有窗口推送权威快照，删除后不消费", async () => {
   const app = await setup();
   const id = await app.start();
   await invoke("send", id, "待删除", app.profile.id);
@@ -326,7 +326,7 @@ it("删除 IPC 校验会话/条目身份；空闲暂停时向所有窗口推送�
   await app.pause(id);
   const before = invoke("view", id);
   expect(() => invoke("queue-remove", "missing", removed.id)).toThrow(
-    /会话不存在/
+    /任务不存在/
   );
   expect(() => invoke("queue-remove", id, 5)).toThrow(/标识/);
   expect(() => invoke("queue-remove", id, "missing")).toThrow(/不存在/);

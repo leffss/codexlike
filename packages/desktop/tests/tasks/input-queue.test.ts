@@ -7,8 +7,8 @@ import type {
 import { createTaskInputQueues } from "../../src/tasks/input-queue";
 
 /**
- * 输入队列（票 01，ADR 0013）：desktop 主进程会话层的队列协调器。
- * 每会话一个队列：忙时入队（含参数快照）、空闲后逐条自动消费。
+ * 输入队列（票 01，ADR 0013）：desktop 主进程任务层的队列协调器。
+ * 每任务一个队列：忙时入队（含参数快照）、空闲后逐条自动消费。
  * 依赖全部注入（store / 忙判定 / 发送 / 变更通知），只测外部可见的状态转移。
  */
 
@@ -163,7 +163,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     ]);
   });
 
-  it("入队时会话已空闲：立即从队首消费，成功后从队列移除并推送出队事件", async () => {
+  it("入队时任务已空闲：立即从队首消费，成功后从队列移除并推送出队事件", async () => {
     const app = harness();
     app.queues.enqueue("session-1", { ...INPUT, text: "空闲入队" });
 
@@ -265,7 +265,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     );
   });
 
-  it("每会话队列独立：A 会话排队不影响 B 会话消费", async () => {
+  it("每任务队列独立：A 任务排队不影响 B 任务消费", async () => {
     const app = harness();
     app.queues.enqueue("session-a", { ...INPUT, text: "A 的排队" });
     app.queues.enqueue("session-b", { ...INPUT, text: "B 的排队" });
@@ -291,7 +291,7 @@ describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与
     app.queues.pause("session-1");
     expect(app.queues.isPaused("session-1")).toBe(true);
 
-    // 会话空闲后触发消费：暂停门控——不取队首
+    // 任务空闲后触发消费：暂停门控——不取队首
     app.setBusy(() => false);
     app.queues.onIdle("session-1");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -340,7 +340,7 @@ describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与
     });
   });
 
-  it("空队列置暂停是无操作（停止空闲/无排队会话不产生暂停残留）", () => {
+  it("空队列置暂停是无操作（停止空闲/无排队任务不产生暂停残留）", () => {
     const app = harness();
     app.queues.pause("session-1");
     expect(app.queues.isPaused("session-1")).toBe(false);
@@ -352,7 +352,7 @@ describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与
     app.queues.enqueue("session-1", { ...INPUT, text: "排队消息" });
     app.queues.pause("session-1");
     app.setBusy(() => false);
-    // 暂停期间直发新消息（插话）：会话空闲走现有直发路径，
+    // 暂停期间直发新消息（插话）：任务空闲走现有直发路径，
     // 由装配层在执行开始时登记（beginInterjection）
     app.queues.beginInterjection("session-1");
     expect(app.queues.isPaused("session-1")).toBe(true);
@@ -407,7 +407,7 @@ describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与
   });
 });
 
-describe("createSqliteInputQueueStore（队列持久化，与会话消息同库）", () => {
+describe("createSqliteInputQueueStore（队列持久化，与任务消息同库）", () => {
   it("存取往返：重开数据库后队列内容与顺序一致；移除/清空生效", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
@@ -415,7 +415,7 @@ describe("createSqliteInputQueueStore（队列持久化，与会话消息同库�
     const root = mkdtempSync(join(tmpdir(), "input-queue-sqlite-"));
     try {
       const dbPath = join(root, "session-workbench.db");
-      // 同库先由会话存储建表（生产布局：同一 db 文件）
+      // 同库先由任务存储建表（生产布局：同一 db 文件）
       const { createSqliteInputQueueStore } =
         await import("../../src/tasks/input-queue-store");
       const store = createSqliteInputQueueStore(dbPath);
@@ -451,7 +451,7 @@ describe("createSqliteInputQueueStore（队列持久化，与会话消息同库�
         approvalMode: "assist",
         createdAt: "2026-11-13T00:00:00.000Z",
       });
-      // 会话隔离 & 移除
+      // 任务隔离 & 移除
       expect(reopened.list("session-2")).toHaveLength(1);
       expect(reopened.remove("session-1", "q-1")).toBe(true);
       expect(reopened.remove("session-1", "q-1")).toBe(false);
@@ -483,7 +483,7 @@ describe("createSqliteInputQueueStore（队列持久化，与会话消息同库�
         await import("../../src/tasks/input-queue-store");
       const dbPath = join(root, "session-workbench.db");
       const store = createSqliteInputQueueStore(dbPath);
-      // 未记录的会话默认不暂停
+      // 未记录的任务默认不暂停
       expect(store.isPaused("session-1")).toBe(false);
       store.setPaused("session-1", true);
       store.close();
@@ -492,7 +492,7 @@ describe("createSqliteInputQueueStore（队列持久化，与会话消息同库�
       const reopened = createSqliteInputQueueStore(dbPath);
       expect(reopened.isPaused("session-1")).toBe(true);
       expect(reopened.isPaused("session-2")).toBe(false);
-      // 会话隔离：清除只影响目标会话
+      // 任务隔离：清除只影响目标任务
       reopened.setPaused("session-1", false);
       reopened.setPaused("session-2", true);
       expect(reopened.isPaused("session-1")).toBe(false);

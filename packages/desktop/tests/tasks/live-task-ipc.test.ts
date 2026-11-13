@@ -96,7 +96,7 @@ async function setup() {
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   const delivered: TaskEventEnvelope[] = [];
-  // 会话→任务改名（票 03）：事件流双发 task:events 与 session:events，两侧序列必须一致。
+  // 任务→任务改名（票 03）：事件流双发 task:events 与 session:events，两侧序列必须一致。
   const deliveredOnTaskChannel: TaskEventEnvelope[] = [];
   const window = {
     isDestroyed: () => false,
@@ -301,7 +301,7 @@ it("完成未查看与执行状态分离，旧水位查看不会吞掉后来的�
   expect(() => invoke("mark-viewed", a.id, view.sequence + 1)).toThrow("水位");
 });
 
-it("模型未结束时公开现场包含后台完整增量，快照水位可无漏无重衔接两个会话", async () => {
+it("模型未结束时公开现场包含后台完整增量，快照水位可无漏无重衔接两个任务", async () => {
   const app = await setup();
   const a = await invoke("start", {
     requestId: "a",
