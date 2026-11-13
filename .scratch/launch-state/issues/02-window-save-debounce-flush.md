@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（store 与建窗时序）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 移动或缩放窗口结束约 500ms 后，现场文件的 bounds 与实际窗口一致
 - [x] 连续拖动窗口期间不产生高频写盘（事件被合并）

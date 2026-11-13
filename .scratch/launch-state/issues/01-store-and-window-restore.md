@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 首次启动（无现场文件）窗口为默认 1280×800 居中，现有冷启动行为不变
 - [x] 预写现场文件（bounds）后启动，窗口位置与尺寸与文件一致（e2e 从渲染层读窗口几何断言）

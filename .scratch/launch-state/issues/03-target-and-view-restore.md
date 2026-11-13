@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（store 与读取时序）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 新增 IPC：渲染层上报目标/视图变更；启动查询启动现场
 - [x] 真实 UI 切换到某会话后退出重开，直接回到该会话（e2e）
