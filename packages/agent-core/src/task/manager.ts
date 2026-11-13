@@ -6,7 +6,7 @@ import type { LanguageModel } from "ai";
 
 import type {
   AgentResourceSnapshot,
-  SessionResourceState,
+  TaskResourceState,
 } from "../context/resource-types";
 import {
   createLanguageModelFromProfile,
@@ -15,35 +15,35 @@ import {
 import type { ProviderProfile } from "../provider/provider-profile";
 import type { ToolDefinition } from "../tools/types";
 
-import { createAgentSession, type AgentSession } from "./agent-session";
+import { createAgentTask, type AgentTask } from "./agent-task";
 import type { ApprovalMode } from "./approval";
-import type { SessionPersistence } from "./persistence";
-import type { SessionSearchResult } from "./search";
+import type { TaskPersistence } from "./persistence";
+import type { TaskSearchResult } from "./search";
 import { workbenchKey } from "./workbench-state";
 import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
   ProjectRecord,
-  SessionRecord,
+  TaskRecord,
   StoredMessage,
   TranscriptItem,
 } from "./types";
 
-export interface CreateSessionManagerOptions {
-  persistence: SessionPersistence;
+export interface CreateTaskManagerOptions {
+  persistence: TaskPersistence;
   /**
-   * 会话可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
+   * 任务可用的工具（空/缺省 = 纯对话；内置六件工具见 tools/builtin）。
    * 工厂形式让 desktop 装配把 MCP 工具的启停/连接状态逐次解析进每条消息（工单 12）。
    */
   tools?: ToolDefinition[] | (() => ToolDefinition[]);
   /**
-   * 子代理编排配置（工单 13）：传入即向会话工具表追加 spawn_subagent。
+   * 子代理编排配置（工单 13）：传入即向任务工具表追加 spawn_subagent。
    * tools 同时作为子代理的完整工具集（编排器剔除 spawn_subagent 防递归）。
    */
   subagents?: SubagentsConfig;
   /**
    * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
-   * options 携带本条消息的思考档位快照（与 agent-session / subagent 的同名
+   * options 携带本条消息的思考档位快照（与 agent-task / subagent 的同名
    * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
    */
   languageModelFor?: (
@@ -51,12 +51,12 @@ export interface CreateSessionManagerOptions {
     options?: { thinkingEffort?: ThinkingEffort }
   ) => LanguageModel;
   /**
-   * 会话系统提示工厂（AGENTS.md 发现 → 组装由宿主注入，agent-core 不依赖 fs）。
+   * 任务系统提示工厂（AGENTS.md 发现 → 组装由宿主注入，agent-core 不依赖 fs）。
    * create 与 get 恢复时各调用一次。
    */
-  systemPromptFor?: (record: SessionRecord) => string;
+  systemPromptFor?: (record: TaskRecord) => string;
   /** 每条消息开始时刷新规范与技能目录；不会因读取状态而构建。 */
-  resourcesFor?: (record: SessionRecord) => AgentResourceSnapshot;
+  resourcesFor?: (record: TaskRecord) => AgentResourceSnapshot;
   /** 工具截图是否作为图片附给模型（默认 true；纯文本端点在装配层关掉走降级路径） */
   attachToolImages?: boolean;
   now?: () => string;
@@ -64,13 +64,13 @@ export interface CreateSessionManagerOptions {
 }
 
 /**
- * 会话管理器：desktop 主进程的装配入口。
- * - `create`：新建会话（绑定工作区）并落库；
+ * 任务管理器：desktop 主进程的装配入口。
+ * - `create`：新建任务（绑定工作区）并落库；
  * - `list` / `messages`：直接读持久层（应用启动时渲染侧栏与消息历史）；
- * - `get`：惰性恢复会话对象（读历史重建上下文；残留 streaming 状态重置为 idle）；
+ * - `get`：惰性恢复任务对象（读历史重建上下文；残留 streaming 状态重置为 idle）；
  * - `rename` / `setArchived`：/rename、/archive 命令与侧栏等效 UI 操作共用的落点。
  */
-export interface SessionManager {
+export interface TaskManager {
   readWorkbench(key: string): import("./workbench-state").WorkbenchEntry | null;
   writeWorkbench(
     key: string,
@@ -85,11 +85,11 @@ export interface SessionManager {
     collapsed: boolean
   ): ProjectRecord | null;
   setProjectPinned(projectId: string, pinned: boolean): ProjectRecord | null;
-  setPinned(sessionId: string, pinned: boolean): SessionRecord | null;
-  markUsed(sessionId: string): SessionRecord | null;
+  setPinned(sessionId: string, pinned: boolean): TaskRecord | null;
+  markUsed(sessionId: string): TaskRecord | null;
   removeUnstarted(sessionId: string): void;
   /** 宿主完成目录与活动检查后，仅同步更改归属。 */
-  setProject(sessionId: string, projectId: string | null): SessionRecord | null;
+  setProject(sessionId: string, projectId: string | null): TaskRecord | null;
   create(options: {
     projectId?: string | null;
     creationRequestId?: string;
@@ -103,43 +103,43 @@ export interface SessionManager {
      * local 模式不传（origin 恒为 null，工作区即原始目录）。
      */
     workspaceOriginPath?: string;
-    /** 会话 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
+    /** 任务 id（默认随机生成）；worktree 模式由宿主传入与副本目录同名的 id */
     id?: string;
-  }): AgentSession;
-  /** 全部会话记录（含已归档），置顶优先、最近使用倒序。 */
-  list(): SessionRecord[];
-  search(query: string, includeArchived?: boolean): SessionSearchResult[];
-  /** 指定会话的消息历史（读持久层，不实例化会话对象） */
+  }): AgentTask;
+  /** 全部任务记录（含已归档），置顶优先、最近使用倒序。 */
+  list(): TaskRecord[];
+  search(query: string, includeArchived?: boolean): TaskSearchResult[];
+  /** 指定任务的消息历史（读持久层，不实例化任务对象） */
   messages(sessionId: string): StoredMessage[];
   /** 持久交互记录不随上下文压缩消失；仅用于历史与草稿归属校验，不恢复等待。 */
   interactions(
     sessionId: string
   ): import("../interaction/types").InteractionRecord[];
-  /** 指定会话的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
+  /** 指定任务的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
   transcript(sessionId: string): TranscriptItem[];
-  /** 惰性恢复会话对象；不存在返回 null；同 id 返回缓存实例 */
-  get(sessionId: string): AgentSession | null;
-  /** 只读缓存实例的运行/最近一轮摘要；未实例化会话返回空状态。 */
-  resourceState(sessionId: string): SessionResourceState;
+  /** 惰性恢复任务对象；不存在返回 null；同 id 返回缓存实例 */
+  get(sessionId: string): AgentTask | null;
+  /** 只读缓存实例的运行/最近一轮摘要；未实例化任务返回空状态。 */
+  resourceState(sessionId: string): TaskResourceState;
   /** /rename：更新标题并落库；不存在返回 null */
-  rename(sessionId: string, title: string): SessionRecord | null;
+  rename(sessionId: string, title: string): TaskRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
-  setArchived(sessionId: string, archived: boolean): SessionRecord | null;
+  setArchived(sessionId: string, archived: boolean): TaskRecord | null;
   /**
    * 审批模式切换（三档）：落库并更新下次发送偏好；当前执行及子代理不受影响。
    * 不改变最近使用时间；不存在返回 null。
    */
-  setApprovalMode(sessionId: string, mode: ApprovalMode): SessionRecord | null;
-  /** 撤销本会话自动批准，立即作用后续审批；未知会话抛错。 */
-  revokeAutoApprove(sessionId: string): SessionRecord;
+  setApprovalMode(sessionId: string, mode: ApprovalMode): TaskRecord | null;
+  /** 撤销本任务自动批准，立即作用后续审批；未知任务抛错。 */
+  revokeAutoApprove(sessionId: string): TaskRecord;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(sessionId: string): CompactRecord | null;
   cancelInteractions(reason: string): void;
 }
 
-export function createSessionManager(
-  options: CreateSessionManagerOptions
-): SessionManager {
+export function createTaskManager(
+  options: CreateTaskManagerOptions
+): TaskManager {
   const { persistence } = options;
   const languageModelFor =
     options.languageModelFor ?? createLanguageModelFromProfile;
@@ -147,12 +147,12 @@ export function createSessionManager(
   const now = options.now ?? (() => new Date().toISOString());
   const generateId = options.generateId ?? randomUUID;
 
-  const cache = new Map<string, AgentSession>();
+  const cache = new Map<string, AgentTask>();
   // 启动即终结所有残留请求：transcript 可在 get 前读取，绝不重放待执行工具。
-  for (const session of persistence.listSessions()) {
-    const interactions = persistence.listInteractions(session.id);
+  for (const task of persistence.listTasks()) {
+    const interactions = persistence.listInteractions(task.id);
     const unfinished =
-      session.status !== "idle" ||
+      task.status !== "idle" ||
       interactions.some((item) => item.status === "pending");
     for (const interaction of interactions) {
       if (interaction.status === "pending")
@@ -165,16 +165,16 @@ export function createSessionManager(
     }
     if (unfinished) {
       // 只恢复历史中断点，不构建模型或重放工具。复用 aborted 消息，二次重开幂等。
-      if (!persistence.listMessages(session.id).at(-1)?.aborted)
+      if (!persistence.listMessages(task.id).at(-1)?.aborted)
         persistence.insertMessage({
           id: generateId(),
-          sessionId: session.id,
+          sessionId: task.id,
           role: "assistant",
           content: "上次执行因应用退出而中断；如需继续，请明确发送新消息。",
           aborted: true,
           createdAt: now(),
         });
-      persistence.updateSession(session.id, { status: "idle" });
+      persistence.updateSession(task.id, { status: "idle" });
     }
   }
 
@@ -186,22 +186,22 @@ export function createSessionManager(
         : item.call.createdAt;
   }
 
-  function restore(record: SessionRecord): AgentSession {
+  function restore(record: TaskRecord): AgentTask {
     const history = persistence.listMessages(record.id);
     // 上次退出时若流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；恢复即视为空闲
     if (record.status === "streaming" || record.status === "waiting-approval") {
-      const patched: SessionRecord = { ...record, status: "idle" };
+      const patched: TaskRecord = { ...record, status: "idle" };
       persistence.updateSession(record.id, { status: "idle" });
-      return createCachedSession(patched, history);
+      return createCachedTask(patched, history);
     }
-    return createCachedSession(record, history);
+    return createCachedTask(record, history);
   }
 
-  function createCachedSession(
-    record: SessionRecord,
+  function createCachedTask(
+    record: TaskRecord,
     history: StoredMessage[]
-  ): AgentSession {
-    const session = createAgentSession({
+  ): AgentTask {
+    const task = createAgentTask({
       record,
       persistence,
       history,
@@ -218,17 +218,17 @@ export function createSessionManager(
       now,
       generateId,
     });
-    cache.set(record.id, session);
-    return session;
+    cache.set(record.id, task);
+    return task;
   }
 
   /** 读取最新记录并应用补丁（rename / setArchived 共用）；同步刷新缓存实例的 record */
   function patchRecord(
     sessionId: string,
-    patch: Partial<Omit<SessionRecord, "id" | "createdAt">>
-  ): SessionRecord | null {
+    patch: Partial<Omit<TaskRecord, "id" | "createdAt">>
+  ): TaskRecord | null {
     const current = persistence
-      .listSessions()
+      .listTasks()
       .find((candidate) => candidate.id === sessionId);
     if (current === undefined) {
       return null;
@@ -298,12 +298,12 @@ export function createSessionManager(
       return patchRecord(sessionId, { lastUsedAt: now() });
     },
     cancelInteractions(reason) {
-      for (const session of cache.values()) session.cancelInteractions(reason);
+      for (const task of cache.values()) task.cancelInteractions(reason);
     },
     removeUnstarted(sessionId) {
       if (persistence.listMessages(sessionId).length)
         throw new Error("不能回滚已有历史的会话");
-      persistence.removeUnstartedSession(sessionId);
+      persistence.removeUnstartedTask(sessionId);
       cache.delete(sessionId);
     },
     create({
@@ -317,8 +317,8 @@ export function createSessionManager(
       workspaceOriginPath = null,
     }) {
       const timestamp = now();
-      const record: SessionRecord = {
-        // worktree 模式：宿主先检出托管 Worktree、以同一会话 id 落库（目录名 = 会话 id）
+      const record: TaskRecord = {
+        // worktree 模式：宿主先检出托管 Worktree、以同一任务 id 落库（目录名 = 任务 id）
         id: id ?? generateId(),
         projectId,
         creationRequestId,
@@ -329,7 +329,7 @@ export function createSessionManager(
         providerProfileId: null,
         model: null,
         status: "idle",
-        // 新建会话默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
+        // 新建任务默认「帮我批准」（assist：写入与联网自动放行，仅危险命令审批）
         approvalMode,
         autoApprove: false,
         archivedAt: null,
@@ -338,15 +338,15 @@ export function createSessionManager(
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      persistence.insertSession(record);
-      return createCachedSession(record, []);
+      persistence.insertTask(record);
+      return createCachedTask(record, []);
     },
 
     list() {
-      return persistence.listSessions();
+      return persistence.listTasks();
     },
     search: (query, includeArchived) =>
-      persistence.searchSessions(query, includeArchived),
+      persistence.searchTasks(query, includeArchived),
 
     messages(sessionId) {
       return persistence.listMessages(sessionId);
@@ -398,7 +398,7 @@ export function createSessionManager(
         return cached;
       }
       const record = persistence
-        .listSessions()
+        .listTasks()
         .find((candidate) => candidate.id === sessionId);
       if (record === undefined) {
         return null;

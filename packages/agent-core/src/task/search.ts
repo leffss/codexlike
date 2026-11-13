@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /** 搜索只返回导航所需信息，不暴露模型配置、工作区文件或工具参数。 */
-export interface SessionSearchResult {
+export interface TaskSearchResult {
   id: string;
   title: string;
   projectId: string | null;
@@ -9,21 +9,21 @@ export interface SessionSearchResult {
   archivedAt: string | null;
 }
 
-/** 直接查询持久历史；EXISTS 保证同一会话多条消息命中也只返回一次。 */
-export function createSessionSearch(db: DatabaseSync) {
+/** 直接查询持久历史；EXISTS 保证同一任务多条消息命中也只返回一次。 */
+export function createTaskSearch(db: DatabaseSync) {
   const statement = db.prepare(`
     SELECT s.id, s.title, s.project_id, p.name AS project_name, s.archived_at
-    FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
+    FROM tasks s LEFT JOIN projects p ON p.id = s.project_id
     WHERE (? = 1 OR s.archived_at IS NULL) AND (
       instr(lower(s.title), lower(?)) > 0 OR EXISTS (
         SELECT 1 FROM messages m
-        WHERE m.session_id = s.id AND instr(lower(m.content), lower(?)) > 0
+        WHERE m.task_id = s.id AND instr(lower(m.content), lower(?)) > 0
       )
     )
     ORDER BY s.pinned DESC, COALESCE(s.last_used_at, s.created_at) DESC,
       s.created_at DESC, s.id DESC
   `);
-  return (query: string, includeArchived = false): SessionSearchResult[] => {
+  return (query: string, includeArchived = false): TaskSearchResult[] => {
     const text = query.trim();
     if (!text) return [];
     return statement.all(includeArchived ? 1 : 0, text, text).map((row) => ({

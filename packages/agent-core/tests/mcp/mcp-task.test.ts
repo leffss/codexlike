@@ -8,14 +8,14 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { ApprovalMode } from "../../src/session/approval";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { ApprovalMode } from "../../src/task/approval";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import type { ToolDefinition } from "../../src/tools/types";
 import { createMcpManager, type McpManager } from "../../src/mcp/manager";
 import type { AgentResourceSnapshot } from "../../src/context/resource-types";
-import { fakeResourceSnapshot } from "../session/resource-fixture";
+import { fakeResourceSnapshot } from "../task/resource-fixture";
 
 const FIXTURE = join(__dirname, "fixtures", "fake-mcp-server.mjs");
 
@@ -52,10 +52,10 @@ async function connectedFakeManager(): Promise<McpManager> {
   return manager;
 }
 
-function sessionRecord(
+function taskRecord(
   workspacePath: string,
   approvalMode: ApprovalMode
-): SessionRecord {
+): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -154,17 +154,17 @@ function fakeClock() {
   return () => `2026-11-11T08:00:${String(++tick).padStart(2, "0")}.000Z`;
 }
 
-function makeSession(
+function makeTask(
   model: MockLanguageModelV4,
   workspacePath: string,
   tools: ToolDefinition[] | (() => ToolDefinition[]),
   approvalMode: ApprovalMode = "assist",
   resources?: () => AgentResourceSnapshot
 ) {
-  const persistence = createSqliteSessionStore(":memory:");
-  const base = sessionRecord(workspacePath, approvalMode);
-  persistence.insertSession(base);
-  const session = createAgentSession({
+  const persistence = createSqliteTaskStore(":memory:");
+  const base = taskRecord(workspacePath, approvalMode);
+  persistence.insertTask(base);
+  const session = createAgentTask({
     record: base,
     persistence,
     history: persistence.listMessages(base.id),
@@ -177,9 +177,9 @@ function makeSession(
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -188,11 +188,11 @@ async function collect(
 
 /** 拉取事件流；interaction-request 到达时自动响应（模拟审批卡片三键） */
 async function drive(
-  session: ReturnType<typeof makeSession>["session"],
+  session: ReturnType<typeof makeTask>["session"],
   text: string,
   decide: "approve" | "reject" | "always"
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   const iterator = session
     .sendMessage({ text, profile })
     [Symbol.asyncIterator]();
@@ -208,7 +208,7 @@ async function drive(
   return events;
 }
 
-describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
+describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
   it("资源工具与 MCP 共存，加载技能不绕过 ask 审批且 MCP 下轮启停仍即时生效", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-mcp-resources-"));
     const manager = await connectedFakeManager();
@@ -237,7 +237,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       { kind: "text", deltas: ["完成"] },
       { kind: "text", deltas: ["下一轮"] },
     ]);
-    const { session, persistence } = makeSession(
+    const { session, persistence } = makeTask(
       model,
       workspace,
       () => (enabled ? manager.tools() : []),
@@ -290,7 +290,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["MCP 工具返回了：", "echo: 你好 MCP"] },
     ]);
-    const { session } = makeSession(
+    const { session } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -300,7 +300,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     const events = await drive(session, "调用 MCP echo", "approve");
 
     const request = events.find(
-      (e): e is Extract<SessionEvent, { type: "interaction-request" }> =>
+      (e): e is Extract<TaskEvent, { type: "interaction-request" }> =>
         e.type === "interaction-request"
     );
     // MCP 工具参数无 command 字段 → 审批卡以工具名呈现（04 预留的回退语义）
@@ -311,7 +311,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     expect(request?.interaction.request.commandWord).toBe("mcp_fake_echo");
 
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.toolName).toBe("mcp_fake_echo");
@@ -354,7 +354,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["完成"] },
     ]);
-    const { session } = makeSession(
+    const { session } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -400,7 +400,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["完成"] },
     ]);
-    const { session, persistence } = makeSession(
+    const { session, persistence } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -431,7 +431,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["用户没批"] },
     ]);
-    const { session } = makeSession(
+    const { session } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -441,7 +441,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     const events = await drive(session, "调用", "reject");
 
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
@@ -459,7 +459,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["server 崩了，但会话还在"] },
     ]);
-    const { session } = makeSession(
+    const { session } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -471,12 +471,12 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     );
 
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
     expect(result?.call.output).toContain("mcp_fake_crash");
-    // 不产生 error 事件（会话存活）、正常收尾
+    // 不产生 error 事件（任务存活）、正常收尾
     expect(events.some((e) => e.type === "error")).toBe(false);
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
@@ -511,7 +511,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["超时了但会话没死"] },
     ]);
-    const { session } = makeSession(
+    const { session } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -522,7 +522,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       session.sendMessage({ text: "慢调用", profile })
     );
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
@@ -555,7 +555,7 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["工具没了"] },
     ]);
-    const { session } = makeSession(model, workspace, tools, "full-access");
+    const { session } = makeTask(model, workspace, tools, "full-access");
 
     // 第一条消息：工具在（模型未调用，仅确认不炸）
     const first = await collect(
@@ -563,13 +563,13 @@ describe("AgentSession 的 MCP 工具链路（工单 12）", () => {
     );
     expect(first.at(-1)?.type).toBe("assistant-done");
 
-    // 设置页禁用 echo → 第二条消息模型仍调它 → 「未注册」可读错误回填，会话不崩
+    // 设置页禁用 echo → 第二条消息模型仍调它 → 「未注册」可读错误回填，任务不崩
     gate = "off";
     const second = await collect(
       session.sendMessage({ text: "第二轮", profile })
     );
     const result = second.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);

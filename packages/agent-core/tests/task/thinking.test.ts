@@ -8,9 +8,9 @@ import {
   type CreateLanguageModelOptions,
 } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 
 /** 测试用 Provider Profile（apiKey 不会被真实使用：模型工厂注入 mock / fetch 替身） */
 const profile: ProviderProfile = {
@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(): SessionRecord {
+function taskRecord(): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -159,16 +159,16 @@ function fakeClock() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
   return events;
 }
 
-/** 装配会话：factoryCalls 记录模型工厂每次调用的 (profile, options) */
+/** 装配任务：factoryCalls 记录模型工厂每次调用的 (profile, options) */
 function makeSession(
   model: MockLanguageModelV4,
   factoryCalls?: {
@@ -176,10 +176,10 @@ function makeSession(
     options: CreateLanguageModelOptions | undefined;
   }[]
 ) {
-  const persistence = createSqliteSessionStore(":memory:");
-  const record = sessionRecord();
-  persistence.insertSession(record);
-  const session = createAgentSession({
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord();
+  persistence.insertTask(record);
+  const session = createAgentTask({
     record,
     persistence,
     languageModelFor: (modelProfile, options) => {
@@ -269,9 +269,9 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
         })
       )
     ).rejects.toThrow("无效的思考档位");
-    // 入口拒绝：不落任何消息、会话保持可用
+    // 入口拒绝：不落任何消息、任务保持可用
     expect(persistence.listMessages("session-1")).toEqual([]);
-    expect(persistence.listSessions().at(0)?.status).toBe("idle");
+    expect(persistence.listTasks().at(0)?.status).toBe("idle");
     const second = await collect(
       session.sendMessage({ text: "再来", profile })
     );
@@ -433,7 +433,7 @@ describe("主会话 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
     const { session, persistence } = makeSession(model);
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "想想看",
       profile,
@@ -576,10 +576,10 @@ describe("主会话入口 → 真实 provider 工厂（fetch 替身全链路）"
       );
     };
 
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
-    const session = createAgentSession({
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: (modelProfile, options) =>

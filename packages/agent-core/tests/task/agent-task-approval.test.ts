@@ -6,10 +6,10 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
-import type { ApprovalMode } from "../../src/session/approval";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
+import type { ApprovalMode } from "../../src/task/approval";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
 const profile: ProviderProfile = {
@@ -20,10 +20,10 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(
+function taskRecord(
   workspacePath: string,
   approvalMode: ApprovalMode
-): SessionRecord {
+): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -127,10 +127,10 @@ function makeSession(
   workspacePath: string,
   options?: { approvalMode?: ApprovalMode }
 ) {
-  const persistence = createSqliteSessionStore(":memory:");
-  const base = sessionRecord(workspacePath, options?.approvalMode ?? "assist");
-  persistence.insertSession(base);
-  const session = createAgentSession({
+  const persistence = createSqliteTaskStore(":memory:");
+  const base = taskRecord(workspacePath, options?.approvalMode ?? "assist");
+  persistence.insertTask(base);
+  const session = createAgentTask({
     record: base,
     persistence,
     history: persistence.listMessages(base.id),
@@ -146,8 +146,8 @@ async function drive(
   session: ReturnType<typeof makeSession>["session"],
   text: string,
   decide: "approve" | "reject" | "always"
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   const iterator = session
     .sendMessage({ text, profile })
     [Symbol.asyncIterator]();
@@ -163,7 +163,7 @@ async function drive(
   return events;
 }
 
-describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问）", () => {
+describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）", () => {
   it("ask 请求批准：写入与命令一律弹审批卡，批准后执行", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
@@ -192,7 +192,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
 
     // 两个工具调用都弹了审批卡（「始终询问」），批准后真实执行
     const requests = events.filter(
-      (e): e is Extract<SessionEvent, { type: "interaction-request" }> =>
+      (e): e is Extract<TaskEvent, { type: "interaction-request" }> =>
         e.type === "interaction-request"
     );
     expect(requests).toHaveLength(2);
@@ -236,7 +236,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     const events = await drive(session, "写个文件", "reject");
 
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
@@ -281,11 +281,11 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     });
 
     const requests: Extract<
-      SessionEvent,
+      TaskEvent,
       { type: "interaction-request" }
     >["interaction"]["request"][] = [];
     const statusesAtRequest: string[] = [];
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({ text: "写文件并删个东西", profile })
       [Symbol.asyncIterator]();
@@ -295,8 +295,8 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       events.push(event);
       if (event.type === "interaction-request") {
         requests.push(event.interaction.request);
-        // 等待审批期间：会话落库状态为 waiting-user（侧栏可见），pendingApproval 可查
-        statusesAtRequest.push(persistence.listSessions()[0]!.status);
+        // 等待审批期间：任务落库状态为 waiting-user（侧栏可见），pendingApproval 可查
+        statusesAtRequest.push(persistence.listTasks()[0]!.status);
         expect(session.pendingApproval?.id).toBe(event.interaction.request.id);
         expect(
           session.respondApproval(event.interaction.request.id, "approve")
@@ -308,7 +308,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     // 文件编辑自动应用；危险命令经审批后真实执行（rm 报错回填，目标本就不存在）
     expect(readFileSync(join(workspace, "auto.txt"), "utf8")).toBe("自动");
     const commandResult = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.id === "c2"
     );
     expect(commandResult?.call.isError).toBe(true);
@@ -337,8 +337,8 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       "assistant-delta",
       "assistant-done",
     ]);
-    // 审批结束后会话回到收尾状态 idle
-    expect(persistence.listSessions()[0]!.status).toBe("idle");
+    // 审批结束后任务回到收尾状态 idle
+    expect(persistence.listTasks()[0]!.status).toBe("idle");
     expect(session.pendingApproval).toBeNull();
   });
 
@@ -361,7 +361,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       approvalMode: "assist",
     });
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "跑个命令",
       profile,
@@ -396,7 +396,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     const events = await drive(session, "跑个危险命令", "reject");
 
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
@@ -428,7 +428,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       approvalMode: "full-access",
     });
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "全自动跑",
       profile,
@@ -488,7 +488,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     const { session: assistSession } = makeSession(assistModel, workspace, {
       approvalMode: "assist",
     });
-    const assistEvents: SessionEvent[] = [];
+    const assistEvents: TaskEvent[] = [];
     for await (const event of assistSession.sendMessage({
       text: "写工作区外",
       profile,
@@ -496,7 +496,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       assistEvents.push(event);
     }
     const blockedResult = assistEvents.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(blockedResult?.call.isError).toBe(true);
@@ -572,7 +572,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       { kind: "text", deltas: ["完成"] },
     ]);
     const { session } = makeSession(model, workspace, { approvalMode: "ask" });
-    const requests: SessionEvent[] = [];
+    const requests: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "第一次",
       profile,
@@ -624,17 +624,17 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
 
     const first = await drive(session, "写入", "reject");
     const firstResult = first.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(firstResult?.call.isError).toBe(true);
     expect(existsSync(join(workspace, "x.txt"))).toBe(false);
 
-    // 会话中途切换（不重启、不重建对象）：对下一次工具调用立即生效
+    // 任务中途切换（不重启、不重建对象）：对下一次工具调用立即生效
     session.setApprovalMode("full-access");
     expect(session.record.approvalMode).toBe("full-access");
 
-    const second: SessionEvent[] = [];
+    const second: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "再试一次",
       profile,
@@ -642,7 +642,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
       second.push(event);
     }
     const secondResult = second.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(secondResult?.call.isError).toBe(false);
@@ -672,7 +672,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     expect(session.respondApproval("c1", "approve")).toBe(false);
     expect(session.respondApproval("别的id", "approve")).toBe(false);
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({ text: "跑命令", profile })
       [Symbol.asyncIterator]();
@@ -691,7 +691,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
     }
     // 批准后真实执行（目标不存在 → rm 报错回填，不卡审批等待）
     const result = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(result?.call.isError).toBe(true);
@@ -728,7 +728,7 @@ describe("AgentSession 审批插点（请求批准 / 帮我批准 / 完全访问
 
     // 等待审批时中断：生成器应以拒绝结果收尾，不永久挂起
     controller.abort();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     let tail = await iterator.next();
     const timeout = Symbol("timeout");
     const raced = await Promise.race([

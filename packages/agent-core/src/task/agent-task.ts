@@ -21,7 +21,7 @@ import { extractSkillNames } from "../composer/skill-reference";
 import type {
   AgentResourceSnapshot,
   ResourceSnapshotSummary,
-  SessionResourceState,
+  TaskResourceState,
 } from "../context/resource-types";
 import {
   createLanguageModelFromProfile,
@@ -44,7 +44,7 @@ import {
   type ApprovalRequest,
 } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
-import type { SessionPersistence } from "./persistence";
+import type { TaskPersistence } from "./persistence";
 import {
   createSubagentOrchestrator,
   SUBAGENT_DELEGATION_POLICY,
@@ -56,8 +56,8 @@ import type {
   CompactRecord,
   CompactResult,
   MentionAttachment,
-  SessionEvent,
-  SessionRecord,
+  TaskEvent,
+  TaskRecord,
   StoredMessage,
 } from "./types";
 
@@ -72,17 +72,17 @@ export interface SendMessageOptions {
    * 复用同一档位；缺省按 auto 处理（未传该字段的既有调用方不受影响）。
    */
   thinkingEffort?: ThinkingEffort;
-  /** 宿主在接收发送时固定；缺省取会话的下次发送偏好。 */
+  /** 宿主在接收发送时固定；缺省取任务的下次发送偏好。 */
   approvalMode?: ApprovalMode;
   /** 中断信号：中断后已生成的部分文本保留为助手消息 */
   signal?: AbortSignal;
 }
 
-export interface CreateAgentSessionOptions {
-  /** 会话记录（新建写入或恢复读出，由调用方负责持久化） */
-  record: SessionRecord;
-  persistence: SessionPersistence;
-  /** 恢复会话时传入既有消息；新会话为空 */
+export interface CreateAgentTaskOptions {
+  /** 任务记录（新建写入或恢复读出，由调用方负责持久化） */
+  record: TaskRecord;
+  persistence: TaskPersistence;
+  /** 恢复任务时传入既有消息；新任务为空 */
   history?: StoredMessage[];
   /** AGENTS.md 等组装的系统提示；空串/省略时不注入 system 角色 */
   systemPrompt?: string;
@@ -98,9 +98,9 @@ export interface CreateAgentSessionOptions {
     options: CreateLanguageModelOptions
   ) => LanguageModel;
   /**
-   * 会话可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
+   * 任务可用的工具（spec「工具注册表」）。空数组或缺省 = 纯对话（02 的行为）。
    * 支持工厂函数：每条消息发送时逐次解析——设置页对 MCP 工具的启停、
-   * server 连接状态变化对后续消息即时生效（工单 12），无需重建会话。
+   * server 连接状态变化对后续消息即时生效（工单 12），无需重建任务。
    * 工具执行前经审批门（GLOSSARY「审批模式」）：ask 全询问、assist 仅风险命令审批、
    * full-access 全放行（见 decideApproval）。
    */
@@ -113,7 +113,7 @@ export interface CreateAgentSessionOptions {
   /**
    * 子代理编排配置（工单 13，GLOSSARY「子代理」）：传入即向工具表追加 spawn_subagent。
    * 子代理：独立上下文、完整工具集（剔除 spawn_subagent 防递归）、并发上限（超出的
-   * 委派 FIFO 排队）；子代理工具调用同样过当前审批模式；报告以工具结果回流主会话。
+   * 委派 FIFO 排队）；子代理工具调用同样过当前审批模式；报告以工具结果回流主任务。
    */
   subagents?: SubagentsConfig;
   /** 初始审批模式（缺省用 record.approvalMode） */
@@ -123,28 +123,28 @@ export interface CreateAgentSessionOptions {
   generateId?: () => string;
 }
 
-export interface AgentSession {
+export interface AgentTask {
   readonly id: string;
   readonly pendingInteractions: InteractionRecord[];
   respondInteraction(requestId: string, response: unknown): boolean;
   cancelInteractions(reason: string): void;
-  /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
-  readonly record: SessionRecord;
+  /** 任务记录快照（可序列化；最新状态以 TaskManager.list 为准） */
+  readonly record: TaskRecord;
   /** 当前运行快照实时摘要与最近一轮摘要；不包含正文，不随持久化恢复。 */
-  readonly resourceState: SessionResourceState;
+  readonly resourceState: TaskResourceState;
   /**
-   * 全部等待用户审批的请求（主会话与子代理并行等待时可能多个）。
-   * UI 切回会话时据此恢复审批卡片。
+   * 全部等待用户审批的请求（主任务与子代理并行等待时可能多个）。
+   * UI 切回任务时据此恢复审批卡片。
    */
   readonly pendingApprovals: ApprovalRequest[];
   /** 第一个等待中的审批请求；无等待时为 null（向后兼容的单值视图） */
   readonly pendingApproval: ApprovalRequest | null;
   /**
    * 切换审批模式（三档，随时可调）：只对下一次发送生效。
-   * 持久化由调用方（SessionManager）负责。
+   * 持久化由调用方（TaskManager）负责。
    */
   setApprovalMode(mode: ApprovalMode): void;
-  /** 先持久化再撤销实时会话授权；失败不改变内存。 */
+  /** 先持久化再撤销实时任务授权；失败不改变内存。 */
   revokeAutoApprove(): void;
   /**
    * 响应等待中的审批请求（审批卡片三键）：
@@ -153,13 +153,13 @@ export interface AgentSession {
    */
   respondApproval(requestId: string, decision: ApprovalDecision): boolean;
   /**
-   * 发送一条用户消息并流式聚合模型回复为会话事件流。
+   * 发送一条用户消息并流式聚合模型回复为任务事件流。
    * 模型可多轮调用工具：每轮 tool-call → 审批门（可能发 interaction-request 并暂停等待
    * respondInteraction 唤醒）→ 执行（tool-result 事件）→ 结果回填继续生成，直到最终文本回复。
-   * 单会话同一时刻只允许一个流（并发发送直接抛错）；
-   * 出错时发 error 事件（中文提示，落库为 error 消息），会话保持可用。
+   * 单任务同一时刻只允许一个流（并发发送直接抛错）；
+   * 出错时发 error 事件（中文提示，落库为 error 消息），任务保持可用。
    */
-  sendMessage(options: SendMessageOptions): AsyncIterable<SessionEvent>;
+  sendMessage(options: SendMessageOptions): AsyncIterable<TaskEvent>;
   /**
    * /compact 手动压缩（工单 08，GLOSSARY「Compact」）：
    * 用当前模型把既有历史压成摘要 → 摘要替换旧历史、保留最近 3 轮原始对话 →
@@ -261,10 +261,8 @@ function keptRoundsStart(context: ModelMessage[]): number {
   return 0;
 }
 
-/** 创建会话对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
-export function createAgentSession(
-  options: CreateAgentSessionOptions
-): AgentSession {
+/** 创建任务对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
+export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
   const { record, persistence } = options;
   // 模型上下文与持久化消息分离：user 消息进上下文时附加 @引用 内容，落库保持原文
   const context: ModelMessage[] = options.history
@@ -279,12 +277,12 @@ export function createAgentSession(
   const attachToolImages = options.attachToolImages ?? true;
 
   // 审批状态（GLOSSARY「审批模式」）：模式随时可切（只对下一次发送生效）。
-  // autoApprove 独立实时读取；遗留 always 仅批准本次，会话授权必须来自有效 scope: session 响应。
-  // waiter 表（工单 13）：主会话与多个子代理可能并行等待审批，按 requestId 路由。
+  // autoApprove 独立实时读取；遗留 always 仅批准本次，任务授权必须来自有效 scope: session 响应。
+  // waiter 表（工单 13）：主任务与多个子代理可能并行等待审批，按 requestId 路由。
   let nextApprovalMode =
     options.approvalMode ?? record.approvalMode ?? "assist";
   let approvalMode = nextApprovalMode;
-  // 主会话流的中断信号（子代理审批等待与之贯通；每次 sendMessage 更新）
+  // 主任务流的中断信号（子代理审批等待与之贯通；每次 sendMessage 更新）
   let activeSignal: AbortSignal | undefined;
   let currentResources: AgentResourceSnapshot | undefined;
   let lastResources: ResourceSnapshotSummary | null = null;
@@ -292,7 +290,7 @@ export function createAgentSession(
   let terminated = false;
   let activeUser: StoredMessage | undefined;
   let activeUserContext: ModelMessage | undefined;
-  const events = createEventBuffer<SessionEvent>();
+  const events = createEventBuffer<TaskEvent>();
   const interactions = createInteractionController({
     persistence,
     now,
@@ -387,7 +385,7 @@ export function createAgentSession(
   let orchestrator: SubagentOrchestrator | null = null;
   if (options.subagents !== undefined) {
     orchestrator = createSubagentOrchestrator(options.subagents, {
-      sessionId: record.id,
+      taskId: record.id,
       workspacePath: record.workspacePath,
       approvalMode: () => approvalMode,
       autoApprove: () => record.autoApprove === true,
@@ -400,7 +398,7 @@ export function createAgentSession(
   }
 
   // 工具表：宿主工具（工单 12 逐条消息解析）+ spawn_subagent（工单 13，见 sendMessage）
-  function resolveSessionTools(): ToolDefinition[] {
+  function resolveTaskTools(): ToolDefinition[] {
     const resolved =
       typeof options.tools === "function"
         ? options.tools()
@@ -490,7 +488,7 @@ export function createAgentSession(
       approvalMode = requestedApprovalMode ?? nextApprovalMode;
       profile = { ...profile };
       busy = true;
-      // 主会话流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
+      // 主任务流的中断信号：子代理运行与审批等待与之贯通（中断一并中止，工单 13）
       terminated = false;
       activeController = new AbortController();
       const upstreamSignal = signal;
@@ -507,7 +505,7 @@ export function createAgentSession(
           execution?.loadExplicit(extractSkillNames(text)) ?? "";
         // 工具逐条消息解析（MCP 启停即时生效），资源工具重名必须显式拒绝。
         const toolsByName = new Map(
-          resolveSessionTools().map((tool) => [tool.name, tool])
+          resolveTaskTools().map((tool) => [tool.name, tool])
         );
         for (const tool of execution?.tools ?? []) {
           if (toolsByName.has(tool.name)) {
@@ -805,7 +803,7 @@ export function createAgentSession(
           if (interrupted) {
             aborted = true;
           } else {
-            // 错误路径：中文提示落库并广播；不进入对话上下文，会话可继续使用
+            // 错误路径：中文提示落库并广播；不进入对话上下文，任务可继续使用
             const errorMessage: StoredMessage = {
               id: generateId(),
               sessionId: record.id,

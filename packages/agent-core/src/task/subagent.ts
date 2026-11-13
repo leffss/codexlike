@@ -2,17 +2,17 @@
  * 子代理编排（GLOSSARY「子代理」；spec「subagents」；工单 13）。
  *
  * spawn_subagent(task) 把调研/大范围搜索类任务委派给子代理：
- * - 独立上下文：固定系统指令 + 任务描述，不含主会话历史；
+ * - 独立上下文：固定系统指令 + 任务描述，不含主任务历史；
  * - 完整工具集但剔除 spawn_subagent（防递归，有测试）；
  * - 模型用全局子代理配置（SubagentsConfig.resolveProfile；null = 同主模型）；
- * - 单会话并发上限（默认 3，设置页可配）：超出的委派 FIFO 排队；
+ * - 单任务并发上限（默认 3，设置页可配）：超出的委派 FIFO 排队；
  * - 子代理工具调用同样过当前审批模式（readonly 下子代理同样只读，
- *   suggest 下的命令经主会话审批链路暂停等待用户）；
- * - 完成后报告以文本回流主会话上下文（spawn_subagent 的工具结果）。
+ *   suggest 下的命令经主任务审批链路暂停等待用户）；
+ * - 完成后报告以文本回流主任务上下文（spawn_subagent 的工具结果）。
  *
  * 执行模型：spawn_subagent 的 execute 立即返回（接受委派），子代理在后台运行；
- * 会话工具循环在本轮工具全部派发后经 pump() 等待本轮全部子代理结束，
- * 再把真实报告作为延迟的 tool-result 落库与回填（见 agent-session 的轮末等待）。
+ * 任务工具循环在本轮工具全部派发后经 pump() 等待本轮全部子代理结束，
+ * 再把真实报告作为延迟的 tool-result 落库与回填（见 agent-task 的轮末等待）。
  */
 import {
   streamText,
@@ -42,7 +42,7 @@ import type {
 
 import { decideApproval, type ApprovalMode } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
-import type { SessionEvent } from "./types";
+import type { TaskEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
 export const SUBAGENT_TOOL_NAME = "spawn_subagent";
@@ -56,10 +56,10 @@ export const SUBAGENT_DELEGATION_POLICY = [
   "- 并行仅限同轮派发，轮末等待全部报告后主模型才继续，不是真异步；失败时诚实说明并修正重试或自行接手，不把失败当作完成。",
 ].join("\n");
 
-/** 单会话子代理并发上限默认值（spec：默认 3，设置页可配） */
+/** 单任务子代理并发上限默认值（spec：默认 3，设置页可配） */
 export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 3;
 
-/** 子代理单次运行允许的工具轮次上限（与主会话 MAX_TOOL_ROUNDS 一致，防失控循环） */
+/** 子代理单次运行允许的工具轮次上限（与主任务 MAX_TOOL_ROUNDS 一致，防失控循环） */
 const MAX_SUBAGENT_TOOL_ROUNDS = 16;
 
 /** 运行时子代理设置（设置页全局配置的内存快照，逐次解析以便改动即时生效） */
@@ -70,7 +70,7 @@ export interface SubagentRuntimeSettings {
 /**
  * 宿主注入的子代理配置（desktop 主进程装配；测试注入 mock 模型）。
  * tools 为子代理可用的工具集——编排器还会再剔除 spawn_subagent 一次（防递归双保险）。
- * 工厂函数形式与主会话 tools 一致（工单 12）：每次委派时逐次解析，
+ * 工厂函数形式与主任务 tools 一致（工单 12）：每次委派时逐次解析，
  * MCP 工具启停、server 断线/重连对下一个子代理即时生效。
  */
 export interface SubagentsConfig {
@@ -79,7 +79,7 @@ export interface SubagentsConfig {
   /**
    * Provider Profile → 语言模型 工厂；缺省 OpenAI 兼容构造。
    * options 携带触发消息的思考档位快照（委派入队时捕获，全部轮次复用）；
-   * 签名与主会话 languageModelFor 一致（思考档位 03）。
+   * 签名与主任务 languageModelFor 一致（思考档位 03）。
    */
   languageModelFor?: (
     profile: ProviderProfile,
@@ -95,21 +95,21 @@ export interface SubagentsConfig {
 }
 
 /**
- * 会话（agent-session）向编排器提供的端口：审批状态、审批等待注册与事件出口。
- * 子代理与主会话共享冻结的审批模式、实时 autoApprove 和交互路由；
- * 会话授权不改变本轮 ToolContext 的文件访问边界。
+ * 任务（agent-task）向编排器提供的端口：审批状态、审批等待注册与事件出口。
+ * 子代理与主任务共享冻结的审批模式、实时 autoApprove 和交互路由；
+ * 任务授权不改变本轮 ToolContext 的文件访问边界。
  */
 export interface SubagentHostPort {
-  sessionId: string;
+  taskId: string;
   workspacePath: string;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
-  /** 实时读取所属会话的审批授权，不改变本轮路径权限。 */
+  /** 实时读取所属任务的审批授权，不改变本轮路径权限。 */
   autoApprove?(): boolean;
-  /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主会话正文。 */
+  /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主任务正文。 */
   resources?(): AgentResourceSnapshot | undefined;
   /**
-   * 子代理的命令审批：注册等待（主会话 waiter 表）并以 approval-request 事件
+   * 子代理的命令审批：注册等待（主任务 waiter 表）并以 approval-request 事件
    * 推给 UI（request.subagentId 标注来源）；resolve 由 respondApproval 触发。
    */
   requestInteraction(
@@ -123,12 +123,12 @@ export interface SubagentHostPort {
           "id" | "sessionId" | "turnId" | "createdAt"
         >
   ): Promise<InteractionRecord>;
-  emit(event: SessionEvent): void;
+  emit(event: TaskEvent): void;
   now(): string;
   generateId(): string;
 }
 
-/** 子代理固定角色指令；运行时追加本轮共享资源规范与目录，不复制主会话正文。 */
+/** 子代理固定角色指令；运行时追加本轮共享资源规范与目录，不复制主任务正文。 */
 const SUBAGENT_SYSTEM_PROMPT = [
   "你是 CodexLike 的子代理：主会话把一项独立任务委派给你执行。",
   "- 你拥有独立上下文，看不到主会话历史，只会收到本条任务描述；",
@@ -140,7 +140,7 @@ const SUBAGENT_SYSTEM_PROMPT = [
 
 interface SubagentEntry {
   subagentId: string;
-  /** 主会话的 spawn_subagent tool call id（报告回流绑定键） */
+  /** 主任务的 spawn_subagent tool call id（报告回流绑定键） */
   toolCallId: string;
   task: string;
   state: "queued" | "running" | "done";
@@ -162,19 +162,19 @@ interface SubagentEntry {
 }
 
 export interface SubagentOrchestrator {
-  /** spawn_subagent 工具定义（加入会话工具表） */
+  /** spawn_subagent 工具定义（加入任务工具表） */
   readonly tool: ToolDefinition;
   wait(): Promise<void>;
   /** 是否还有未结束的子代理（queued 或 running） */
   hasPending(): boolean;
   /**
-   * 委派的最终结果（报告/失败原因）：轮末等待后由会话取回，
+   * 委派的最终结果（报告/失败原因）：轮末等待后由任务取回，
    * 作为 spawn_subagent 的延迟 tool-result 落库并回填模型。
    */
   resultFor(toolCallId: string): ToolResult | undefined;
 }
 
-/** 从工具参数中读取 command 字段（与 agent-session 的审批门同构） */
+/** 从工具参数中读取 command 字段（与 agent-task 的审批门同构） */
 function commandOfToolInput(input: unknown): string | undefined {
   if (typeof input === "object" && input !== null && "command" in input) {
     const value = (input as Record<string, unknown>).command;
@@ -193,7 +193,7 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
-/** 创建子代理编排器（由 createAgentSession 内部装配；port 即会话自身） */
+/** 创建子代理编排器（由 createAgentTask 内部装配；port 即任务自身） */
 export function createSubagentOrchestrator(
   config: SubagentsConfig,
   port: SubagentHostPort
@@ -208,7 +208,7 @@ export function createSubagentOrchestrator(
 
   const modelFor = config.languageModelFor ?? createLanguageModelFromProfile;
 
-  // 事件直接送主会话共享缓冲；仅跟踪运行 Promise，不再维护第二条事件队列。
+  // 事件直接送主任务共享缓冲；仅跟踪运行 Promise，不再维护第二条事件队列。
   const running = new Set<Promise<void>>();
   const emit = port.emit;
 
@@ -260,7 +260,7 @@ export function createSubagentOrchestrator(
     }
   }
 
-  /** 子代理审批门：与主会话审批门同构（复用 decideApproval + 主会话审批链路） */
+  /** 子代理审批门：与主任务审批门同构（复用 decideApproval + 主任务审批链路） */
   async function gateAndRun(
     definition: ToolDefinition,
     input: unknown,
@@ -312,19 +312,19 @@ export function createSubagentOrchestrator(
           isError: true,
         };
       }
-      // 授权由主会话交互控制器提交；此处不写遗留命令授权。
+      // 授权由主任务交互控制器提交；此处不写遗留命令授权。
     }
     return runTool(definition, input, {
       workspacePath: port.workspacePath,
       approvalMode,
-      // 工单 11：子代理与主会话共享同一会话级浏览器 context/Cookie
-      sessionId: port.sessionId,
+      // 工单 11：子代理与主任务共享同一任务级浏览器 context/Cookie
+      sessionId: port.taskId,
       toolCallId,
       signal,
     });
   }
 
-  /** 子代理运行循环：独立上下文的 streamText 工具循环（结构与主会话循环同构） */
+  /** 子代理运行循环：独立上下文的 streamText 工具循环（结构与主任务循环同构） */
   async function runSubagent(
     entry: SubagentEntry,
     signal: AbortSignal | undefined
@@ -343,7 +343,7 @@ export function createSubagentOrchestrator(
       ]
         .filter(Boolean)
         .join("\n\n");
-      // 模型解析：设置页的子代理 Profile；null = 同主模型（spawn 时暂存的会话 profile）
+      // 模型解析：设置页的子代理 Profile；null = 同主模型（spawn 时暂存的任务 profile）
       const fallback = fallbackProfiles.get(entry.subagentId);
       const profile = (await config.resolveProfile()) ?? fallback;
       if (profile === undefined) {
@@ -388,7 +388,7 @@ export function createSubagentOrchestrator(
           break;
         }
         const result = streamText({
-          // 全部轮次复用入队时捕获的档位快照（运行中主会话切档不影响本任务）
+          // 全部轮次复用入队时捕获的档位快照（运行中主任务切档不影响本任务）
           model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
           system: systemPrompt,
           messages,
@@ -442,7 +442,7 @@ export function createSubagentOrchestrator(
         for (const call of toolCalls) {
           const base: ToolCallRecord = {
             id: call.toolCallId,
-            sessionId: port.sessionId,
+            sessionId: port.taskId,
             toolName: call.toolName,
             arguments: safeJsonStringify(call.input),
             output: "",
@@ -492,14 +492,14 @@ export function createSubagentOrchestrator(
           });
         }
 
-        // 工具结果作为 tool 消息回填，进入下一轮生成（与主会话循环一致）
+        // 工具结果作为 tool 消息回填，进入下一轮生成（与主任务循环一致）
         messages.push({ role: "tool", content: resultParts });
       }
     } catch (error) {
       if (isAbortLike(error, signal)) {
         aborted = true;
       } else {
-        // 子代理失败不崩主会话：失败原因作为报告回流，isError 标记
+        // 子代理失败不崩主任务：失败原因作为报告回流，isError 标记
         output = `子代理执行失败：${describeModelError(error)}`;
         isError = true;
       }
@@ -585,7 +585,7 @@ export function createSubagentOrchestrator(
       emit({ type: "subagent-queued", subagentId, task });
       // 立即尝试占位开跑；并发上限满则留在 FIFO 队列（前一个结束时推进）
       startQueued(context.signal);
-      // 占位输出：真实报告在会话轮末等待后作为延迟 tool-result 回填（见 resultFor）
+      // 占位输出：真实报告在任务轮末等待后作为延迟 tool-result 回填（见 resultFor）
       return {
         output:
           "已接受委派：子代理正在后台执行任务，完成后报告将回流到主会话。",
@@ -603,7 +603,7 @@ export function createSubagentOrchestrator(
     resultFor(toolCallId) {
       for (const entry of entries.values()) {
         if (entry.toolCallId === toolCallId && entry.state === "done") {
-          // 思考全文随报告一并回流（票 02）：会话侧落库进 tool_calls.reasoning 列；
+          // 思考全文随报告一并回流（票 02）：任务侧落库进 tool_calls.reasoning 列；
           // 回填模型的仍只有 output
           return {
             output: entry.output,

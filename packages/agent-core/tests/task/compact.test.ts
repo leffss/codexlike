@@ -5,15 +5,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createLanguageModelFromProfile } from "../../src/index";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
+import { createTaskManager } from "../../src/task/manager";
 import { fakeResourceSnapshot } from "./resource-fixture";
 
 /**
  * 工单 08：/compact 手动压缩（GLOSSARY「Compact」）。
- * Seam：AgentSession.compact 公共接口 + SessionPersistence（库行为经 listMessages/listCompacts 观察）
+ * Seam：AgentTask.compact 公共接口 + TaskPersistence（库行为经 listMessages/listCompacts 观察）
  * + MockLanguageModelV4 的调用记录（注入模型的请求内容）。
  */
 const profile: ProviderProfile = {
@@ -24,7 +24,7 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(): SessionRecord {
+function taskRecord(): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -126,10 +126,10 @@ function fakeClock() {
   return () => `2026-11-11T08:00:${String(++tick).padStart(2, "0")}.000Z`;
 }
 
-const tempStores: ReturnType<typeof createSqliteSessionStore>[] = [];
+const tempStores: ReturnType<typeof createSqliteTaskStore>[] = [];
 
 function memoryStore() {
-  const store = createSqliteSessionStore(":memory:");
+  const store = createSqliteTaskStore(":memory:");
   tempStores.push(store);
   return store;
 }
@@ -142,11 +142,11 @@ afterEach(() => {
 
 /** 驱动 N 轮对话（user「第k轮问题」→ assistant「第k轮回复」） */
 async function talkRounds(
-  session: ReturnType<typeof createAgentSession>,
+  session: ReturnType<typeof createAgentTask>,
   rounds: number
 ): Promise<void> {
   for (let i = 1; i <= rounds; i += 1) {
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: `第${i}轮问题`,
       profile,
@@ -157,13 +157,13 @@ async function talkRounds(
   }
 }
 
-describe("AgentSession.compact（手动压缩）", () => {
+describe("AgentTask.compact（手动压缩）", () => {
   it("兼容工厂的 compact HTTP 请求不附加思考控制字段", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     let body: Record<string, unknown> = {};
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: Array.from({ length: 8 }, (_, index) => ({
         id: `history-${index}`,
@@ -206,7 +206,7 @@ describe("AgentSession.compact（手动压缩）", () => {
         "当前规范",
         available ? { alpha: "ALPHA_PRIVATE_BODY" } : {}
       );
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor,
@@ -237,7 +237,7 @@ describe("AgentSession.compact（手动压缩）", () => {
       "ALPHA_PRIVATE_BODY"
     );
     expect(session.resourceState.last?.loaded).toEqual([]);
-    const restored = createSessionManager({
+    const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor,
@@ -259,10 +259,10 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("压缩成功：摘要替换旧历史，仅保留最近 3 轮原始对话，compact 记录入库", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     const model = compactableModel("此前对话的压缩摘要：修复了登录 bug。");
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -317,10 +317,10 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("压缩后继续对话：注入模型的消息序列 = 摘要（包装 user）+ 最近 3 轮 + 新消息", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     const model = compactableModel("压缩摘要：调通了安装流程。");
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -371,7 +371,7 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("压缩请求失败：原历史与上下文不受损，可重试且成功", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     let failFirst = true;
     let streamCall = 0;
     const model = new MockLanguageModelV4({
@@ -407,8 +407,8 @@ describe("AgentSession.compact（手动压缩）", () => {
         };
       },
     });
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -440,7 +440,7 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("互斥：压缩进行中不可发送/重复压缩；回复中不可压缩", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     let releaseGenerate: (() => void) | null = null;
     const model = new MockLanguageModelV4({
       doStream: async () => ({ stream: textStream(["回复"]) }),
@@ -464,8 +464,8 @@ describe("AgentSession.compact（手动压缩）", () => {
         };
       },
     });
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -506,10 +506,10 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("历史过短（≤3 轮）：中文提示且不动库", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     const model = compactableModel("摘要");
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -530,7 +530,7 @@ describe("AgentSession.compact（手动压缩）", () => {
 
   it("重启等价：压缩后经持久层恢复的上下文与压缩后立即发送一致（含 @引用 保留轮次）", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     const summary = "修复了打包脚本";
     let streamCall = 0;
     const model = new MockLanguageModelV4({
@@ -553,8 +553,8 @@ describe("AgentSession.compact（手动压缩）", () => {
         warnings: [],
       }),
     });
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,
@@ -596,9 +596,9 @@ describe("AgentSession.compact（手动压缩）", () => {
       "被引用的文件内容"
     );
 
-    // 等价重启：同一持久层重建会话（manager.get 的恢复路径）
-    const restored = createAgentSession({
-      record: sessionRecord(),
+    // 等价重启：同一持久层重建任务（manager.get 的恢复路径）
+    const restored = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: persistence.listMessages("session-1"),
       languageModelFor: () => model,
@@ -635,7 +635,7 @@ describe("AgentSession.compact（手动压缩）", () => {
 describe("compact 与工具调用记录的合并融合（工单 03+08）", () => {
   it("压缩落地时同步清理被压缩轮次的工具调用记录（保留轮次的不动）", async () => {
     const persistence = memoryStore();
-    persistence.insertSession(sessionRecord());
+    persistence.insertTask(taskRecord());
     const summary = "含工具调用的压缩摘要";
     const model = new MockLanguageModelV4({
       doStream: async () => ({ stream: textStream(["回复"]) }),
@@ -654,8 +654,8 @@ describe("compact 与工具调用记录的合并融合（工单 03+08）", () =>
         warnings: [],
       }),
     });
-    const session = createAgentSession({
-      record: sessionRecord(),
+    const session = createAgentTask({
+      record: taskRecord(),
       persistence,
       history: [],
       languageModelFor: () => model,

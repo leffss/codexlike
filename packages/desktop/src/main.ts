@@ -95,6 +95,12 @@ function dataDir(): string {
   return process.env.CODEXLIKE_HOME ?? join(homedir(), ".codexlike");
 }
 
+/**
+ * 管理数据库文件名（ADR 0014：session→task 改名启用新库文件）。
+ * 旧 session-workbench.db 不读取、不迁移、不删除，新库从零初始化。
+ */
+const WORKBENCH_DB_FILENAME = "task-workbench.db";
+
 let mainWindow: BrowserWindow | null = null;
 
 /** 各主题的窗口底色（页面加载前可见；与 styles.css 的 --canvas 保持一致） */
@@ -407,9 +413,10 @@ function registerLaunchStateHandlers(store: LaunchStateStore): void {
 
 void app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
-  // ADR 0010：新管理数据独立初始化，旧 codexlike.db 与用户文件原样保留，不迁移不删除。
+  // ADR 0014：session→task 改名启用新库文件（task-workbench.db），旧 session-workbench.db
+  // 不读、不删、不迁移；启动现场（workbench_state）在新库从零开始。
   const persistence = createSqliteSessionStore(
-    join(dataDir(), "session-workbench.db")
+    join(dataDir(), WORKBENCH_DB_FILENAME)
   );
 
   // 搜索源（工单 10）：key 存设置页（safeStorage 加密），内存缓存供 web_search 逐次解析；
@@ -561,9 +568,9 @@ void app.whenReady().then(async () => {
     },
   });
   registerMcpHandlers(mcpService);
-  // 输入队列（票 01 / ADR 0013）：与 session-workbench.db 同库的独立连接
+  // 输入队列（票 01 / ADR 0013）：与管理库同文件的独立连接（ADR 0014 新库文件名）
   const queueStore = createSqliteInputQueueStore(
-    join(dataDir(), "session-workbench.db")
+    join(dataDir(), WORKBENCH_DB_FILENAME)
   );
   const sessionRuntime = registerSessionHandlers({
     manager,

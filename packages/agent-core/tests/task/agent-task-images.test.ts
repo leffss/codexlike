@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createAgentSession } from "../../src/session/agent-session";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import type { SessionEvent, SessionRecord } from "../../src/session/types";
+import { createAgentTask } from "../../src/task/agent-task";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import type {
   ToolDefinition,
   ToolExecutionContext,
@@ -26,7 +26,7 @@ const profile: ProviderProfile = {
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-function sessionRecord(workspacePath: string): SessionRecord {
+function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-shot",
     title: "截图会话",
@@ -132,9 +132,9 @@ function scriptedToolThenText() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -170,11 +170,11 @@ async function runSession(
   captured: ToolExecutionContext[]
 ) {
   const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-  const persistence = createSqliteSessionStore(":memory:");
-  const record = sessionRecord(workspace);
-  persistence.insertSession(record);
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord(workspace);
+  persistence.insertTask(record);
   const model = scriptedToolThenText();
-  const session = createAgentSession({
+  const session = createAgentTask({
     record,
     persistence,
     history: [],
@@ -195,7 +195,7 @@ describe("工具结果附图（截图回填模型：多模态附图 / 纯文本�
     const { events, model } = await runSession({}, captured);
 
     expect(events.at(-1)?.type).toBe("assistant-done");
-    // 工具执行上下文带 sessionId / toolCallId（会话级浏览器与截图文件命名依赖它们）
+    // 工具执行上下文带 sessionId / toolCallId（任务级浏览器与截图文件命名依赖它们）
     expect(captured[0]?.sessionId).toBe("session-shot");
     expect(captured[0]?.toolCallId).toBe("call-1");
 

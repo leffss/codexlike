@@ -6,7 +6,7 @@ export type WorkbenchTarget =
   | { kind: "new"; projectId: string | null }
   | { kind: "session"; sessionId: string };
 
-export interface SessionPreferences {
+export interface TaskPreferences {
   providerProfileId: string;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;
@@ -35,7 +35,7 @@ export interface SavedQuestionDraft {
 
 export interface WorkbenchValue {
   text: string;
-  preferences: SessionPreferences;
+  preferences: TaskPreferences;
   questionDrafts: Record<string, SavedQuestionDraft>;
   readingPosition: ReadingPosition | null;
   /** 新建入口的幂等意图；成功消费后更换，旧异步写不能复活它。 */
@@ -50,7 +50,9 @@ export interface WorkbenchEntry {
 }
 
 export function workbenchKey(target: WorkbenchTarget): string {
+  // 持久化键已换 task 系（ADR 0014，新库从零开始）；输入形状的 kind: "session"
+  // 是 expand 阶段留给 desktop/ui 的旧结构，票 03 随桌面侧一并翻转。
   return target.kind === "session"
-    ? JSON.stringify(["session", target.sessionId])
+    ? JSON.stringify(["task", target.sessionId])
     : JSON.stringify(["new", target.projectId]);
 }

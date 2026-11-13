@@ -244,7 +244,7 @@ describe("web_search 工具", () => {
     });
     expect(webSearch?.permission).toBe("network");
 
-    // 未传 webSearch 时不注册（会话无搜索能力）
+    // 未传 webSearch 时不注册（任务无搜索能力）
     const without = createBuiltinTools();
     expect(without.map((t) => t.name)).not.toContain("web_search");
   });

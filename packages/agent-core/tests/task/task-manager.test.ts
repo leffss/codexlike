@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ThinkingEffort } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createTaskManager } from "../../src/task/manager";
 
 const profile: ProviderProfile = {
   id: "profile-1",
@@ -63,12 +63,12 @@ afterEach(() => {
   }
 });
 
-describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
+describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
   it("项目默认未置顶，管理器切换置顶但保留创建顺序和折叠状态", () => {
     const directory = mkdtempSync(join(tmpdir(), "project-pin-"));
     tempDirs.push(directory);
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({ persistence });
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({ persistence });
     const project = manager.addProject(directory);
     expect(project.pinned).toBe(false);
     manager.setProjectCollapsed(project.id, true);
@@ -81,8 +81,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
   it("create 落库并默认以工作区目录名作为标题；list 按 updatedAt 倒序", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -102,10 +102,10 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
   });
 
   it("注入的模型工厂收到思考档位：sendMessage 带档位时 options 经 manager 透传到工厂", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const factoryOptions: ({ thinkingEffort?: ThinkingEffort } | undefined)[] =
       [];
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: (_profile, options) => {
         factoryOptions.push(options);
@@ -122,15 +122,15 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
       // 只驱动流走完
     }
 
-    // 双参工厂拿到档位快照：签名与 agent-session / subagent 的注入点对齐，
+    // 双参工厂拿到档位快照：签名与 agent-task / subagent 的注入点对齐，
     // 注入方不再因 TS 参数逆变静默丢弃 thinkingEffort
     expect(factoryOptions).toEqual([{ thinkingEffort: "high" }]);
     persistence.close();
   });
 
   it("create 支持 worktree 模式与外部生成的会话 id（宿主先建 worktree 再落库）", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -163,8 +163,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     );
 
     const model = okModel();
-    const persistence1 = createSqliteSessionStore(dbPath);
-    const first = createSessionManager({
+    const persistence1 = createSqliteTaskStore(dbPath);
+    const first = createTaskManager({
       persistence: persistence1,
       languageModelFor: () => model,
     });
@@ -180,8 +180,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     );
 
     // 等价重启：同一库文件上的新 manager
-    const persistence2 = createSqliteSessionStore(dbPath);
-    const second = createSessionManager({
+    const persistence2 = createSqliteTaskStore(dbPath);
+    const second = createTaskManager({
       persistence: persistence2,
       languageModelFor: () => model,
     });
@@ -208,36 +208,36 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
   });
 
   it("恢复时把异常残留的 streaming 状态重置为 idle", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
     const session = manager.create({ workspacePath: "C:\\work\\demo" });
     // 模拟应用在流式中途被杀：库里残留 streaming
     persistence.updateSession(session.id, { status: "streaming" });
-    expect(persistence.listSessions().at(0)?.status).toBe("streaming");
+    expect(persistence.listTasks().at(0)?.status).toBe("streaming");
 
     // get 惰性恢复：用全新 manager 绕过缓存，读取残留记录并重置为 idle 落库
-    const manager2 = createSessionManager({
+    const manager2 = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
     const restored = manager2.get(session.id);
     expect(restored).not.toBeNull();
-    expect(persistence.listSessions().at(0)?.status).toBe("idle");
+    expect(persistence.listTasks().at(0)?.status).toBe("idle");
     persistence.close();
   });
 
   it("transcript：消息与工具调用按时间顺序合并（重启恢复时间线用）", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
     const session = manager.create({ workspacePath: "C:\work\demo" });
 
-    // 手工落库一份交错的记录（真实路径由会话循环产生；此处验证合并语义）
+    // 手工落库一份交错的记录（真实路径由任务循环产生；此处验证合并语义）
     persistence.insertMessage({
       id: "m1",
       sessionId: session.id,
@@ -278,8 +278,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
   });
 
   it("get 不存在的会话返回 null；create 后 get 返回同一实例（缓存）", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -292,8 +292,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
   });
 
   it("create 默认 assist 审批模式；setApprovalMode 落库并即时生效于缓存实例", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -308,21 +308,21 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     expect(session.record.approvalMode).toBe("ask");
     expect(manager.list()[0]?.approvalMode).toBe("ask");
 
-    // 不存在的会话返回 null
+    // 不存在的任务返回 null
     expect(manager.setApprovalMode("nope", "full-access")).toBeNull();
     persistence.close();
   });
 
   it("setApprovalMode 对未实例化会话只落库：get 恢复时读到新档位", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
 
     const created = manager.create({ workspacePath: "C:\work\demo" });
 
-    // 未 get 实例化前切换模式（IPC 可先于会话打开发生）
+    // 未 get 实例化前切换模式（IPC 可先于任务打开发生）
     manager.setApprovalMode(created.id, "full-access");
     const restored = manager.get(created.id)!;
     expect(restored.record.approvalMode).toBe("full-access");
@@ -330,8 +330,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
   });
 
   it("恢复时把异常残留的 waiting-approval 状态重置为 idle（上次退出时等待审批中途被杀）", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -344,14 +344,14 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     });
 
     // 等价应用重启：全新 manager 读残留记录并重置为 idle 落库
-    const manager2 = createSessionManager({
+    const manager2 = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
     const restored = manager2.get(created.id)!;
     expect(restored.record.status).toBe("idle");
     expect(
-      persistence.listSessions().find((r) => r.id === created.id)?.status
+      persistence.listTasks().find((r) => r.id === created.id)?.status
     ).toBe("idle");
     persistence.close();
   });
@@ -366,8 +366,8 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
       "codexlike.db"
     );
 
-    const persistence1 = createSqliteSessionStore(dbPath);
-    const first = createSessionManager({
+    const persistence1 = createSqliteTaskStore(dbPath);
+    const first = createTaskManager({
       persistence: persistence1,
       languageModelFor: () => okModel(),
     });
@@ -381,9 +381,9 @@ describe("createSessionManager（会话创建 / 列表 / 恢复）", () => {
     expect(first.setApprovalMode("nope", "full-access")).toBeNull();
     persistence1.close();
 
-    // 等价重启：审批模式随会话记录恢复
-    const persistence2 = createSqliteSessionStore(dbPath);
-    const second = createSessionManager({
+    // 等价重启：审批模式随任务记录恢复
+    const persistence2 = createSqliteTaskStore(dbPath);
+    const second = createTaskManager({
       persistence: persistence2,
       languageModelFor: () => okModel(),
     });

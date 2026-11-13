@@ -5,7 +5,7 @@ import {
   commandFirstWord,
   decideApproval,
   isRiskyCommand,
-} from "../../src/session/approval";
+} from "../../src/task/approval";
 
 describe("commandFirstWord（命令首词）", () => {
   it("取命令首个空白分隔 token，大小写归一", () => {

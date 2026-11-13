@@ -3,10 +3,10 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/session/persistence";
-import { createAgentSession } from "../../src/session/agent-session";
-import type { SessionRecord } from "../../src/session/types";
-import { createSessionManager } from "../../src/session/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskRecord } from "../../src/task/types";
+import { createTaskManager } from "../../src/task/manager";
 import { fakeResourceSnapshot } from "./resource-fixture";
 
 /** 工单 07：AGENTS.md → 系统提示、@引用 → 该条消息的模型上下文 */
@@ -18,7 +18,7 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(): SessionRecord {
+function taskRecord(): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -75,12 +75,12 @@ function fakeClock() {
   return () => `2026-11-10T08:00:${String(++tick).padStart(2, "0")}.000Z`;
 }
 
-describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
+describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
   it("缓存会话每条消息刷新资源规范，并与旧静态 systemPrompt 兼容", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = scriptedModel(["收到"]);
     let revision = "第一版规范";
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       systemPromptFor: () => "旧宿主提示",
@@ -111,9 +111,9 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("显式多技能按顺序去重，首次请求有正文且下一轮不继承、不写入 mentions", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = scriptedModel(["收到"]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
@@ -144,9 +144,9 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("资源状态只在运行时 active，结束保留无正文摘要；查询未恢复会话不实例化", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    persistence.insertSession(sessionRecord());
-    const uninstantiated = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    persistence.insertTask(taskRecord());
+    const uninstantiated = createTaskManager({
       persistence,
       systemPromptFor: () => {
         throw new Error("不应实例化会话");
@@ -164,7 +164,7 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
       last: null,
     });
     const model = scriptedModel(["收到"]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
@@ -193,9 +193,9 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("未知显式技能不落库、不请求模型，失败后仍能继续普通对话", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = scriptedModel(["收到"]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
@@ -226,9 +226,9 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   it.each(["failure", "abort", "return"] as const)(
     "%s 路径释放 active 与互斥，保留最近摘要",
     async (ending) => {
-      const persistence = createSqliteSessionStore(":memory:");
-      const record = sessionRecord();
-      persistence.insertSession(record);
+      const persistence = createSqliteTaskStore(":memory:");
+      const record = taskRecord();
+      persistence.insertTask(record);
       let fail = ending === "failure";
       const model = new MockLanguageModelV4({
         doStream: async () => {
@@ -236,7 +236,7 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
           return { stream: textStream("收到") };
         },
       });
-      const session = createAgentSession({
+      const session = createAgentTask({
         record,
         persistence,
         languageModelFor: () => model,
@@ -271,9 +271,9 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   );
 
   it("未配置 resources 时美元引用仍按普通文本对话", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = scriptedModel(["收到"]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -289,11 +289,11 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("systemPrompt 进入模型请求的 system 角色", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       systemPrompt: "# 用户与项目规范（AGENTS.md）\n\n回答保持简洁。",
@@ -310,11 +310,11 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("未配置 systemPrompt 时不注入 system 角色（保持工单 02 行为）", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -330,11 +330,11 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("@引用 文件内容附加进该条消息的模型上下文（XML 标签 + 路径标注）", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -378,11 +378,11 @@ describe("AgentSession 上下文注入（系统提示与 @引用）", () => {
   });
 
   it("多轮会话中 @引用 只附加在所属那条消息上", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel(["第一轮", "第二轮"]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
