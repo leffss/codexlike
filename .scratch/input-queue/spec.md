@@ -1,6 +1,6 @@
 # Spec: 输入队列（Input Queue）
 
-Status: ready-for-agent
+Status: done
 
 术语依 `GLOSSARY.md`：**输入队列**、**排队消息**、**队列暂停**、**会话**、**用户交互**。架构决策见 ADR 0013。
 
