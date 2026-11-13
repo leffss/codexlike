@@ -253,7 +253,7 @@ describe("task-view 子代理思考归并（subagent-reasoning）", () => {
     });
   });
 
-  it("未知 subagentId 的 reasoning 事件被忽略（会话切换后迟到的事件）", () => {
+  it("未知 subagentId 的 reasoning 事件被忽略（任务切换后迟到的事件）", () => {
     let items = applyTaskEvent([], {
       type: "assistant-delta",
       messageId: "a1",
@@ -271,7 +271,7 @@ describe("task-view 子代理思考归并（subagent-reasoning）", () => {
     expect(card.reasoning).toBeUndefined();
   });
 
-  it("主会话思考进序列 thinking 段、子代理思考进卡内（主/子思考互不串流）", () => {
+  it("主任务思考进序列 thinking 段、子代理思考进卡内（主/子思考互不串流）", () => {
     let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
@@ -284,7 +284,7 @@ describe("task-view 子代理思考归并（subagent-reasoning）", () => {
     items = applyTaskEvent(items, {
       type: "assistant-reasoning",
       messageId: "a1",
-      delta: "主会话思考",
+      delta: "主任务思考",
     });
     items = applyTaskEvent(items, {
       type: "subagent-reasoning",
@@ -294,7 +294,7 @@ describe("task-view 子代理思考归并（subagent-reasoning）", () => {
     expect(kinds(items)).toEqual(["subagent", "thinking"]);
     expect(items[1]).toMatchObject({
       kind: "thinking",
-      content: "主会话思考",
+      content: "主任务思考",
       responseId: "a1",
     });
     expect(items[0]).toMatchObject({

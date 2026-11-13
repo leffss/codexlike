@@ -62,7 +62,7 @@ describe("planSlashCommand", () => {
     });
   });
 
-  it("除 /new 外的命令在没有会话时不可用", () => {
+  it("除 /new 外的命令在没有任务时不可用", () => {
     expect(planSlashCommand({ name: "status", argument: "" }, false)).toEqual({
       type: "needs-task",
     });
@@ -71,7 +71,7 @@ describe("planSlashCommand", () => {
     });
   });
 
-  it("新草稿中的 /new 与新建按钮一样可用，不要求先产生空会话", () => {
+  it("新草稿中的 /new 与新建按钮一样可用，不要求先产生空任务", () => {
     expect(planSlashCommand({ name: "new", argument: "" }, false)).toEqual({
       type: "new-task",
     });
@@ -343,7 +343,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
 
 /** 工单 08：/compact 命令分发与 /status 已压缩文案 */
 describe("/compact（手动压缩）ui 分发", () => {
-  it("/compact → compact 动作；无会话时 needs-task", () => {
+  it("/compact → compact 动作；无任务时 needs-task", () => {
     expect(planSlashCommand({ name: "compact", argument: "" }, true)).toEqual({
       type: "compact",
     });

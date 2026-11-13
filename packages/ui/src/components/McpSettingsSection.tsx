@@ -24,7 +24,7 @@ const EMPTY_FORM: McpServerForm = {
 
 /**
  * 设置页「MCP servers」区（工单 12）：添加/删除 stdio server、
- * 连接状态与错误可见、逐工具启停（对会话即时生效）、手动重连。
+ * 连接状态与错误可见、逐工具启停（对任务即时生效）、手动重连。
  */
 export function McpSettingsSection() {
   const [servers, setServers] = useState<McpServerView[] | null>(null);
@@ -114,7 +114,7 @@ export function McpSettingsSection() {
           <p className="text-xs text-fg-muted">
             stdio 方式接入第三方工具服务器（Model Context Protocol）；
             发现的工具以 mcp_
-            前缀并入工具注册表，可逐工具启停（对之后的会话消息即时生效）；
+            前缀并入工具注册表，可逐工具启停（对之后的任务消息即时生效）；
             环境变量经系统加密存储。MCP
             工具按命令级权限处理——协作模式下调用会弹审批卡片。
           </p>

@@ -117,9 +117,9 @@ export function TaskContextMenu(props: {
     <div
       ref={menuRef}
       role="menu"
-      aria-label="会话操作"
-      data-testid="session-context-menu"
-      data-session-id={props.taskId}
+      aria-label="任务操作"
+      data-testid="task-context-menu"
+      data-task-id={props.taskId}
       className="fixed z-50 w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-surface p-1 text-sm text-fg shadow-lg"
       style={{ ...position, maxHeight: "calc(100vh - 16px)" }}
       onKeyDown={onKeyDown}

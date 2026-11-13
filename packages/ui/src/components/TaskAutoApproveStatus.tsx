@@ -1,4 +1,4 @@
-/** 会话级持久授权，与当前执行、问答和基础审批模式独立。 */
+/** 任务级持久授权，与当前执行、问答和基础审批模式独立。 */
 export function TaskAutoApproveStatus(props: {
   autoApprove: boolean;
   busy: boolean;
@@ -8,15 +8,15 @@ export function TaskAutoApproveStatus(props: {
   if (!props.autoApprove) return null;
   return (
     <section
-      data-testid="session-auto-approve"
-      aria-label="会话自动批准"
+      data-testid="task-auto-approve"
+      aria-label="任务自动批准"
       className="border-t border-line bg-warn-bg px-4 py-2 text-xs text-warn-fg"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span>本会话已开启自动批准</span>
+        <span>本任务已开启自动批准</span>
         <button
           type="button"
-          data-testid="session-auto-approve-revoke"
+          data-testid="task-auto-approve-revoke"
           disabled={props.busy}
           onClick={props.onRevoke}
           className="rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"

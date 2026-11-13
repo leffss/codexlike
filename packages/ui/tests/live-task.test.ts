@@ -72,7 +72,7 @@ it("终态完成时刻由消息提供，快照重放、错过增量与重启恢�
   }
 });
 
-it("会话授权由快照恢复并随事件更新，不因等待、停止或旧会话事件清除", () => {
+it("任务授权由快照恢复并随事件更新，不因等待、停止或旧任务事件清除", () => {
   let state = hydrateLiveTask({ ...snapshot, autoApprove: true });
   expect(state.autoApprove).toBe(true);
   const revoke: TaskEventEnvelope = {
@@ -195,11 +195,11 @@ it("在停止清理期间切回仍接收中断终态，不能残留流式标记"
   ]);
   expect(closed.items[0]).not.toHaveProperty("streaming", true);
 });
-it("初始现场与订阅缓冲交错仍完整且无重，其他会话和旧执行迟到事件不能污染新执行", () => {
+it("初始现场与订阅缓冲交错仍完整且无重，其他任务和旧执行迟到事件不能污染新执行", () => {
   let state = hydrateLiveTask(snapshot, [
     delta(2, "第二段"),
     delta(3, "第三段"),
-    { ...delta(4, "其他会话"), taskId: "b" },
+    { ...delta(4, "其他任务"), taskId: "b" },
   ]);
   expect(state.items).toMatchObject([
     { content: "第一段第二段第三段", streaming: true },
@@ -326,7 +326,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
   );
 });
 
-it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运行中会话不重复、不丢失；重启后由落盘重建", () => {
+it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运行中任务不重复、不丢失；重启后由落盘重建", () => {
   const reasoningEnvelope = (
     sequence: number,
     delta: string
@@ -337,7 +337,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
     activity,
     event: { type: "assistant-reasoning", messageId: "m1", delta },
   });
-  // 运行中会话切走再切回：view = 执行起点快照（不含本轮）+ 内存事件重放
+  // 运行中任务切走再切回：view = 执行起点快照（不含本轮）+ 内存事件重放
   const switchedBack = hydrateLiveTask({
     ...snapshot,
     history: [],
@@ -371,7 +371,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
           id: "u1",
           sessionId: "a",
           role: "user",
-          content: "会话内的问题",
+          content: "任务内的问题",
           createdAt: "2026-11-11T08:00:00Z",
         },
       },
@@ -406,7 +406,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
   expect(restoredThinking.streaming).toBeUndefined();
 });
 
-it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回退队列", () => {
+it("空闲队列事件按任务水位接续，加载缓冲与重复事件不回退队列", () => {
   const view: TaskView = {
     ...snapshot,
     activity: { ...activity, running: false, outcome: "completed" },
@@ -570,7 +570,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   const continued = receiveLiveEvent(dequeued, delta(7, "新回复", "e2"));
   expect(continued.items.at(-1)).toMatchObject({ content: "新回复" });
 
-  // 切换会话快照恢复：view.queue 原样带回队列条与暂停态（票 02）
+  // 切换任务快照恢复：view.queue 原样带回队列条与暂停态（票 02）
   const restored = hydrateLiveTask({
     ...snapshot,
     queueState: { queue: queued, paused: true, sendingId: null },

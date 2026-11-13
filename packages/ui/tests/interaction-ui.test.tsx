@@ -37,7 +37,7 @@ const props = {
 };
 
 describe("唯一底部 InteractionPanel", () => {
-  it("历史明确区分会话授权批量通过与旧无 scope 单次批准", () => {
+  it("历史明确区分任务授权批量通过与旧无 scope 单次批准", () => {
     for (const scope of [undefined, "once", "session"] as const) {
       const html = renderToStaticMarkup(
         createElement(InteractionHistory, {
@@ -53,7 +53,7 @@ describe("唯一底部 InteractionPanel", () => {
         })
       );
       expect(html).toContain(
-        scope === "session" ? "会话授权批量通过" : "已批准（本次）"
+        scope === "session" ? "任务授权批量通过" : "已批准（本次）"
       );
       expect(html).not.toContain("<button");
     }
@@ -202,7 +202,7 @@ describe("唯一底部 InteractionPanel", () => {
     );
     expect(last).toContain("interaction-error");
   });
-  it("审批显示单次、会话授权与拒绝，说明批量范围和风险；提交中停止仍可点", () => {
+  it("审批显示单次、任务授权与拒绝，说明批量范围和风险；提交中停止仍可点", () => {
     const html = renderToStaticMarkup(
       createElement(InteractionPanel, {
         ...props,
@@ -217,14 +217,14 @@ describe("唯一底部 InteractionPanel", () => {
       "核对改动",
       "git diff --stat",
       "批准本次",
-      "批准本会话后续所有请求",
+      "批准本任务后续所有请求",
       "主代理与子代理",
       "当前排队",
       "危险命令",
       "重启",
       "不代答问答",
       "文件工具边界",
-      "approval-approve-session",
+      "approval-approve-task",
       "approval-approve",
       "approval-reject",
       "composer-stop",

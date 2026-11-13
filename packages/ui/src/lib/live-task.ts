@@ -53,7 +53,7 @@ export function receiveLiveEvent(
   const starts =
     envelope.event.type === "user-message" ||
     envelope.event.type === "compact-start" ||
-    // 队列是会话状态而非执行增量：空闲修改也按主进程单调水位接续。
+    // 队列是任务状态而非执行增量：空闲修改也按主进程单调水位接续。
     envelope.event.type === "queue-changed";
   const cleanup =
     state.activity.outcome === "interrupted" &&

@@ -53,7 +53,7 @@ const APPROVAL_MODE_OPTIONS: {
 /**
  * 思考档位（GLOSSARY「思考档位」）→ 胶囊选项文案。
  * 与 Provider Profile 选择一样属于「下一条消息怎么发」的临时设置：
- * 只对下一条发送的消息生效，不做会话级记忆；「关」是显式发送关闭请求，
+ * 只对下一条发送的消息生效，不做任务级记忆；「关」是显式发送关闭请求，
  * 不保证强制思考模型实际停止思考（以服务端行为为准）。
  */
 const THINKING_EFFORT_OPTIONS: {
@@ -98,7 +98,7 @@ const THINKING_EFFORT_OPTIONS: {
  *   并排双按钮（票 05，与 Enter 同一提交路径），无输入时仅「停止」；空闲为单发送按钮。
  */
 export function MessageComposer(props: {
-  /** 草稿由 App 按会话保存；未传时保持独立使用能力。 */
+  /** 草稿由 App 按任务保存；未传时保持独立使用能力。 */
   draftValue?: string;
   onDraftChange?: (text: string) => void;
   profiles: ProviderProfile[];
@@ -112,7 +112,7 @@ export function MessageComposer(props: {
   /** 最新磁盘预览候选；打开技能菜单时重新发现，不沿用运行快照。 */
   skills?: readonly SkillDescriptor[];
   onOpenSkills?: () => void;
-  /** 无会话 / 未选模型 / 流式回复中时禁用发送 */
+  /** 无任务 / 未选模型 / 流式回复中时禁用发送 */
   disabled: boolean;
   /** 恢复中或首次发送消费草稿期间不允许编辑；运行中仍可准备下一条。 */
   readOnly?: boolean;
@@ -121,12 +121,12 @@ export function MessageComposer(props: {
   /** 停止按钮：打断运行中的本轮（立即中断流式输出、终止工具子进程） */
   onStop?: () => void;
   hint: string;
-  /** 当前会话审批模式；无会话时选择器禁用 */
+  /** 当前任务审批模式；无任务时选择器禁用 */
   approvalMode: ApprovalMode | null;
   onSelectApprovalMode: (mode: ApprovalMode) => void;
   /**
    * 思考档位（GLOSSARY「思考档位」）当前选择：逐条消息的临时发送设置，
-   * 只对下一条发送的消息生效；null（无会话）时选择器禁用。
+   * 只对下一条发送的消息生效；null（无任务）时选择器禁用。
    * 回复运行中允许改选（为下一条消息预置）。
    */
   thinkingEffort: ThinkingEffort | null;
@@ -137,7 +137,7 @@ export function MessageComposer(props: {
    */
   contentWidthClass?: string;
   /**
-   * 当前会话的输入队列状态（票 01/02/03，review 重构收拢三元组）：
+   * 当前任务的输入队列状态（票 01/02/03，review 重构收拢三元组）：
    * 排队条目 + 暂停标志 + 正在发出条目；队列空时队列条不渲染。
    */
   queueState?: QueueSnapshot;
@@ -514,7 +514,7 @@ export function MessageComposer(props: {
                 onSelect={props.onSelectProfile}
                 className="min-w-0 max-w-56 shrink"
               />
-              {/* 无会话禁用；运行中允许改选，只对下一条消息生效。 */}
+              {/* 无任务禁用；运行中允许改选，只对下一条消息生效。 */}
               <ComposerSelect
                 testId="thinking-effort-select"
                 label="思考档位"

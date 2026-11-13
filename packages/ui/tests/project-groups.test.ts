@@ -12,7 +12,7 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: "task",
     projectId: null,
-    title: "会话",
+    title: "任务",
     workspacePath: project.workspacePath,
     workspaceMode: "local",
     workspaceOriginPath: null,
@@ -26,7 +26,7 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
     ...overrides,
   };
 }
-it("显式项目在没有会话时仍显示，独立分区不伪造成项目", () => {
+it("显式项目在没有任务时仍显示，独立分区不伪造成项目", () => {
   expect(
     groupTasksByProject([], [project]).map((group) => [
       group.projectId,
@@ -35,7 +35,7 @@ it("显式项目在没有会话时仍显示，独立分区不伪造成项目", (
     ])
   ).toEqual([
     ["project", "项目", 0],
-    [null, "独立会话", 0],
+    [null, "独立任务", 0],
   ]);
 });
 it("相同目录及 Worktree 来源不推导归属，只有 projectId 决定所属分区", () => {

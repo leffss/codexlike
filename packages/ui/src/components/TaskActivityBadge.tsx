@@ -34,7 +34,7 @@ export function TaskActivityBadge({
         : "bg-ok-bg text-ok-fg";
   return (
     <span
-      data-testid="session-activity"
+      data-testid="task-activity"
       title={compact ? label : undefined}
       aria-label={compact ? label : undefined}
       className={

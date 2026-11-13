@@ -16,7 +16,7 @@ function previewText(text: string): string {
 const DRAG_PAYLOAD = "application/x-codexlike-queue-item";
 
 /**
- * 输入框上缘的紧凑队列条（票 01/02/03）：显示当前会话排队消息的预览与条数。
+ * 输入框上缘的紧凑队列条（票 01/02/03）：显示当前任务排队消息的预览与条数。
  * - 不进入消息流（ADR 0013：渲染层只呈现）；
  * - 超过 5 条折叠为「+N 更多」；
  * - 队列暂停（票 02，停止保留队列）：显示「已暂停」并提供「恢复」「清空」；

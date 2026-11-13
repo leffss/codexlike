@@ -95,7 +95,7 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
   });
 });
 
-describe("子代理卡内思考块：与主会话思考块同构", () => {
+describe("子代理卡内思考块：与主任务思考块同构", () => {
   function subagent(state: "running" | "done", id: string): SubagentSegment {
     return {
       kind: "subagent",

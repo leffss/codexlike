@@ -9,7 +9,7 @@ function task(overrides: Partial<TaskListItem> = {}): TaskListItem {
   return {
     id: "task",
     projectId: null,
-    title: "这是一条应优先占满剩余宽度且只显示一行的完整会话标题",
+    title: "这是一条应优先占满剩余宽度且只显示一行的完整任务标题",
     workspacePath: "C:/work/demo",
     workspaceMode: "local",
     workspaceOriginPath: null,
@@ -151,7 +151,7 @@ it.each([
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-13T11:00:00Z"));
     const item = task({ lastUsedAt });
     const html = renderSidebar(item);
-    const label = elementByTestId(html, "session-label");
+    const label = elementByTestId(html, "task-label");
     expect(label.tag).toBe("span");
     expect(textContent(label.content)).toBe(item.title);
     expect(classes(label.opening)).toEqual(
@@ -164,7 +164,7 @@ it.each([
     expect(tooltip).toContain(
       new Date(item.lastUsedAt ?? item.createdAt).toLocaleString("zh-CN")
     );
-    expect(html).not.toContain('data-testid="session-time"');
+    expect(html).not.toContain('data-testid="task-time"');
     expect(html).not.toMatch(/class="[^"]*\bw-14\b/);
   }
 );
@@ -173,9 +173,9 @@ it.each([false, true])(
   "置顶状态 %s 使用独立图标按钮且名称可访问，已置顶始终可见",
   (pinned) => {
     const html = renderSidebar(task({ pinned }));
-    const select = elementByTestId(html, "session-item");
+    const select = elementByTestId(html, "task-item");
     const pin = elementByTestId(html, "pin-button");
-    const label = pinned ? "取消置顶" : "置顶会话";
+    const label = pinned ? "取消置顶" : "置顶任务";
     expect(pin.tag).toBe("button");
     expect(attribute(pin.opening, "type")).toBe("button");
     expect(attribute(pin.opening, "aria-pressed")).toBe(String(pinned));
@@ -203,7 +203,7 @@ it.each([false, true])(
   }
 );
 
-it("Worktree 使用图标和读屏标签，保留原路径 tooltip，本地会话不显示该徽标", () => {
+it("Worktree 使用图标和读屏标签，保留原路径 tooltip，本地任务不显示该徽标", () => {
   const item = task({
     workspaceMode: "worktree",
     workspacePath: "C:/worktrees/feature",
@@ -335,7 +335,7 @@ it.each(activityCases)(
       createElement(TaskActivityBadge, { task: item, compact: false })
     );
     expect(explicitNormal).toBe(normal);
-    const normalBadge = elementByTestId(normal, "session-activity");
+    const normalBadge = elementByTestId(normal, "task-activity");
     expect(textContent(normalBadge.content)).toBe(label);
     expect(normalBadge.content).not.toContain("sr-only");
     expect(normalBadge.content).not.toContain("<svg");
@@ -347,7 +347,7 @@ it.each(activityCases)(
       createElement(TaskActivityBadge, { task: item, compact: true })
     );
     for (const html of [compact, renderSidebar(item)]) {
-      const badge = elementByTestId(html, "session-activity");
+      const badge = elementByTestId(html, "task-activity");
       expect(attribute(badge.opening, "title")).toBe(label);
       expect(attribute(badge.opening, "aria-label")).toBe(label);
       expectCompactLabel(badge.content, label);
@@ -403,7 +403,7 @@ it.each([
         )
       ).toBe("");
     }
-    expect(renderSidebar(item)).not.toContain('data-testid="session-activity"');
+    expect(renderSidebar(item)).not.toContain('data-testid="task-activity"');
   }
 );
 
@@ -424,7 +424,7 @@ it.each([false, true])(
       })
     );
     expect(html).toContain(
-      `data-testid="${archived ? "archived-session-item" : "session-item"}"`
+      `data-testid="${archived ? "archived-task-item" : "task-item"}"`
     );
     expect(html).toContain('data-testid="pin-button"');
     let buttonDepth = 0;

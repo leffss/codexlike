@@ -211,7 +211,7 @@ function ThemeSettingsSection() {
 /**
  * 终端执行偏好区（code review 修复 1，spec「设置页：… shell 偏好」）：
  * run_terminal_command 的 shell（Git Bash 默认 / PowerShell / cmd）。
- * 保存后经主进程内存缓存逐次解析，对下一次终端命令即时生效（无需重启会话）。
+ * 保存后经主进程内存缓存逐次解析，对下一次终端命令即时生效（无需重启任务）。
  */
 function TerminalSettingsSection() {
   const [shell, setShell] = useState<"git-bash" | "powershell" | "cmd">(
@@ -313,7 +313,7 @@ function TerminalSettingsSection() {
 /**
  * 子代理全局配置区（工单 13，GLOSSARY「子代理」）：
  * 子代理模型（Provider Profile 引用；默认同主模型）+ 并发上限（默认 3，1-8）。
- * 保存后对后续会话/下一次委派即时生效（主进程逐次解析内存缓存）。
+ * 保存后对后续任务/下一次委派即时生效（主进程逐次解析内存缓存）。
  */
 function SubagentSettingsSection() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
@@ -357,7 +357,7 @@ function SubagentSettingsSection() {
         maxConcurrent: Number(maxConcurrent),
       });
       setMaxConcurrent(String(settings.maxConcurrent));
-      setMessage("子代理设置已保存（对后续会话与下一次委派生效）");
+      setMessage("子代理设置已保存（对后续任务与下一次委派生效）");
       setMessageError(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -391,7 +391,7 @@ function SubagentSettingsSection() {
               value={providerProfileId}
               onChange={(e) => setProviderProfileId(e.target.value)}
             >
-              <option value="">同主模型（每次委派沿用当前会话所选模型）</option>
+              <option value="">同主模型（每次委派沿用当前任务所选模型）</option>
               {profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.name} · {profile.model}
@@ -439,7 +439,7 @@ function SubagentSettingsSection() {
   );
 }
 
-/** 搜索源配置区（工单 10）：默认 Tavily；key 经 safeStorage 加密存储，改完对进行中的会话即时生效 */
+/** 搜索源配置区（工单 10）：默认 Tavily；key 经 safeStorage 加密存储，改完对进行中的任务即时生效 */
 function SearchSettingsSection() {
   const [apiKey, setApiKey] = useState("");
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -490,7 +490,7 @@ function SearchSettingsSection() {
         <p className="text-xs text-fg-muted">
           web_search 工具使用的搜索服务（默认 Tavily，https://tavily.com
           注册，免费 1000 次/月）；API key
-          经系统加密存储。配置后无需重启会话即可生效。
+          经系统加密存储。配置后无需重启任务即可生效。
         </p>
       </div>
 

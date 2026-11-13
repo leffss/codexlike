@@ -32,7 +32,7 @@ export function WorkspaceModeSelector(props: {
       <span>
         {props.mode === "worktree"
           ? "首次发送时创建隔离副本"
-          : "首次发送才创建会话"}
+          : "首次发送才创建任务"}
       </span>
     </label>
   );
@@ -103,7 +103,7 @@ export function WorkspaceSharingNotice(props: {
           className="text-warn-fg"
         >
           共享文件风险：另有 {sharing.runningTasks.length}{" "}
-          个会话正在同一实际目录执行或等待回应（
+          个任务正在同一实际目录执行或等待回应（
           {sharing.runningTasks.map((item) => item.title).join("、")}
           ）。修改会互相影响，可继续发送，也可先停止其他任务。
         </p>

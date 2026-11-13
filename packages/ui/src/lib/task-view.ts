@@ -8,7 +8,7 @@ import type {
 
 /**
  * 时序消息段模型（GLOSSARY「消息段」「轮次」，ADR 0011）：
- * 会话视图状态是按事件发生顺序排列的扁平消息段序列——思考段、正文段、
+ * 任务视图状态是按事件发生顺序排列的扁平消息段序列——思考段、正文段、
  * 工具调用卡、子代理卡、错误段、状态段、compact 摘要段、用户消息段
  * 全部是序列中的平等成员，不按类型归类合并；时序交错在数据层保真，
  * 渲染层只按时序分派。
@@ -23,7 +23,7 @@ import type {
 interface SegmentBase {
   /** 段稳定 id（渲染 key；按 id 整段替换时不变） */
   id: string;
-  /** 会话内单调稳定序号：仅随尾部追加递增，永不复用；整段替换保持原值 */
+  /** 任务内单调稳定序号：仅随尾部追加递增，永不复用；整段替换保持原值 */
   seq: number;
   /** 轮次标签（触发本轮的用户消息 id）：段上的标签而非容器 */
   turnId: string;
@@ -87,7 +87,7 @@ export interface CompactSummarySegment extends SegmentBase {
 /** 工具调用卡段：tool-call 事件已到、tool-result 未到时显示运行中 */
 export interface ToolCallSegment extends SegmentBase {
   kind: "tool-call";
-  /** 所属会话（截图卡片按会话+调用 id 向主进程请求图片数据） */
+  /** 所属任务（截图卡片按任务+调用 id 向主进程请求图片数据） */
   taskId: string;
   toolName: string;
   /** 参数 JSON 字符串（展示时解析） */
@@ -112,7 +112,7 @@ export interface SubagentSegment extends SegmentBase {
   kind: "subagent";
   /** 子代理 id（编排器生成，进度事件匹配键） */
   id: string;
-  /** 主会话 spawn_subagent 的 tool call id（报告回流匹配；queued 阶段尚未知为空串） */
+  /** 主任务 spawn_subagent 的 tool call id（报告回流匹配；queued 阶段尚未知为空串） */
   toolCallId: string;
   /** 委派任务描述 */
   task: string;
@@ -257,7 +257,7 @@ function replaceSegment(
 }
 
 /**
- * 会话时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
+ * 任务时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
  * 历史恢复与运行期流式输出共用同一形状：本函数产出的段序列与
  * applyTaskEvent 归并出的段序列同类同构。
  */
@@ -402,7 +402,7 @@ function subagentFromToolRecord(
 
 /**
  * 流式事件 → 消息段序列增量更新（纯函数，React state 的归并核心）。
- * 调用方按 taskId 隔离事件；切会话可能错过 assistant-start，
+ * 调用方按 taskId 隔离事件；切任务可能错过 assistant-start，
  * delta / reasoning / done 自行兜底建段。
  */
 export function applyTaskEvent(
@@ -423,7 +423,7 @@ export function applyTaskEvent(
       });
 
     case "task-auto-approve-changed":
-      // 授权状态由会话控制区展示，不生成历史消息段。
+      // 授权状态由任务控制区展示，不生成历史消息段。
       return items;
 
     case "assistant-start":
@@ -527,7 +527,7 @@ export function applyTaskEvent(
           (item) => item.kind === "tool-call" && item.id === event.call.id
         )
       ) {
-        // 当前执行错过 tool-call（切会话后迟到）：由 tool-result 补齐终态卡
+        // 当前执行错过 tool-call（切任务后迟到）：由 tool-result 补齐终态卡
         // （开始时刻未观察，耗时不可知，仅记录结束时刻）
         return append(items, {
           kind: "tool-call",
@@ -618,7 +618,7 @@ export function applyTaskEvent(
       );
 
     case "subagent-reasoning":
-      // 子代理思考：与报告分离累积到所属卡片；未知 subagentId（会话切换后迟到）忽略
+      // 子代理思考：与报告分离累积到所属卡片；未知 subagentId（任务切换后迟到）忽略
       return replaceSegment(items, event.subagentId, (item) =>
         item.kind === "subagent"
           ? { ...item, reasoning: (item.reasoning ?? "") + event.delta }
@@ -667,7 +667,7 @@ function finalizeResponse(
   message: StoredMessage,
   interrupted: boolean
 ): MessageSegment[] {
-  // 全部流态段（思考/正文）收敛：不残留进行中状态（单会话单流，
+  // 全部流态段（思考/正文）收敛：不残留进行中状态（单任务单流，
   // 与 error 分支同策略）；收敛时刻取终态消息落库时刻（真实完成点，
   // 段耗时以此定格）
   let next = settleStreamingSegments(
