@@ -57,6 +57,7 @@ import {
   type LaunchStateStore,
 } from "./launch-state/launch-state-store";
 import { resolveLaunchBounds } from "./launch-state/display-geometry";
+import { trackWindowLaunchState } from "./launch-state/window-save";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
 import { createSqliteInputQueueStore } from "./sessions/input-queue-store";
@@ -587,11 +588,18 @@ void app.whenReady().then(async () => {
   const launchState = await launchStateStore.get();
   registerLaunchStateHandlers(launchStateStore);
   mainWindow = createMainWindow(themePreference, launchState);
+  // 启动现场（票02）：主进程监听窗口事件——move/resize 防抖合并落盘，
+  // maximize/unmaximize 及时记录（bounds 始终正常态）；退出屏障请求时 flush。
+  const launchStateTracking = trackWindowLaunchState({
+    win: mainWindow,
+    store: launchStateStore,
+  });
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
   registerApplicationExit({
     window: mainWindow,
     runtime: sessionRuntime,
+    flushPendingWrites: () => launchStateTracking.flush(),
     closeStorage: () => {
       persistence.close();
       queueStore.close();

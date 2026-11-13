@@ -11,6 +11,11 @@ export function registerApplicationExit(options: {
   runtime: SessionExitRuntime;
   closeStorage(): void;
   releaseResources(): Promise<void>;
+  /**
+   * 退出请求被接受时同步调用（窗口仍存活、尚未进入销毁）：
+   * 供各持久化层刷出防抖中的未落盘写（如启动现场，票02）。
+   */
+  flushPendingWrites?(): void;
 }) {
   const win = options.window;
   let storageClosed = false;
@@ -40,6 +45,7 @@ export function registerApplicationExit(options: {
   function request(event: { preventDefault(): void }) {
     if (exit.state().phase === "ready") return;
     event.preventDefault();
+    options.flushPendingWrites?.();
     exit.request();
   }
   win.on("close", request);
