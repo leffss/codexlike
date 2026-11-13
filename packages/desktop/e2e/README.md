@@ -4,12 +4,12 @@
 
 ## 运行方式
 
-- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按下表顺序依次跑 30 个场景，任一失败即停）。
+- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按下表顺序依次跑 31 个场景，任一失败即停）。
 - 单跑：根目录 `pnpm test:e2e:<场景名>`（同样先 build）。场景名列与下表一一对应。
 - 链外：`pnpm test:e2e:packaged` 需要 `CODEXLIKE_PACKAGED_EXE` 指向打包产物 exe（冷启动冒烟，不进 all 链）。
 - 定位器规范：场景文件受 `pnpm check:e2e-locators`（pre-commit）约束，见 CODING_STANDARDS.md「E2E 定位器」。
 
-## 场景索引（30 个，按 test:e2e:all 链序）
+## 场景索引（31 个，按 test:e2e:all 链序）
 
 | #   | 场景名             | 文件                       | 一行断言要点                                                                                                                 |
 | --- | ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -43,6 +43,7 @@
 | 28  | reasoning-recovery | `reasoning-recovery.mjs`   | reasoning 落库与恢复（ADR 0011）：思考随终态落 SQLite，重启可回看，切走切回不重复不丢失，旧会话无空思考块                    |
 | 29  | scroll             | `scroll-following.mjs`     | 滚动跟随状态机：流式贴底、上翻脱离不夺滚动权、回到最新恢复跟随、阅读位置记忆含贴底与否                                       |
 | 30  | window             | `window-controls.mjs`      | 自绘标题栏：菜单移除、原生最小化/最大化/还原、状态同步、设置/窄窗/主题及关闭保存                                             |
+| 31  | external-links     | `external-links.mjs`       | assistant Markdown HTTP 链接真实点击：系统打开一次、主窗口 URL/标题栏/消息/草稿保留、无额外窗口及正常退出                    |
 
 链外（不进 test:e2e:all）：
 
@@ -51,6 +52,16 @@
 | packaged | `packaged.mjs` | 打包冷启动冒烟：数据目录不存在的干净状态下窗口出现且目录自建（2026-11-11 打包黑屏事故兜底） |
 
 共享工具（非场景）：`helpers.mjs`（断言/启动/mock 骨架/退出清理）、`launch-target.mjs`（Electron 启动目标）。
+
+## external-links 测试边界
+
+- 单跑 `pnpm test:e2e:external-links`；已有最新构建时可运行 `pnpm --filter @codexlike/desktop run test:e2e:external-links`。原始 HTTP 正文场景已在修复前记录导航覆盖/关闭超时的红测试，并在产品修复后验证转绿。
+- 复用 `launchApp()` 与 `startMockProvider()`，在隔离数据目录中通过公开 Provider Profile 配置和真实发送获得 assistant Markdown HTTP 链接；本地目标页由同一 mock server 提供，不依赖互联网。
+- 仅替换 OS 边界：`shell.openExternal` 记录调用并支持 reject，防止启动系统浏览器；`dialog.showMessageBox` 记录提示参数并立即返回，避免原生弹窗阻塞。不注入导航防护、不替换产品处理器、不模拟点击回调。原 assistant 链接 DOM 不变；额外创建 React 根节点之外的原生 DOM fixture 并真实点击，专门验证绕过 Markdown 呈现层的宿主防护。真实点击之后记录主窗口 ID/URL/标题、主 frame 导航、Electron 窗口列表、目标页请求、系统打开次数及提示参数。
+- 工作台断言涵盖自绘标题栏/关闭入口、原消息、可编辑输入框与未发送草稿；工作台仍在时再验证编辑及设置往返。先汇总失败，再独立验证正常退出，避免 URL 断言短路而漏掉关闭挂起。
+- 正常退出必须在 15 秒内观察到子进程 `exit(0, null)`。标题栏消失时额外尝试原生 `BrowserWindow.close()`，不绕过原有保存屏障；超时是失败。`finally` 中 `closeApp()` 的退出重试/强杀仅用于清理，不计为正常关闭成功。
+- 宿主边界场景：原生 `_self` HTTP 链接、`target=_blank` HTTPS 弹出（与 `window.open` 汇入同一 `setWindowOpenHandler`；被拒的 `window.open` 会让 Playwright 渲染进程调用停在等待导航，故由单元测试直接覆盖 handler 的该形态）、同窗口及新窗口 `file:`、新窗口 `data:`/`javascript:`/未知协议、`openExternal` reject 后的一次 warning 提示；每项检查 URL、单窗口、工作台及草稿保留，拒绝路径在 500ms 观察窗口内验证零外部调用。被产品取消的主 frame 导航会让 Playwright 的等待型 locator 调用（含 boundingBox/locator.evaluate）永久停在 waiting for navigation to finish，故边界夹具的点击用实际命中点的真实鼠标输入，点击后的工作台、点击计数与清理断言全部经 evaluate 直读 DOM，不经 locator 等待；弹出场景（`target=_blank` + `rel=noopener noreferrer`，与 `window.open` 汇入同一 `setWindowOpenHandler`）不取消主 frame 导航，不受此影响。所有场景结束后独立验证真实关闭。
+- 尚未覆盖：真实 TLS 网络、Markdown HTTPS/裸 URL、compact/子代理报告、同窗口 `javascript:`/`data:`、自动重定向、子 frame、开发服务器/打包 exe 入口、真实系统浏览器及原生提示窗口外观、提示自身 reject。当前用例不冒充上述覆盖。
 
 ## 新增场景的维护要求
 

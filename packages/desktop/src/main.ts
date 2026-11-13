@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   app,
@@ -51,6 +52,7 @@ import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerSessionHandlers } from "./sessions/session-ipc";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
 import { registerWindowControls } from "./window/window-controls";
+import { registerNavigationPolicy } from "./window/navigation-policy";
 import { sessionScreenshotDir } from "./sessions/screenshots";
 import {
   createSubagentSettingsStore,
@@ -114,15 +116,19 @@ function createMainWindow(theme: ThemeName | null): BrowserWindow {
   registerWindowControls(win);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  // 打包时由 extraResources 提供静态界面；开发目录的生产构建（含 E2E）使用 ui/dist。
+  const entryFile = app.isPackaged
+    ? join(process.resourcesPath, "ui-dist", "index.html")
+    : join(__dirname, "..", "..", "ui", "dist", "index.html");
+  // 必须先注册保护，连首次加载的重定向也不能替换工作台。
+  registerNavigationPolicy(
+    win.webContents,
+    devServerUrl || pathToFileURL(entryFile).href
+  );
   if (devServerUrl) {
     void win.loadURL(devServerUrl);
-  } else if (app.isPackaged) {
-    // 打包产物（工单 14）：ui 静态产物由 electron-builder 放在 resources/ui-dist
-    // （asar 外的 extraResources，Monaco worker 等以 file:// 直读）
-    void win.loadFile(join(process.resourcesPath, "ui-dist", "index.html"));
   } else {
-    // 生产构建（开发目录运行，如 E2E）：ui 包产物位于平级目录 packages/ui/dist
-    void win.loadFile(join(__dirname, "..", "..", "ui", "dist", "index.html"));
+    void win.loadFile(entryFile);
   }
 
   return win;
