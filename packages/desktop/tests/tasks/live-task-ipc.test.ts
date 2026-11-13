@@ -11,7 +11,7 @@ import {
   createWorktreeService,
 } from "@codexlike/agent-core/node";
 import type { BrowserWindow } from "electron";
-import type { SessionEventEnvelope } from "../../src/shared/ipc";
+import type { TaskEventEnvelope } from "../../src/shared/ipc";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
 import { listenMock } from "./mock-server";
@@ -95,12 +95,18 @@ async function setup() {
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
-  const delivered: SessionEventEnvelope[] = [];
+  const delivered: TaskEventEnvelope[] = [];
+  // 会话→任务改名（票 03）：事件流双发 task:events 与 session:events，两侧序列必须一致。
+  const deliveredOnTaskChannel: TaskEventEnvelope[] = [];
   const window = {
     isDestroyed: () => false,
     webContents: {
-      send: (_channel: string, envelope: SessionEventEnvelope) =>
-        delivered.push(structuredClone(envelope)),
+      send: (channel: string, envelope: TaskEventEnvelope) => {
+        if (channel === "session:events")
+          delivered.push(structuredClone(envelope));
+        else if (channel === "task:events")
+          deliveredOnTaskChannel.push(structuredClone(envelope));
+      },
     },
   } as unknown as BrowserWindow;
   registerTaskHandlers({
@@ -136,7 +142,7 @@ async function setup() {
     );
     if (finish) res.end("data: [DONE]\n\n");
   }
-  return { profile, project, frame, delivered };
+  return { profile, project, frame, delivered, deliveredOnTaskChannel };
 }
 
 it("运行期思考随现场恢复但不扩大历史持久化范围，等待工具可从统一现场取得", async () => {
@@ -215,6 +221,8 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
   )?.message;
   expect(interrupted?.reasoning).toBe("只存在运行期的思考");
   expect(interrupted?.content).not.toContain("只存在运行期的思考");
+  // 事件流双发（票 03）：task:events 与 session:events 收到完全一致的信封序列
+  expect(app.deliveredOnTaskChannel).toEqual(app.delivered);
 });
 
 it("启动前失败不覆盖上一轮现场与水位，重试仍沿原序号递增", async () => {

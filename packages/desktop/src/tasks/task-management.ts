@@ -1,12 +1,12 @@
 import type { TaskManager } from "@codexlike/agent-core/node";
-import type { SessionExecutionState } from "../shared/ipc";
+import type { TaskExecutionState } from "../shared/ipc";
 
 /** 宿主管理规则。检查和同步写入之间不得 await；归属调整/项目移除复用此保护。 */
 export function createTaskManagement(
   manager: TaskManager,
   executions: ReadonlyMap<string, string>
 ) {
-  function execution(sessionId: string): SessionExecutionState | null {
+  function execution(sessionId: string): TaskExecutionState | null {
     const record = manager.list().find((item) => item.id === sessionId);
     if (!record) return null;
     const pending = manager.get(sessionId)?.pendingInteractions ?? [];

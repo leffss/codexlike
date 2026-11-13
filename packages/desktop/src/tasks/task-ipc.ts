@@ -45,11 +45,12 @@ import {
   IPC,
   type QueueOperationResult,
   type QueueSnapshot,
-  type SessionEventEnvelope,
-  type StartSessionInput,
+  type TaskEventEnvelope,
+  type StartTaskInput,
+  type WorkspaceSharingTarget,
 } from "../shared/ipc";
 
-/** 注册会话相关 IPC 指令；事件流经 IPC.sessionEvents 推送给主窗口 */
+/** 注册任务相关 IPC 指令；事件流经 task:events / session:events 双发推送给主窗口 */
 export function registerTaskHandlers(options: {
   manager: TaskManager;
   profiles: ProfileStore;
@@ -113,8 +114,21 @@ export function registerTaskHandlers(options: {
     return task;
   }
 
+  /**
+   * 会话→任务改名（票 03）expand 兼容：同一 handler 同时挂正式 tasks:* 与
+   * 旧 sessions:* 两个 channel 名，现有 UI 调用与 e2e 不改仍绿；票 06 删旧注册。
+   */
+  function dualHandle<Args extends unknown[]>(
+    taskChannel: string,
+    sessionChannel: string,
+    handler: (event: IpcMainInvokeEvent, ...args: Args) => unknown
+  ): void {
+    ipcMain.handle(taskChannel, handler);
+    ipcMain.handle(sessionChannel, handler);
+  }
+
   function emit(
-    input: Pick<SessionEventEnvelope, "sessionId" | "executionId" | "event">
+    input: Pick<TaskEventEnvelope, "sessionId" | "executionId" | "event">
   ): void {
     const envelope = liveSessions.accept(
       input.sessionId,
@@ -124,6 +138,7 @@ export function registerTaskHandlers(options: {
     if (!envelope) return;
     const win = getWindow();
     if (win !== null && !win.isDestroyed()) {
+      win.webContents.send(IPC.taskEvents, envelope);
       win.webContents.send(IPC.sessionEvents, envelope);
     }
   }
@@ -158,8 +173,10 @@ export function registerTaskHandlers(options: {
       });
       if (!envelope) return;
       for (const window of getWindows()) {
-        if (!window.isDestroyed())
+        if (!window.isDestroyed()) {
+          window.webContents.send(IPC.taskEvents, envelope);
           window.webContents.send(IPC.sessionEvents, envelope);
+        }
       }
     },
   });
@@ -228,7 +245,8 @@ export function registerTaskHandlers(options: {
     }
     return result;
   });
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.setProject,
     IPC.sessions.setProject,
     (_e, id: unknown, projectId: unknown) => {
       if (
@@ -239,13 +257,13 @@ export function registerTaskHandlers(options: {
       return membership.setProject(id, projectId);
     }
   );
-  ipcMain.handle(IPC.sessions.list, () =>
+  dualHandle(IPC.tasks.list, IPC.sessions.list, () =>
     manager.list().map((record) => ({
       ...record,
       activity: liveSessions.activity(record.id),
     }))
   );
-  ipcMain.handle(IPC.sessions.view, (_e, sessionId: unknown) => {
+  dualHandle(IPC.tasks.view, IPC.sessions.view, (_e, sessionId: unknown) => {
     if (typeof sessionId !== "string")
       throw new Error("view：sessionId 必须是字符串");
     const view = liveSessions.view(sessionId);
@@ -254,7 +272,8 @@ export function registerTaskHandlers(options: {
       ? null
       : { ...view, queueState: queueSnapshot(sessionId) };
   });
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.markViewed,
     IPC.sessions.markViewed,
     (_e, sessionId: unknown, sequence: unknown) => {
       if (typeof sessionId !== "string" || typeof sequence !== "number")
@@ -275,23 +294,31 @@ export function registerTaskHandlers(options: {
       throw new Error("项目 setPinned：参数不合法");
     return manager.setProjectPinned(id, pinned);
   });
-  ipcMain.handle(IPC.sessions.setPinned, (_e, id: unknown, pinned: unknown) => {
-    if (typeof id !== "string" || typeof pinned !== "boolean")
-      throw new Error("setPinned：参数不合法");
-    return manager.setPinned(id, pinned);
-  });
-  ipcMain.handle(IPC.sessions.markUsed, (_e, id: unknown) => {
+  dualHandle(
+    IPC.tasks.setPinned,
+    IPC.sessions.setPinned,
+    (_e, id: unknown, pinned: unknown) => {
+      if (typeof id !== "string" || typeof pinned !== "boolean")
+        throw new Error("setPinned：参数不合法");
+      return manager.setPinned(id, pinned);
+    }
+  );
+  dualHandle(IPC.tasks.markUsed, IPC.sessions.markUsed, (_e, id: unknown) => {
     if (typeof id !== "string") throw new Error("markUsed：参数不合法");
     return manager.markUsed(id);
   });
-  ipcMain.handle(IPC.sessions.workspaceSharing, (_e, target) =>
-    workspaceSharing(
-      target,
-      manager,
-      (id) => management.execution(id)?.running ?? false
-    )
+  dualHandle(
+    IPC.tasks.workspaceSharing,
+    IPC.sessions.workspaceSharing,
+    (_e, target: WorkspaceSharingTarget) =>
+      workspaceSharing(
+        target,
+        manager,
+        (id) => management.execution(id)?.running ?? false
+      )
   );
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.search,
     IPC.sessions.search,
     (_e, query: unknown, includeArchived: unknown = false) => {
       if (typeof query !== "string" || typeof includeArchived !== "boolean")
@@ -299,17 +326,21 @@ export function registerTaskHandlers(options: {
       return manager.search(query, includeArchived);
     }
   );
-  ipcMain.handle(IPC.sessions.execution, (_e, sessionId: unknown) => {
-    if (typeof sessionId !== "string")
-      throw new Error("execution：sessionId 必须是字符串");
-    return management.execution(sessionId);
-  });
+  dualHandle(
+    IPC.tasks.execution,
+    IPC.sessions.execution,
+    (_e, sessionId: unknown) => {
+      if (typeof sessionId !== "string")
+        throw new Error("execution：sessionId 必须是字符串");
+      return management.execution(sessionId);
+    }
+  );
 
-  ipcMain.handle(IPC.sessions.start, (_e, input: unknown) => {
+  dualHandle(IPC.tasks.start, IPC.sessions.start, (_e, input: unknown) => {
     assertOpen();
     if (!input || typeof input !== "object")
       throw new Error("首次发送参数不合法");
-    const request = input as StartSessionInput;
+    const request = input as StartTaskInput;
     if (
       typeof request.requestId !== "string" ||
       !request.requestId.trim() ||
@@ -488,20 +519,25 @@ export function registerTaskHandlers(options: {
     return task;
   });
 
-  ipcMain.handle(IPC.sessions.selectWorkspace, async () => {
-    // E2E 钩子：Playwright 无法操作原生目录对话框，自动化环境固定返回该目录
-    const pinned = process.env.CODEXLIKE_TEST_WORKSPACE;
-    if (pinned !== undefined && pinned !== "") {
-      return pinned;
+  dualHandle(
+    IPC.tasks.selectWorkspace,
+    IPC.sessions.selectWorkspace,
+    async () => {
+      // E2E 钩子：Playwright 无法操作原生目录对话框，自动化环境固定返回该目录
+      const pinned = process.env.CODEXLIKE_TEST_WORKSPACE;
+      if (pinned !== undefined && pinned !== "") {
+        return pinned;
+      }
+      const win = getWindow();
+      const result = win
+        ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
+        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
     }
-    const win = getWindow();
-    const result = win
-      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
+  );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.messages,
     IPC.sessions.messages,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -694,11 +730,14 @@ export function registerTaskHandlers(options: {
       approvalMode: entry.approvalMode,
     });
   }
-  ipcMain.handle(IPC.sessions.send, (_e, ...args: Parameters<typeof send>) =>
-    track(send(...args))
+  dualHandle(
+    IPC.tasks.send,
+    IPC.sessions.send,
+    (_e, ...args: Parameters<typeof send>) => track(send(...args))
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.interrupt,
     IPC.sessions.interrupt,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -744,7 +783,8 @@ export function registerTaskHandlers(options: {
       ...queueSnapshot(sessionId),
     };
   }
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.queueRemove,
     IPC.sessions.queueRemove,
     (_e, sessionId: unknown, id: unknown) => {
       assertQueueSession(sessionId);
@@ -753,7 +793,8 @@ export function registerTaskHandlers(options: {
       return queueResult(sessionId);
     }
   );
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.queueUpdate,
     IPC.sessions.queueUpdate,
     (
       _e,
@@ -784,7 +825,8 @@ export function registerTaskHandlers(options: {
       return queueResult(sessionId);
     }
   );
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.queueReorder,
     IPC.sessions.queueReorder,
     (_e, sessionId: unknown, orderedIds: unknown) => {
       assertQueueSession(sessionId);
@@ -799,7 +841,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.queueResume,
     IPC.sessions.queueResume,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       // 参数与会话校验统一走 assertQueueSession（review 重构），与其余队列操作一致
@@ -809,7 +852,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.queueClear,
     IPC.sessions.queueClear,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       assertQueueSession(sessionId);
@@ -818,7 +862,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.rename,
     IPC.sessions.rename,
     (_e: IpcMainInvokeEvent, sessionId: unknown, title: unknown) => {
       if (typeof sessionId !== "string" || typeof title !== "string") {
@@ -828,7 +873,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.archive,
     IPC.sessions.archive,
     (_e: IpcMainInvokeEvent, sessionId: unknown, archived: unknown) => {
       if (typeof sessionId !== "string" || typeof archived !== "boolean") {
@@ -844,7 +890,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.toolImage,
     IPC.sessions.toolImage,
     (_e: IpcMainInvokeEvent, sessionId: unknown, toolCallId: unknown) => {
       if (typeof sessionId !== "string" || typeof toolCallId !== "string") {
@@ -858,7 +905,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.status,
     IPC.sessions.status,
     async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -892,7 +940,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.resources,
     IPC.sessions.resources,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -911,7 +960,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.compact,
     IPC.sessions.compact,
     (_e: IpcMainInvokeEvent, sessionId: unknown, profileId: unknown) =>
       track(
@@ -971,7 +1021,8 @@ export function registerTaskHandlers(options: {
       )
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.workspaceFiles,
     IPC.sessions.workspaceFiles,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -987,13 +1038,18 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(IPC.sessions.revokeAutoApprove, (_e, sessionId: unknown) => {
-    if (typeof sessionId !== "string" || !sessionId.trim())
-      throw new Error("revokeAutoApprove：参数不合法");
-    return manager.revokeAutoApprove(sessionId);
-  });
+  dualHandle(
+    IPC.tasks.revokeAutoApprove,
+    IPC.sessions.revokeAutoApprove,
+    (_e, sessionId: unknown) => {
+      if (typeof sessionId !== "string" || !sessionId.trim())
+        throw new Error("revokeAutoApprove：参数不合法");
+      return manager.revokeAutoApprove(sessionId);
+    }
+  );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.setApprovalMode,
     IPC.sessions.setApprovalMode,
     (_e: IpcMainInvokeEvent, sessionId: unknown, mode: unknown) => {
       if (typeof sessionId !== "string") {
@@ -1025,7 +1081,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.pendingInteractions,
     IPC.sessions.pendingInteractions,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.trim() === "") {
@@ -1035,7 +1092,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.respondInteraction,
     IPC.sessions.respondInteraction,
     (
       _e: IpcMainInvokeEvent,
@@ -1061,7 +1119,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.respondApproval,
     IPC.sessions.respondApproval,
     (
       _e: IpcMainInvokeEvent,
@@ -1090,7 +1149,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.pendingApproval,
     IPC.sessions.pendingApproval,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {
@@ -1102,7 +1162,8 @@ export function registerTaskHandlers(options: {
     }
   );
 
-  ipcMain.handle(
+  dualHandle(
+    IPC.tasks.pendingApprovals,
     IPC.sessions.pendingApprovals,
     (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       if (typeof sessionId !== "string") {

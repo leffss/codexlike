@@ -1,20 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { TaskManager, TranscriptItem } from "@codexlike/agent-core/node";
-import type {
-  SessionActivity,
-  SessionEventEnvelope,
-  SessionView,
-} from "../shared/ipc";
+import type { TaskActivity, TaskEventEnvelope, TaskView } from "../shared/ipc";
 
 interface LiveExecution {
   executionId: string;
   history: TranscriptItem[];
-  events: SessionEventEnvelope[];
+  events: TaskEventEnvelope[];
   sequence: number;
   viewed: number;
   terminalAt: number;
   stopped: boolean;
-  activity: SessionActivity;
+  activity: TaskActivity;
 }
 
 /** 宿主保存当前执行日志；历史只在执行起点取一次，避免轮末落库与增量重复。
@@ -24,13 +20,13 @@ interface LiveExecution {
  */
 export function createLiveTasks(manager: TaskManager) {
   const sessions = new Map<string, LiveExecution>();
-  const idle = (): SessionActivity => ({
+  const idle = (): TaskActivity => ({
     running: false,
     waitingForUser: false,
     outcome: null,
     unread: false,
   });
-  function activity(id: string): SessionActivity {
+  function activity(id: string): TaskActivity {
     const live = sessions.get(id);
     if (!live) {
       const last = manager.messages(id).at(-1);
@@ -60,8 +56,8 @@ export function createLiveTasks(manager: TaskManager) {
   function accept(
     id: string,
     executionId: string,
-    event: SessionEventEnvelope["event"]
-  ): SessionEventEnvelope | null {
+    event: TaskEventEnvelope["event"]
+  ): TaskEventEnvelope | null {
     const live = sessions.get(id);
     if (
       !live ||
@@ -127,7 +123,7 @@ export function createLiveTasks(manager: TaskManager) {
       live.activity.waitingForUser =
         !live.stopped && (manager.get(id)?.pendingInteractions.length ?? 0) > 0;
     }
-    const envelope: SessionEventEnvelope = {
+    const envelope: TaskEventEnvelope = {
       sessionId: id,
       executionId,
       sequence: live.sequence,
@@ -140,8 +136,8 @@ export function createLiveTasks(manager: TaskManager) {
   /** 队列修改不等同于执行：空闲/重开后也延续会话水位，不伪造运行态。 */
   function acceptQueue(
     id: string,
-    event: Extract<SessionEventEnvelope["event"], { type: "queue-changed" }>
-  ): SessionEventEnvelope | null {
+    event: Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>
+  ): TaskEventEnvelope | null {
     if (!sessions.has(id)) {
       if (!manager.list().some((record) => record.id === id)) return null;
       sessions.set(id, {
@@ -157,7 +153,7 @@ export function createLiveTasks(manager: TaskManager) {
     }
     return accept(id, sessions.get(id)!.executionId, event);
   }
-  function view(id: string): SessionView | null {
+  function view(id: string): TaskView | null {
     const record = manager.list().find((record) => record.id === id);
     if (!record) return null;
     const live = sessions.get(id);

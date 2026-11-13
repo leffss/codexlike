@@ -11,7 +11,7 @@ import {
   createWorktreeService,
 } from "@codexlike/agent-core/node";
 import type { BrowserWindow } from "electron";
-import type { SessionEventEnvelope } from "../../src/shared/ipc";
+import type { TaskEventEnvelope } from "../../src/shared/ipc";
 import { createProfileStore } from "../../src/profiles/profile-store";
 import { createSqliteInputQueueStore } from "../../src/tasks/input-queue-store";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
@@ -97,13 +97,13 @@ async function setup() {
     apiKey: "test",
     baseURL: `http://127.0.0.1:${port}/v1`,
   });
-  const delivered: SessionEventEnvelope[][] = [[], []];
+  const delivered: TaskEventEnvelope[][] = [[], []];
   const windows = delivered.map(
     (events) =>
       ({
         isDestroyed: () => false,
         webContents: {
-          send: (_channel: string, event: SessionEventEnvelope) =>
+          send: (_channel: string, event: TaskEventEnvelope) =>
             events.push(structuredClone(event)),
         },
       }) as unknown as BrowserWindow
