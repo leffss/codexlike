@@ -169,7 +169,7 @@ describe("用户交互公开 seam", () => {
     ).toBe(true);
     expect(store.listInteractions(session.id)[2]?.status).toBe("pending");
     expect(store.listInteractions(other.id)[0]?.status).toBe("pending");
-    store.updateSession(session.id, { autoApprove: false });
+    store.updateTask(session.id, { autoApprove: false });
     expect(
       store.approveTaskInteraction(session.id, "a", "2026-01-03")
     ).toBeNull();
@@ -470,10 +470,10 @@ describe("用户交互公开 seam", () => {
         if (failGrant) throw new Error("授权保存失败");
         return store.approveTaskInteraction(...args);
       },
-      updateSession(...args: Parameters<typeof store.updateSession>) {
+      updateTask(...args: Parameters<typeof store.updateTask>) {
         if (args[1].autoApprove === false && failRevoke)
           throw new Error("撤销保存失败");
-        return store.updateSession(...args);
+        return store.updateTask(...args);
       },
     };
     const manager = createTaskManager({
@@ -544,9 +544,9 @@ describe("用户交互公开 seam", () => {
           committed = result !== null;
           return result;
         },
-        updateSession(...args) {
+        updateTask(...args) {
           if (committed) throw new Error("提交后不应再次保存等待状态");
-          store.updateSession(...args);
+          store.updateTask(...args);
         },
       },
       tools: [
@@ -913,7 +913,7 @@ describe("用户交互公开 seam", () => {
       cancelReason: null,
     };
     first.insertInteraction(pending);
-    first.updateSession("legacy", { status: "idle" });
+    first.updateTask("legacy", { status: "idle" });
     first.close();
     const persistence = createSqliteTaskStore(path);
     const model = modelFor("不应调用");

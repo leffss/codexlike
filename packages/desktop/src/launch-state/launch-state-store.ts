@@ -30,7 +30,7 @@ export type LaunchView = "workspace" | "settings";
 export interface LaunchState {
   bounds?: LaunchBounds;
   maximized?: boolean;
-  /** 退出前的工作台目标（GLOSSARY）：某会话，或新建草稿 + 项目关联 */
+  /** 退出前的工作台目标（GLOSSARY）：某任务，或新建草稿 + 项目关联 */
   workbenchTarget?: WorkbenchTarget;
   view?: LaunchView;
 }
@@ -113,7 +113,7 @@ export function createLaunchStateStore(options: {
   function assertValid(state: LaunchStatePatch): void {
     if (!isLaunchState(state)) {
       throw new Error(
-        "启动现场形状不合法（bounds 有限数字、maximized 布尔、workbenchTarget 会话/新建草稿、view 二值枚举）"
+        "启动现场形状不合法（bounds 有限数字、maximized 布尔、workbenchTarget 任务/新建草稿、view 二值枚举）"
       );
     }
   }

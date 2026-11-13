@@ -36,7 +36,7 @@ export interface BrowserTaskManager {
    */
   resetPage(sessionId: string): Promise<Page>;
   /** 任务结束：关闭其 context（页面与 Cookie 随之释放）；未打开的任务安全返回 */
-  closeSession(sessionId: string): Promise<void>;
+  closeTask(taskId: string): Promise<void>;
   /** 应用退出：关闭 Chromium 与全部任务 context；可重复调用 */
   close(): Promise<void>;
 }
@@ -102,12 +102,12 @@ export function createBrowserTaskManager(
       return page;
     },
 
-    async closeSession(sessionId) {
-      const entry = tasks.get(sessionId);
+    async closeTask(taskId) {
+      const entry = tasks.get(taskId);
       if (entry === undefined) {
         return;
       }
-      tasks.delete(sessionId);
+      tasks.delete(taskId);
       await entry.context.close().catch(() => {});
     },
 

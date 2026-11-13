@@ -89,7 +89,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     first.insertTask(taskRecord());
     first.insertApproval("session-1", "git");
     expect(first.listTasks()[0]?.autoApprove).toBe(false);
-    first.updateSession("session-1", { autoApprove: true });
+    first.updateTask("session-1", { autoApprove: true });
     first.close();
     const reopened = createSqliteTaskStore(path);
     expect(reopened.listTasks()[0]?.autoApprove).toBe(true);
@@ -162,7 +162,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
       })
     );
 
-    store.updateSession("old", {
+    store.updateTask("old", {
       status: "streaming",
       updatedAt: "2026-11-10T10:00:00.000Z",
     });
@@ -176,12 +176,12 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     expect(store.listMessages("nope")).toEqual([]);
   });
 
-  it("审批模式随会话落库：insert 读回一致，updateSession 补丁生效", () => {
+  it("审批模式随会话落库：insert 读回一致，updateTask 补丁生效", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(taskRecord({ approvalMode: "ask" }));
     expect(store.listTasks()[0]?.approvalMode).toBe("ask");
 
-    store.updateSession("session-1", {
+    store.updateTask("session-1", {
       approvalMode: "full-access",
       updatedAt: "2026-11-10T08:30:00.000Z",
     });
@@ -228,12 +228,12 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     store.close();
   });
 
-  it("运行模式（local/worktree）随会话落库：insert 读回一致，updateSession 补丁生效", () => {
+  it("运行模式（local/worktree）随会话落库：insert 读回一致，updateTask 补丁生效", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(taskRecord({ workspaceMode: "worktree" }));
     expect(store.listTasks()[0]?.workspaceMode).toBe("worktree");
 
-    store.updateSession("session-1", {
+    store.updateTask("session-1", {
       workspaceMode: "local",
       updatedAt: "2026-11-10T08:40:00.000Z",
     });
@@ -378,7 +378,7 @@ describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
     expect(record.approvalMode).toBe("assist");
     store.insertApproval("legacy-1", "git");
     expect(store.listApprovals("legacy-1")).toEqual(["git"]);
-    store.updateSession("legacy-1", {
+    store.updateTask("legacy-1", {
       approvalMode: "full-access",
       updatedAt: "2026-11-02T00:00:00.000Z",
     });

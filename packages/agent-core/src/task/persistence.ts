@@ -41,7 +41,7 @@ export interface TaskPersistence {
   /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
   removeUnstartedTask(id: string): void;
   /** 只更新给定字段；目标不存在时静默忽略（写入方持有内存态，读路径不经过这里） */
-  updateSession(
+  updateTask(
     id: string,
     patch: Partial<Omit<TaskRecord, "id" | "createdAt">>
   ): void;
@@ -313,7 +313,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   const insertTask = db.prepare(
     "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
-  const updateSessionStmt = db.prepare(
+  const updateTaskStmt = db.prepare(
     "UPDATE tasks SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ?, auto_approve = ? WHERE id = ?"
   );
   const insertMessageStmt = db.prepare(
@@ -539,14 +539,14 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       ).run(id, id);
     },
 
-    updateSession(id, patch) {
+    updateTask(id, patch) {
       const current = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
         TaskRow | undefined;
       if (current === undefined) {
         return;
       }
       const next = { ...toRecord(current), ...patch };
-      updateSessionStmt.run(
+      updateTaskStmt.run(
         next.title,
         next.workspacePath,
         next.providerProfileId,

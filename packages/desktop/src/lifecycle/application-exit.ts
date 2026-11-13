@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export interface SessionExitRuntime {
+export interface TaskExitRuntime {
   hasWork(): boolean;
   freeze(): void;
   thaw(): void;
@@ -14,7 +14,7 @@ export interface ExitState {
 
 /** 真正退出的唯一协调入口。确认前不停止；保存屏障成功后才中断并等待收尾。 */
 export function createApplicationExit(options: {
-  runtime: SessionExitRuntime;
+  runtime: TaskExitRuntime;
   publish(state: ExitState): void;
   finish(): void;
 }) {

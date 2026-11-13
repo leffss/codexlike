@@ -4,8 +4,8 @@ import {
   createLanguageModelFromProfile,
   generateCommitMessage,
   type ProviderProfile,
-  type SessionManager,
-  type SessionRecord,
+  type TaskManager,
+  type TaskRecord,
 } from "@codexlike/agent-core/node";
 
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
@@ -16,24 +16,24 @@ import { IPC } from "../shared/ipc";
 /**
  * 改动面板 + git 集成的 IPC 指令（工单 05）。
  * git 逻辑在 agent-core 的 git 服务（真实 git repo 测试覆盖），
- * 这里只做：会话 → 工作区的接线、输入校验、错误中文化。
+ * 这里只做：任务 → 工作区的接线、输入校验、错误中文化。
  */
 export function registerGitHandlers(options: {
-  manager: SessionManager;
+  manager: TaskManager;
   profiles: ProfileStore;
 }): void {
   const { manager, profiles } = options;
 
-  /** IPC 边界不信任渲染进程：sessionId 必须对应存在的会话 */
-  function findSession(sessionId: unknown): SessionRecord {
+  /** IPC 边界不信任渲染进程：sessionId 必须对应存在的任务 */
+  function findSession(sessionId: unknown): TaskRecord {
     if (typeof sessionId !== "string") {
       throw new Error("git：sessionId 必须是字符串");
     }
     const record = manager
       .list()
-      .find((candidate: SessionRecord) => candidate.id === sessionId);
+      .find((candidate: TaskRecord) => candidate.id === sessionId);
     if (record === undefined) {
-      throw new Error("会话不存在或已损坏");
+      throw new Error("任务不存在或已损坏");
     }
     return record;
   }
@@ -86,9 +86,9 @@ export function registerGitHandlers(options: {
     IPC.git.createBranch,
     async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
       const record = findSession(sessionId);
-      // 分支名由会话名生成（codexlike/<会话名>，sanitize 在 agent-core 纯函数）
+      // 分支名由任务名生成（codexlike/<任务名>，sanitize 在 agent-core 纯函数）
       try {
-        return await createGitService(record.workspacePath).createSessionBranch(
+        return await createGitService(record.workspacePath).createTaskBranch(
           codexlikeBranchName(record.title)
         );
       } catch (error) {
@@ -119,7 +119,7 @@ export function registerGitHandlers(options: {
         throw new Error("当前工作区不是 git 仓库");
       }
       try {
-        // 按会话内容 + 变更文件列表生成（一次不发工具的请求）
+        // 按任务内容 + 变更文件列表生成（一次不发工具的请求）
         return await generateCommitMessage({
           model,
           messages: manager.messages(record.id),
