@@ -295,17 +295,7 @@ export function McpSettingsSection() {
           {formError !== "" && (
             <p className="text-xs text-danger-fg">{formError}</p>
           )}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              formNoValidate
-              data-testid="mcp-form-submit"
-              disabled={busy}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
-              onClick={() => void addServer()}
-            >
-              {busy ? "连接中…" : "保存并连接"}
-            </button>
+          <div className="flex justify-end gap-2">
             <button
               type="button"
               className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
@@ -315,6 +305,16 @@ export function McpSettingsSection() {
               }}
             >
               取消
+            </button>
+            <button
+              type="button"
+              formNoValidate
+              data-testid="mcp-form-submit"
+              disabled={busy}
+              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              onClick={() => void addServer()}
+            >
+              {busy ? "连接中…" : "保存并连接"}
             </button>
           </div>
         </div>

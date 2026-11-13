@@ -285,7 +285,7 @@ function TerminalSettingsSection() {
             </select>
           </label>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-end gap-3">
             <button
               type="button"
               data-testid="terminal-settings-save"
@@ -414,7 +414,7 @@ function SubagentSettingsSection() {
             />
           </label>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-end gap-3">
             <button
               type="button"
               data-testid="subagent-settings-save"
@@ -515,15 +515,6 @@ function SearchSettingsSection() {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
-            <button
-              type="button"
-              data-testid="search-api-key-save"
-              disabled={saving || apiKey.trim() === ""}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
-              onClick={() => void save(apiKey.trim())}
-            >
-              {saving ? "保存中…" : "保存"}
-            </button>
             {configured && (
               <button
                 type="button"
@@ -534,6 +525,15 @@ function SearchSettingsSection() {
                 清除
               </button>
             )}
+            <button
+              type="button"
+              data-testid="search-api-key-save"
+              disabled={saving || apiKey.trim() === ""}
+              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              onClick={() => void save(apiKey.trim())}
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
           </div>
           {message !== "" && (
             <p

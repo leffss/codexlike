@@ -31,8 +31,8 @@ function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
 function FolderIcon(props: { open: boolean }) {
   return (
     <svg
-      width="13"
-      height="13"
+      width="14"
+      height="14"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -47,6 +47,26 @@ function FolderIcon(props: { open: boolean }) {
             : "M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z"
         }
       />
+    </svg>
+  );
+}
+
+/** 独立会话分区的气泡图标（不属于任何项目的会话，与项目文件夹图标区分） */
+function StandaloneIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path d="M5.27 13.33A6 6 0 1 0 2.67 10.73L1.33 14.67Z" />
     </svg>
   );
 }
@@ -298,18 +318,20 @@ export function SessionSidebar(props: {
               }`}
               onClick={() => props.onPin(session.id, !session.pinned)}
             >
+              {/* 图钉两态：已置顶实心常显（accent 色），未置顶空心仅悬停出现 */}
               <svg
                 width="12"
                 height="12"
-                viewBox="0 0 16 16"
-                fill="none"
+                viewBox="0 0 24 24"
+                fill={session.pinned ? "currentColor" : "none"}
                 stroke="currentColor"
-                strokeWidth="1.4"
+                strokeWidth="1.8"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <path d="m6 2 7 7-2 1-2-2-3 2-1-1 2-3-2-2 1-2ZM6 10l-4 4" />
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
               </svg>
             </button>
           </>
@@ -361,7 +383,11 @@ export function SessionSidebar(props: {
             <span className="w-3 shrink-0 text-center text-fg-subtle">
               {expanded ? "▾" : "▸"}
             </span>
-            <FolderIcon open={expanded} />
+            {group.projectId === null ? (
+              <StandaloneIcon />
+            ) : (
+              <FolderIcon open={expanded} />
+            )}
             <span className="truncate">{group.name}</span>
             {project?.pinned && (
               <span
@@ -426,11 +452,9 @@ export function SessionSidebar(props: {
             )}
           </span>
         </div>
+        {/* 无竖线缩进导轨：会话标题起点对齐原竖线位置（ml-7 + 行内 pl-2），为标题让出宽度 */}
         {expanded && (
-          <div
-            data-testid="group-sessions"
-            className="ml-9 border-l border-line pl-2"
-          >
+          <div data-testid="group-sessions" className="ml-7">
             <ul>{group.active.map((session) => renderSessionItem(session))}</ul>
             {group.archived.length > 0 && (
               <div>
