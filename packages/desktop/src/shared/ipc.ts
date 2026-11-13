@@ -8,7 +8,7 @@ import type {
   ProviderProfileInput,
   ProjectRecord,
   SessionEvent,
-  SessionRecord,
+  TaskRecord,
   SessionSearchResult,
   SessionResourcesView,
   ThinkingEffort,
@@ -24,8 +24,8 @@ import type {
   GitStatus,
 } from "@codexlike/agent-core";
 
-import type { SessionStatusInfo } from "../sessions/status";
-import type { QueueChangeReason, QueuedMessage } from "../sessions/input-queue";
+import type { TaskStatusInfo } from "../tasks/status";
+import type { QueueChangeReason, QueuedMessage } from "../tasks/input-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
@@ -43,7 +43,7 @@ export type WindowState = { maximized: boolean };
 export type { LaunchState, LaunchView };
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
-export type { SessionStatusInfo };
+export type { TaskStatusInfo, TaskStatusInfo as SessionStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
 export type { TerminalShell };
@@ -231,7 +231,7 @@ export interface SessionActivity {
   outcome: "completed" | "failed" | "interrupted" | null;
   unread: boolean;
 }
-export type SessionListItem = SessionRecord & { activity?: SessionActivity };
+export type SessionListItem = TaskRecord & { activity?: SessionActivity };
 
 export interface SessionView {
   sessionId: string;
@@ -360,22 +360,19 @@ export interface CodexLikeApi {
     remove(id: string): Promise<boolean>;
   };
   sessions: {
-    start(input: StartSessionInput): Promise<SessionRecord>;
+    start(input: StartSessionInput): Promise<TaskRecord>;
     /** 仅调整归属；null 移出项目，移入由宿主校验实际目录及活动状态。 */
     setProject(
       sessionId: string,
       projectId: string | null
-    ): Promise<SessionRecord | null>;
+    ): Promise<TaskRecord | null>;
     execution(sessionId: string): Promise<SessionExecutionState | null>;
     view(sessionId: string): Promise<SessionView | null>;
     /** 只确认用户已经看到的水位，不消费更新之后产生的完成提醒。 */
     markViewed(sessionId: string, sequence: number): Promise<void>;
-    setPinned(
-      sessionId: string,
-      pinned: boolean
-    ): Promise<SessionRecord | null>;
+    setPinned(sessionId: string, pinned: boolean): Promise<TaskRecord | null>;
     /** 只在用户主动查看时调用；发送由宿主自动登记，后台刷新不调用。 */
-    markUsed(sessionId: string): Promise<SessionRecord | null>;
+    markUsed(sessionId: string): Promise<TaskRecord | null>;
     /** 读取同实际目录的其他运行会话；不锁定并行，不创建工作区。 */
     workspaceSharing(
       target: WorkspaceSharingTarget
@@ -447,14 +444,11 @@ export interface CodexLikeApi {
       orderedIds: string[]
     ): Promise<QueueOperationResult>;
     /** 重命名（/rename 与侧栏等效 UI 操作共用）；会话不存在返回 null */
-    rename(sessionId: string, title: string): Promise<SessionRecord | null>;
+    rename(sessionId: string, title: string): Promise<TaskRecord | null>;
     /** 归档（/archive 与侧栏等效 UI 操作共用）；archived=false 取消归档 */
-    archive(
-      sessionId: string,
-      archived: boolean
-    ): Promise<SessionRecord | null>;
+    archive(sessionId: string, archived: boolean): Promise<TaskRecord | null>;
     /** /status 数据；会话不存在返回 null */
-    status(sessionId: string): Promise<SessionStatusInfo | null>;
+    status(sessionId: string): Promise<TaskStatusInfo | null>;
     /** 只返回资源元数据与加载记录，不返回全部技能正文。 */
     resources(sessionId: string): Promise<SessionResourcesView | null>;
     /**
@@ -473,12 +467,12 @@ export interface CodexLikeApi {
      */
     toolImage(sessionId: string, toolCallId: string): Promise<string | null>;
     /** 仅撤销持久会话授权；启用只能来自有效的执行审批响应。 */
-    revokeAutoApprove(sessionId: string): Promise<SessionRecord>;
+    revokeAutoApprove(sessionId: string): Promise<TaskRecord>;
     /** 切换审批模式（ask / assist / full-access），只对下一次发送生效；会话不存在返回 null */
     setApprovalMode(
       sessionId: string,
       mode: ApprovalMode
-    ): Promise<SessionRecord | null>;
+    ): Promise<TaskRecord | null>;
     /**
      * 兼容旧审批响应（always 与 approve 同义，仅批准本次）；
      * 转发统一交互，没有等待中的请求或 id 不匹配时返回 false。

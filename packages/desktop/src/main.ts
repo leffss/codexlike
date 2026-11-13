@@ -15,16 +15,16 @@ import {
 
 import {
   createAgentResourceSnapshot,
-  createBrowserSessionManager,
+  createBrowserTaskManager,
   createBrowserTools,
   createBuiltinTools,
-  createSessionManager,
-  createSqliteSessionStore,
+  createTaskManager,
+  createSqliteTaskStore,
   createTavilySearchSource,
   createWorktreeService,
   validateProviderProfile,
   type SearchSource,
-  type SessionRecord,
+  type TaskRecord,
 } from "@codexlike/agent-core/node";
 
 import {
@@ -59,12 +59,12 @@ import {
 import { resolveLaunchBounds } from "./launch-state/display-geometry";
 import { trackWindowLaunchState } from "./launch-state/window-save";
 import type { TerminalShell } from "@codexlike/agent-core/node";
-import { registerSessionHandlers } from "./sessions/session-ipc";
-import { createSqliteInputQueueStore } from "./sessions/input-queue-store";
+import { registerTaskHandlers } from "./tasks/task-ipc";
+import { createSqliteInputQueueStore } from "./tasks/input-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
 import { registerWindowControls } from "./window/window-controls";
 import { registerNavigationPolicy } from "./window/navigation-policy";
-import { sessionScreenshotDir } from "./sessions/screenshots";
+import { taskScreenshotDir } from "./tasks/screenshots";
 import {
   createSubagentSettingsStore,
   type SubagentSettings,
@@ -415,7 +415,7 @@ void app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   // ADR 0014：session→task 改名启用新库文件（task-workbench.db），旧 session-workbench.db
   // 不读、不删、不迁移；启动现场（workbench_state）在新库从零开始。
-  const persistence = createSqliteSessionStore(
+  const persistence = createSqliteTaskStore(
     join(dataDir(), WORKBENCH_DB_FILENAME)
   );
 
@@ -452,13 +452,13 @@ void app.whenReady().then(async () => {
   applyNativeTheme(themePreference);
   // 浏览器工具组（工单 11）：Playwright headless Chromium 会话级复用；
   // 首次使用自动下载（进度打到主进程日志，镜像默认 npmmirror）。
-  const browserManager = createBrowserSessionManager({
+  const browserManager = createBrowserTaskManager({
     progress: (line) => console.log(`[browser] ${line}`),
   });
   const browserTools = createBrowserTools({
     manager: browserManager,
     // 截图保存到会话数据目录（约定路径，重启后 UI 仍可读回）
-    screenshotDirFor: (sessionId) => sessionScreenshotDir(dataDir(), sessionId),
+    screenshotDirFor: (sessionId) => taskScreenshotDir(dataDir(), sessionId),
   });
 
   const builtinTools = createBuiltinTools({
@@ -495,7 +495,7 @@ void app.whenReady().then(async () => {
     ...browserTools,
   ];
   // 每条消息发现一次规范与技能；预览和运行使用同一规则，执行中的快照不被预览替换。
-  const resourcesFor = (record: SessionRecord) =>
+  const resourcesFor = (record: TaskRecord) =>
     createAgentResourceSnapshot({
       workspacePath: record.workspacePath,
       globalDir: dataDir(),
@@ -507,7 +507,7 @@ void app.whenReady().then(async () => {
   const attachToolImages = ["1", "true"].includes(
     (process.env["CODEXLIKE_ATTACH_TOOL_IMAGES"] ?? "").toLowerCase()
   );
-  const manager = createSessionManager({
+  const manager = createTaskManager({
     persistence,
     tools: sessionTools,
     resourcesFor,
@@ -572,7 +572,7 @@ void app.whenReady().then(async () => {
   const queueStore = createSqliteInputQueueStore(
     join(dataDir(), WORKBENCH_DB_FILENAME)
   );
-  const sessionRuntime = registerSessionHandlers({
+  const taskRuntime = registerTaskHandlers({
     manager,
     profiles: store,
     getWindow: () => mainWindow,
@@ -587,7 +587,7 @@ void app.whenReady().then(async () => {
   registerGitHandlers({ manager, profiles: store });
   // 输入队列恢复（票 04 / ADR 0013）：主进程服务与凭据装配完成后启用，
   // 不依赖窗口、view 或渲染层加载；暂停态队列由持久标志保持不消费。
-  sessionRuntime.startInputQueues();
+  taskRuntime.startInputQueues();
   // 启动现场（票01/03）：与主题同构的建窗前时序——先读现场再建窗；无窗口
   // bounds 现场或损坏（null）维持默认 1280×800 居中。票03 目标/视图上报通道
   // 建窗前装配（渲染层启动即查询启动现场）。
@@ -605,7 +605,7 @@ void app.whenReady().then(async () => {
 
   registerApplicationExit({
     window: mainWindow,
-    runtime: sessionRuntime,
+    runtime: taskRuntime,
     flushPendingWrites: () => launchStateTracking.flush(),
     closeStorage: () => {
       persistence.close();

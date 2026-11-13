@@ -2,13 +2,13 @@ import { app, ipcMain, type BrowserWindow } from "electron";
 import { IPC } from "../shared/ipc";
 import {
   createApplicationExit,
-  type SessionExitRuntime,
+  type TaskExitRuntime,
 } from "./application-exit";
 
 /** 所有正常关闭入口都保留窗口，直到renderer保存屏障及执行清理完成。 */
 export function registerApplicationExit(options: {
   window: BrowserWindow;
-  runtime: SessionExitRuntime;
+  runtime: TaskExitRuntime;
   closeStorage(): void;
   releaseResources(): Promise<void>;
   /**

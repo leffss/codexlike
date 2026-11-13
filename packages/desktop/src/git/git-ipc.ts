@@ -4,8 +4,8 @@ import {
   createLanguageModelFromProfile,
   generateCommitMessage,
   type ProviderProfile,
-  type SessionManager,
-  type SessionRecord,
+  type TaskManager,
+  type TaskRecord,
 } from "@codexlike/agent-core/node";
 
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
@@ -19,19 +19,19 @@ import { IPC } from "../shared/ipc";
  * 这里只做：会话 → 工作区的接线、输入校验、错误中文化。
  */
 export function registerGitHandlers(options: {
-  manager: SessionManager;
+  manager: TaskManager;
   profiles: ProfileStore;
 }): void {
   const { manager, profiles } = options;
 
   /** IPC 边界不信任渲染进程：sessionId 必须对应存在的会话 */
-  function findSession(sessionId: unknown): SessionRecord {
+  function findSession(sessionId: unknown): TaskRecord {
     if (typeof sessionId !== "string") {
       throw new Error("git：sessionId 必须是字符串");
     }
     const record = manager
       .list()
-      .find((candidate: SessionRecord) => candidate.id === sessionId);
+      .find((candidate: TaskRecord) => candidate.id === sessionId);
     if (record === undefined) {
       throw new Error("会话不存在或已损坏");
     }
