@@ -47,13 +47,13 @@ describe("工作台页面之上的状态", () => {
     let rejectWrite!: (error: Error) => void;
     const state = createWorkspaceState({
       read: async (target) =>
-        target.kind === "session" && target.sessionId === "loading"
+        target.kind === "task" && target.taskId === "loading"
           ? new Promise((resolve) => {
               release = resolve;
             })
           : structuredClone(entry),
       write: async (target, value) => {
-        if (target.kind === "session" && target.sessionId === "writing")
+        if (target.kind === "task" && target.taskId === "writing")
           return new Promise((_resolve, reject) => {
             rejectWrite = reject;
           });

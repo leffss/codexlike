@@ -33,7 +33,7 @@ function thinking(overrides: Partial<ThinkingSegment> = {}): ThinkingSegment {
 
 function streamOf(items: MessageSegment[]): string {
   return renderToStaticMarkup(
-    createElement(MessageStream, { items, sessionId: "s1" })
+    createElement(MessageStream, { items, taskId: "s1" })
   );
 }
 

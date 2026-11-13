@@ -13,7 +13,7 @@ export function MembershipDialog(props: {
   onChanged: () => Promise<unknown>;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
-  const sessionId = props.task.id;
+  const taskId = props.task.id;
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -21,7 +21,7 @@ export function MembershipDialog(props: {
     const taskTarget = () =>
       Array.from(
         document.querySelectorAll<HTMLElement>("[data-session-select]")
-      ).find((element) => element.dataset.sessionId === sessionId);
+      ).find((element) => element.dataset.sessionId === taskId);
     const returnTarget =
       previous instanceof HTMLElement &&
       previous !== document.body &&
@@ -52,7 +52,7 @@ export function MembershipDialog(props: {
         target?.focus({ preventScroll: true });
       });
     };
-  }, [sessionId]);
+  }, [taskId]);
   const movingOut = props.task.projectId !== null;
   const [target, setTarget] = useState(props.projects[0]?.id ?? "");
   const [busy, setBusy] = useState(false);

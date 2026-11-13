@@ -100,12 +100,12 @@ export function TaskSidebar(props: {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [menu, setMenu] = useState<{
-    sessionId: string;
+    taskId: string;
     projectId: TaskListItem["projectId"];
     archivedAt: TaskListItem["archivedAt"];
     anchor: TaskMenuAnchor;
   } | null>(null);
-  const menuTask = props.tasks.find((task) => task.id === menu?.sessionId);
+  const menuTask = props.tasks.find((task) => task.id === menu?.taskId);
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
       if (restoreFocus && menu) {
@@ -118,12 +118,12 @@ export function TaskSidebar(props: {
             : null;
         if (
           (active === document.body ||
-            activeMenu?.dataset.sessionId === menu.sessionId) &&
+            activeMenu?.dataset.sessionId === menu.taskId) &&
           !document.querySelector("[role='dialog'][aria-modal='true']")
         ) {
           const taskTarget = Array.from(
             document.querySelectorAll<HTMLElement>("[data-session-select]")
-          ).find((element) => element.dataset.sessionId === menu.sessionId);
+          ).find((element) => element.dataset.sessionId === menu.taskId);
           const groupTarget = Array.from(
             document.querySelectorAll<HTMLElement>(
               "[data-testid='project-header']"
@@ -216,7 +216,7 @@ export function TaskSidebar(props: {
           );
           if (!target) return;
           setMenu({
-            sessionId: task.id,
+            taskId: task.id,
             projectId: task.projectId,
             archivedAt: task.archivedAt,
             anchor: { x: event.clientX, y: event.clientY, target },
@@ -236,7 +236,7 @@ export function TaskSidebar(props: {
           const target = event.target as HTMLElement;
           const rect = target.getBoundingClientRect();
           setMenu({
-            sessionId: task.id,
+            taskId: task.id,
             projectId: task.projectId,
             archivedAt: task.archivedAt,
             anchor: { x: rect.left, y: rect.bottom, target },
@@ -263,7 +263,7 @@ export function TaskSidebar(props: {
               data-session-select="true"
               aria-current={task.id === props.currentId ? "page" : undefined}
               aria-haspopup="menu"
-              aria-expanded={menu?.sessionId === task.id}
+              aria-expanded={menu?.taskId === task.id}
               className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 pr-1 text-left text-sm"
               onClick={() => props.onSelect(task.id)}
             >
@@ -481,7 +481,7 @@ export function TaskSidebar(props: {
     <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface-muted">
       {menu && menuTask && (
         <TaskContextMenu
-          sessionId={menuTask.id}
+          taskId={menuTask.id}
           anchor={menu.anchor}
           onClose={closeMenu}
           items={[

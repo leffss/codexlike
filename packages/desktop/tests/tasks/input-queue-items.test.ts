@@ -27,7 +27,7 @@ function harness(
   overrides?: {
     /** 自定义发送假件：返回的 promise 决定「发出」何时完成（窗口期条目锁定）。 */
     dispatch?: (
-      sessionId: string,
+      taskId: string,
       entry: QueuedMessage,
       onSettled: () => void
     ) => Promise<void>;
@@ -51,10 +51,9 @@ function harness(
   const queues = createTaskInputQueues({
     store,
     isBusy: () => busy,
-    dispatch: async (sessionId, entry, settled) => {
+    dispatch: async (taskId, entry, settled) => {
       dispatched.push(entry);
-      if (overrides?.dispatch)
-        await overrides.dispatch(sessionId, entry, settled);
+      if (overrides?.dispatch) await overrides.dispatch(taskId, entry, settled);
       else settled();
     },
     onChange: (_sessionId, reason, queue, _paused, sendingId) =>

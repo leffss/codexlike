@@ -16,12 +16,12 @@ export function createTaskMembership(
         .list()
         .filter((item) => item.projectId === projectId);
       for (const member of members) management.assertInactive(member.id);
-      return { projectId, sessionIds: manager.removeProject(projectId) };
+      return { projectId, taskIds: manager.removeProject(projectId) };
     },
-    setProject(sessionId: string, projectId: string | null) {
-      const session = manager.list().find((item) => item.id === sessionId);
+    setProject(taskId: string, projectId: string | null) {
+      const session = manager.list().find((item) => item.id === taskId);
       if (!session) throw new Error("任务不存在或已移除");
-      management.assertInactive(sessionId);
+      management.assertInactive(taskId);
       if (projectId !== null) {
         const project = manager
           .projects()
@@ -38,7 +38,7 @@ export function createTaskMembership(
               : "任务工作区与目标项目目录不匹配"
           );
       }
-      return manager.setProject(sessionId, projectId);
+      return manager.setProject(taskId, projectId);
     },
   };
 }

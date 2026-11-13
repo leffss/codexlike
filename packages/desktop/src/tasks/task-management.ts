@@ -6,15 +6,15 @@ export function createTaskManagement(
   manager: TaskManager,
   executions: ReadonlyMap<string, string>
 ) {
-  function execution(sessionId: string): TaskExecutionState | null {
-    const record = manager.list().find((item) => item.id === sessionId);
+  function execution(taskId: string): TaskExecutionState | null {
+    const record = manager.list().find((item) => item.id === taskId);
     if (!record) return null;
-    const pending = manager.get(sessionId)?.pendingInteractions ?? [];
+    const pending = manager.get(taskId)?.pendingInteractions ?? [];
     return {
-      sessionId,
-      executionId: executions.get(sessionId) ?? null,
+      taskId,
+      executionId: executions.get(taskId) ?? null,
       running:
-        executions.has(sessionId) ||
+        executions.has(taskId) ||
         record.status !== "idle" ||
         pending.length > 0,
       waitingForUser: pending.length > 0,
@@ -22,24 +22,24 @@ export function createTaskManagement(
     };
   }
 
-  function assertInactive(sessionId: string): void {
-    if (execution(sessionId)?.running)
+  function assertInactive(taskId: string): void {
+    if (execution(taskId)?.running)
       throw new Error("任务正在执行或等待用户回应，请先停止再整理");
   }
 
   return {
     execution,
     assertInactive,
-    assertCanExecute(sessionId: string) {
-      const record = manager.list().find((item) => item.id === sessionId);
+    assertCanExecute(taskId: string) {
+      const record = manager.list().find((item) => item.id === taskId);
       if (!record) throw new Error("任务不存在或已移除");
       if (record.archivedAt !== null)
         throw new Error("任务已归档，请先恢复再发送");
-      assertInactive(sessionId);
+      assertInactive(taskId);
     },
-    archive(sessionId: string, archived: boolean) {
-      assertInactive(sessionId);
-      return manager.setArchived(sessionId, archived);
+    archive(taskId: string, archived: boolean) {
+      assertInactive(taskId);
+      return manager.setArchived(taskId, archived);
     },
   };
 }

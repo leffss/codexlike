@@ -330,7 +330,7 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
   );
   const state = await invoke("sessions:execution", session.id);
   expect(state).toMatchObject({
-    sessionId: session.id,
+    taskId: session.id,
     executionId: expect.any(String),
     running: true,
     waitingForUser: true,
@@ -452,8 +452,8 @@ it("成功首次发送只消费同一意图，失败保留设置；迟到保存�
     expect((await invoke("sessions:execution", session.id)).running).toBe(false)
   );
   expect(
-    (await invoke("workbench:read", { kind: "session", sessionId: session.id }))
-      .value.preferences
+    (await invoke("workbench:read", { kind: "task", taskId: session.id })).value
+      .preferences
   ).toEqual(value.preferences);
   const consumed = await invoke("workbench:read", target);
   expect(consumed.value.text).toBe("");
@@ -556,8 +556,8 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
     expect(consumed.value.requestId).not.toBe(value.requestId);
     expect(consumed.value.text).toBe("");
     expect(
-      (await invoke("workbench:read", { kind: "session", sessionId: first.id }))
-        .value.preferences.thinkingEffort
+      (await invoke("workbench:read", { kind: "task", taskId: first.id })).value
+        .preferences.thinkingEffort
     ).toBe("high");
     invoke("workbench:write", target, {
       revision: consumed.revision + 1,
@@ -658,7 +658,7 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
     "sessions:pending-interactions",
     session.id
   );
-  const target = { kind: "session", sessionId: session.id };
+  const target = { kind: "task", taskId: session.id };
   const original = await invoke("workbench:read", target);
   const question = {
     index: 0,
@@ -727,7 +727,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(1)
   );
   const [interaction] = invoke("sessions:pending-interactions", session.id);
-  const target = { kind: "session", sessionId: session.id };
+  const target = { kind: "task", taskId: session.id };
   const original = await invoke("workbench:read", target);
   const questionDrafts = {
     [interaction.request.id]: {
@@ -802,7 +802,7 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     expect(() =>
       invoke(
         "workbench:write",
-        { kind: "session", sessionId: other.id },
+        { kind: "task", taskId: other.id },
         {
           revision: 3,
           value: { ...original.value, questionDrafts: invalidDrafts },
@@ -841,7 +841,7 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
     "sessions:pending-interactions",
     session.id
   );
-  const target = { kind: "session", sessionId: session.id };
+  const target = { kind: "task", taskId: session.id };
   const saved = await invoke("workbench:read", target);
   await invoke("workbench:write", target, {
     revision: saved.revision + 1,
@@ -899,18 +899,18 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
 });
 
 it("执行已占位但Core尚未更新状态时，过时的idle列表也不能绕过归档保护", async () => {
-  let sessionId: string | undefined;
+  let taskId: string | undefined;
   let checked = false;
   const app = setup(undefined, () => {
-    if (!sessionId) return;
+    if (!taskId) return;
     expect(
-      invoke("sessions:list").find((s: any) => s.id === sessionId).status
+      invoke("sessions:list").find((s: any) => s.id === taskId).status
     ).toBe("idle");
-    expect(invoke("sessions:execution", sessionId)).toMatchObject({
+    expect(invoke("sessions:execution", taskId)).toMatchObject({
       running: true,
       executionId: expect.any(String),
     });
-    expect(() => invoke("sessions:archive", sessionId, true)).toThrow("先停止");
+    expect(() => invoke("sessions:archive", taskId, true)).toThrow("先停止");
     checked = true;
   });
   const model = await provider(app);
@@ -922,10 +922,10 @@ it("执行已占位但Core尚未更新状态时，过时的idle列表也不能�
   await waitFor(() =>
     expect(invoke("sessions:execution", record.id).running).toBe(false)
   );
-  sessionId = record.id;
-  await invoke("sessions:send", sessionId, "开始另一轮", model.profile.id);
+  taskId = record.id;
+  await invoke("sessions:send", taskId, "开始另一轮", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", sessionId).running).toBe(false)
+    expect(invoke("sessions:execution", taskId).running).toBe(false)
   );
   expect(checked).toBe(true);
   expect(invoke("sessions:list")[0].archivedAt).toBeNull();
@@ -1203,7 +1203,7 @@ it("确认移除仅删除显式所属含归档记录，清除现场与首次发�
   expect(invoke("projects:list")).toEqual([project]);
   expect(invoke("projects:remove", project.id, true)).toEqual({
     projectId: project.id,
-    sessionIds: expect.arrayContaining([member.id, archived.id]),
+    taskIds: expect.arrayContaining([member.id, archived.id]),
   });
   expect(invoke("projects:list")).toEqual([]);
   expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([
@@ -1569,7 +1569,7 @@ it("同目录独立任务等待中仍可移除空项目，不能按目录误判�
   const before = invoke("sessions:view", record.id);
   expect(invoke("projects:remove", project.id, true)).toEqual({
     projectId: project.id,
-    sessionIds: [],
+    taskIds: [],
   });
   expect(invoke("sessions:view", record.id)).toEqual(before);
   invoke("sessions:interrupt", record.id);
@@ -1602,11 +1602,11 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
   );
   const ownedTargets = [
     { kind: "new", projectId: project.id },
-    { kind: "session", sessionId: member.id },
+    { kind: "task", taskId: member.id },
   ] as const;
   const keptTargets = [
     { kind: "new", projectId: null },
-    { kind: "session", sessionId: independent.id },
+    { kind: "task", taskId: independent.id },
   ] as const;
   const saved: WorkbenchEntry[] = [];
   for (const target of [...ownedTargets, ...keptTargets]) {
@@ -1721,9 +1721,7 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
     "保留源文件"
   );
   expect(
-    app.manager.readWorkbench(
-      workbenchKey({ kind: "session", sessionId: record.id })
-    )
+    app.manager.readWorkbench(workbenchKey({ kind: "task", taskId: record.id }))
   ).toBeNull();
   expect(invoke("sessions:list")).toEqual([]);
 });

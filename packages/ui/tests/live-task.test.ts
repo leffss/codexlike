@@ -15,7 +15,7 @@ function delta(
   executionId = "e1"
 ): TaskEventEnvelope {
   return {
-    sessionId: "a",
+    taskId: "a",
     executionId,
     sequence,
     activity,
@@ -23,7 +23,7 @@ function delta(
   };
 }
 const snapshot: TaskView = {
-  sessionId: "a",
+  taskId: "a",
   executionId: "e1",
   sequence: 2,
   history: [],
@@ -78,22 +78,22 @@ it("会话授权由快照恢复并随事件更新，不因等待、停止或旧�
   const revoke: TaskEventEnvelope = {
     ...delta(3, ""),
     event: {
-      type: "session-auto-approve-changed",
-      sessionId: "a",
+      type: "task-auto-approve-changed",
+      taskId: "a",
       autoApprove: false,
     },
   };
-  expect(
-    receiveLiveEvent(state, { ...revoke, sessionId: "b" }).autoApprove
-  ).toBe(true);
+  expect(receiveLiveEvent(state, { ...revoke, taskId: "b" }).autoApprove).toBe(
+    true
+  );
   state = receiveLiveEvent(state, revoke);
   expect(state.autoApprove).toBe(false);
   expect(
     receiveLiveEvent(state, {
       ...revoke,
       event: {
-        type: "session-auto-approve-changed",
-        sessionId: "a",
+        type: "task-auto-approve-changed",
+        taskId: "a",
         autoApprove: true,
       },
     }).autoApprove
@@ -199,7 +199,7 @@ it("初始现场与订阅缓冲交错仍完整且无重，其他会话和旧执�
   let state = hydrateLiveTask(snapshot, [
     delta(2, "第二段"),
     delta(3, "第三段"),
-    { ...delta(4, "其他会话"), sessionId: "b" },
+    { ...delta(4, "其他会话"), taskId: "b" },
   ]);
   expect(state.items).toMatchObject([
     { content: "第一段第二段第三段", streaming: true },
@@ -331,7 +331,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
     sequence: number,
     delta: string
   ): TaskEventEnvelope => ({
-    sessionId: "a",
+    taskId: "a",
     executionId: "e1",
     sequence,
     activity,
@@ -361,7 +361,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
 
   // 重启后：内存事件缓冲消失，落盘终态消息（带 reasoning）经 transcript 恢复
   const restarted = hydrateLiveTask({
-    sessionId: "a",
+    taskId: "a",
     executionId: null,
     sequence: 0,
     history: [
@@ -433,15 +433,15 @@ it("空闲队列事件按会话水位接续，加载缓冲与重复事件不回�
     queueState: next.queueState,
   });
   expect(receiveLiveEvent(next, changed)).toBe(next);
-  expect(
-    receiveLiveEvent(next, { ...changed, sessionId: "b", sequence: 4 })
-  ).toBe(next);
+  expect(receiveLiveEvent(next, { ...changed, taskId: "b", sequence: 4 })).toBe(
+    next
+  );
 });
 
 it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 id 不丢、出队后清空、切换恢复保持", () => {
   const item = {
     id: "q1",
-    sessionId: "a",
+    taskId: "a",
     position: 0,
     text: "正在发出的一条",
     mentionPaths: [],
@@ -494,7 +494,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   const queued = [
     {
       id: "q1",
-      sessionId: "a",
+      taskId: "a",
       position: 0,
       text: "排队第一条",
       mentionPaths: [],
@@ -552,7 +552,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
   });
   state = settled;
   const dequeued = receiveLiveEvent(state, {
-    sessionId: "a",
+    taskId: "a",
     executionId: "e2",
     sequence: 6,
     activity: { ...activity, running: true },

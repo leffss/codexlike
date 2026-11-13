@@ -15,7 +15,7 @@ interface MenuItem {
 
 /** 焦点仅在主动取消时归还；执行操作不能抢走对话框或重命名输入的焦点。 */
 export function TaskContextMenu(props: {
-  sessionId: string;
+  taskId: string;
   anchor: TaskMenuAnchor;
   items: MenuItem[];
   onClose: (restoreFocus: boolean) => void;
@@ -119,7 +119,7 @@ export function TaskContextMenu(props: {
       role="menu"
       aria-label="会话操作"
       data-testid="session-context-menu"
-      data-session-id={props.sessionId}
+      data-session-id={props.taskId}
       className="fixed z-50 w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-surface p-1 text-sm text-fg shadow-lg"
       style={{ ...position, maxHeight: "calc(100vh - 16px)" }}
       onKeyDown={onKeyDown}

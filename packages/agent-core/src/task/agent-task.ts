@@ -299,8 +299,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     autoApproved() {
       record.autoApprove = true;
       events.push({
-        type: "session-auto-approve-changed",
-        sessionId: record.id,
+        type: "task-auto-approve-changed",
+        taskId: record.id,
         autoApprove: true,
       });
     },
@@ -439,8 +439,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       persistence.updateTask(record.id, { autoApprove: false });
       record.autoApprove = false;
       events.push({
-        type: "session-auto-approve-changed",
-        sessionId: record.id,
+        type: "task-auto-approve-changed",
+        taskId: record.id,
         autoApprove: false,
       });
     },

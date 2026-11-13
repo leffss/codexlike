@@ -78,7 +78,7 @@ function toolSeg(
     seq: ++nextSeq,
     turnId,
     responseId: null,
-    sessionId: "s1",
+    taskId: "s1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "输出",

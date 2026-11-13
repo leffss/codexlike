@@ -218,7 +218,7 @@ async function main() {
       globalThis.worktreeSharingOriginal = original;
       ipcMain.removeHandler(channel);
       ipcMain.handle(channel, (event, target) => {
-        if (!target?.sessionId) return original(event, target);
+        if (!target?.taskId) return original(event, target);
         ipcMain.removeHandler(channel);
         ipcMain.handle(channel, original);
         throw new Error("E2E 工作区检查故障");

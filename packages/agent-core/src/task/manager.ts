@@ -358,8 +358,9 @@ export function createTaskManager(
       const messages = persistence.listMessages(sessionId);
       const turnIds = new Set(messages.map((message) => message.id));
       const savedDrafts =
-        persistence.readWorkbench(workbenchKey({ kind: "session", sessionId }))
-          ?.value.questionDrafts ?? {};
+        persistence.readWorkbench(
+          workbenchKey({ kind: "task", taskId: sessionId })
+        )?.value.questionDrafts ?? {};
       const items: TranscriptItem[] = [
         ...persistence
           .listMessages(sessionId)

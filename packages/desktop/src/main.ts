@@ -458,7 +458,7 @@ void app.whenReady().then(async () => {
   const browserTools = createBrowserTools({
     manager: browserManager,
     // 截图保存到任务数据目录（约定路径，重启后 UI 仍可读回）
-    screenshotDirFor: (sessionId) => taskScreenshotDir(dataDir(), sessionId),
+    screenshotDirFor: (taskId) => taskScreenshotDir(dataDir(), taskId),
   });
 
   const builtinTools = createBuiltinTools({
@@ -490,8 +490,8 @@ void app.whenReady().then(async () => {
   await mcpService.startup();
 
   // 任务工具工厂（主任务与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
-  const sessionTools = () => [
-    ...mcpService.sessionTools(builtinTools),
+  const taskTools = () => [
+    ...mcpService.taskTools(builtinTools),
     ...browserTools,
   ];
   // 每条消息发现一次规范与技能；预览和运行使用同一规则，执行中的快照不被预览替换。
@@ -509,13 +509,13 @@ void app.whenReady().then(async () => {
   );
   const manager = createTaskManager({
     persistence,
-    tools: sessionTools,
+    tools: taskTools,
     resourcesFor,
     attachToolImages,
     subagents: {
       // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
-      tools: sessionTools,
+      tools: taskTools,
       settings: () => subagentSettings,
       // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
       resolveProfile: async () => {

@@ -173,8 +173,8 @@ export interface CompactResult {
  */
 export type TaskEvent =
   | {
-      type: "session-auto-approve-changed";
-      sessionId: string;
+      type: "task-auto-approve-changed";
+      taskId: string;
       autoApprove: boolean;
     }
   | { type: "interaction-request"; interaction: InteractionRecord }

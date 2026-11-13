@@ -45,7 +45,7 @@ function toolSeg(
     turnId: "u1",
     responseId: null,
     at: 2_000,
-    sessionId: "s1",
+    taskId: "s1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "输出",
@@ -109,7 +109,7 @@ function subagentSeg(
 
 function streamOf(items: MessageSegment[]): string {
   return renderToStaticMarkup(
-    createElement(MessageStream, { items, sessionId: "s1" })
+    createElement(MessageStream, { items, taskId: "s1" })
   );
 }
 

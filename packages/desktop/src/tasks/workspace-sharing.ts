@@ -39,8 +39,8 @@ export function workspaceSharing(
     throw new Error("工作区查询参数不合法");
   let path: string | undefined;
   let exclude: string | undefined;
-  if ("sessionId" in target) {
-    const session = manager.list().find((item) => item.id === target.sessionId);
+  if ("taskId" in target) {
+    const session = manager.list().find((item) => item.id === target.taskId);
     if (!session) throw new Error("任务不存在");
     path = session.workspacePath;
     exclude = session.id;
@@ -59,7 +59,7 @@ export function workspaceSharing(
       if (target.workspacePath !== undefined)
         throw new Error("项目任务不能更换工作区");
       if (target.workspaceMode === "worktree")
-        return { workspacePath: null, runningSessions: [] };
+        return { workspacePath: null, runningTasks: [] };
       path = project.workspacePath;
     } else {
       if (target.workspaceMode === "worktree")
@@ -67,12 +67,12 @@ export function workspaceSharing(
       path = target.workspacePath;
     }
   }
-  if (path === undefined) return { workspacePath: null, runningSessions: [] };
+  if (path === undefined) return { workspacePath: null, runningTasks: [] };
   if (typeof path !== "string") throw new Error("工作区路径不合法");
   const workspacePath = canonicalWorkspacePath(path);
   return {
     workspacePath,
-    runningSessions: manager
+    runningTasks: manager
       .list()
       .filter(
         (item) =>

@@ -46,8 +46,8 @@ function isFiniteNumber(value: unknown): value is number {
 export function isWorkbenchTarget(value: unknown): value is WorkbenchTarget {
   if (typeof value !== "object" || value === null) return false;
   const { kind } = value as Record<string, unknown>;
-  if (kind === "session") {
-    return typeof (value as Record<string, unknown>)["sessionId"] === "string";
+  if (kind === "task") {
+    return typeof (value as Record<string, unknown>)["taskId"] === "string";
   }
   if (kind === "new") {
     const projectId = (value as Record<string, unknown>)["projectId"];

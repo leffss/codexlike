@@ -19,7 +19,7 @@ export const EMPTY_QUEUE_STATE: QueueSnapshot = {
 };
 
 export interface LiveTask {
-  sessionId: string;
+  taskId: string;
   autoApprove: boolean;
   executionId: string | null;
   sequence: number;
@@ -48,10 +48,7 @@ export function receiveLiveEvent(
   state: LiveTask,
   envelope: TaskEventEnvelope
 ): LiveTask {
-  if (
-    envelope.sessionId !== state.sessionId ||
-    envelope.sequence <= state.sequence
-  )
+  if (envelope.taskId !== state.taskId || envelope.sequence <= state.sequence)
     return state;
   const starts =
     envelope.event.type === "user-message" ||
@@ -62,7 +59,7 @@ export function receiveLiveEvent(
     state.activity.outcome === "interrupted" &&
     [
       "compact-finished",
-      "session-auto-approve-changed",
+      "task-auto-approve-changed",
       "assistant-aborted",
       "tool-result",
       "interaction-resolved",
@@ -77,9 +74,9 @@ export function receiveLiveEvent(
   )
     return state;
   return {
-    sessionId: state.sessionId,
+    taskId: state.taskId,
     autoApprove:
-      envelope.event.type === "session-auto-approve-changed"
+      envelope.event.type === "task-auto-approve-changed"
         ? envelope.event.autoApprove
         : state.autoApprove,
     executionId: envelope.executionId,
@@ -106,7 +103,7 @@ export function hydrateLiveTask(
   for (const envelope of view.events)
     items = applyLiveEvent(items, envelope.event);
   let state: LiveTask = {
-    sessionId: view.sessionId,
+    taskId: view.taskId,
     autoApprove: view.autoApprove ?? false,
     executionId: view.executionId,
     sequence: view.sequence,

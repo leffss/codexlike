@@ -16,44 +16,44 @@ import { createTaskInputQueues } from "../../src/tasks/input-queue";
 function createMemoryStore(): InputQueueStore {
   const rows = new Map<string, QueuedMessage[]>();
   const paused = new Set<string>();
-  function list(sessionId: string) {
-    return [...(rows.get(sessionId) ?? [])].sort(
+  function list(taskId: string) {
+    return [...(rows.get(taskId) ?? [])].sort(
       (a, b) => a.position - b.position
     );
   }
   return {
     list,
-    append(sessionId, entry) {
-      const current = rows.get(sessionId) ?? [];
+    append(taskId, entry) {
+      const current = rows.get(taskId) ?? [];
       const position = current.reduce(
         (max, item) => Math.max(max, item.position + 1),
         0
       );
-      const saved = { ...entry, sessionId, position };
+      const saved = { ...entry, taskId, position };
       current.push(saved);
-      rows.set(sessionId, current);
+      rows.set(taskId, current);
       return saved;
     },
-    remove(sessionId, id) {
-      const current = rows.get(sessionId) ?? [];
+    remove(taskId, id) {
+      const current = rows.get(taskId) ?? [];
       const index = current.findIndex((item) => item.id === id);
       if (index === -1) return false;
       current.splice(index, 1);
       return true;
     },
-    clear(sessionId) {
-      rows.delete(sessionId);
+    clear(taskId) {
+      rows.delete(taskId);
     },
-    update(sessionId, id, patch) {
-      const current = rows.get(sessionId) ?? [];
+    update(taskId, id, patch) {
+      const current = rows.get(taskId) ?? [];
       const index = current.findIndex((item) => item.id === id);
       if (index === -1) return null;
       const saved = { ...current[index]!, ...patch };
       current[index] = saved;
       return saved;
     },
-    reorder(sessionId, orderedIds) {
-      const current = list(sessionId);
+    reorder(taskId, orderedIds) {
+      const current = list(taskId);
       const idSet = new Set(orderedIds);
       if (idSet.size !== orderedIds.length)
         throw new Error("重排：条目清单有重复");
@@ -68,27 +68,27 @@ function createMemoryStore(): InputQueueStore {
         byId.get(id)!.position = positions[index]!;
       });
     },
-    isPaused: (sessionId) => paused.has(sessionId),
-    setPaused(sessionId, value) {
-      if (value) paused.add(sessionId);
-      else paused.delete(sessionId);
+    isPaused: (taskId) => paused.has(taskId),
+    setPaused(taskId, value) {
+      if (value) paused.add(taskId);
+      else paused.delete(taskId);
     },
     close() {},
   };
 }
 
 function harness(overrides?: {
-  isBusy?: (sessionId: string) => boolean;
+  isBusy?: (taskId: string) => boolean;
   dispatch?: (
-    sessionId: string,
+    taskId: string,
     entry: QueuedMessage,
     onSettled: () => void
   ) => Promise<void>;
 }) {
   const store = createMemoryStore();
-  const dispatched: { sessionId: string; entry: QueuedMessage }[] = [];
+  const dispatched: { taskId: string; entry: QueuedMessage }[] = [];
   const changes: {
-    sessionId: string;
+    taskId: string;
     reason: string;
     queue: QueuedMessage[];
     paused: boolean;
@@ -96,26 +96,26 @@ function harness(overrides?: {
   let busy = overrides?.isBusy ?? (() => false);
   const queues = createTaskInputQueues({
     store,
-    isBusy: (sessionId) => busy(sessionId),
-    dispatch: async (sessionId, entry, onSettled) => {
-      dispatched.push({ sessionId, entry });
+    isBusy: (taskId) => busy(taskId),
+    dispatch: async (taskId, entry, onSettled) => {
+      dispatched.push({ taskId, entry });
       if (overrides?.dispatch) {
         // 自定义假件：onSettled 的调用时机由假件全权控制
-        await overrides.dispatch(sessionId, entry, onSettled);
+        await overrides.dispatch(taskId, entry, onSettled);
       } else {
         // 默认假件：发送即时完成并立刻结束本轮回复
         onSettled();
       }
     },
-    onChange: (sessionId, reason, queue, paused) =>
-      changes.push({ sessionId, reason, queue: [...queue], paused }),
+    onChange: (taskId, reason, queue, paused) =>
+      changes.push({ taskId, reason, queue: [...queue], paused }),
   });
   return {
     store,
     queues,
     dispatched,
     changes,
-    setBusy(next: (sessionId: string) => boolean) {
+    setBusy(next: (taskId: string) => boolean) {
       busy = next;
     },
   };
@@ -143,7 +143,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     expect(app.queues.snapshot("session-1")).toHaveLength(1);
     expect(app.changes).toHaveLength(1);
     expect(app.changes[0]).toMatchObject({
-      sessionId: "session-1",
+      taskId: "session-1",
       reason: "enqueue",
     });
   });
@@ -192,7 +192,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     const releases: (() => void)[] = [];
     const app = harness({
       isBusy: () => true,
-      dispatch: (sessionId, entry, onSettled) => {
+      dispatch: (taskId, entry, onSettled) => {
         if (entry.text === "第一条") {
           releases.push(onSettled);
         } else {
@@ -238,7 +238,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     let failFirst = true;
     const app = harness({
       isBusy: () => true,
-      dispatch: (sessionId, entry, onSettled) => {
+      dispatch: (taskId, entry, onSettled) => {
         if (entry.text === "第一条" && failFirst)
           return Promise.reject(new Error("Profile 已删除"));
         onSettled();
@@ -271,7 +271,7 @@ describe("createTaskInputQueues（忙时入队与逐条自动消费）", () => {
     app.queues.enqueue("session-b", { ...INPUT, text: "B 的排队" });
 
     await vi.waitFor(() =>
-      expect(app.dispatched.map((item) => item.sessionId)).toEqual([
+      expect(app.dispatched.map((item) => item.taskId)).toEqual([
         "session-a",
         "session-b",
       ])
@@ -309,7 +309,7 @@ describe("队列暂停状态机（票 02：停止保留队列、恢复/清空与
     // 置暂停推送变更事件；暂停期间的入队事件同样携带暂停态
     expect(app.changes).toHaveLength(3);
     expect(app.changes[1]).toMatchObject({
-      sessionId: "session-1",
+      taskId: "session-1",
       reason: "pause",
       paused: true,
     });
@@ -443,7 +443,7 @@ describe("createSqliteInputQueueStore（队列持久化，与任务消息同库�
       ]);
       expect(restored[0]).toMatchObject({
         id: "q-1",
-        sessionId: "session-1",
+        taskId: "session-1",
         position: 0,
         mentionPaths: ["docs/a.md"],
         providerProfileId: "profile-1",

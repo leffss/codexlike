@@ -37,7 +37,7 @@ export interface McpService {
    * 任务工具工厂：内置工具在前（同名优先），MCP 启用工具随后；
    * 交给 TaskManager 的 tools 选项，每条消息逐次解析。
    */
-  sessionTools(builtin?: ToolDefinition[]): ToolDefinition[];
+  taskTools(builtin?: ToolDefinition[]): ToolDefinition[];
   /** 应用启动时连接全部已配置 server（失败不抛，状态可见） */
   startup(): Promise<void>;
   /** 应用退出时断开全部子进程 */
@@ -120,7 +120,7 @@ export function createMcpService(options: {
       await reload();
     },
 
-    sessionTools(builtin = []) {
+    taskTools(builtin = []) {
       const mcpTools = manager.tools();
       const names = new Set(builtin.map((tool) => tool.name));
       return [...builtin, ...mcpTools.filter((tool) => !names.has(tool.name))];

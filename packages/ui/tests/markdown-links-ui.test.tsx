@@ -41,7 +41,7 @@ function render(entry: (typeof entries)[number], content: string): string {
   return renderToStaticMarkup(
     createElement(MessageStream, {
       items: [segment],
-      sessionId: "markdown-links-task",
+      taskId: "markdown-links-task",
     })
   );
 }

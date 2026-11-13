@@ -20,7 +20,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     setFailed(false);
     if (!call.isError) {
       window.codexlike.tasks
-        .toolImage(call.sessionId, call.id)
+        .toolImage(call.taskId, call.id)
         .then((dataUrl) => {
           if (alive) {
             if (dataUrl === null) {
@@ -39,7 +39,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     return () => {
       alive = false;
     };
-  }, [call.id, call.sessionId, call.isError]);
+  }, [call.id, call.taskId, call.isError]);
 
   if (call.isError) {
     return null;

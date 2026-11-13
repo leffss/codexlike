@@ -7,7 +7,7 @@ import { QueueBar } from "../src/components/QueueBar";
 function queued(texts: string[]): QueuedMessage[] {
   return texts.map((text, index) => ({
     id: `q-${index}`,
-    sessionId: "s",
+    taskId: "s",
     position: index,
     text,
     mentionPaths: [],

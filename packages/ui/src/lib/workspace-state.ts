@@ -51,9 +51,9 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     thinkingEffort: "auto",
     approvalMode: "ask",
   };
-  const taskTarget = (sessionId: string) => ({
-    kind: "session" as const,
-    sessionId,
+  const taskTarget = (taskId: string) => ({
+    kind: "task" as const,
+    taskId,
   });
   const records = new Map<string, InteractionRecord>();
   const hidden = new Set<string>();
@@ -83,8 +83,8 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   const submissions = new Map<string, SubmissionState>();
   const listeners = new Set<() => void>();
   let revision = 0;
-  const key = (sessionId: string, requestId: string) =>
-    JSON.stringify([sessionId, requestId]);
+  const key = (taskId: string, requestId: string) =>
+    JSON.stringify([taskId, requestId]);
   function notify() {
     revision += 1;
     for (const listener of listeners) listener();
@@ -115,23 +115,22 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   return {
     flush: persisted.flush,
     persistenceError: persisted.error,
-    async loadTask(sessionId: string) {
-      if (loaded.has(sessionId)) return;
-      const entry = await persisted.load(taskTarget(sessionId));
-      if (removedTasks.has(sessionId)) return;
-      if (entry && !loaded.has(sessionId)) {
-        if (!composers.has(sessionId))
-          composers.set(sessionId, entry.value.text);
-        if (!preferences.has(sessionId))
-          preferences.set(sessionId, entry.value.preferences);
-        if (!positions.has(sessionId))
-          positions.set(sessionId, entry.value.readingPosition);
+    async loadTask(taskId: string) {
+      if (loaded.has(taskId)) return;
+      const entry = await persisted.load(taskTarget(taskId));
+      if (removedTasks.has(taskId)) return;
+      if (entry && !loaded.has(taskId)) {
+        if (!composers.has(taskId)) composers.set(taskId, entry.value.text);
+        if (!preferences.has(taskId))
+          preferences.set(taskId, entry.value.preferences);
+        if (!positions.has(taskId))
+          positions.set(taskId, entry.value.readingPosition);
         for (const [requestId, draft] of Object.entries(
           entry.value.questionDrafts
         ))
-          drafts.set(key(sessionId, requestId), draft);
+          drafts.set(key(taskId, requestId), draft);
       }
-      loaded.add(sessionId);
+      loaded.add(taskId);
       notify();
     },
     async loadNewDraft(projectId: string | null, defaultProfile = "") {
@@ -151,25 +150,25 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       newDraft(projectId, defaultProfile);
       notify();
     },
-    preferences: (sessionId: string) =>
-      preferences.get(sessionId) ?? defaultPreferences,
-    setPreferences(sessionId: string, patch: Partial<TaskPreferences>) {
-      if (removedTasks.has(sessionId)) return;
-      preferences.set(sessionId, {
-        ...(preferences.get(sessionId) ?? defaultPreferences),
+    preferences: (taskId: string) =>
+      preferences.get(taskId) ?? defaultPreferences,
+    setPreferences(taskId: string, patch: Partial<TaskPreferences>) {
+      if (removedTasks.has(taskId)) return;
+      preferences.set(taskId, {
+        ...(preferences.get(taskId) ?? defaultPreferences),
         ...patch,
       });
-      persisted.patch(taskTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(taskId), (value) => ({
         ...value,
         preferences: { ...value.preferences, ...patch },
       }));
       notify();
     },
-    readingPosition: (sessionId: string) => positions.get(sessionId) ?? null,
-    setReadingPosition(sessionId: string, position: ReadingPosition) {
-      if (removedTasks.has(sessionId)) return;
-      positions.set(sessionId, position);
-      persisted.patch(taskTarget(sessionId), (value) => ({
+    readingPosition: (taskId: string) => positions.get(taskId) ?? null,
+    setReadingPosition(taskId: string, position: ReadingPosition) {
+      if (removedTasks.has(taskId)) return;
+      positions.set(taskId, position);
+      persisted.patch(taskTarget(taskId), (value) => ({
         ...value,
         readingPosition: position,
       }));
@@ -202,18 +201,18 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       notify();
     },
     /** 仅清除宿主返回的明确归属集合，不比较工作区路径。 */
-    removeProject(projectId: string, sessionIds: string[]) {
+    removeProject(projectId: string, taskIds: string[]) {
       removedProjects.add(projectId);
       persisted.remove({ kind: "new", projectId });
       newDrafts.delete(projectId);
-      const removed = new Set(sessionIds);
-      for (const sessionId of removed) {
-        removedTasks.add(sessionId);
-        persisted.remove(taskTarget(sessionId));
-        composers.delete(sessionId);
-        preferences.delete(sessionId);
-        positions.delete(sessionId);
-        loaded.delete(sessionId);
+      const removed = new Set(taskIds);
+      for (const taskId of removed) {
+        removedTasks.add(taskId);
+        persisted.remove(taskTarget(taskId));
+        composers.delete(taskId);
+        preferences.delete(taskId);
+        positions.delete(taskId);
+        loaded.delete(taskId);
       }
       for (const [id, record] of records) {
         if (!removed.has(record.request.sessionId)) continue;
@@ -252,13 +251,13 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     version: () => revision,
     observe,
     /** 权威历史隐藏已压缩记录，但墓碑保留；查询期间新事件与pending草稿不丢。 */
-    reconcile(sessionId: string, snapshot: InteractionRecord[], since: number) {
+    reconcile(taskId: string, snapshot: InteractionRecord[], since: number) {
       const visible = new Set(
-        snapshot.map((record) => key(sessionId, record.request.id))
+        snapshot.map((record) => key(taskId, record.request.id))
       );
       for (const [id, record] of records) {
         if (
-          record.request.sessionId === sessionId &&
+          record.request.sessionId === taskId &&
           record.status !== "pending" &&
           !visible.has(id) &&
           (observedAt.get(id) ?? 0) <= since
@@ -266,31 +265,31 @@ export function createWorkspaceState(port?: WorkbenchPort) {
           hidden.add(id);
       }
       for (const record of snapshot) {
-        if (record.request.sessionId !== sessionId) continue;
-        hidden.delete(key(sessionId, record.request.id));
+        if (record.request.sessionId !== taskId) continue;
+        hidden.delete(key(taskId, record.request.id));
         observe(record);
       }
       notify();
     },
-    submission: (sessionId: string, requestId: string) =>
-      submissions.get(key(sessionId, requestId)) ?? idleSubmission,
+    submission: (taskId: string, requestId: string) =>
+      submissions.get(key(taskId, requestId)) ?? idleSubmission,
     async submit(
-      sessionId: string,
+      taskId: string,
       requestId: string,
       response: InteractionResponse,
       send: (
-        sessionId: string,
+        taskId: string,
         requestId: string,
         response: InteractionResponse
       ) => Promise<boolean>
     ) {
-      const id = key(sessionId, requestId);
+      const id = key(taskId, requestId);
       const record = records.get(id);
       if (record?.status !== "pending" || submissions.get(id)?.busy) return;
       submissions.set(id, { busy: true, error: null });
       notify();
       try {
-        const accepted = await send(sessionId, requestId, response);
+        const accepted = await send(taskId, requestId, response);
         if (records.get(id)?.status !== "pending") return;
         if (accepted) {
           observe({
@@ -318,20 +317,20 @@ export function createWorkspaceState(port?: WorkbenchPort) {
         notify();
       }
     },
-    composer: (sessionId: string) => composers.get(sessionId) ?? "",
-    setComposer(sessionId: string, text: string) {
-      if (removedTasks.has(sessionId)) return;
-      composers.set(sessionId, text);
-      persisted.patch(taskTarget(sessionId), (value) => ({
+    composer: (taskId: string) => composers.get(taskId) ?? "",
+    setComposer(taskId: string, text: string) {
+      if (removedTasks.has(taskId)) return;
+      composers.set(taskId, text);
+      persisted.patch(taskTarget(taskId), (value) => ({
         ...value,
         text,
       }));
       notify();
     },
-    draft: (sessionId: string, requestId: string) =>
-      drafts.get(key(sessionId, requestId)),
-    edit(sessionId: string, requestId: string, action: QuestionAction) {
-      const id = key(sessionId, requestId);
+    draft: (taskId: string, requestId: string) =>
+      drafts.get(key(taskId, requestId)),
+    edit(taskId: string, requestId: string, action: QuestionAction) {
+      const id = key(taskId, requestId);
       const record = records.get(id);
       const draft = drafts.get(id);
       if (
@@ -343,25 +342,24 @@ export function createWorkspaceState(port?: WorkbenchPort) {
         return;
       const next = updateQuestionDraft(record.request, draft, action);
       drafts.set(id, next);
-      persisted.patch(taskTarget(sessionId), (value) => ({
+      persisted.patch(taskTarget(taskId), (value) => ({
         ...value,
         questionDrafts: { ...value.questionDrafts, [requestId]: next },
       }));
       notify();
     },
-    records(sessionId: string) {
+    records(taskId: string) {
       return [...records.values()].filter(
         (record) =>
-          record.request.sessionId === sessionId &&
-          !hidden.has(key(sessionId, record.request.id))
+          record.request.sessionId === taskId &&
+          !hidden.has(key(taskId, record.request.id))
       );
     },
-    pending(sessionId: string) {
+    pending(taskId: string) {
       return [...records.values()]
         .filter(
           (record) =>
-            record.request.sessionId === sessionId &&
-            record.status === "pending"
+            record.request.sessionId === taskId && record.status === "pending"
         )
         .sort((a, b) => a.request.createdAt.localeCompare(b.request.createdAt));
     },
