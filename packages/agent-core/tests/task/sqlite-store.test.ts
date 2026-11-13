@@ -5,11 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import type { SessionRecord, StoredMessage } from "../../src/task/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { TaskRecord, StoredMessage } from "../../src/task/types";
 
 /** 最小合法会话记录（固定时间戳避免测试不稳定） */
-function sessionRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {
+function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: "session-1",
     creationRequestId: null,
@@ -59,14 +59,14 @@ afterEach(() => {
   }
 });
 
-describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
+describe("createSqliteTaskStore（SQLite 会话持久化）", () => {
   it("项目置顶跨重启保存且不改变创建顺序，旧项目幂等补列默认关闭", () => {
     const path = tempDbPath();
     const raw = new DatabaseSync(path);
     raw.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, workspace_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
       INSERT INTO projects VALUES ('old', '旧项目', '/old', '2026-01-01');`);
     raw.close();
-    const store = createSqliteSessionStore(path);
+    const store = createSqliteTaskStore(path);
     expect(store.listProjects()[0]?.pinned).toBe(false);
     store.insertProject({
       id: "new",
@@ -77,7 +77,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     store.setProjectPinned("new", true);
     expect(store.listProjects().map((p) => p.id)).toEqual(["old", "new"]);
     store.close();
-    const reopened = createSqliteSessionStore(path);
+    const reopened = createSqliteTaskStore(path);
     expect(reopened.listProjects().map((p) => p.pinned)).toEqual([false, true]);
     reopened.setProjectPinned("new", false);
     expect(reopened.listProjects()[1]?.pinned).toBe(false);
@@ -85,24 +85,24 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
   });
   it("自动批准默认关闭、独立于遗留命令授权，更新后跨重启保留", () => {
     const path = tempDbPath();
-    const first = createSqliteSessionStore(path);
-    first.insertSession(sessionRecord());
+    const first = createSqliteTaskStore(path);
+    first.insertTask(taskRecord());
     first.insertApproval("session-1", "git");
-    expect(first.listSessions()[0]?.autoApprove).toBe(false);
+    expect(first.listTasks()[0]?.autoApprove).toBe(false);
     first.updateSession("session-1", { autoApprove: true });
     first.close();
-    const reopened = createSqliteSessionStore(path);
-    expect(reopened.listSessions()[0]?.autoApprove).toBe(true);
-    reopened.insertSession(sessionRecord({ id: "new" }));
-    expect(
-      reopened.listSessions().find((s) => s.id === "new")?.autoApprove
-    ).toBe(false);
+    const reopened = createSqliteTaskStore(path);
+    expect(reopened.listTasks()[0]?.autoApprove).toBe(true);
+    reopened.insertTask(taskRecord({ id: "new" }));
+    expect(reopened.listTasks().find((s) => s.id === "new")?.autoApprove).toBe(
+      false
+    );
     reopened.close();
   });
   it("插入的会话与消息可原样读回（内存库）", () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
 
-    store.insertSession(sessionRecord());
+    store.insertTask(taskRecord());
     store.insertMessage(message());
     store.insertMessage(
       message({
@@ -113,7 +113,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       })
     );
 
-    expect(store.listSessions()).toEqual([sessionRecord()]);
+    expect(store.listTasks()).toEqual([taskRecord()]);
     expect(store.listMessages("session-1")).toEqual([
       message(),
       message({
@@ -128,10 +128,10 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
   it("同一路径重开 store（等价应用重启）数据完整恢复", () => {
     const dbPath = tempDbPath();
 
-    const first = createSqliteSessionStore(dbPath);
-    first.insertSession(sessionRecord({ id: "session-a", title: "项目A" }));
-    first.insertSession(
-      sessionRecord({
+    const first = createSqliteTaskStore(dbPath);
+    first.insertTask(taskRecord({ id: "session-a", title: "项目A" }));
+    first.insertTask(
+      taskRecord({
         id: "session-b",
         title: "项目B",
         createdAt: "2026-11-10T09:00:00.000Z",
@@ -141,21 +141,21 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     first.insertMessage(message({ sessionId: "session-b" }));
     first.close();
 
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     // 最近使用倒序：session-b（09:00）比 session-a（08:00）新
-    const ids = reopened.listSessions().map((s) => s.id);
+    const ids = reopened.listTasks().map((s) => s.id);
     expect(ids).toEqual(["session-b", "session-a"]);
     expect(reopened.listMessages("session-b")).toHaveLength(1);
     reopened.close();
   });
 
   it("后台记录更新不改变最近使用排序", () => {
-    const store = createSqliteSessionStore(":memory:");
-    store.insertSession(
-      sessionRecord({ id: "old", updatedAt: "2026-11-10T08:00:00.000Z" })
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(
+      taskRecord({ id: "old", updatedAt: "2026-11-10T08:00:00.000Z" })
     );
-    store.insertSession(
-      sessionRecord({
+    store.insertTask(
+      taskRecord({
         id: "new",
         createdAt: "2026-11-10T09:00:00.000Z",
         updatedAt: "2026-11-10T09:00:00.000Z",
@@ -167,25 +167,25 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       updatedAt: "2026-11-10T10:00:00.000Z",
     });
 
-    expect(store.listSessions().map((s) => s.id)).toEqual(["new", "old"]);
-    expect(store.listSessions()[1]?.status).toBe("streaming");
+    expect(store.listTasks().map((s) => s.id)).toEqual(["new", "old"]);
+    expect(store.listTasks()[1]?.status).toBe("streaming");
   });
 
   it("未写入过的会话消息查询返回空数组", () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
     expect(store.listMessages("nope")).toEqual([]);
   });
 
   it("审批模式随会话落库：insert 读回一致，updateSession 补丁生效", () => {
-    const store = createSqliteSessionStore(":memory:");
-    store.insertSession(sessionRecord({ approvalMode: "ask" }));
-    expect(store.listSessions()[0]?.approvalMode).toBe("ask");
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord({ approvalMode: "ask" }));
+    expect(store.listTasks()[0]?.approvalMode).toBe("ask");
 
     store.updateSession("session-1", {
       approvalMode: "full-access",
       updatedAt: "2026-11-10T08:30:00.000Z",
     });
-    expect(store.listSessions()[0]?.approvalMode).toBe("full-access");
+    expect(store.listTasks()[0]?.approvalMode).toBe("full-access");
   });
 
   it("旧三档值读侧迁移（ADR 0004，不回写）：readonly→ask、suggest→assist、full→full-access；非法值回退 assist", () => {
@@ -212,10 +212,8 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     `);
     raw.close();
 
-    const store = createSqliteSessionStore(dbPath);
-    const byId = new Map(
-      store.listSessions().map((r) => [r.id, r.approvalMode])
-    );
+    const store = createSqliteTaskStore(dbPath);
+    const byId = new Map(store.listTasks().map((r) => [r.id, r.approvalMode]));
     expect(byId.get("legacy-ro")).toBe("ask");
     expect(byId.get("legacy-sg")).toBe("assist");
     expect(byId.get("legacy-fl")).toBe("full-access");
@@ -231,21 +229,21 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
   });
 
   it("运行模式（local/worktree）随会话落库：insert 读回一致，updateSession 补丁生效", () => {
-    const store = createSqliteSessionStore(":memory:");
-    store.insertSession(sessionRecord({ workspaceMode: "worktree" }));
-    expect(store.listSessions()[0]?.workspaceMode).toBe("worktree");
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord({ workspaceMode: "worktree" }));
+    expect(store.listTasks()[0]?.workspaceMode).toBe("worktree");
 
     store.updateSession("session-1", {
       workspaceMode: "local",
       updatedAt: "2026-11-10T08:40:00.000Z",
     });
-    expect(store.listSessions()[0]?.workspaceMode).toBe("local");
+    expect(store.listTasks()[0]?.workspaceMode).toBe("local");
   });
 
   it("worktree 会话的原始仓库路径（workspaceOriginPath）随会话落库读回；local 会话为 null（ADR 0005）", () => {
-    const store = createSqliteSessionStore(":memory:");
-    store.insertSession(
-      sessionRecord({
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(
+      taskRecord({
         id: "session-wt",
         workspaceMode: "worktree",
         workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
@@ -253,10 +251,10 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
         updatedAt: "2026-11-10T08:30:00.000Z",
       })
     );
-    store.insertSession(sessionRecord());
+    store.insertTask(taskRecord());
 
     const byId = new Map(
-      store.listSessions().map((r) => [r.id, r.workspaceOriginPath])
+      store.listTasks().map((r) => [r.id, r.workspaceOriginPath])
     );
     expect(byId.get("session-wt")).toBe("C:\\work\\demo");
     expect(byId.get("session-1")).toBeNull();
@@ -285,9 +283,9 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     `);
     raw.close();
 
-    const store = createSqliteSessionStore(dbPath);
-    store.insertSession(
-      sessionRecord({
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(
+      taskRecord({
         id: "session-wt",
         workspaceMode: "worktree",
         workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
@@ -296,7 +294,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     );
 
     const byId = new Map(
-      store.listSessions().map((r) => [r.id, r.workspaceOriginPath])
+      store.listTasks().map((r) => [r.id, r.workspaceOriginPath])
     );
     expect(byId.get("legacy-wt")).toBeNull();
     expect(byId.get("session-wt")).toBe("C:\\work\\demo");
@@ -321,17 +319,17 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     `);
     raw.close();
 
-    const store = createSqliteSessionStore(dbPath);
-    expect(store.listSessions()[0]?.workspaceMode).toBe("local");
+    const store = createSqliteTaskStore(dbPath);
+    expect(store.listTasks()[0]?.workspaceMode).toBe("local");
     store.close();
   });
 
   it("「总是允许」记忆入库：幂等（同词不重复）、按会话隔离、重开库完整恢复", () => {
     const dbPath = tempDbPath();
-    const first = createSqliteSessionStore(dbPath);
-    first.insertSession(sessionRecord({ id: "session-a" }));
-    first.insertSession(
-      sessionRecord({
+    const first = createSqliteTaskStore(dbPath);
+    first.insertTask(taskRecord({ id: "session-a" }));
+    first.insertTask(
+      taskRecord({
         id: "session-b",
         createdAt: "2026-11-10T09:00:00.000Z",
         updatedAt: "2026-11-10T09:00:00.000Z",
@@ -349,7 +347,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     first.close();
 
     // 等价应用重启：记忆完整恢复（审批恢复后仍生效的数据来源）
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     expect(reopened.listApprovals("session-a")).toEqual(["git", "pnpm"]);
     reopened.close();
   });
@@ -374,8 +372,8 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     raw.close();
 
     // 打开旧库：迁移幂等补列（approval_mode 默认 assist）+ approvals 表可用
-    const store = createSqliteSessionStore(dbPath);
-    const record = store.listSessions()[0]!;
+    const store = createSqliteTaskStore(dbPath);
+    const record = store.listTasks()[0]!;
     expect(record.id).toBe("legacy-1");
     expect(record.approvalMode).toBe("assist");
     store.insertApproval("legacy-1", "git");
@@ -384,14 +382,14 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       approvalMode: "full-access",
       updatedAt: "2026-11-02T00:00:00.000Z",
     });
-    expect(store.listSessions()[0]?.approvalMode).toBe("full-access");
+    expect(store.listTasks()[0]?.approvalMode).toBe("full-access");
     store.close();
   });
 
   it("消息的 @引用 与中断标记原样往返（快照恢复的数据来源）", () => {
     const dbPath = tempDbPath();
-    const store = createSqliteSessionStore(dbPath);
-    store.insertSession(sessionRecord());
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
     store.insertMessage(
       message({
         mentions: [{ path: "material.txt", content: "被引用的文件内容" }],
@@ -408,7 +406,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     );
     store.close();
 
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     const restored = reopened.listMessages("session-1");
     expect(restored[0]?.mentions).toEqual([
       { path: "material.txt", content: "被引用的文件内容" },
@@ -421,8 +419,8 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
 
   it("reasoning 随消息与工具调用记录落库：重开库完整恢复（票 02 思考回看的数据来源）", () => {
     const dbPath = tempDbPath();
-    const store = createSqliteSessionStore(dbPath);
-    store.insertSession(sessionRecord());
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
     store.insertMessage(
       message({
         id: "assistant-1",
@@ -461,7 +459,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     });
     store.close();
 
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     const messages = reopened.listMessages("session-1");
     expect(messages[0]?.reasoning).toBe("先想想再回答");
     expect(messages[0]?.content).toBe("正文回答");
@@ -511,7 +509,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       VALUES ('legacy-d', 'session-1', 'spawn_subagent', '{"task":"旧任务"}', '旧报告', 0, '2026-11-10T08:00:02.000Z')`);
     raw.close();
 
-    const migrated = createSqliteSessionStore(dbPath);
+    const migrated = createSqliteTaskStore(dbPath);
     // 旧行读回：reasoning 自然缺失（undefined），不报错、不产生空思考
     expect(migrated.listMessages("session-1")[0]?.reasoning).toBeUndefined();
     expect(migrated.listToolCalls("session-1")[0]?.reasoning).toBeUndefined();
@@ -570,7 +568,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     );
     db.close();
 
-    const migrated = createSqliteSessionStore(dbPath);
+    const migrated = createSqliteTaskStore(dbPath);
     const messages = migrated.listMessages("session-1");
     expect(messages).toEqual([
       {
@@ -590,11 +588,11 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
   });
 });
 
-describe("SessionPersistence compact 落库（工单 08）", () => {
+describe("TaskPersistence compact 落库（工单 08）", () => {
   it("replaceHistory 单事务替换消息历史并追加 compact 记录；重开库完整恢复", () => {
     const dbPath = tempDbPath();
-    const store = createSqliteSessionStore(dbPath);
-    store.insertSession(sessionRecord());
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
     store.insertMessage(message({ id: "m1", content: "旧问题1" }));
     store.insertMessage(
       message({
@@ -637,7 +635,7 @@ describe("SessionPersistence compact 落库（工单 08）", () => {
     );
     store.close();
 
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     expect(
       reopened.listMessages("session-1").map((m) => [m.id, m.role])
     ).toEqual([
@@ -657,8 +655,8 @@ describe("SessionPersistence compact 落库（工单 08）", () => {
   });
 
   it("listCompacts 按时间正序（多次压缩累积，末条为当前生效摘要）", () => {
-    const store = createSqliteSessionStore(":memory:");
-    store.insertSession(sessionRecord());
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord());
     const compact = (id: string, at: string) =>
       store.replaceHistory(
         "session-1",
@@ -707,7 +705,7 @@ describe("SessionPersistence compact 落库（工单 08）", () => {
     `);
     db.close();
 
-    const store = createSqliteSessionStore(dbPath);
+    const store = createSqliteTaskStore(dbPath);
     expect(store.listMessages("session-1")).toHaveLength(1);
     expect(store.listCompacts("session-1")).toEqual([]);
     store.close();
@@ -718,13 +716,13 @@ describe("SessionPersistence compact 落库（工单 08）", () => {
     tempDirs.push(dir);
     const dbPath = join(dir, "nested", "deeper", "codexlike.db");
 
-    const store = createSqliteSessionStore(dbPath);
-    store.insertSession(sessionRecord());
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
     store.insertMessage(message());
     store.close();
 
     // 重开验证：目录由 store 自建，库文件落在嵌套路径且可读回
-    const reopened = createSqliteSessionStore(dbPath);
+    const reopened = createSqliteTaskStore(dbPath);
     expect(reopened.listMessages("session-1")).toHaveLength(1);
     reopened.close();
   });

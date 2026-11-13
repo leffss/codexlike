@@ -21,7 +21,7 @@ import { extractSkillNames } from "../composer/skill-reference";
 import type {
   AgentResourceSnapshot,
   ResourceSnapshotSummary,
-  SessionResourceState,
+  TaskResourceState,
 } from "../context/resource-types";
 import {
   createLanguageModelFromProfile,
@@ -44,7 +44,7 @@ import {
   type ApprovalRequest,
 } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
-import type { SessionPersistence } from "./persistence";
+import type { TaskPersistence } from "./persistence";
 import {
   createSubagentOrchestrator,
   SUBAGENT_DELEGATION_POLICY,
@@ -56,8 +56,8 @@ import type {
   CompactRecord,
   CompactResult,
   MentionAttachment,
-  SessionEvent,
-  SessionRecord,
+  TaskEvent,
+  TaskRecord,
   StoredMessage,
 } from "./types";
 
@@ -78,10 +78,10 @@ export interface SendMessageOptions {
   signal?: AbortSignal;
 }
 
-export interface CreateAgentSessionOptions {
+export interface CreateAgentTaskOptions {
   /** 会话记录（新建写入或恢复读出，由调用方负责持久化） */
-  record: SessionRecord;
-  persistence: SessionPersistence;
+  record: TaskRecord;
+  persistence: TaskPersistence;
   /** 恢复会话时传入既有消息；新会话为空 */
   history?: StoredMessage[];
   /** AGENTS.md 等组装的系统提示；空串/省略时不注入 system 角色 */
@@ -123,15 +123,15 @@ export interface CreateAgentSessionOptions {
   generateId?: () => string;
 }
 
-export interface AgentSession {
+export interface AgentTask {
   readonly id: string;
   readonly pendingInteractions: InteractionRecord[];
   respondInteraction(requestId: string, response: unknown): boolean;
   cancelInteractions(reason: string): void;
-  /** 会话记录快照（可序列化；最新状态以 SessionManager.list 为准） */
-  readonly record: SessionRecord;
+  /** 会话记录快照（可序列化；最新状态以 TaskManager.list 为准） */
+  readonly record: TaskRecord;
   /** 当前运行快照实时摘要与最近一轮摘要；不包含正文，不随持久化恢复。 */
-  readonly resourceState: SessionResourceState;
+  readonly resourceState: TaskResourceState;
   /**
    * 全部等待用户审批的请求（主会话与子代理并行等待时可能多个）。
    * UI 切回会话时据此恢复审批卡片。
@@ -141,7 +141,7 @@ export interface AgentSession {
   readonly pendingApproval: ApprovalRequest | null;
   /**
    * 切换审批模式（三档，随时可调）：只对下一次发送生效。
-   * 持久化由调用方（SessionManager）负责。
+   * 持久化由调用方（TaskManager）负责。
    */
   setApprovalMode(mode: ApprovalMode): void;
   /** 先持久化再撤销实时会话授权；失败不改变内存。 */
@@ -159,7 +159,7 @@ export interface AgentSession {
    * 单会话同一时刻只允许一个流（并发发送直接抛错）；
    * 出错时发 error 事件（中文提示，落库为 error 消息），会话保持可用。
    */
-  sendMessage(options: SendMessageOptions): AsyncIterable<SessionEvent>;
+  sendMessage(options: SendMessageOptions): AsyncIterable<TaskEvent>;
   /**
    * /compact 手动压缩（工单 08，GLOSSARY「Compact」）：
    * 用当前模型把既有历史压成摘要 → 摘要替换旧历史、保留最近 3 轮原始对话 →
@@ -262,9 +262,7 @@ function keptRoundsStart(context: ModelMessage[]): number {
 }
 
 /** 创建会话对象（纯 agent-core，不依赖 Electron；持久化经接口注入） */
-export function createAgentSession(
-  options: CreateAgentSessionOptions
-): AgentSession {
+export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
   const { record, persistence } = options;
   // 模型上下文与持久化消息分离：user 消息进上下文时附加 @引用 内容，落库保持原文
   const context: ModelMessage[] = options.history
@@ -292,7 +290,7 @@ export function createAgentSession(
   let terminated = false;
   let activeUser: StoredMessage | undefined;
   let activeUserContext: ModelMessage | undefined;
-  const events = createEventBuffer<SessionEvent>();
+  const events = createEventBuffer<TaskEvent>();
   const interactions = createInteractionController({
     persistence,
     now,
@@ -387,7 +385,7 @@ export function createAgentSession(
   let orchestrator: SubagentOrchestrator | null = null;
   if (options.subagents !== undefined) {
     orchestrator = createSubagentOrchestrator(options.subagents, {
-      sessionId: record.id,
+      taskId: record.id,
       workspacePath: record.workspacePath,
       approvalMode: () => approvalMode,
       autoApprove: () => record.autoApprove === true,
@@ -400,7 +398,7 @@ export function createAgentSession(
   }
 
   // 工具表：宿主工具（工单 12 逐条消息解析）+ spawn_subagent（工单 13，见 sendMessage）
-  function resolveSessionTools(): ToolDefinition[] {
+  function resolveTaskTools(): ToolDefinition[] {
     const resolved =
       typeof options.tools === "function"
         ? options.tools()
@@ -507,7 +505,7 @@ export function createAgentSession(
           execution?.loadExplicit(extractSkillNames(text)) ?? "";
         // 工具逐条消息解析（MCP 启停即时生效），资源工具重名必须显式拒绝。
         const toolsByName = new Map(
-          resolveSessionTools().map((tool) => [tool.name, tool])
+          resolveTaskTools().map((tool) => [tool.name, tool])
         );
         for (const tool of execution?.tools ?? []) {
           if (toolsByName.has(tool.name)) {

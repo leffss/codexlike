@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createAgentSession } from "../../src/task/agent-task";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createAgentTask } from "../../src/task/agent-task";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import type {
   ToolDefinition,
   ToolExecutionContext,
@@ -26,7 +26,7 @@ const profile: ProviderProfile = {
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-function sessionRecord(workspacePath: string): SessionRecord {
+function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-shot",
     title: "截图会话",
@@ -132,9 +132,9 @@ function scriptedToolThenText() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -170,11 +170,11 @@ async function runSession(
   captured: ToolExecutionContext[]
 ) {
   const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-  const persistence = createSqliteSessionStore(":memory:");
-  const record = sessionRecord(workspace);
-  persistence.insertSession(record);
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord(workspace);
+  persistence.insertTask(record);
   const model = scriptedToolThenText();
-  const session = createAgentSession({
+  const session = createAgentTask({
     record,
     persistence,
     history: [],

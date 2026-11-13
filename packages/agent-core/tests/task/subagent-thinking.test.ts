@@ -11,9 +11,9 @@ import {
   type ThinkingEffort,
 } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import { createAgentSession } from "../../src/task/agent-task";
-import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 
 /** 主会话 Profile（sendMessage 携带；「同主模型」回退路径用到） */
@@ -34,7 +34,7 @@ const subProfile: ProviderProfile = {
   model: "glm-4.7-air",
 };
 
-function sessionRecord(workspacePath: string): SessionRecord {
+function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -207,9 +207,9 @@ function fakeClock() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -248,9 +248,9 @@ function makeSubagentThinkingSession(
     scriptedModel(
       options.sub ?? [{ kind: "text", deltas: ["子代理默认报告"] }]
     );
-  const persistence = createSqliteSessionStore(":memory:");
-  const record = sessionRecord(options.workspacePath);
-  persistence.insertSession(record);
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord(options.workspacePath);
+  persistence.insertTask(record);
   const factory = (
     modelProfile: ProviderProfile,
     factoryOptions: CreateLanguageModelOptions | undefined
@@ -258,7 +258,7 @@ function makeSubagentThinkingSession(
     factoryCalls?.push({ profile: modelProfile, options: factoryOptions });
     return modelProfile.id === subProfile.id ? subModel : mainModel;
   };
-  const session = createAgentSession({
+  const session = createAgentTask({
     record,
     persistence,
     languageModelFor: factory,
@@ -467,7 +467,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
 
     // 子代理 reasoning：独立事件类型、增量有序、subagentId 正确
     const subReasoning = events.filter(
-      (event): event is Extract<SessionEvent, { type: "subagent-reasoning" }> =>
+      (event): event is Extract<TaskEvent, { type: "subagent-reasoning" }> =>
         event.type === "subagent-reasoning"
     );
     expect(subReasoning.map((event) => event.delta)).toEqual([
@@ -490,13 +490,13 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
 
     // 报告正文不含思考；子代理报告回流正常
     const report = events.find(
-      (event): event is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
         event.type === "subagent-report"
     );
     expect(report?.report).toBe("调研报告正文");
     expect(report?.ok).toBe(true);
     const delegation = events.find(
-      (event): event is Extract<SessionEvent, { type: "tool-result" }> =>
+      (event): event is Extract<TaskEvent, { type: "tool-result" }> =>
         event.type === "tool-result" && event.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.output).toBe("调研报告正文");
@@ -547,12 +547,12 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     );
 
     const reasoning = events.filter(
-      (event): event is Extract<SessionEvent, { type: "subagent-reasoning" }> =>
+      (event): event is Extract<TaskEvent, { type: "subagent-reasoning" }> =>
         event.type === "subagent-reasoning"
     );
     expect(reasoning).toHaveLength(2);
     const reports = events.filter(
-      (event): event is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
         event.type === "subagent-report"
     );
     // 每个思考增量的 subagentId 与其报告内容中的编号一一对应（同一次 doStream）
@@ -643,7 +643,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     });
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({
         text: "委派后中断",
@@ -682,7 +682,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
       "中断前的子代理思考",
     ]);
     const report = events.find(
-      (event): event is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
         event.type === "subagent-report"
     );
     expect(report?.ok).toBe(false);
@@ -779,9 +779,9 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
       return framesFor([{ content: "收到报告" }], "stop");
     };
 
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord(workspace);
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord(workspace);
+    persistence.insertTask(record);
     const realFactory = (
       modelProfile: ProviderProfile,
       factoryOptions: CreateLanguageModelOptions
@@ -790,7 +790,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         ...factoryOptions,
         fetch: fetchSpy,
       });
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: realFactory,
@@ -833,7 +833,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
     expect(subSecondParsed.reasoning_effort).toBe("high");
     // 报告回流与最终正文不含思考
     const delegation = events.find(
-      (event): event is Extract<SessionEvent, { type: "tool-result" }> =>
+      (event): event is Extract<TaskEvent, { type: "tool-result" }> =>
         event.type === "tool-result" && event.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.output).toBe("子代理最终报告");

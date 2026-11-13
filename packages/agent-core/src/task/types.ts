@@ -1,7 +1,7 @@
 /**
  * 会话域类型（见 GLOSSARY.md「会话」「工作区」「工具注册表」）。
- * 全部可 JSON 序列化：SessionEvent 经 Electron IPC 转发到渲染进程，
- * StoredMessage / SessionRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
+ * 全部可 JSON 序列化：TaskEvent 经 Electron IPC 转发到渲染进程，
+ * StoredMessage / TaskRecord / ToolCallRecord 是持久化与 IPC 共用的形状。
  */
 import type {
   ApprovalDecision,
@@ -18,7 +18,7 @@ import type {
  * 会话运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
  * `waiting-approval` 工具执行暂停、等待用户审批（spec 用户故事 10，侧栏可见）
  */
-export type SessionStatus =
+export type TaskStatus =
   "idle" | "streaming" | "waiting-user" | "waiting-approval";
 
 /**
@@ -47,7 +47,7 @@ export interface ProjectRecord {
 }
 
 /** 会话记录（sessions 表一行；重启恢复的数据来源） */
-export interface SessionRecord {
+export interface TaskRecord {
   id: string;
   /** 管理归属；null 为独立会话，绝不从目录推导。 */
   projectId: string | null;
@@ -69,7 +69,7 @@ export interface SessionRecord {
   approvalMode: ApprovalMode;
   /** 本会话自动批准执行审批；未设置等价 false，不改变文件访问边界。 */
   autoApprove?: boolean;
-  status: SessionStatus;
+  status: TaskStatus;
   /** 归档时间（ISO 8601）；null = 未归档。归档的会话不在侧栏默认列表显示（/archive） */
   archivedAt: string | null;
   /** ISO 8601 */
@@ -84,7 +84,7 @@ export interface SessionRecord {
 
 /**
  * 遗留审批决定的兼容类型，不再作为运行时授权来源。
- * 新审批历史使用 InteractionRecord；会话授权保存为 SessionRecord.autoApprove。
+ * 新审批历史使用 InteractionRecord；会话授权保存为 TaskRecord.autoApprove。
  */
 export interface ApprovalDecisionRecord {
   id: string;
@@ -171,7 +171,7 @@ export interface CompactResult {
  * 一次 sendMessage 的事件序列（正常路径）：
  * `user-message → assistant-start → assistant-delta* → assistant-done`
  */
-export type SessionEvent =
+export type TaskEvent =
   | {
       type: "session-auto-approve-changed";
       sessionId: string;

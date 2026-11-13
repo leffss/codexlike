@@ -8,12 +8,12 @@ import type {
   QuestionAnswerSnapshot,
 } from "../interaction/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
-import { createSessionSearch, type SessionSearchResult } from "./search";
+import { createTaskSearch, type TaskSearchResult } from "./search";
 import { workbenchKey } from "./workbench-state";
 import type {
   CompactRecord,
   ProjectRecord,
-  SessionRecord,
+  TaskRecord,
   StoredMessage,
 } from "./types";
 
@@ -24,7 +24,7 @@ import type {
  *
  * compact（工单 08）与审批记忆（工单 04）均已落地，各自在此接口上扩展方法。
  */
-export interface SessionPersistence {
+export interface TaskPersistence {
   readWorkbench(key: string): import("./workbench-state").WorkbenchEntry | null;
   writeWorkbench(
     key: string,
@@ -37,13 +37,13 @@ export interface SessionPersistence {
   isRemovedCreationRequest(requestId: string): boolean;
   setProjectCollapsed(projectId: string, collapsed: boolean): void;
   setProjectPinned(projectId: string, pinned: boolean): void;
-  insertSession(record: SessionRecord): void;
+  insertTask(record: TaskRecord): void;
   /** 仅回滚尚未写入首条消息的创建；不会删除文件或已有历史。 */
-  removeUnstartedSession(id: string): void;
+  removeUnstartedTask(id: string): void;
   /** 只更新给定字段；目标不存在时静默忽略（写入方持有内存态，读路径不经过这里） */
   updateSession(
     id: string,
-    patch: Partial<Omit<SessionRecord, "id" | "createdAt">>
+    patch: Partial<Omit<TaskRecord, "id" | "createdAt">>
   ): void;
   insertMessage(message: StoredMessage): void;
   insertInteraction(interaction: InteractionRecord): void;
@@ -54,7 +54,7 @@ export interface SessionPersistence {
     snapshot?: QuestionAnswerSnapshot
   ): boolean;
   /** 有效 pending 审批才能授予会话权限；同事务结算该会话全部 pending 审批，问答不变。 */
-  approveSessionInteraction(
+  approveTaskInteraction(
     sessionId: string,
     requestId: string,
     resolvedAt: string
@@ -72,11 +72,8 @@ export interface SessionPersistence {
     pruneToolCallsBefore?: string
   ): void;
   /** 全部会话，置顶优先、用户最近使用倒序；后台更新不重排。 */
-  listSessions(): SessionRecord[];
-  searchSessions(
-    query: string,
-    includeArchived?: boolean
-  ): SessionSearchResult[];
+  listTasks(): TaskRecord[];
+  searchTasks(query: string, includeArchived?: boolean): TaskSearchResult[];
   /** 指定会话的全部消息，按写入顺序；未知会话返回空数组 */
   listMessages(sessionId: string): StoredMessage[];
   /** 指定会话的 compact 记录，按时间正序（最后一条为当前生效摘要） */
@@ -168,7 +165,7 @@ CREATE TABLE IF NOT EXISTS approvals (
 );
 `;
 
-interface SessionRow {
+interface TaskRow {
   id: string;
   project_id: string | null;
   creation_request_id: string | null;
@@ -224,7 +221,7 @@ interface ToolCallRow {
  * 单条语句写入即单个事务（SQLite 语义），断电安全。
  * 测试传 `:memory:` 得到内存库。
  */
-export function createSqliteSessionStore(dbPath: string): SessionPersistence {
+export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   // 父目录不存在时自建（SQLite 不会创建目录）：打包后首次启动 ~/.codexlike
   // 尚未建立，宿主也未统一 mkdir，这里不自建则 whenReady 链在第一步即断
   // （2026-11-11 打包黑屏事故）。`:memory:` 时 dirname 为 "."，mkdir 空操作。
@@ -286,16 +283,16 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     db.exec("ALTER TABLE tool_calls ADD COLUMN reasoning TEXT");
   }
 
-  const sessionColumns = db.prepare("PRAGMA table_info(tasks)").all();
-  if (!sessionColumns.some((column) => column.name === "auto_approve"))
+  const taskColumns = db.prepare("PRAGMA table_info(tasks)").all();
+  if (!taskColumns.some((column) => column.name === "auto_approve"))
     db.exec(
       "ALTER TABLE tasks ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0"
     );
-  if (!sessionColumns.some((column) => column.name === "project_id"))
+  if (!taskColumns.some((column) => column.name === "project_id"))
     db.exec(
       "ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES projects(id)"
     );
-  if (!sessionColumns.some((column) => column.name === "creation_request_id"))
+  if (!taskColumns.some((column) => column.name === "creation_request_id"))
     db.exec("ALTER TABLE tasks ADD COLUMN creation_request_id TEXT");
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_creation_request ON tasks(creation_request_id)"
@@ -309,11 +306,11 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     db.exec(
       "ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
     );
-  if (!sessionColumns.some((column) => column.name === "pinned"))
+  if (!taskColumns.some((column) => column.name === "pinned"))
     db.exec("ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
-  if (!sessionColumns.some((column) => column.name === "last_used_at"))
+  if (!taskColumns.some((column) => column.name === "last_used_at"))
     db.exec("ALTER TABLE tasks ADD COLUMN last_used_at TEXT");
-  const insertSession = db.prepare(
+  const insertTask = db.prepare(
     "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateSessionStmt = db.prepare(
@@ -322,7 +319,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
   const insertMessageStmt = db.prepare(
     "INSERT INTO messages (id, task_id, role, content, created_at, mentions, aborted, question_answers, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
-  const listSessionsStmt = db.prepare(
+  const listTasksStmt = db.prepare(
     "SELECT * FROM tasks ORDER BY pinned DESC, COALESCE(last_used_at, created_at) DESC, created_at DESC, id DESC"
   );
   const listMessagesStmt = db.prepare(
@@ -353,7 +350,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
     "SELECT command_word FROM approvals WHERE task_id = ? ORDER BY created_at, rowid"
   );
 
-  function toRecord(row: SessionRow): SessionRecord {
+  function toRecord(row: TaskRow): TaskRecord {
     return {
       id: row.id,
       projectId: row.project_id ?? null,
@@ -365,7 +362,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       status:
         row.status === "waiting-approval"
           ? "waiting-user"
-          : (row.status as SessionRecord["status"]),
+          : (row.status as TaskRecord["status"]),
       // 审批模式读侧迁移（ADR 0004，不回写数据）：旧三档值映射到新三档
       // （readonly→ask、suggest→assist、full→full-access）；
       // 非法/缺失/损坏值恢复为默认档 assist
@@ -430,7 +427,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           .run(key, entry.revision, JSON.stringify(entry.value)).changes > 0
       );
     },
-    searchSessions: createSessionSearch(db),
+    searchTasks: createTaskSearch(db),
     insertProject(record) {
       db.prepare(
         "INSERT INTO projects (id, name, workspace_path, created_at, pinned) VALUES (?, ?, ?, ?, ?)"
@@ -515,8 +512,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
           createdAt: String(row.created_at),
         }));
     },
-    insertSession(record) {
-      insertSession.run(
+    insertTask(record) {
+      insertTask.run(
         record.id,
         record.title,
         record.workspacePath,
@@ -536,7 +533,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
         record.autoApprove ? 1 : 0
       );
     },
-    removeUnstartedSession(id) {
+    removeUnstartedTask(id) {
       db.prepare(
         "DELETE FROM tasks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE task_id = ?)"
       ).run(id, id);
@@ -544,7 +541,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
 
     updateSession(id, patch) {
       const current = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
-        SessionRow | undefined;
+        TaskRow | undefined;
       if (current === undefined) {
         return;
       }
@@ -638,7 +635,7 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       }
     },
 
-    approveSessionInteraction(sessionId, requestId, resolvedAt) {
+    approveTaskInteraction(sessionId, requestId, resolvedAt) {
       db.exec("BEGIN IMMEDIATE");
       try {
         const records = db
@@ -712,8 +709,8 @@ export function createSqliteSessionStore(dbPath: string): SessionPersistence {
       }
     },
 
-    listSessions() {
-      return (listSessionsStmt.all() as unknown as SessionRow[]).map(toRecord);
+    listTasks() {
+      return (listTasksStmt.all() as unknown as TaskRow[]).map(toRecord);
     },
 
     listMessages(sessionId) {

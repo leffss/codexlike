@@ -1,27 +1,27 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  createBrowserSessionManager,
-  type BrowserSessionManager,
-} from '../../src/browser/manager';
-import { startFixtureServer, type FixtureServer } from './fixture-server';
+  createBrowserTaskManager,
+  type BrowserTaskManager,
+} from "../../src/browser/manager";
+import { startFixtureServer, type FixtureServer } from "./fixture-server";
 
 /**
  * 真实 Chromium 的会话级生命周期测试（本机需有 playwright Chromium 缓存；
  * 首次拉起较慢，整个文件共享一次 launch）。
  */
-describe('BrowserSessionManager（会话级浏览器实例）', () => {
-  let manager: BrowserSessionManager;
+describe("BrowserTaskManager（会话级浏览器实例）", () => {
+  let manager: BrowserTaskManager;
   let fixture: FixtureServer;
   const log: string[] = [];
 
   beforeAll(async () => {
     fixture = await startFixtureServer();
-    manager = createBrowserSessionManager({ progress: (line) => log.push(line) });
+    manager = createBrowserTaskManager({ progress: (line) => log.push(line) });
   }, 120_000);
 
   afterAll(async () => {
@@ -29,44 +29,44 @@ describe('BrowserSessionManager（会话级浏览器实例）', () => {
     await fixture.close();
   });
 
-  it('同一会话的 pageFor 返回同一页面（会话内复用）', async () => {
-    const page1 = await manager.pageFor('session-a');
-    const page2 = await manager.pageFor('session-a');
+  it("同一会话的 pageFor 返回同一页面（会话内复用）", async () => {
+    const page1 = await manager.pageFor("session-a");
+    const page2 = await manager.pageFor("session-a");
     expect(page1).toBe(page2);
   }, 60_000);
 
-  it('不同会话拿到不同 context：Cookie 互不共享', async () => {
-    const pageA = await manager.pageFor('session-cookie-a');
-    const pageB = await manager.pageFor('session-cookie-b');
+  it("不同会话拿到不同 context：Cookie 互不共享", async () => {
+    const pageA = await manager.pageFor("session-cookie-a");
+    const pageB = await manager.pageFor("session-cookie-b");
     await pageA.goto(`${fixture.origin}/set-cookie`);
-    const cookieA = await pageA.evaluate<string>('document.cookie');
-    expect(cookieA).toContain('fixture_sid=abc123');
+    const cookieA = await pageA.evaluate<string>("document.cookie");
+    expect(cookieA).toContain("fixture_sid=abc123");
     await pageB.goto(`${fixture.origin}/form`);
-    const cookieB = await pageB.evaluate<string>('document.cookie');
-    expect(cookieB).not.toContain('fixture_sid');
+    const cookieB = await pageB.evaluate<string>("document.cookie");
+    expect(cookieB).not.toContain("fixture_sid");
   }, 60_000);
 
-  it('closeSession 关闭该会话页面；再次 pageFor 得到全新页面（旧 Cookie 不残留）', async () => {
-    const page = await manager.pageFor('session-recycled');
+  it("closeSession 关闭该会话页面；再次 pageFor 得到全新页面（旧 Cookie 不残留）", async () => {
+    const page = await manager.pageFor("session-recycled");
     await page.goto(`${fixture.origin}/set-cookie`);
-    await manager.closeSession('session-recycled');
+    await manager.closeSession("session-recycled");
     // 旧 page 已关闭
     expect(page.isClosed()).toBe(true);
-    const fresh = await manager.pageFor('session-recycled');
+    const fresh = await manager.pageFor("session-recycled");
     expect(fresh).not.toBe(page);
     await fresh.goto(`${fixture.origin}/form`);
-    const cookie = await fresh.evaluate<string>('document.cookie');
-    expect(cookie).not.toContain('fixture_sid');
+    const cookie = await fresh.evaluate<string>("document.cookie");
+    expect(cookie).not.toContain("fixture_sid");
   }, 60_000);
 
-  it('closeSession 对未知会话安全；close 幂等且清理全部会话', async () => {
-    await expect(manager.closeSession('never-opened')).resolves.toBeUndefined();
-    const page = await manager.pageFor('session-final');
+  it("closeSession 对未知会话安全；close 幂等且清理全部会话", async () => {
+    await expect(manager.closeSession("never-opened")).resolves.toBeUndefined();
+    const page = await manager.pageFor("session-final");
     await manager.close();
     expect(page.isClosed()).toBe(true);
     await expect(manager.close()).resolves.toBeUndefined();
     // close 后可重新拉起（应用生命周期内 manager 不重建也可用）
-    const revived = await manager.pageFor('session-after-close');
+    const revived = await manager.pageFor("session-after-close");
     expect(revived.isClosed()).toBe(false);
   }, 60_000);
 });

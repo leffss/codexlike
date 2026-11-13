@@ -50,12 +50,12 @@ export interface ResourceSnapshotSummary {
   estimatedTokens: number;
 }
 
-export interface SessionResourceState {
+export interface TaskResourceState {
   active: ResourceSnapshotSummary | null;
   last: ResourceSnapshotSummary | null;
 }
 
-export interface SessionResourcesView extends SessionResourceState {
+export interface TaskResourcesView extends TaskResourceState {
   /** 最新磁盘预览，不代表当前运行快照。 */
   preview: ResourceSnapshotSummary;
 }

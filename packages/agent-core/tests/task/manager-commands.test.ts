@@ -7,8 +7,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import { createSessionManager } from "../../src/task/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createTaskManager } from "../../src/task/manager";
 
 /** 工单 07：/rename /archive 与 AGENTS.md 系统提示注入（manager 层） */
 const profile: ProviderProfile = {
@@ -59,10 +59,10 @@ afterEach(() => {
   }
 });
 
-describe("SessionManager /rename 与 /archive（会话管理命令）", () => {
+describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
   it("create 默认未归档；rename 更新标题并落库", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
     });
@@ -84,8 +84,8 @@ describe("SessionManager /rename 与 /archive（会话管理命令）", () => {
   });
 
   it("setArchived 归档落库（archivedAt 时间戳），取消归档恢复 null", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => okModel(),
       now: () => "2026-11-11T08:00:00.000Z",
@@ -128,29 +128,29 @@ describe("SessionManager /rename 与 /archive（会话管理命令）", () => {
       .run();
     legacy.close();
 
-    const persistence = createSqliteSessionStore(dbPath);
-    expect(persistence.listSessions().at(0)).toMatchObject({
+    const persistence = createSqliteTaskStore(dbPath);
+    expect(persistence.listTasks().at(0)).toMatchObject({
       id: "s1",
       archivedAt: null,
     });
     // 迁移后新列可写
     persistence.updateSession("s1", { archivedAt: "2026-11-11T08:00:00.000Z" });
-    expect(persistence.listSessions().at(0)?.archivedAt).toBe(
+    expect(persistence.listTasks().at(0)?.archivedAt).toBe(
       "2026-11-11T08:00:00.000Z"
     );
     persistence.close();
   });
 });
 
-describe("SessionManager 系统提示注入（systemPromptFor）", () => {
+describe("TaskManager 系统提示注入（systemPromptFor）", () => {
   it("create 与 get 恢复都会话注入 systemPromptFor 的系统提示", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codexlike-sys-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "codexlike.db");
     const model = okModel();
 
-    const persistence1 = createSqliteSessionStore(dbPath);
-    const first = createSessionManager({
+    const persistence1 = createSqliteTaskStore(dbPath);
+    const first = createTaskManager({
       persistence: persistence1,
       languageModelFor: () => model,
       systemPromptFor: (record) => `规范：${record.workspacePath}`,
@@ -169,8 +169,8 @@ describe("SessionManager 系统提示注入（systemPromptFor）", () => {
     });
 
     // 等价重启：恢复的会话同样注入系统提示
-    const persistence2 = createSqliteSessionStore(dbPath);
-    const second = createSessionManager({
+    const persistence2 = createSqliteTaskStore(dbPath);
+    const second = createTaskManager({
       persistence: persistence2,
       languageModelFor: () => model,
       systemPromptFor: (record) => `规范：${record.workspacePath}`,
@@ -196,7 +196,7 @@ describe("SessionManager 系统提示注入（systemPromptFor）", () => {
   });
 });
 
-describe("SessionManager compact 支持（工单 08）", () => {
+describe("TaskManager compact 支持（工单 08）", () => {
   /** 双通道模型：doStream 对话 + doGenerate 压缩摘要 */
   function dualModel() {
     let streamCall = 0;
@@ -253,8 +253,8 @@ describe("SessionManager compact 支持（工单 08）", () => {
   }
 
   it("latestCompact：未压缩 null；压缩后返回最近记录；重启后仍可读", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => dualModel(),
       now: () => "2026-11-11T08:00:00.000Z",
@@ -283,9 +283,9 @@ describe("SessionManager compact 支持（工单 08）", () => {
   });
 
   it("压缩后 manager.get 恢复的会话继续对话，上下文含摘要", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = dualModel();
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });

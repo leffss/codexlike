@@ -3,15 +3,20 @@
  * 会话结束关闭）。全进程共享一个 headless Chromium，每个会话一个独立 BrowserContext
  * （Cookie/localStorage 互不串扰），context 内固定一个 Page（工具组的「当前页」）。
  */
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "playwright-core";
 
 import {
   createCliChromiumInstaller,
   ensureChromiumReady,
   type ChromiumInstaller,
-} from './chromium';
+} from "./chromium";
 
-export interface BrowserSessionManagerOptions {
+export interface BrowserTaskManagerOptions {
   /** Chromium 安装器（默认 CLI 实现；测试注入 fake） */
   installer?: ChromiumInstaller;
   /** 生命周期与下载进度输出（工具层据此向模型报告进度）；默认静默 */
@@ -20,7 +25,7 @@ export interface BrowserSessionManagerOptions {
   launchOptions?: Parameters<typeof chromium.launch>[0];
 }
 
-export interface BrowserSessionManager {
+export interface BrowserTaskManager {
   /** 确保 Chromium 就绪（必要时下载安装）；onProgress 接收下载进度，缺省走构造时 progress */
   prepare(onProgress?: (line: string) => void): Promise<void>;
   /** 获取会话页面：首次调用确保 Chromium 就绪（必要时下载）并创建独立 context */
@@ -36,25 +41,27 @@ export interface BrowserSessionManager {
   close(): Promise<void>;
 }
 
-interface SessionEntry {
+interface TaskEntry {
   context: BrowserContext;
   page: Page;
 }
 
-export function createBrowserSessionManager(
-  options: BrowserSessionManagerOptions = {},
-): BrowserSessionManager {
+export function createBrowserTaskManager(
+  options: BrowserTaskManagerOptions = {}
+): BrowserTaskManager {
   const installer = options.installer ?? createCliChromiumInstaller();
   const progress = options.progress ?? (() => {});
-  const sessions = new Map<string, SessionEntry>();
+  const tasks = new Map<string, TaskEntry>();
 
   let browser: Browser | null = null;
   let launchTask: Promise<Browser> | null = null;
 
   /** 首次使用前确保 Chromium 可执行就绪（未就绪自动下载，失败中文提示可重试） */
-  async function launchBrowser(onProgress: (line: string) => void): Promise<Browser> {
+  async function launchBrowser(
+    onProgress: (line: string) => void
+  ): Promise<Browser> {
     await ensureChromiumReady(installer, onProgress);
-    onProgress('正在启动 Chromium…');
+    onProgress("正在启动 Chromium…");
     return await chromium.launch({ headless: true, ...options.launchOptions });
   }
 
@@ -65,7 +72,7 @@ export function createBrowserSessionManager(
     if (launchTask === null) {
       // 并发调用共享同一次启动；启动失败清空任务句柄，下次调用重试
       browser = null;
-      sessions.clear();
+      tasks.clear();
       launchTask = launchBrowser(onProgress)
         .then((launched) => {
           browser = launched;
@@ -85,27 +92,27 @@ export function createBrowserSessionManager(
 
     async pageFor(sessionId) {
       const active = await browserReady(progress);
-      const existing = sessions.get(sessionId);
+      const existing = tasks.get(sessionId);
       if (existing !== undefined && !existing.page.isClosed()) {
         return existing.page;
       }
       const context = await active.newContext();
       const page = await context.newPage();
-      sessions.set(sessionId, { context, page });
+      tasks.set(sessionId, { context, page });
       return page;
     },
 
     async closeSession(sessionId) {
-      const entry = sessions.get(sessionId);
+      const entry = tasks.get(sessionId);
       if (entry === undefined) {
         return;
       }
-      sessions.delete(sessionId);
+      tasks.delete(sessionId);
       await entry.context.close().catch(() => {});
     },
 
     async resetPage(sessionId) {
-      const entry = sessions.get(sessionId);
+      const entry = tasks.get(sessionId);
       if (entry === undefined) {
         return await this.pageFor(sessionId);
       }
@@ -115,7 +122,7 @@ export function createBrowserSessionManager(
     },
 
     async close() {
-      sessions.clear();
+      tasks.clear();
       const closing = browser;
       browser = null;
       await closing?.close().catch(() => {});

@@ -11,9 +11,9 @@ import type { InteractionRecord } from "../../src/interaction/types";
 import { describe, expect, it } from "vitest";
 
 import { createInteractionController } from "../../src/interaction/controller";
-import { createSessionManager } from "../../src/task/manager";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import type { SessionEvent } from "../../src/task/types";
+import { createTaskManager } from "../../src/task/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { TaskEvent } from "../../src/task/types";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 
 const profile: ProviderProfile = {
@@ -95,8 +95,8 @@ const ask: Call = {
   toolName: "ask_user_question",
   input: { questions },
 };
-async function collect(iterable: AsyncIterable<SessionEvent>) {
-  const events: SessionEvent[] = [];
+async function collect(iterable: AsyncIterable<TaskEvent>) {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) events.push(event);
   return events;
 }
@@ -105,8 +105,8 @@ describe("用户交互公开 seam", () => {
   it("会话授权与全部当前审批同事务落库，失败回滚且不处理问答或其他会话", () => {
     const directory = mkdtempSync(join(tmpdir(), "approval-atomic-"));
     const path = join(directory, "session.db");
-    const store = createSqliteSessionStore(path);
-    const manager = createSessionManager({ persistence: store });
+    const store = createSqliteTaskStore(path);
+    const manager = createTaskManager({ persistence: store });
     const session = manager.create({ workspacePath: "C:/work" });
     const other = manager.create({ workspacePath: "C:/other" });
     const pending = (
@@ -142,10 +142,10 @@ describe("用户交互公开 seam", () => {
       `CREATE TRIGGER fail_batch BEFORE UPDATE ON interactions WHEN OLD.id = 'b' BEGIN SELECT RAISE(ABORT, '批量失败'); END;`
     );
     expect(() =>
-      store.approveSessionInteraction(session.id, "a", "2026-01-02")
+      store.approveTaskInteraction(session.id, "a", "2026-01-02")
     ).toThrow("批量失败");
     expect(
-      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+      store.listTasks().find((s) => s.id === session.id)?.autoApprove
     ).toBe(false);
     expect(store.listInteractions(session.id).map((i) => i.status)).toEqual([
       "pending",
@@ -154,39 +154,35 @@ describe("用户交互公开 seam", () => {
     ]);
     raw.exec("DROP TRIGGER fail_batch");
     expect(
-      store.approveSessionInteraction(session.id, "other", "2026-01-02")
+      store.approveTaskInteraction(session.id, "other", "2026-01-02")
     ).toBeNull();
     expect(
-      store.approveSessionInteraction(session.id, "q", "2026-01-02")
+      store.approveTaskInteraction(session.id, "q", "2026-01-02")
     ).toBeNull();
-    const settled = store.approveSessionInteraction(
-      session.id,
-      "a",
-      "2026-01-02"
-    );
+    const settled = store.approveTaskInteraction(session.id, "a", "2026-01-02");
     expect(settled?.map((i) => i.response)).toEqual([
       { kind: "approval", decision: "approve", scope: "session" },
       { kind: "approval", decision: "approve", scope: "session" },
     ]);
     expect(
-      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+      store.listTasks().find((s) => s.id === session.id)?.autoApprove
     ).toBe(true);
     expect(store.listInteractions(session.id)[2]?.status).toBe("pending");
     expect(store.listInteractions(other.id)[0]?.status).toBe("pending");
     store.updateSession(session.id, { autoApprove: false });
     expect(
-      store.approveSessionInteraction(session.id, "a", "2026-01-03")
+      store.approveTaskInteraction(session.id, "a", "2026-01-03")
     ).toBeNull();
     expect(
-      store.listSessions().find((s) => s.id === session.id)?.autoApprove
+      store.listTasks().find((s) => s.id === session.id)?.autoApprove
     ).toBe(false);
     raw.close();
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
   it("控制器先持久化再批量更新内存和事件，失败不唤醒且审批并发入队不遗漏", async () => {
-    const store = createSqliteSessionStore(":memory:");
-    const session = createSessionManager({ persistence: store }).create({
+    const store = createSqliteTaskStore(":memory:");
+    const session = createTaskManager({ persistence: store }).create({
       workspacePath: "C:/work",
     });
     let fail = true;
@@ -195,9 +191,9 @@ describe("用户交互公开 seam", () => {
     const controller = createInteractionController({
       persistence: {
         ...store,
-        approveSessionInteraction(...args) {
+        approveTaskInteraction(...args) {
           if (fail) throw new Error("保存失败");
-          return store.approveSessionInteraction(...args);
+          return store.approveTaskInteraction(...args);
         },
       },
       now: () => "2026-01-02",
@@ -205,7 +201,7 @@ describe("用户交互公开 seam", () => {
       answered() {},
       autoApprove: () => autoApprove,
       autoApproved() {
-        expect(store.listSessions()[0]?.autoApprove).toBe(true);
+        expect(store.listTasks()[0]?.autoApprove).toBe(true);
         autoApprove = true;
         seen.push("authorized");
       },
@@ -263,7 +259,7 @@ describe("用户交互公开 seam", () => {
     store.close();
   });
   it("有效审批开启会话授权：当前轮后续与后轮自动批准，撤销即时恢复询问且不改变工具路径模式", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const modes: unknown[] = [];
     const tool: ToolDefinition = {
       name: "write",
@@ -288,7 +284,7 @@ describe("用户交互公开 seam", () => {
       [call("d"), call("e")],
       "完成"
     );
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       tools: [tool],
       languageModelFor: () => model,
@@ -298,7 +294,7 @@ describe("用户交互公开 seam", () => {
       approvalMode: "ask",
     });
     expect(session.record.autoApprove).toBe(false);
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     let firstId = "";
     for await (const event of session.sendMessage({ text: "开始", profile })) {
       events.push(event);
@@ -358,7 +354,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("主子代理排队审批全部放行而问答仍等待，实时授权不改变本轮冻结模式", async () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
     const modes: unknown[] = [];
     const write: ToolDefinition = {
       name: "write",
@@ -397,7 +393,7 @@ describe("用户交互公开 seam", () => {
         );
       },
     });
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence: store,
       tools: [write],
       languageModelFor: () => main,
@@ -444,7 +440,7 @@ describe("用户交互公开 seam", () => {
     store.close();
   });
   it("授权保存失败不执行工具；撤销保存失败保留授权，成功撤销在本轮立即发事件并重新询问", async () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
     let failGrant = true;
     let failRevoke = true;
     let executed = 0;
@@ -468,11 +464,11 @@ describe("用户交互公开 seam", () => {
     );
     const persistence = {
       ...store,
-      approveSessionInteraction(
-        ...args: Parameters<typeof store.approveSessionInteraction>
+      approveTaskInteraction(
+        ...args: Parameters<typeof store.approveTaskInteraction>
       ) {
         if (failGrant) throw new Error("授权保存失败");
-        return store.approveSessionInteraction(...args);
+        return store.approveTaskInteraction(...args);
       },
       updateSession(...args: Parameters<typeof store.updateSession>) {
         if (args[1].autoApprove === false && failRevoke)
@@ -480,7 +476,7 @@ describe("用户交互公开 seam", () => {
         return store.updateSession(...args);
       },
     };
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       tools: [write],
       languageModelFor: () => model,
@@ -523,7 +519,7 @@ describe("用户交互公开 seam", () => {
         );
         expect(session.record.autoApprove).toBe(true);
         expect(
-          store.listSessions().find((s) => s.id === session.id)?.autoApprove
+          store.listTasks().find((s) => s.id === session.id)?.autoApprove
         ).toBe(true);
         failRevoke = false;
         expect(manager.revokeAutoApprove(session.id).autoApprove).toBe(false);
@@ -537,14 +533,14 @@ describe("用户交互公开 seam", () => {
     store.close();
   });
   it("批量授权事务已保存会话等待状态，不在提交后额外写库导致部分放行", async () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
     let committed = false;
     let executed = false;
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence: {
         ...store,
-        approveSessionInteraction(...args) {
-          const result = store.approveSessionInteraction(...args);
+        approveTaskInteraction(...args) {
+          const result = store.approveTaskInteraction(...args);
           committed = result !== null;
           return result;
         },
@@ -581,7 +577,7 @@ describe("用户交互公开 seam", () => {
             scope: "session",
           })
         ).toBe(true);
-        expect(store.listSessions()[0]?.status).toBe("streaming");
+        expect(store.listTasks()[0]?.status).toBe("streaming");
         committed = false;
       }
     }
@@ -594,7 +590,7 @@ describe("用户交互公开 seam", () => {
     mkdirSync(workspace);
     const outside = join(directory, "outside.txt");
     const path = join(directory, "session.db");
-    const store = createSqliteSessionStore(path);
+    const store = createSqliteTaskStore(path);
     const model = modelFor(
       [
         {
@@ -605,7 +601,7 @@ describe("用户交互公开 seam", () => {
       ],
       "完成"
     );
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence: store,
       tools: [createWriteFileTool()],
       languageModelFor: () => model,
@@ -636,7 +632,7 @@ describe("用户交互公开 seam", () => {
     session.cancelInteractions("停止");
     expect(session.record.autoApprove).toBe(true);
     store.close();
-    const reopened = createSqliteSessionStore(path);
+    const reopened = createSqliteTaskStore(path);
     const restoredModel = modelFor(
       [
         {
@@ -647,7 +643,7 @@ describe("用户交互公开 seam", () => {
       ],
       "完成"
     );
-    const restored = createSessionManager({
+    const restored = createTaskManager({
       persistence: reopened,
       tools: [createWriteFileTool()],
       languageModelFor: () => restoredModel,
@@ -677,14 +673,14 @@ describe("用户交互公开 seam", () => {
       restored.create({ workspacePath: workspace }).record.autoApprove
     ).toBe(false);
     // 未缓存会话也可撤销，返回新记录供空闲UI同步。
-    const uncached = createSessionManager({ persistence: reopened });
+    const uncached = createTaskManager({ persistence: reopened });
     expect(uncached.revokeAutoApprove(session.id).autoApprove).toBe(false);
     expect(uncached.get(session.id)?.record.autoApprove).toBe(false);
     reopened.close();
     rmSync(directory, { recursive: true, force: true });
   });
   it("主工具落库失败时仍向消费者发送子代理问答取消终态", async () => {
-    const store = createSqliteSessionStore(":memory:");
+    const store = createSqliteTaskStore(":memory:");
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -711,7 +707,7 @@ describe("用户交互公开 seam", () => {
       "后续"
     );
     const sub = modelFor([ask], "不应继续");
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence: {
         ...store,
         insertToolCall() {
@@ -728,7 +724,7 @@ describe("用户交互公开 seam", () => {
       },
     });
     const session = manager.create({ workspacePath: "C:/work" });
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({ text: "任务", profile })) {
       events.push(event);
       if (event.type === "interaction-request") release();
@@ -744,7 +740,7 @@ describe("用户交互公开 seam", () => {
     store.close();
   });
   it("单选预设与自定义互斥，非法混合响应后仍可提交纯自定义", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = modelFor(
       [
         {
@@ -754,7 +750,7 @@ describe("用户交互公开 seam", () => {
       ],
       "完成"
     );
-    const session = createSessionManager({
+    const session = createTaskManager({
       persistence,
       languageModelFor: () => model,
     }).create({ workspacePath: "C:/work" });
@@ -775,7 +771,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("主问答与两个子代理同时等待，停止同步取消全部且下一轮无旧请求", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const main = modelFor(
       [
         {
@@ -793,7 +789,7 @@ describe("用户交互公开 seam", () => {
       "下一轮"
     );
     const sub = modelFor([ask]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => main,
       subagents: {
@@ -831,9 +827,9 @@ describe("用户交互公开 seam", () => {
   });
 
   it("回答提交后中断仍保留快照，不请求后续模型", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = modelFor([ask], "新轮");
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -860,10 +856,10 @@ describe("用户交互公开 seam", () => {
   });
 
   it("问答内置名称冲突显式拒绝，不静默覆盖宿主工具", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     let executed = false;
     const model = modelFor([ask]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
       tools: [
@@ -897,8 +893,8 @@ describe("用户交互公开 seam", () => {
       INSERT INTO tasks VALUES ('legacy', '旧会话', 'C:/work', NULL, NULL, 'waiting-approval', '2026-01-01', '2026-01-01');
       INSERT INTO messages VALUES ('turn', 'legacy', 'user', '旧问题', '2026-01-01');`);
     raw.close();
-    const first = createSqliteSessionStore(path);
-    expect(first.listSessions()[0]?.status).toBe("waiting-user");
+    const first = createSqliteTaskStore(path);
+    expect(first.listTasks()[0]?.status).toBe("waiting-user");
     expect(first.listMessages("legacy")[0]?.questionAnswers).toBeUndefined();
     const pending: InteractionRecord = {
       request: {
@@ -919,9 +915,9 @@ describe("用户交互公开 seam", () => {
     first.insertInteraction(pending);
     first.updateSession("legacy", { status: "idle" });
     first.close();
-    const persistence = createSqliteSessionStore(path);
+    const persistence = createSqliteTaskStore(path);
     const model = modelFor("不应调用");
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -949,15 +945,15 @@ describe("用户交互公开 seam", () => {
       aborted: true,
     });
     persistence.close();
-    const reopened = createSqliteSessionStore(path);
+    const reopened = createSqliteTaskStore(path);
     expect(reopened.listInteractions("legacy")[0]?.status).toBe("cancelled");
     reopened.close();
     rmSync(directory, { recursive: true, force: true });
   });
 
   it("快照提交失败事务回滚 pending，修复所属消息后可原子提交且重复不写入", () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const manager = createSessionManager({ persistence });
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({ persistence });
     const session = manager.create({ workspacePath: "C:/work" });
     const interaction: InteractionRecord = {
       request: {
@@ -1026,9 +1022,9 @@ describe("用户交互公开 seam", () => {
   });
 
   it("已 abort 的信号立即收尾，问答不会注册等待或请求模型", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = modelFor([ask]);
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -1044,7 +1040,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("响应严格校验且非法响应不消耗请求；纯文本、多选、跳过可提交", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const richQuestions = [
       { ...questions[0]!, multiSelect: false },
       { ...questions[0]!, id: "multi", multiSelect: true },
@@ -1055,7 +1051,7 @@ describe("用户交互公开 seam", () => {
       [{ ...ask, input: { questions: richQuestions } }],
       "完成"
     );
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -1143,7 +1139,7 @@ describe("用户交互公开 seam", () => {
   });
 
   it("问答参数拒绝未知字段、超限与重复 ID，合法最大 8题×8选项可等待", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const bad: unknown[] = [
       { questions: [] },
       { questions: Array(9).fill(questions[0]) },
@@ -1184,7 +1180,7 @@ describe("用户交互公开 seam", () => {
       [...calls, { ...ask, input: { questions: maximum } }],
       "完成"
     );
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -1219,7 +1215,7 @@ describe("用户交互公开 seam", () => {
   it.each(["abort", "cancel", "response-then-abort", "return"] as const)(
     "%s 终结等待且不执行后续工具，取消与拒绝不同",
     async (mode) => {
-      const persistence = createSqliteSessionStore(":memory:");
+      const persistence = createSqliteTaskStore(":memory:");
       let executed = 0;
       const tool: ToolDefinition = {
         name: "write",
@@ -1235,7 +1231,7 @@ describe("用户交互公开 seam", () => {
         [{ toolCallId: "write-1", toolName: "write", input: {} }],
         "不应请求"
       );
-      const manager = createSessionManager({
+      const manager = createTaskManager({
         persistence,
         tools: [tool],
         languageModelFor: () => model,
@@ -1296,7 +1292,7 @@ describe("用户交互公开 seam", () => {
   );
 
   it("回答后模型失败仍保留快照，下一轮及恢复上下文不会丢失答案", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     let step = 0;
     const model = new MockLanguageModelV4({
       doStream: async () => {
@@ -1312,12 +1308,12 @@ describe("用户交互公开 seam", () => {
         return stream("继续");
       },
     });
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
     const session = manager.create({ workspacePath: "C:/work" });
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({ text: "任务", profile })) {
       events.push(event);
       if (event.type === "interaction-request")
@@ -1327,7 +1323,7 @@ describe("用户交互公开 seam", () => {
     expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(1);
     await collect(session.sendMessage({ text: "重试", profile }));
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain("仅本地");
-    const restored = createSessionManager({
+    const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
     }).get(session.id)!;
@@ -1338,7 +1334,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("主工具等待期间实时显示并行子代理的审批和问答，回答不依赖轮末 pump", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -1408,7 +1404,7 @@ describe("用户交互公开 seam", () => {
         );
       },
     });
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => main,
       tools: [slowTool],
@@ -1467,7 +1463,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("Compact 保留问答快照与最近轮次归属，重启与即时上下文一致", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     let call = 0;
     const model = new MockLanguageModelV4({
       doStream: async () => {
@@ -1493,7 +1489,7 @@ describe("用户交互公开 seam", () => {
         warnings: [],
       }),
     });
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
@@ -1527,7 +1523,7 @@ describe("用户交互公开 seam", () => {
     expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
       "仅本地"
     );
-    const restored = createSessionManager({
+    const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
     }).get(session.id)!;
@@ -1546,15 +1542,15 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
   it("问答先落库再通知，等待用户提交，响应与触发消息快照原子可见", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
+    const persistence = createSqliteTaskStore(":memory:");
     const model = modelFor([ask], "已收到答案", "下一轮");
-    const manager = createSessionManager({
+    const manager = createTaskManager({
       persistence,
       languageModelFor: () => model,
     });
     const session = manager.create({ workspacePath: "C:/work" });
     session.setApprovalMode("full-access");
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "开始任务",
       profile,

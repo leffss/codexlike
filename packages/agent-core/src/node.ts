@@ -1,23 +1,41 @@
 // Node 宿主出口（Electron 主进程 / Node 测试）。
 // 相比浏览器安全的主出口（index.ts），这里额外导出依赖 Node 内置 API 的部分：
-// 会话对象、会话管理器、SQLite 持久化。
+// 任务对象、任务管理器、SQLite 持久化。
+// 「会话→任务」改名 expand 阶段（ADR 0014）：同 index.ts，暂留旧名别名供
+// desktop 既有 import 编译，票 06（contract 阶段）统一删除。
 export * from "./index";
 
-export type { SessionPersistence } from "./task/persistence";
-export { createSqliteSessionStore } from "./task/persistence";
 export type {
-  AgentSession,
-  CreateAgentSessionOptions,
+  TaskPersistence,
+  TaskPersistence as SessionPersistence,
+} from "./task/persistence";
+export {
+  createSqliteTaskStore,
+  createSqliteTaskStore as createSqliteSessionStore,
+} from "./task/persistence";
+export type {
+  AgentTask,
+  AgentTask as AgentSession,
+  CreateAgentTaskOptions,
+  CreateAgentTaskOptions as CreateAgentSessionOptions,
   SendMessageOptions,
 } from "./task/agent-task";
-export { createAgentSession } from "./task/agent-task";
+export {
+  createAgentTask,
+  createAgentTask as createAgentSession,
+} from "./task/agent-task";
 export type {
-  CreateSessionManagerOptions,
-  SessionManager,
+  CreateTaskManagerOptions,
+  CreateTaskManagerOptions as CreateSessionManagerOptions,
+  TaskManager,
+  TaskManager as SessionManager,
 } from "./task/manager";
-export { createSessionManager } from "./task/manager";
+export {
+  createTaskManager,
+  createTaskManager as createSessionManager,
+} from "./task/manager";
 
-// 子代理编排（工单 13，GLOSSARY「子代理」）：spawn_subagent 工具由 createAgentSession
+// 子代理编排（工单 13，GLOSSARY「子代理」）：spawn_subagent 工具由 createAgentTask
 // 在 subagents 配置存在时自动追加；此处导出常量与类型供宿主装配与测试
 export type {
   SubagentOrchestrator,
@@ -76,10 +94,15 @@ export type {
 // 消息级规范与技能发现/按需加载（ADR 0007，宿主与预览共用）。
 export { createAgentResourceSnapshot } from "./context/agent-resources";
 // 浏览器工具组（工单 11）：Playwright headless Chromium，会话级复用（依赖 playwright-core，仅 Node 宿主）
-export { createBrowserSessionManager } from "./browser/manager";
+export {
+  createBrowserTaskManager,
+  createBrowserTaskManager as createBrowserSessionManager,
+} from "./browser/manager";
 export type {
-  BrowserSessionManager,
-  BrowserSessionManagerOptions,
+  BrowserTaskManager,
+  BrowserTaskManager as BrowserSessionManager,
+  BrowserTaskManagerOptions,
+  BrowserTaskManagerOptions as BrowserSessionManagerOptions,
 } from "./browser/manager";
 export { createBrowserTools, BROWSER_READ_MAX_CHARS } from "./browser/tools";
 export type { BrowserToolsOptions } from "./browser/tools";

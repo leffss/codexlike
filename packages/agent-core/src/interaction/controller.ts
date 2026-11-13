@@ -1,5 +1,5 @@
-import type { SessionPersistence } from "../task/persistence";
-import type { SessionEvent } from "../task/types";
+import type { TaskPersistence } from "../task/persistence";
+import type { TaskEvent } from "../task/types";
 import type {
   InteractionRecord,
   InteractionRequest,
@@ -9,9 +9,9 @@ import { parseInteractionResponse, questionSnapshot } from "./questions";
 
 /** 审批与问答唯一 waiter 所有者；先持久化，再更新内存并通知，最后唤醒工具。 */
 export function createInteractionController(options: {
-  persistence: SessionPersistence;
+  persistence: TaskPersistence;
   now(): string;
-  emit(event: SessionEvent): void;
+  emit(event: TaskEvent): void;
   waiting(waiting: boolean, persisted?: boolean): void;
   answered(snapshot: QuestionAnswerSnapshot): void;
   /** 所属会话实时授权；不参与冻结的审批模式/路径权限。 */
@@ -120,7 +120,7 @@ export function createInteractionController(options: {
         response.scope === "session"
       ) {
         const sessionId = waiter.record.request.sessionId;
-        const records = options.persistence.approveSessionInteraction(
+        const records = options.persistence.approveTaskInteraction(
           sessionId,
           id,
           options.now()

@@ -4,9 +4,9 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import { createAgentSession } from "../../src/task/agent-task";
-import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 
 /** 测试用 Provider Profile（apiKey 不会被真实使用：模型工厂注入 mock） */
 const profile: ProviderProfile = {
@@ -17,7 +17,7 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(): SessionRecord {
+function taskRecord(): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -91,9 +91,9 @@ function fakeClock() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -141,14 +141,14 @@ function gatedFirstDeltaStream(
   });
 }
 
-describe("AgentSession.sendMessage（会话流式循环）", () => {
+describe("AgentTask.sendMessage（会话流式循环）", () => {
   it("单轮问答：事件序列为 user-message → assistant-start → delta×2 → assistant-done，消息与状态落库", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel([{ deltas: ["你好，", "世界"] }]);
 
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -169,7 +169,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
     ]);
     const deltas = events
       .filter(
-        (e): e is Extract<SessionEvent, { type: "assistant-delta" }> =>
+        (e): e is Extract<TaskEvent, { type: "assistant-delta" }> =>
           e.type === "assistant-delta"
       )
       .map((e) => e.delta);
@@ -189,22 +189,22 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
     ]);
 
     // 会话记录：模型选择已持久化，状态回到 idle
-    const stored = persistence.listSessions().at(0);
+    const stored = persistence.listTasks().at(0);
     expect(stored?.providerProfileId).toBe("profile-1");
     expect(stored?.model).toBe("glm-4.7");
     expect(stored?.status).toBe("idle");
   });
 
   it("多轮上下文保持：第二轮请求携带第一轮的 user 与 assistant 消息", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel([
       { deltas: ["第一轮回答"] },
       { deltas: ["第二轮回答"] },
     ]);
 
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -222,8 +222,8 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
     expect(secondPrompt).toContain("第二问");
 
     // 恢复场景：用同库重建会话（等价应用重启后续聊），历史仍然续上
-    const restored = createAgentSession({
-      record: persistence.listSessions().at(0)!,
+    const restored = createAgentTask({
+      record: persistence.listTasks().at(0)!,
       persistence,
       history: persistence.listMessages("session-1"),
       languageModelFor: () => model,
@@ -237,9 +237,9 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
   });
 
   it("流式中断（abort）：部分文本保留为助手消息，会话可继续发消息", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     let openGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       openGate = resolve;
@@ -254,7 +254,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
       },
     });
 
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -262,7 +262,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
     });
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "慢慢说",
       profile,
@@ -288,7 +288,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
       ["assistant", "部分回复"],
     ]);
     expect(messages[1]?.aborted).toBe(true);
-    expect(persistence.listSessions().at(0)?.status).toBe("idle");
+    expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
     // 会话可继续：下一轮正常完成
     const second = await collect(
@@ -302,9 +302,9 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
   });
 
   it("模型 API 出错：error 事件带中文提示并落库，error 不进上下文，会话可继续使用", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     const model = scriptedModel([
       {
         error: new APICallError({
@@ -317,7 +317,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
       { deltas: ["恢复后的回答"] },
     ]);
 
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -343,7 +343,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
       ["user", "第一问"],
       ["error", expect.stringContaining("模型请求失败")],
     ]);
-    expect(persistence.listSessions().at(0)?.status).toBe("idle");
+    expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
     // 会话可继续使用，且 error 提示不进入第二轮上下文
     const second = await collect(
@@ -362,9 +362,9 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
   });
 
   it("同一会话流式进行中拒绝并发发送", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord();
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
     let openGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       openGate = resolve;
@@ -379,7 +379,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
       },
     });
 
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -396,7 +396,7 @@ describe("AgentSession.sendMessage（会话流式循环）", () => {
 
     openGate();
     // 消费完第一个流，会话回到可用状态
-    let last: SessionEvent | undefined;
+    let last: TaskEvent | undefined;
     for (
       let head = await firstIterator.next();
       !head.done;

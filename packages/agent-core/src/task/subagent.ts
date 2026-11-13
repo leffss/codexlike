@@ -42,7 +42,7 @@ import type {
 
 import { decideApproval, type ApprovalMode } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
-import type { SessionEvent } from "./types";
+import type { TaskEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
 export const SUBAGENT_TOOL_NAME = "spawn_subagent";
@@ -100,7 +100,7 @@ export interface SubagentsConfig {
  * 会话授权不改变本轮 ToolContext 的文件访问边界。
  */
 export interface SubagentHostPort {
-  sessionId: string;
+  taskId: string;
   workspacePath: string;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
@@ -123,7 +123,7 @@ export interface SubagentHostPort {
           "id" | "sessionId" | "turnId" | "createdAt"
         >
   ): Promise<InteractionRecord>;
-  emit(event: SessionEvent): void;
+  emit(event: TaskEvent): void;
   now(): string;
   generateId(): string;
 }
@@ -193,7 +193,7 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
-/** 创建子代理编排器（由 createAgentSession 内部装配；port 即会话自身） */
+/** 创建子代理编排器（由 createAgentTask 内部装配；port 即会话自身） */
 export function createSubagentOrchestrator(
   config: SubagentsConfig,
   port: SubagentHostPort
@@ -318,7 +318,7 @@ export function createSubagentOrchestrator(
       workspacePath: port.workspacePath,
       approvalMode,
       // 工单 11：子代理与主会话共享同一会话级浏览器 context/Cookie
-      sessionId: port.sessionId,
+      sessionId: port.taskId,
       toolCallId,
       signal,
     });
@@ -442,7 +442,7 @@ export function createSubagentOrchestrator(
         for (const call of toolCalls) {
           const base: ToolCallRecord = {
             id: call.toolCallId,
-            sessionId: port.sessionId,
+            sessionId: port.taskId,
             toolName: call.toolName,
             arguments: safeJsonStringify(call.input),
             output: "",

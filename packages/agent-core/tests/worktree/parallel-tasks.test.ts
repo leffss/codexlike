@@ -13,9 +13,9 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSessionManager } from "../../src/task/manager";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import type { SessionEvent } from "../../src/task/types";
+import { createTaskManager } from "../../src/task/manager";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { TaskEvent } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import { createWorktreeService } from "../../src/worktree/worktree-service";
 
@@ -144,12 +144,12 @@ function writeThenTextModel(
 const modelFactories = new Map<string, () => MockLanguageModelV4>();
 
 /** 打开的 SQLite 库句柄（Windows 上不 close 会锁住临时目录，afterAll 统一释放） */
-const openStores: ReturnType<typeof createSqliteSessionStore>[] = [];
+const openStores: ReturnType<typeof createSqliteTaskStore>[] = [];
 
 function makeManager(dbPath: string) {
-  const persistence = createSqliteSessionStore(dbPath);
+  const persistence = createSqliteTaskStore(dbPath);
   openStores.push(persistence);
-  return createSessionManager({
+  return createTaskManager({
     persistence,
     tools: createBuiltinTools(),
     languageModelFor: (used) => {
@@ -163,9 +163,9 @@ function makeManager(dbPath: string) {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }

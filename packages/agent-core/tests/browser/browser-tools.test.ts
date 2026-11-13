@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createBrowserSessionManager } from "../../src/browser/manager";
+import { createBrowserTaskManager } from "../../src/browser/manager";
 import { createBrowserTools } from "../../src/browser/tools";
-import type { BrowserSessionManager } from "../../src/browser/manager";
+import type { BrowserTaskManager } from "../../src/browser/manager";
 import type {
   ToolDefinition,
   ToolExecutionContext,
@@ -21,7 +21,7 @@ import { listenSafePort } from "./safe-port";
  */
 describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
   let fixture: FixtureServer;
-  let manager: BrowserSessionManager;
+  let manager: BrowserTaskManager;
   let screenshotDir: string;
   let tools: ToolDefinition[];
   const byName = () => new Map(tools.map((tool) => [tool.name, tool]));
@@ -38,7 +38,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
   beforeAll(async () => {
     fixture = await startFixtureServer();
     screenshotDir = mkdtempSync(join(tmpdir(), "codexlike-shots-"));
-    manager = createBrowserSessionManager();
+    manager = createBrowserTaskManager();
     tools = createBrowserTools({
       manager,
       screenshotDirFor: () => screenshotDir,

@@ -7,9 +7,9 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import { createAgentSession } from "../../src/task/agent-task";
-import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { AgentResourceSnapshot } from "../../src/context/resource-types";
 import type { ToolDefinition } from "../../src/tools/types";
@@ -32,7 +32,7 @@ const subProfile: ProviderProfile = {
   model: "glm-4.7-air",
 };
 
-function sessionRecord(workspacePath: string): SessionRecord {
+function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -136,9 +136,9 @@ function fakeClock() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -158,7 +158,7 @@ interface SubagentHarnessOptions {
   /** 并发上限（缺省 3） */
   maxConcurrent?: number;
   /** 审批模式 */
-  approvalMode?: SessionRecord["approvalMode"];
+  approvalMode?: TaskRecord["approvalMode"];
   resources?: () => AgentResourceSnapshot;
   systemPrompt?: string;
   subTools?: ToolDefinition[];
@@ -175,11 +175,11 @@ function makeSubagentSession(options: SubagentHarnessOptions) {
     scriptedModel(
       options.sub ?? [{ kind: "text", deltas: ["子代理默认报告"] }]
     );
-  const persistence = createSqliteSessionStore(":memory:");
-  const record = sessionRecord(options.workspacePath);
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord(options.workspacePath);
   record.approvalMode = options.approvalMode ?? "assist";
-  persistence.insertSession(record);
-  const session = createAgentSession({
+  persistence.insertTask(record);
+  const session = createAgentTask({
     record,
     persistence,
     history: persistence.listMessages(record.id),
@@ -267,11 +267,11 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
   it.each([false, true])(
     "未配置编排器时不注入策略（宿主同名工具：%s）",
     async (sameNameTool) => {
-      const persistence = createSqliteSessionStore(":memory:");
-      const record = sessionRecord("C:/work/demo");
-      persistence.insertSession(record);
+      const persistence = createSqliteTaskStore(":memory:");
+      const record = taskRecord("C:/work/demo");
+      persistence.insertTask(record);
       const model = scriptedModel([{ kind: "text", deltas: ["直接回答"] }]);
-      const session = createAgentSession({
+      const session = createAgentTask({
         record,
         persistence,
         languageModelFor: () => model,
@@ -520,7 +520,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
         { kind: "text", deltas: ["两份报告已收到"] },
       ],
     });
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "并行委派",
       profile,
@@ -606,7 +606,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 报告作为工具结果回流：spawn_subagent 卡片的 output 是报告文本
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(resultEvent).toBeDefined();
@@ -673,7 +673,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 行为断言：子代理尝试调用 → 「未注册」错误回填子代理 → 子代理继续到最终报告
     const subToolEvents = events.filter(
-      (e): e is Extract<SessionEvent, { type: "subagent-tool" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-tool" }> =>
         e.type === "subagent-tool"
     );
     const rejected = subToolEvents.find(
@@ -684,7 +684,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 子代理最终报告回流（未被套娃调用破坏），主会话正常收尾
     const reportEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-report" }> =>
         e.type === "subagent-report"
     );
     expect(reportEvent?.report).toContain("子代理无法再委派");
@@ -737,7 +737,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       subModel,
     });
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({
         text: "并行调研四件事",
@@ -747,7 +747,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 推进到 4 个委派全部派发（第 4 个 queued 事件即证据：前 3 个已 start）
     async function drainUntil(
-      predicate: (event: SessionEvent) => boolean
+      predicate: (event: TaskEvent) => boolean
     ): Promise<void> {
       for (
         let head = await iterator.next();
@@ -796,7 +796,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     expect(events.filter((e) => e.type === "subagent-report")).toHaveLength(4);
     const delegationResults = events.filter(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(delegationResults).toHaveLength(4);
@@ -859,12 +859,12 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       ],
     });
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({ text: "让子代理写文件", profile })
       [Symbol.asyncIterator]();
     let approvalRequest: Extract<
-      SessionEvent,
+      TaskEvent,
       { type: "interaction-request" }
     > | null = null;
     for (
@@ -912,7 +912,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 子代理的 write_file 被真实拦截：subagent-tool 结果为拒绝，文件不落盘
     const writeResult = events.find(
-      (e): e is Extract<SessionEvent, { type: "subagent-tool" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-tool" }> =>
         e.type === "subagent-tool" &&
         e.phase === "result" &&
         e.call.toolName === "write_file"
@@ -923,7 +923,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 委派本身放行（ask 不禁调研），子代理报告正常回流
     const delegation = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.isError).toBe(false);
@@ -1084,13 +1084,13 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
     // 失败以 isError 工具结果回流（中文原因），subagent-report 标记失败
     const delegation = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.isError).toBe(true);
     expect(delegation?.call.output).toContain("子代理执行失败");
     const report = events.find(
-      (e): e is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-report" }> =>
         e.type === "subagent-report"
     );
     expect(report?.ok).toBe(false);
@@ -1138,14 +1138,14 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       ],
     });
 
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({ text: "委派跑命令", profile })
       [Symbol.asyncIterator]();
 
     // 推进到子代理的审批请求（interaction-request 带 subagentId）
     let approvalRequest: Extract<
-      SessionEvent,
+      TaskEvent,
       { type: "interaction-request" }
     > | null = null;
     for (
@@ -1192,7 +1192,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     ).toBe(true);
     // 真实执行（目标不存在 → rm 报错回填）
     const commandResult = events.find(
-      (e): e is Extract<SessionEvent, { type: "subagent-tool" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-tool" }> =>
         e.type === "subagent-tool" &&
         e.phase === "result" &&
         e.call.toolName === "run_terminal_command"
@@ -1273,7 +1273,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     });
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const iterator = session
       .sendMessage({
         text: "委派后中断",
@@ -1311,12 +1311,12 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     }
 
     const report = events.find(
-      (e): e is Extract<SessionEvent, { type: "subagent-report" }> =>
+      (e): e is Extract<TaskEvent, { type: "subagent-report" }> =>
         e.type === "subagent-report"
     );
     expect(report?.ok).toBe(false);
     const delegation = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.isError).toBe(true);

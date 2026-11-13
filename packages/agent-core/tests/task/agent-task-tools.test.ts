@@ -6,9 +6,9 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
-import { createSqliteSessionStore } from "../../src/task/persistence";
-import { createAgentSession } from "../../src/task/agent-task";
-import type { SessionEvent, SessionRecord } from "../../src/task/types";
+import { createSqliteTaskStore } from "../../src/task/persistence";
+import { createAgentTask } from "../../src/task/agent-task";
+import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { SearchSource } from "../../src/tools/web-search";
 import { fakeResourceSnapshot } from "./resource-fixture";
@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   model: "glm-4.7",
 };
 
-function sessionRecord(workspacePath: string): SessionRecord {
+function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-1",
     title: "demo",
@@ -126,9 +126,9 @@ function fakeClock() {
 }
 
 async function collect(
-  iterable: AsyncIterable<SessionEvent>
-): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+  iterable: AsyncIterable<TaskEvent>
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
   for await (const event of iterable) {
     events.push(event);
   }
@@ -138,12 +138,12 @@ async function collect(
 function makeSession(
   model: MockLanguageModelV4,
   workspacePath: string,
-  record?: SessionRecord
+  record?: TaskRecord
 ) {
-  const persistence = createSqliteSessionStore(":memory:");
-  const base = record ?? sessionRecord(workspacePath);
-  persistence.insertSession(base);
-  const session = createAgentSession({
+  const persistence = createSqliteTaskStore(":memory:");
+  const base = record ?? taskRecord(workspacePath);
+  persistence.insertTask(base);
+  const session = createAgentTask({
     record: base,
     persistence,
     history: persistence.listMessages(base.id),
@@ -154,11 +154,11 @@ function makeSession(
   return { session, persistence };
 }
 
-describe("AgentSession 工具循环（六件工具默认放行）", () => {
+describe("AgentTask 工具循环（六件工具默认放行）", () => {
   it("普通请求自主加载技能与资源，仅同轮回填且 active 摘要实时变化，下轮执行者清空", async () => {
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord("C:/work/demo");
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord("C:/work/demo");
+    persistence.insertTask(record);
     const model = scriptedModel([
       {
         kind: "tool",
@@ -193,7 +193,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["需要重新加载"] },
     ]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       resources: () => fakeResourceSnapshot(),
@@ -235,11 +235,11 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
   it.each(["load_skill", "read_skill_resource"])(
     "宿主工具与资源工具 %s 重名时发送前拒绝，不静默覆盖",
     async (name) => {
-      const persistence = createSqliteSessionStore(":memory:");
-      const record = sessionRecord("C:/work/demo");
-      persistence.insertSession(record);
+      const persistence = createSqliteTaskStore(":memory:");
+      const record = taskRecord("C:/work/demo");
+      persistence.insertTask(record);
       const model = scriptedModel([{ kind: "text", deltas: ["不应请求"] }]);
-      const session = createAgentSession({
+      const session = createAgentTask({
         record,
         persistence,
         resources: () => fakeResourceSnapshot(),
@@ -299,7 +299,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     ]);
 
     const toolCallEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-call" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-call" }> =>
         e.type === "tool-call"
     );
     expect(toolCallEvent?.call.toolName).toBe("write_file");
@@ -310,7 +310,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     });
 
     const toolResultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(toolResultEvent?.call.isError).toBe(false);
@@ -408,7 +408,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     );
 
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.isError).toBe(true);
@@ -438,7 +438,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     );
 
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.isError).toBe(true);
@@ -448,11 +448,11 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
 
   it("不带 tools 的会话保持 02 的纯对话行为（向后兼容）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord(workspace);
-    persistence.insertSession(record);
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord(workspace);
+    persistence.insertTask(record);
     const model = scriptedModel([{ kind: "text", deltas: ["纯文本回答"] }]);
-    const session = createAgentSession({
+    const session = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -498,10 +498,10 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["查到了，Tavily 是给 agent 用的搜索 API"] },
     ]);
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord(workspace);
-    persistence.insertSession(record);
-    const session = createAgentSession({
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord(workspace);
+    persistence.insertTask(record);
+    const session = createAgentTask({
       record,
       persistence,
       history: persistence.listMessages(record.id),
@@ -522,7 +522,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     expect(secondPrompt).toContain("Search API for AI agents.");
 
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.toolName).toBe("web_search");
@@ -541,10 +541,10 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["没配搜索 key，我换个思路"] },
     ]);
-    const persistence = createSqliteSessionStore(":memory:");
-    const record = sessionRecord(workspace);
-    persistence.insertSession(record);
-    const session = createAgentSession({
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord(workspace);
+    persistence.insertTask(record);
+    const session = createAgentTask({
       record,
       persistence,
       history: persistence.listMessages(record.id),
@@ -558,7 +558,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     );
 
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.isError).toBe(true);
@@ -585,12 +585,12 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
       { kind: "text", deltas: ["（不应被请求）"] },
     ]);
     // ask 档：echo 长命令也弹审批（本用例以批准点为 abort 计时锚点，见下）
-    const askRecord = sessionRecord(workspace);
+    const askRecord = taskRecord(workspace);
     askRecord.approvalMode = "ask";
     const { session, persistence } = makeSession(model, workspace, askRecord);
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     const startedAt = Date.now();
     // 批准后 1000ms 点停止：此时长命令已在执行中（echo started 已产出、sleep 30 进行中）。
     // 不能在收到 tool-call 事件后立刻 abort——生成器在 yield 处暂停，工具尚未启动；
@@ -614,7 +614,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
 
     // 结果事件标记用户中断（而非超时），进程树已被杀（不会等满 30 秒）
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.isError).toBe(true);
@@ -625,7 +625,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
 
     // 本轮终止：assistant-aborted 收尾，状态回 idle
     expect(events.at(-1)?.type).toBe("assistant-aborted");
-    expect(persistence.listSessions().at(0)?.status).toBe("idle");
+    expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
     // 中断的工具调用记录落库（含用户中断标记）
     const stored = persistence.listToolCalls("session-1");
@@ -662,7 +662,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     const { session, persistence } = makeSession(model, workspace);
 
     const controller = new AbortController();
-    const events: SessionEvent[] = [];
+    const events: TaskEvent[] = [];
     for await (const event of session.sendMessage({
       text: "写个文件",
       profile,
@@ -676,7 +676,7 @@ describe("AgentSession 工具循环（六件工具默认放行）", () => {
     }
 
     const resultEvent = events.find(
-      (e): e is Extract<SessionEvent, { type: "tool-result" }> =>
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
     );
     expect(resultEvent?.call.isError).toBe(true);
