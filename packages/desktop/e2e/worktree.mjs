@@ -107,9 +107,9 @@ async function main() {
     assert(
       pathBox !== null &&
         composerBox !== null &&
-        Math.abs(pathBox.x - composerBox.x) <= 1 &&
-        Math.abs(pathBox.width - composerBox.width) <= 1,
-      "顶部工作区路径仍占整列宽，与输入区左右缘对齐"
+        Math.abs(pathBox.x - composerBox.x - 8) <= 1 &&
+        Math.abs(composerBox.width - pathBox.width - 16) <= 1,
+      "顶部工作区路径与内容列对齐，输入卡片左右各外扩 8px"
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
