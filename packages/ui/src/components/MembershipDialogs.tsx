@@ -21,7 +21,7 @@ export function MembershipDialog(props: {
     const taskTarget = () =>
       Array.from(
         document.querySelectorAll<HTMLElement>("[data-task-select]")
-      ).find((element) => element.dataset.sessionId === taskId);
+      ).find((element) => element.dataset.taskId === taskId);
     const returnTarget =
       previous instanceof HTMLElement &&
       previous !== document.body &&

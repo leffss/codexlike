@@ -116,12 +116,12 @@ export function TaskSidebar(props: {
             : null;
         if (
           (active === document.body ||
-            activeMenu?.dataset.sessionId === menu.taskId) &&
+            activeMenu?.dataset.taskId === menu.taskId) &&
           !document.querySelector("[role='dialog'][aria-modal='true']")
         ) {
           const taskTarget = Array.from(
             document.querySelectorAll<HTMLElement>("[data-task-select]")
-          ).find((element) => element.dataset.sessionId === menu.taskId);
+          ).find((element) => element.dataset.taskId === menu.taskId);
           const groupTarget = Array.from(
             document.querySelectorAll<HTMLElement>(
               "[data-testid='project-header']"
