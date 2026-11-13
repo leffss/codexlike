@@ -892,9 +892,9 @@ describe("用户交互公开 seam", () => {
     const directory = mkdtempSync(join(tmpdir(), "interaction-store-"));
     const path = join(directory, "session.db");
     const raw = new DatabaseSync(path);
-    raw.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-      CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
-      INSERT INTO sessions VALUES ('legacy', '旧会话', 'C:/work', NULL, NULL, 'waiting-approval', '2026-01-01', '2026-01-01');
+    raw.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO tasks VALUES ('legacy', '旧会话', 'C:/work', NULL, NULL, 'waiting-approval', '2026-01-01', '2026-01-01');
       INSERT INTO messages VALUES ('turn', 'legacy', 'user', '旧问题', '2026-01-01');`);
     raw.close();
     const first = createSqliteSessionStore(path);

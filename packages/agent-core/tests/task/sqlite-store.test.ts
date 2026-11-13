@@ -192,7 +192,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     const dbPath = tempDbPath();
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
-      CREATE TABLE sessions (
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         workspace_path TEXT NOT NULL,
@@ -205,10 +205,10 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO sessions VALUES ('legacy-ro', '旧只读', 'C:\\work\\old', NULL, NULL, 'idle', 'readonly', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
-      INSERT INTO sessions VALUES ('legacy-sg', '旧协作', 'C:\\work\\old', NULL, NULL, 'idle', 'suggest', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
-      INSERT INTO sessions VALUES ('legacy-fl', '旧自主', 'C:\\work\\old', NULL, NULL, 'idle', 'full', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
-      INSERT INTO sessions VALUES ('legacy-bad', '损坏值', 'C:\\work\\old', NULL, NULL, 'idle', 'yolo', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-ro', '旧只读', 'C:\\work\\old', NULL, NULL, 'idle', 'readonly', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-sg', '旧协作', 'C:\\work\\old', NULL, NULL, 'idle', 'suggest', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-fl', '旧自主', 'C:\\work\\old', NULL, NULL, 'idle', 'full', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-bad', '损坏值', 'C:\\work\\old', NULL, NULL, 'idle', 'yolo', 'local', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -223,7 +223,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     // 不回写：库里仍是旧值（幂等迁移，无数据改写风险）
     const rawAgain = new DatabaseSync(dbPath);
     const values = rawAgain
-      .prepare("SELECT approval_mode FROM sessions WHERE id = 'legacy-ro'")
+      .prepare("SELECT approval_mode FROM tasks WHERE id = 'legacy-ro'")
       .all() as { approval_mode: string }[];
     expect(values[0]?.approval_mode).toBe("readonly");
     rawAgain.close();
@@ -268,7 +268,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     // ADR 0005 之前的生产库形状（有 workspace_mode、无 workspace_origin_path）
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
-      CREATE TABLE sessions (
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         workspace_path TEXT NOT NULL,
@@ -281,7 +281,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO sessions VALUES ('legacy-wt', '旧worktree会话', 'C:\\home\\.codexlike\\worktrees\\legacy-wt', NULL, NULL, 'idle', 'assist', 'worktree', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-wt', '旧worktree会话', 'C:\\home\\.codexlike\\worktrees\\legacy-wt', NULL, NULL, 'idle', 'assist', 'worktree', NULL, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -307,7 +307,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     const dbPath = tempDbPath();
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
-      CREATE TABLE sessions (
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         workspace_path TEXT NOT NULL,
@@ -317,7 +317,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO sessions VALUES ('legacy-wt', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-wt', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -359,7 +359,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     // 手工建 03 时代的旧 schema 并写入一行旧会话
     const raw = new DatabaseSync(dbPath);
     raw.exec(`
-      CREATE TABLE sessions (
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         workspace_path TEXT NOT NULL,
@@ -369,7 +369,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO sessions VALUES ('legacy-1', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+      INSERT INTO tasks VALUES ('legacy-1', '旧会话', 'C:\\work\\old', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     `);
     raw.close();
 
@@ -479,7 +479,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     // 票 02 之前的生产库形状：messages / tool_calls 均无 reasoning 列
     const { DatabaseSync } = await import("node:sqlite");
     const raw = new DatabaseSync(dbPath);
-    raw.exec(`CREATE TABLE sessions (
+    raw.exec(`CREATE TABLE tasks (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
       provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, approval_mode TEXT NOT NULL DEFAULT 'assist',
       workspace_mode TEXT NOT NULL DEFAULT 'local', archived_at TEXT,
@@ -487,7 +487,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     )`);
     raw.exec(`CREATE TABLE messages (
       id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -496,18 +496,18 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     )`);
     raw.exec(`CREATE TABLE tool_calls (
       id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       tool_name TEXT NOT NULL,
       arguments TEXT NOT NULL,
       output TEXT NOT NULL,
       is_error INTEGER NOT NULL,
       created_at TEXT NOT NULL
     )`);
-    raw.exec(`INSERT INTO sessions (id, title, workspace_path, status, created_at, updated_at)
+    raw.exec(`INSERT INTO tasks (id, title, workspace_path, status, created_at, updated_at)
       VALUES ('session-1', 'demo', 'C:\\work\\demo', 'idle', '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z')`);
-    raw.exec(`INSERT INTO messages (id, session_id, role, content, created_at)
+    raw.exec(`INSERT INTO messages (id, task_id, role, content, created_at)
       VALUES ('legacy-a', 'session-1', 'assistant', '旧回答', '2026-11-10T08:00:01.000Z')`);
-    raw.exec(`INSERT INTO tool_calls (id, session_id, tool_name, arguments, output, is_error, created_at)
+    raw.exec(`INSERT INTO tool_calls (id, task_id, tool_name, arguments, output, is_error, created_at)
       VALUES ('legacy-d', 'session-1', 'spawn_subagent', '{"task":"旧任务"}', '旧报告', 0, '2026-11-10T08:00:02.000Z')`);
     raw.close();
 
@@ -534,20 +534,20 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
     // 手工建工单 03 时代的旧 schema（messages 无 mentions / aborted 列，07 踩坑样例）
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(dbPath);
-    db.exec(`CREATE TABLE sessions (
+    db.exec(`CREATE TABLE tasks (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
       provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`);
     db.exec(`CREATE TABLE messages (
       id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`);
     db.prepare(
-      "INSERT INTO sessions (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       "session-1",
       "demo",
@@ -560,7 +560,7 @@ describe("createSqliteSessionStore（SQLite 会话持久化）", () => {
       "2026-11-10T08:00:00.000Z"
     );
     db.prepare(
-      "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO messages (id, task_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run(
       "legacy-1",
       "session-1",
@@ -693,16 +693,16 @@ describe("SessionPersistence compact 落库（工单 08）", () => {
     const dbPath = tempDbPath();
     const db = new DatabaseSync(dbPath);
     db.exec(`
-      CREATE TABLE sessions (
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
         provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE messages (
-        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
       );
-      INSERT INTO sessions VALUES ('session-1', 'demo', 'C:\\work', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO tasks VALUES ('session-1', 'demo', 'C:\\work', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
       INSERT INTO messages VALUES ('m1', 'session-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
     `);
     db.close();

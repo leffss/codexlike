@@ -111,7 +111,7 @@ describe("SessionManager /rename 与 /archive（会话管理命令）", () => {
 
     // 手工建工单 02 时代的旧 schema 并写入一行
     const legacy = new DatabaseSync(dbPath);
-    legacy.exec(`CREATE TABLE sessions (
+    legacy.exec(`CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       workspace_path TEXT NOT NULL,
@@ -123,7 +123,7 @@ describe("SessionManager /rename 与 /archive（会话管理命令）", () => {
     )`);
     legacy
       .prepare(
-        "INSERT INTO sessions VALUES ('s1', '旧会话', 'C:\\work\\demo', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')"
+        "INSERT INTO tasks VALUES ('s1', '旧会话', 'C:\\work\\demo', NULL, NULL, 'idle', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')"
       )
       .run();
     legacy.close();
