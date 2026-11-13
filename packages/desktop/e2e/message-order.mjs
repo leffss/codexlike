@@ -214,8 +214,9 @@ async function main() {
         .getAttribute("class")) === "sr-only",
       "成功状态只向屏幕阅读器播报"
     );
-    const firstCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    // Windows 上 Chromium 写剪贴板会把 \n 规范化为 \r\n，读出后还原再比对内容。
+    const firstCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     // 使用渲染器时钟精确验证两秒边界，避免额外真实等待。
     await window.clock.runFor(1999);
@@ -265,8 +266,8 @@ async function main() {
       .filter({ hasText: "已复制" })
       .waitFor({ state: "attached" });
     await assertCopyState(window, "已复制");
-    const retriedCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    const retriedCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     await window.clock.runFor(2000);
     await assertCopyState(window, "复制");
@@ -593,8 +594,8 @@ async function main() {
       .getByTestId("assistant-copy-feedback")
       .filter({ hasText: "已复制" })
       .waitFor({ state: "attached" });
-    const restoredCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    const restoredCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     console.log(
       "[e2e] 主题截图、失败重试反馈、卸载隔离、重启消息段与完成时刻验证通过"
