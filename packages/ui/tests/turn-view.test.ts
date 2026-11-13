@@ -48,7 +48,12 @@ function textSeg(
   };
 }
 
-function thinkSeg(id: string, turnId: string, at: number): ThinkingSegment {
+function thinkSeg(
+  id: string,
+  turnId: string,
+  at: number,
+  extra: Partial<ThinkingSegment> = {}
+): ThinkingSegment {
   return {
     kind: "thinking",
     id,
@@ -57,6 +62,7 @@ function thinkSeg(id: string, turnId: string, at: number): ThinkingSegment {
     responseId: `resp-${turnId}`,
     content: `思考 ${id}`,
     at,
+    ...extra,
   };
 }
 
@@ -99,6 +105,7 @@ function subSeg(
     task: "任务",
     state,
     startedAt: null,
+    endedAt: null,
     report: state === "done" ? "报告" : null,
     ok: state === "done" ? true : null,
     tools: [],
@@ -251,19 +258,30 @@ describe("groupTurns：轮次聚合与轮内切分（ADR 0011 呈现分层）", 
     expect(turns[1]?.following.map((item) => item.id)).toEqual(["a2"]);
   });
 
-  it("工时 = 轮首段到轮内最后段的时间差；段缺时间数据则为 null", () => {
+  it("工时 = 段时间线极差（终点取 endedAt/completedAt，流式时长计入）；段缺时间数据则为 null", () => {
     const withTime = groupTurns([
       userSeg("u1", "u1", 1_000),
-      toolSeg("c1", "u1", 4_000),
-      textSeg("a1", "u1", 9_500),
+      toolSeg("c1", "u1", 4_000, { startedAt: 4_000, endedAt: 6_000 }),
+      // 最终正文：建立 9_500，流式到 12_000 才完成（completedAt 定格终点）
+      textSeg("a1", "u1", 9_500, { completedAt: 12_000 }),
     ]);
-    expect(withTime[0]?.durationMs).toBe(8_500);
+    expect(withTime[0]?.durationMs).toBe(11_000);
+    expect(withTime[0]?.startedAtMs).toBe(1_000);
+
+    // 思考段收敛打点（endedAt）同样计入终点
+    const withThinking = groupTurns([
+      userSeg("u1", "u1", 1_000),
+      thinkSeg("t1", "u1", 2_000, { endedAt: 6_500 }),
+      textSeg("a1", "u1", 8_000),
+    ]);
+    expect(withThinking[0]?.durationMs).toBe(7_000);
 
     const noTime = groupTurns([
       { ...userSeg("u1", "u1", 0), at: undefined },
       textSeg("a1", "u1", 1_000),
     ]);
     expect(noTime[0]?.durationMs).toBeNull();
+    expect(noTime[0]?.startedAtMs).toBeNull();
   });
 
   it("兜底轮（无用户段）同样按最终正文切分", () => {

@@ -22,6 +22,7 @@ function render(entry: (typeof entries)[number], content: string): string {
       task: "链接报告",
       state: "done",
       startedAt: null,
+      endedAt: null,
       report: content,
       ok: true,
       tools: [],

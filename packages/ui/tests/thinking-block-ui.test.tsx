@@ -107,6 +107,7 @@ describe("子代理卡内思考块：与主会话思考块同构", () => {
       task: "调研测试基建",
       state,
       startedAt: state === "running" ? "2026-11-12T08:00:00.000Z" : null,
+      endedAt: null,
       reasoning: "先看 vitest 配置，\n再数现有接缝",
       report: state === "done" ? "报告" : null,
       ok: state === "done" ? true : null,

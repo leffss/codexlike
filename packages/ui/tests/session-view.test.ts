@@ -135,6 +135,8 @@ describe("正文完成时刻", () => {
           ...newText,
           content: "新轮完整正文",
           streaming: undefined,
+          // 流态收敛打点（段耗时数据）：终态消息落库时刻，与 completedAt 同源
+          endedAt: Date.UTC(2026, 10, 11, 8, 1, 19),
           completedAt: Date.UTC(2026, 10, 11, 8, 1, 19),
         },
       ]);
@@ -1116,5 +1118,111 @@ describe("段时刻打点（已工作折叠区工时与工具耗时的数据来�
     ]);
     expect(items[0]?.at).toBe(Date.parse("2026-11-11T08:00:00.000Z"));
     expect(items[1]?.at).toBe(Date.parse("2026-11-11T08:00:02.000Z"));
+  });
+
+  it("新起流态段收敛旧流态段（多转圈回归）：思考→正文、正文→工具→再正文，旧段 streaming 清除并打 endedAt", () => {
+    const before = Date.now();
+    const items = [
+      { type: "user-message", message: stored({ id: "u1", role: "user" }) },
+      { type: "assistant-reasoning", messageId: "a1", delta: "先想" },
+      { type: "assistant-delta", messageId: "a1", delta: "工具前正文" },
+      { type: "tool-call", call: toolRecord({ id: "c1", output: "" }) },
+      { type: "tool-result", call: toolRecord({ id: "c1", output: "结果" }) },
+      { type: "assistant-delta", messageId: "a1", delta: "工具后正文" },
+    ].reduce(
+      (acc, event) => applySessionEvent(acc, event as SessionEvent),
+      [] as MessageSegment[]
+    );
+    const after = Date.now();
+    const thinking = items.find((item) => item.kind === "thinking");
+    const texts = items.filter((item) => item.kind === "assistant");
+    // 任一时刻至多一个流态段：旧思考段与被工具卡隔断的正文段都已收敛
+    expect(thinking).toMatchObject({
+      streaming: undefined,
+      endedAt: expect.any(Number),
+    });
+    expect(texts[0]).toMatchObject({
+      content: "工具前正文",
+      streaming: undefined,
+      endedAt: expect.any(Number),
+    });
+    // 只有末尾新起的正文段在流式中
+    expect(texts[1]).toMatchObject({ content: "工具后正文", streaming: true });
+    expect(texts[1]?.endedAt).toBeUndefined();
+    // 收敛打点落在事件处理时刻窗口内（段耗时数据来源）
+    for (const item of [thinking, texts[0]]) {
+      expect((item?.endedAt ?? 0) >= before).toBe(true);
+      expect((item?.endedAt ?? 0) <= after).toBe(true);
+    }
+  });
+
+  it("子代理卡打点：report/tool-result 回流记 endedAt，恢复的完成态无起止对", () => {
+    let items: MessageSegment[] = applySessionEvent([], {
+      type: "subagent-queued",
+      subagentId: "sa-1",
+      task: "调研",
+    });
+    items = applySessionEvent(items, {
+      type: "subagent-start",
+      subagentId: "sa-1",
+      task: "调研",
+      toolCallId: "delegate-1",
+    });
+    items = applySessionEvent(items, {
+      type: "subagent-tool",
+      subagentId: "sa-1",
+      phase: "call",
+      call: toolRecord({ id: "sub-c1", toolName: "glob", output: "" }),
+    });
+    // 卡内工具行打点：call 记 startedAt，result 补 endedAt
+    const withCall = items[0];
+    if (withCall?.kind !== "subagent") throw new Error("首段应为子代理段");
+    expect(withCall.tools[0]).toMatchObject({
+      running: true,
+      startedAt: expect.any(Number),
+    });
+    items = applySessionEvent(items, {
+      type: "subagent-tool",
+      subagentId: "sa-1",
+      phase: "result",
+      call: toolRecord({ id: "sub-c1", toolName: "glob", output: "a.txt" }),
+    });
+    const card = items[0];
+    if (card?.kind !== "subagent") throw new Error("首段应为子代理段");
+    expect(card.tools[0]).toMatchObject({
+      running: false,
+      startedAt: expect.any(Number),
+      endedAt: expect.any(Number),
+    });
+    expect(card.state).toBe("running");
+    expect(card.endedAt).toBeNull();
+    // 报告到达：完成态打 endedAt（总耗时定格基准）
+    items = applySessionEvent(items, {
+      type: "subagent-report",
+      subagentId: "sa-1",
+      task: "调研",
+      report: "报告",
+      ok: true,
+    });
+    const done = items[0];
+    if (done?.kind !== "subagent") throw new Error("首段应为子代理段");
+    expect(done.state).toBe("done");
+    expect(done.endedAt).toEqual(expect.any(String));
+    // 恢复的记录无起止对：完成态不显示总耗时
+    const restored = initialTranscript([
+      {
+        kind: "tool-call",
+        call: toolRecord({
+          toolName: "spawn_subagent",
+          arguments: '{"task":"调研"}',
+        }),
+      },
+    ]);
+    expect(restored[0]).toMatchObject({
+      kind: "subagent",
+      state: "done",
+      startedAt: null,
+      endedAt: null,
+    });
   });
 });

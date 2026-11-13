@@ -31,8 +31,10 @@ export interface TurnView {
   historyDefaultOpen: boolean;
   /** 轮仍在运行（流态正文/思考、运行中工具卡或子代理任一成立） */
   running: boolean;
-  /** 已工作时长（毫秒）：轮内全部段的 at 极差；任一段缺时间数据为 null */
+  /** 已工作时长（毫秒）：轮内段时间线极差（at → endedAt/completedAt）；任一段缺时间数据为 null */
   durationMs: number | null;
+  /** 轮开始时刻（毫秒，段 at 最小值）：运行中工时跳动的基准；缺时间数据为 null */
+  startedAtMs: number | null;
 }
 
 /** 段处于流态或运行中（轮次"运行中"判据；流式过程实时可见） */
@@ -115,6 +117,7 @@ export function groupTurns(
     const running =
       cluster.some(isSegmentRunning) ||
       (options.lastTurnRunning === true && index === clusters.length - 1);
+    const { durationMs, startedAtMs } = turnDuration(cluster);
     return {
       turnId: cluster[0]?.turnId ?? "",
       user,
@@ -122,23 +125,50 @@ export function groupTurns(
       following,
       historyDefaultOpen: running || isTurnFailed(cluster),
       running,
-      durationMs: turnDuration(cluster),
+      durationMs,
+      startedAtMs,
     };
   });
 }
 
-/** 工时：轮内全部段 at 的极差；任一段缺 at 则不可知（呈现层省略数字） */
-function turnDuration(cluster: MessageSegment[]): number | null {
+/**
+ * 工时：轮内段时间线极差——起点取段 at 最小值，终点取各段
+ * at / endedAt / completedAt 最大值（流式正文/思考的时长计入工时，
+ * 终点不再停在最后一个事件建段时刻）；任一段缺 at 则不可知
+ * （呈现层省略数字）。
+ */
+function turnDuration(cluster: MessageSegment[]): {
+  durationMs: number | null;
+  startedAtMs: number | null;
+} {
   let min: number | undefined;
   let max: number | undefined;
   for (const segment of cluster) {
     const at = segment.at;
-    if (at === undefined) return null;
+    if (at === undefined) return { durationMs: null, startedAtMs: null };
     if (min === undefined || at < min) min = at;
+    const end = segmentEnd(segment);
+    if (end !== undefined && (max === undefined || end > max)) max = end;
     if (max === undefined || at > max) max = at;
   }
-  if (min === undefined || max === undefined) return null;
-  return Math.max(0, max - min);
+  if (min === undefined || max === undefined) {
+    return { durationMs: null, startedAtMs: null };
+  }
+  return { durationMs: Math.max(0, max - min), startedAtMs: min };
+}
+
+/** 段时间线终点：收敛/完成时刻优先，缺省回退段建立时刻 */
+function segmentEnd(segment: MessageSegment): number | undefined {
+  if (segment.kind === "assistant") {
+    return segment.completedAt ?? segment.endedAt ?? segment.at;
+  }
+  if (segment.kind === "thinking") {
+    return segment.endedAt ?? segment.at;
+  }
+  if (segment.kind === "tool-call") {
+    return segment.endedAt ?? segment.at;
+  }
+  return segment.at;
 }
 
 /**

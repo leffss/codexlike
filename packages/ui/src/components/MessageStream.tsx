@@ -28,12 +28,14 @@ import {
 import type { MessageSegment, ThinkingSegment } from "../lib/session-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import {
+  formatDurationCn,
   formatWorkDuration,
   groupConsecutiveTools,
   groupTurns,
   type ToolSequenceItem,
   type TurnView,
 } from "../lib/turn-view";
+import { useTickingNow } from "../lib/use-ticking-now";
 import { AssistantActions } from "./AssistantActions";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
@@ -391,6 +393,12 @@ function WorkedHistory(props: {
     `history-${turn.turnId}`,
     turn.historyDefaultOpen
   );
+  // 运行中工时实时跳动（段极差到当前时刻）；完成轮定格值由段极差直接得出
+  const liveNow = useTickingNow(turn.running && turn.startedAtMs !== null);
+  const workMs =
+    turn.running && turn.startedAtMs !== null
+      ? Math.max(turn.durationMs ?? 0, liveNow - turn.startedAtMs)
+      : turn.durationMs;
   return (
     <li
       data-testid="worked-history"
@@ -415,8 +423,7 @@ function WorkedHistory(props: {
         )}
         <span data-testid="worked-history-summary">
           {turn.running ? "工作中" : "已工作"}
-          {turn.durationMs !== null &&
-            ` ${formatWorkDuration(turn.durationMs)}`}
+          {workMs !== null && ` ${formatWorkDuration(workMs)}`}
           {" · "}
           {turn.history.length} 个过程段
         </span>
@@ -475,10 +482,16 @@ function ToolGroupView(props: {
 }) {
   const { item } = props;
   const first = item.segments[0];
+  const last = item.segments[item.segments.length - 1];
   const { open, toggle } = useCollapseState(
     `tool-group-${first?.id ?? ""}`,
     false
   );
+  // 组头耗时汇总：首段开始 → 末段结束的时间线跨度；组内任一卡缺打点则省略
+  const groupSpanMs =
+    first?.startedAt !== undefined && last?.endedAt !== undefined
+      ? last.endedAt - first.startedAt
+      : null;
   return (
     <li
       data-testid="tool-call-group"
@@ -500,6 +513,14 @@ function ToolGroupView(props: {
         {item.hasError && (
           <span data-testid="tool-call-group-error" className="text-danger-fg">
             含失败
+          </span>
+        )}
+        {groupSpanMs !== null && (
+          <span
+            data-testid="tool-call-group-duration"
+            className="ml-auto shrink-0 font-mono text-xs text-fg-subtle"
+          >
+            {formatDurationCn(groupSpanMs)}
           </span>
         )}
       </button>
@@ -567,6 +588,16 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
   const { segment } = props;
   const streaming = segment.streaming === true;
   const { open, setOpen } = useCollapseState(segment.id, streaming);
+  // 思考耗时：流式中实时跳动，收敛后以 endedAt 定格；缺时间数据则不显示
+  const liveNow = useTickingNow(streaming && segment.at !== undefined);
+  const thinkingMs =
+    segment.at === undefined
+      ? null
+      : streaming
+        ? Math.max(0, liveNow - segment.at)
+        : segment.endedAt !== undefined
+          ? segment.endedAt - segment.at
+          : null;
   const summary = thinkingSummary(segment.content);
   return (
     <li>
@@ -599,6 +630,14 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             {streaming ? "思考中" : "已思考"}
             {summary !== "" && ` · ${summary}`}
           </span>
+          {thinkingMs !== null && (
+            <span
+              data-testid="thinking-duration"
+              className={`shrink-0 font-mono ${streaming ? "text-warn-fg" : "text-fg-subtle"}`}
+            >
+              {formatDurationCn(thinkingMs)}
+            </span>
+          )}
         </summary>
         <div
           data-testid="thinking-content"
@@ -709,6 +748,19 @@ function MessageBubble(props: {
           </p>
         )}
       </div>
+      {/* 中间正文段（过程段，无 completedAt）的耗时：收敛时刻定格；最终正文与恢复的历史段不显示 */}
+      {segment.kind === "assistant" &&
+        segment.streaming !== true &&
+        segment.completedAt === undefined &&
+        segment.endedAt !== undefined &&
+        segment.at !== undefined && (
+          <p
+            data-testid="assistant-segment-duration"
+            className="mt-1 text-right font-mono text-xs text-fg-subtle"
+          >
+            {formatDurationCn(segment.endedAt - segment.at)}
+          </p>
+        )}
       {props.showActions && props.now !== undefined && (
         <AssistantActions
           key={segment.content}

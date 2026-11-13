@@ -49,6 +49,8 @@ export interface AssistantSegment extends SegmentBase {
   content: string;
   /** 流式进行中（流式文本只追加到末尾流态段） */
   streaming?: boolean;
+  /** 流态收敛时刻（epoch ms）：被隔断新起段/终态/错误收敛时打点；段耗时 = endedAt - at */
+  endedAt?: number;
   /** 正常终态消息的完成时刻（epoch ms），独立于段建立时刻 at。 */
   completedAt?: number;
   /** 该段被用户中断：content 为部分内容 */
@@ -60,6 +62,8 @@ export interface ThinkingSegment extends SegmentBase {
   kind: "thinking";
   content: string;
   streaming?: boolean;
+  /** 流态收敛时刻（epoch ms）：思考结束（切换正文/终态/错误）时打点；缺省则无耗时 */
+  endedAt?: number;
 }
 
 /** 错误段：模型 API 出错等的中文提示（不进入对话上下文） */
@@ -115,6 +119,8 @@ export interface SubagentSegment extends SegmentBase {
   state: "queued" | "running" | "done";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
+  /** 结束时间（ISO；完成态总耗时定格的计算基准，运行期为 null） */
+  endedAt: string | null;
   /**
    * 子代理思考过程（与报告文本分开累积）；运行期由 subagent-reasoning
    * 事件累积，重启后由落库 reasoning 列重建（票 02，旧记录自然缺失）
@@ -136,6 +142,10 @@ export interface SubagentToolCall {
   output: string;
   isError: boolean;
   running?: boolean;
+  /** 执行开始时刻（epoch ms，call 事件打点；列表行耗时的起点） */
+  startedAt?: number;
+  /** 执行结束时刻（epoch ms，result 事件打点；缺省则行不显示耗时） */
+  endedAt?: number;
 }
 
 /** 交互记录段：只读回放；操作只存在于底部 InteractionPanel */
@@ -195,6 +205,20 @@ function isStreamingSegment(
   return (
     (item.kind === "assistant" || item.kind === "thinking") &&
     item.streaming === true
+  );
+}
+
+/**
+ * 收敛全部流态段（streaming 去除）并打 endedAt（段耗时数据来源）。
+ * 新流态段建立（思考→正文切换、工具卡隔断后再起正文）与终态/错误
+ * 收敛共用：任一时刻至多一个流态段，被隔断的旧段不再显示流式指示。
+ */
+function settleStreamingSegments(
+  items: MessageSegment[],
+  endedAt: number
+): MessageSegment[] {
+  return items.map((item) =>
+    isStreamingSegment(item) ? { ...item, streaming: undefined, endedAt } : item
   );
 }
 
@@ -366,6 +390,8 @@ function subagentFromToolRecord(
     task,
     state: "done",
     startedAt: null,
+    // 恢复的记录无起止时间对：完成态不显示总耗时
+    endedAt: null,
     // 落盘思考重建卡内思考折叠块（票 02）；旧记录自然缺失（undefined）
     ...(call.reasoning ? { reasoning: call.reasoning } : {}),
     report: call.output,
@@ -423,7 +449,9 @@ export function applySessionEvent(
           { ...last, content: last.content + delta },
         ];
       }
-      return append(items, {
+      // 新起段前收敛既有流态段：隔断即终结（思考→正文切换、工具卡隔断），
+      // 旧段不再残留 streaming（否则每段各渲染一个流式指示，出现多个转圈）
+      return append(settleStreamingSegments(items, nowEpoch()), {
         kind: isText ? "assistant" : "thinking",
         id: segmentId(isText ? "text" : "thinking", messageId, items),
         seq: nextSeq(items),
@@ -487,6 +515,7 @@ export function applySessionEvent(
             ? {
                 ...item,
                 state: "done" as const,
+                endedAt: nowIso(),
                 report: event.call.output,
                 ok: !event.call.isError,
               }
@@ -546,6 +575,7 @@ export function applySessionEvent(
         task: event.task,
         state: "queued",
         startedAt: null,
+        endedAt: null,
         report: null,
         ok: null,
         tools: [],
@@ -601,6 +631,7 @@ export function applySessionEvent(
           ? {
               ...item,
               state: "done" as const,
+              endedAt: nowIso(),
               report: event.report,
               ok: event.ok,
             }
@@ -617,21 +648,16 @@ export function applySessionEvent(
       return items;
 
     case "error":
-      // 出错即本轮终止：全部流态段收敛，尾部追加错误段
-      return append(
-        items.map((item) =>
-          isStreamingSegment(item) ? { ...item, streaming: undefined } : item
-        ),
-        {
-          kind: "error",
-          id: event.message.id,
-          seq: nextSeq(items),
-          turnId: deriveTurnId(items, event.message.id),
-          responseId: null,
-          at: nowEpoch(),
-          content: event.message.content,
-        }
-      );
+      // 出错即本轮终止：全部流态段收敛（打 endedAt），尾部追加错误段
+      return append(settleStreamingSegments(items, nowEpoch()), {
+        kind: "error",
+        id: event.message.id,
+        seq: nextSeq(items),
+        turnId: deriveTurnId(items, event.message.id),
+        responseId: null,
+        at: nowEpoch(),
+        content: event.message.content,
+      });
   }
 }
 
@@ -641,13 +667,13 @@ function finalizeResponse(
   message: StoredMessage,
   interrupted: boolean
 ): MessageSegment[] {
-  // 该响应的全部流态段（思考/正文）收敛：不残留进行中状态
-  let next = items.map((item): MessageSegment => {
-    if (isStreamingSegment(item) && item.responseId === message.id) {
-      return { ...item, streaming: undefined };
-    }
-    return item;
-  });
+  // 全部流态段（思考/正文）收敛：不残留进行中状态（单会话单流，
+  // 与 error 分支同策略）；收敛时刻取终态消息落库时刻（真实完成点，
+  // 段耗时以此定格）
+  let next = settleStreamingSegments(
+    items,
+    parseIso(message.createdAt) ?? nowEpoch()
+  );
   const hasTextSegments = next.some(
     (item) => item.kind === "assistant" && item.responseId === message.id
   );
@@ -721,6 +747,7 @@ function applySubagentTool(
         output: "",
         isError: false,
         running: true,
+        startedAt: nowEpoch(),
       },
     ];
   }
@@ -735,12 +762,19 @@ function applySubagentTool(
         output: call.output,
         isError: call.isError,
         running: false,
+        endedAt: nowEpoch(),
       },
     ];
   }
   return tools.map((tool) =>
     tool.id === call.id
-      ? { ...tool, output: call.output, isError: call.isError, running: false }
+      ? {
+          ...tool,
+          output: call.output,
+          isError: call.isError,
+          running: false,
+          endedAt: nowEpoch(),
+        }
       : tool
   );
 }

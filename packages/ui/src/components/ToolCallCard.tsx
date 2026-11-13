@@ -4,6 +4,7 @@ import { useCollapseState } from "../lib/collapse-memory";
 import type { ToolCallSegment } from "../lib/session-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
+import { useTickingNow } from "../lib/use-ticking-now";
 
 import { DisclosureArrow } from "./DisclosureArrow";
 
@@ -70,6 +71,10 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
 export function ToolCallCard(props: { call: ToolCallSegment }) {
   const { call } = props;
   const { open: expanded, toggle } = useCollapseState(`tool-${call.id}`, false);
+  // 运行中耗时实时跳动（每秒）；定格值由 endedAt 计算，不依赖跳动源
+  const liveNow = useTickingNow(
+    call.running === true && call.startedAt !== undefined
+  );
 
   const statusLabel = call.running ? "运行中" : call.isError ? "失败" : "完成";
   const statusClass = call.running
@@ -77,10 +82,16 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
     : call.isError
       ? "text-danger-fg"
       : "text-ok-fg";
+  const durationMs =
+    call.startedAt === undefined
+      ? null
+      : call.endedAt !== undefined
+        ? call.endedAt - call.startedAt
+        : call.running === true
+          ? Math.max(0, liveNow - call.startedAt)
+          : null; // 恢复的历史记录无 endedAt：耗时不可知，省略
   const duration =
-    call.endedAt !== undefined && call.startedAt !== undefined
-      ? formatDurationCn(call.endedAt - call.startedAt, true)
-      : null;
+    durationMs === null ? null : formatDurationCn(durationMs, true);
 
   return (
     <li
@@ -114,7 +125,7 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
         >
           {statusLabel}
         </span>
-        {/* 耗时：运行期 call→result 打点可得；恢复的历史记录无耗时则省略 */}
+        {/* 耗时：运行中实时跳动，完成定格（endedAt）；恢复的历史记录无打点则省略 */}
         {duration !== null && (
           <span
             data-testid="tool-call-duration"

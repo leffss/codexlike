@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -8,6 +7,8 @@ import { markdownComponents } from "../lib/markdown";
 import type { SubagentSegment } from "../lib/session-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
+import { formatDurationCn } from "../lib/turn-view";
+import { useTickingNow } from "../lib/use-ticking-now";
 
 import { DisclosureArrow } from "./DisclosureArrow";
 
@@ -23,16 +24,8 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
     `subagent-${subagent.id}`,
     false
   );
-  const [nowTick, setNowTick] = useState(() => Date.now());
-
-  // 运行中每秒刷新「已用时」；结束后停止计时
-  useEffect(() => {
-    if (subagent.state !== "running") {
-      return;
-    }
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [subagent.state]);
+  // 运行中每秒刷新「已用时」；结束后停止计时（完成态定格值由 endedAt 计算）
+  const nowTick = useTickingNow(subagent.state === "running");
 
   const statusLabel =
     subagent.state === "queued"
@@ -77,10 +70,11 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">
           {subagent.task === "" ? "（任务描述缺失）" : subagent.task}
         </span>
-        {subagent.state === "running" && (
+        {/* 已用时：运行中实时跳动，完成定格总耗时（endedAt）；恢复卡无起止对则省略 */}
+        {elapsed !== "" && (
           <span
             data-testid="subagent-elapsed"
-            className="shrink-0 font-mono text-xs text-warn-fg"
+            className={`shrink-0 font-mono text-xs ${subagent.state === "running" ? "text-warn-fg" : "text-fg-subtle"}`}
           >
             {elapsed}
           </span>
@@ -167,6 +161,15 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
                     >
                       {tool.isError ? "失败" : "完成"}
                     </span>
+                    {tool.startedAt !== undefined &&
+                      tool.endedAt !== undefined && (
+                        <span className="shrink-0 text-fg-subtle">
+                          {formatDurationCn(
+                            tool.endedAt - tool.startedAt,
+                            true
+                          )}
+                        </span>
+                      )}
                   </li>
                 ))}
               </ul>
@@ -184,7 +187,10 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
   );
 }
 
-/** 已用时（运行中实时刷新；恢复的卡片无 startedAt 则不显示数字） */
+/**
+ * 已用时（mm:ss）：运行中以 now 实时刷新；完成态以 endedAt 定格总耗时。
+ * 恢复的卡片无 startedAt（或完成态缺 endedAt）则不显示数字。
+ */
 function formatElapsed(subagent: SubagentSegment, now: number): string {
   if (subagent.startedAt === null) {
     return "";
@@ -193,7 +199,16 @@ function formatElapsed(subagent: SubagentSegment, now: number): string {
   if (Number.isNaN(started)) {
     return "";
   }
-  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  const end =
+    subagent.state === "done"
+      ? subagent.endedAt === null
+        ? NaN
+        : Date.parse(subagent.endedAt)
+      : now;
+  if (Number.isNaN(end)) {
+    return "";
+  }
+  const seconds = Math.max(0, Math.floor((end - started) / 1000));
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
