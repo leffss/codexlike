@@ -11,7 +11,11 @@
 // （实测 125% 缩放：x-7 / y0 / 宽+14 / 高+7）。各场景用「启动 → 读渲染层与
 // 主进程读数对 → 得单位差 delta → 重启 → 渲染层断言期望值+delta」：期望值
 // 只来自现场文件与主屏 workArea（独立来源），delta 只是单位换算，不构成循环。
-// 本 feature（票01）无写入路径：closeApp 后 launch-state.json 原样，重启可复现。
+// 票02 起主进程监听窗口事件写盘（maximize 切换即时、move/resize 防抖、退出 flush），
+// closeApp 后 launch-state.json 会更新：各预写场景二次启动前用 fileContent 覆盖回
+// 被测输入；场景①（首启默认）二次启动读到的正是退出 flush 写入的默认居中现场，
+// 与断言一致。窗口事件保存链路本身不放 e2e（CI 无显示器驱动不可靠），由
+// tests/launch-state/window-save.test.ts 单测覆盖。
 // 运行：node e2e/launch-state.mjs（需先 build）。
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
