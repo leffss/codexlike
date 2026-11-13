@@ -134,7 +134,7 @@ describe("TaskManager /rename 与 /archive（会话管理命令）", () => {
       archivedAt: null,
     });
     // 迁移后新列可写
-    persistence.updateSession("s1", { archivedAt: "2026-11-11T08:00:00.000Z" });
+    persistence.updateTask("s1", { archivedAt: "2026-11-11T08:00:00.000Z" });
     expect(persistence.listTasks().at(0)?.archivedAt).toBe(
       "2026-11-11T08:00:00.000Z"
     );

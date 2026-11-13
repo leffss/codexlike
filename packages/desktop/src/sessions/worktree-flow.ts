@@ -19,8 +19,8 @@ export async function prepareSessionWorkspace(options: {
       rollback: async () => true,
     };
   }
-  const worktree = await options.worktreeService.createForSession({
-    sessionId: options.id,
+  const worktree = await options.worktreeService.createForTask({
+    taskId: options.id,
     workspacePath: options.workspacePath,
   });
   return {

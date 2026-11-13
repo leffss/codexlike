@@ -215,7 +215,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     });
     const session = manager.create({ workspacePath: "C:\\work\\demo" });
     // 模拟应用在流式中途被杀：库里残留 streaming
-    persistence.updateSession(session.id, { status: "streaming" });
+    persistence.updateTask(session.id, { status: "streaming" });
     expect(persistence.listTasks().at(0)?.status).toBe("streaming");
 
     // get 惰性恢复：用全新 manager 绕过缓存，读取残留记录并重置为 idle 落库
@@ -338,7 +338,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
 
     const created = manager.create({ workspacePath: "C:\work\demo" });
     // 模拟应用在等待审批时被杀：库里残留 waiting-approval
-    persistence.updateSession(created.id, {
+    persistence.updateTask(created.id, {
       status: "waiting-approval",
       updatedAt: "2026-11-11T09:00:00.000Z",
     });

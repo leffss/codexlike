@@ -185,8 +185,8 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
     const worktrees = makeManager(dbPath);
     const localSession = worktrees.create({ workspacePath: repo });
     const wtId = "wt-parallel-1";
-    const wt = await worktreeService.createForSession({
-      sessionId: wtId,
+    const wt = await worktreeService.createForTask({
+      taskId: wtId,
       workspacePath: repo,
     });
     const wtSession = worktrees.create({
@@ -241,8 +241,8 @@ describe("托管 Worktree 集成（同一仓库双会话并行）", () => {
 
     const first = makeManager(dbPath);
     const wtId = "wt-resume-1";
-    const wt = await worktreeService.createForSession({
-      sessionId: wtId,
+    const wt = await worktreeService.createForTask({
+      taskId: wtId,
       workspacePath: repo,
     });
     const session = first.create({

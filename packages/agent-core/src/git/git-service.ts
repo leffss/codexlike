@@ -52,7 +52,7 @@ export interface GitService {
    * 创建（或切换到已存在的）`codexlike/<任务名>` 分支。
    * 创建成功 created=true；分支已存在则切换过去（created=false），可重复调用。
    */
-  createSessionBranch(name: string): Promise<GitBranchResult>;
+  createTaskBranch(name: string): Promise<GitBranchResult>;
   /** 提交当前全部变更（含 untracked，等价 `git add -A` + `git commit`） */
   commitAll(message: string): Promise<GitCommitResult>;
 }
@@ -192,7 +192,7 @@ export function createGitService(workspacePath: string): GitService {
       return { path, original, modified };
     },
 
-    async createSessionBranch(name: string): Promise<GitBranchResult> {
+    async createTaskBranch(name: string): Promise<GitBranchResult> {
       if (!(await git.checkIsRepo())) {
         throw new Error("当前工作区不是 git 仓库，无法创建分支");
       }

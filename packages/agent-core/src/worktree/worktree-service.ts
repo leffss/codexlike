@@ -44,8 +44,8 @@ export interface WorktreeService {
    * 为任务创建托管 Worktree：非 git 目录抛中文错误（任务不应创建），
    * 成功返回副本路径与分支名。`.worktreeinclude` 声明的文件（存在时）复制进副本。
    */
-  createForSession(input: {
-    sessionId: string;
+  createForTask(input: {
+    taskId: string;
     workspacePath: string;
   }): Promise<ManagedWorktree>;
 }
@@ -69,8 +69,8 @@ export function createWorktreeService(options: {
   }
 
   return {
-    async createForSession({ sessionId, workspacePath }) {
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(sessionId))
+    async createForTask({ taskId, workspacePath }) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId))
         throw new Error("会话 id 不能包含路径或特殊字符");
       const git = simpleGit({ baseDir: workspacePath });
       if (!(await git.checkIsRepo())) {
@@ -78,7 +78,7 @@ export function createWorktreeService(options: {
           `当前工作区不是 git 仓库，无法使用 worktree 模式：${workspacePath}。请改用「本目录直跑」，或先在该目录执行 git init。`
         );
       }
-      const worktreePath = join(worktreesDir, sessionId);
+      const worktreePath = join(worktreesDir, taskId);
       if (existsSync(worktreePath)) {
         throw new Error(
           `worktree 目录已存在：${worktreePath}（会话 id 冲突，请重试新建会话）`
@@ -96,7 +96,7 @@ export function createWorktreeService(options: {
           );
         return { line, source: resolveInWorkspace(workspacePath, line) };
       });
-      const branch = codexlikeBranchName(sessionId);
+      const branch = codexlikeBranchName(taskId);
       let head: string;
       try {
         head = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim();

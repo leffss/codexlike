@@ -389,7 +389,7 @@ it("异常结束的持久执行归一为中断；二次重开不重复追加标�
     content: "异常前最后输入",
     createdAt: "2026-11-11T00:00:00.000Z",
   });
-  app.persistence.updateSession(session.id, { status: "streaming" });
+  app.persistence.updateTask(session.id, { status: "streaming" });
   app.close();
   for (let i = 0; i < 2; i++) {
     const store = createSqliteSessionStore(app.dbPath);

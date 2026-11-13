@@ -1096,8 +1096,8 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
   git("commit", "-m", "fixture");
   const project = invoke("projects:add", app.workspace);
   // 04尚未合入时用公开创建接口准备真实Worktree，不断言其创建实现。
-  const worktree = await app.worktrees.createForSession({
-    sessionId: "archive-worktree",
+  const worktree = await app.worktrees.createForTask({
+    taskId: "archive-worktree",
     workspacePath: app.workspace,
   });
   const session = app.manager.create({
@@ -1343,7 +1343,7 @@ it("准备Worktree期间项目被移除，首次发送必须重查且不留悬�
   writeFileSync(join(app.workspace, "source.txt"), "保留来源");
   git("add", "source.txt");
   git("commit", "-m", "fixture");
-  const original = app.worktrees.createForSession;
+  const original = app.worktrees.createForTask;
   let release!: () => void;
   let entered!: () => void;
   const ready = new Promise<void>((resolve) => {
@@ -1353,7 +1353,7 @@ it("准备Worktree期间项目被移除，首次发送必须重查且不留悬�
     release = resolve;
   });
   // 闸门只控制外部Git返回时机，实际创建与安全回滚仍走真实实现。
-  vi.spyOn(app.worktrees, "createForSession").mockImplementationOnce(
+  vi.spyOn(app.worktrees, "createForTask").mockImplementationOnce(
     async (input) => {
       const result = await original(input);
       entered();

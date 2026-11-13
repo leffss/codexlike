@@ -46,10 +46,10 @@ describe("BrowserTaskManager（会话级浏览器实例）", () => {
     expect(cookieB).not.toContain("fixture_sid");
   }, 60_000);
 
-  it("closeSession 关闭该会话页面；再次 pageFor 得到全新页面（旧 Cookie 不残留）", async () => {
+  it("closeTask 关闭该会话页面；再次 pageFor 得到全新页面（旧 Cookie 不残留）", async () => {
     const page = await manager.pageFor("session-recycled");
     await page.goto(`${fixture.origin}/set-cookie`);
-    await manager.closeSession("session-recycled");
+    await manager.closeTask("session-recycled");
     // 旧 page 已关闭
     expect(page.isClosed()).toBe(true);
     const fresh = await manager.pageFor("session-recycled");
@@ -59,8 +59,8 @@ describe("BrowserTaskManager（会话级浏览器实例）", () => {
     expect(cookie).not.toContain("fixture_sid");
   }, 60_000);
 
-  it("closeSession 对未知会话安全；close 幂等且清理全部会话", async () => {
-    await expect(manager.closeSession("never-opened")).resolves.toBeUndefined();
+  it("closeTask 对未知会话安全；close 幂等且清理全部会话", async () => {
+    await expect(manager.closeTask("never-opened")).resolves.toBeUndefined();
     const page = await manager.pageFor("session-final");
     await manager.close();
     expect(page.isClosed()).toBe(true);

@@ -88,7 +88,7 @@ export function registerGitHandlers(options: {
       const record = findSession(sessionId);
       // 分支名由会话名生成（codexlike/<会话名>，sanitize 在 agent-core 纯函数）
       try {
-        return await createGitService(record.workspacePath).createSessionBranch(
+        return await createGitService(record.workspacePath).createTaskBranch(
           codexlikeBranchName(record.title)
         );
       } catch (error) {

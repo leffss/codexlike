@@ -224,7 +224,7 @@ export function registerSessionHandlers(options: {
     for (const sessionId of result?.sessionIds ?? []) {
       liveSessions.forget(sessionId);
       queueStore.clear(sessionId);
-      void browserManager?.closeSession(sessionId).catch(() => {});
+      void browserManager?.closeTask(sessionId).catch(() => {});
     }
     return result;
   });
@@ -837,7 +837,7 @@ export function registerSessionHandlers(options: {
       // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
       const result = management.archive(sessionId, archived);
       if (archived && result) {
-        void browserManager?.closeSession(sessionId).catch(() => {});
+        void browserManager?.closeTask(sessionId).catch(() => {});
       }
       // 归档只整理记录，不触发磁盘回收（包括新模型隔离保留的旧 Worktree）。
       return result;

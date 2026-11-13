@@ -174,7 +174,7 @@ export function createTaskManager(
           aborted: true,
           createdAt: now(),
         });
-      persistence.updateSession(task.id, { status: "idle" });
+      persistence.updateTask(task.id, { status: "idle" });
     }
   }
 
@@ -191,7 +191,7 @@ export function createTaskManager(
     // 上次退出时若流式/等待审批中途被杀，库里会残留 streaming / waiting-approval；恢复即视为空闲
     if (record.status === "streaming" || record.status === "waiting-approval") {
       const patched: TaskRecord = { ...record, status: "idle" };
-      persistence.updateSession(record.id, { status: "idle" });
+      persistence.updateTask(record.id, { status: "idle" });
       return createCachedTask(patched, history);
     }
     return createCachedTask(record, history);
@@ -233,7 +233,7 @@ export function createTaskManager(
     if (current === undefined) {
       return null;
     }
-    persistence.updateSession(sessionId, patch);
+    persistence.updateTask(sessionId, patch);
     const next = { ...current, ...patch };
     const cached = cache.get(sessionId);
     if (cached !== undefined) {

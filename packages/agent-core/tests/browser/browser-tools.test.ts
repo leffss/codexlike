@@ -195,7 +195,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     const shotResult = await shot.execute({}, virginContext);
     expect(shotResult.isError).toBe(true);
     expect(shotResult.output).toContain("browser_navigate");
-    await manager.closeSession("never-navigated");
+    await manager.closeTask("never-navigated");
   }, 60_000);
 
   it("不同会话的当前页互不干扰", async () => {
@@ -229,7 +229,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
       }
     );
     expect(readA.output).toContain("长文测试页标题");
-    await manager.closeSession("isolated-a");
-    await manager.closeSession("isolated-b");
+    await manager.closeTask("isolated-a");
+    await manager.closeTask("isolated-b");
   }, 60_000);
 });

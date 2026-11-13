@@ -308,7 +308,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       record.status = waiting ? "waiting-user" : "streaming";
       // 批量授权事务已保存状态；提交后只更新内存，避免第二次写库失败造成部分放行。
       if (persisted) return;
-      persistence.updateSession(record.id, {
+      persistence.updateTask(record.id, {
         status: record.status,
         updatedAt: now(),
       });
@@ -436,7 +436,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     },
 
     revokeAutoApprove() {
-      persistence.updateSession(record.id, { autoApprove: false });
+      persistence.updateTask(record.id, { autoApprove: false });
       record.autoApprove = false;
       events.push({
         type: "session-auto-approve-changed",
@@ -454,7 +454,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       if (busy) {
         terminated = true;
         record.status = "idle";
-        persistence.updateSession(record.id, {
+        persistence.updateTask(record.id, {
           status: "idle",
           updatedAt: now(),
         });
@@ -530,7 +530,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             : undefined;
 
         // 模型选择对本次及后续消息生效，落库
-        persistence.updateSession(record.id, {
+        persistence.updateTask(record.id, {
           providerProfileId: profile.id,
           model: profile.model,
           status: "streaming",
@@ -857,7 +857,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           busy = false;
           record.status = "idle";
           if (!terminated)
-            persistence.updateSession(record.id, {
+            persistence.updateTask(record.id, {
               status: "idle",
               updatedAt: now(),
             });
@@ -878,7 +878,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       signal?.throwIfAborted();
       busy = true;
       record.status = "streaming";
-      persistence.updateSession(record.id, { status: "streaming" });
+      persistence.updateTask(record.id, { status: "streaming" });
       try {
         // 第一步（副本上生成）：请求当前模型压缩被替换的旧历史；失败直接抛出，
         // 库与内存上下文都未动，可原样重试
@@ -949,7 +949,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           toModelMessage(summaryMessage),
           ...keptContext
         );
-        persistence.updateSession(record.id, {
+        persistence.updateTask(record.id, {
           providerProfileId: profile.id,
           model: profile.model,
           updatedAt: now(),
@@ -976,7 +976,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       } finally {
         busy = false;
         record.status = "idle";
-        persistence.updateSession(record.id, { status: "idle" });
+        persistence.updateTask(record.id, { status: "idle" });
       }
     },
   };
