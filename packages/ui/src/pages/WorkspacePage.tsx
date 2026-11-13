@@ -39,6 +39,7 @@ import {
   type ProjectRecord,
   type SessionResourcesView,
   type ThinkingEffort,
+  type WorkbenchTarget,
 } from "@codexlike/agent-core";
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
@@ -53,6 +54,7 @@ import {
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
 import { SESSION_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import { reportLaunchState } from "../lib/launch-state";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -80,6 +82,8 @@ interface QueueEditSession {
 export function WorkspacePage(props: {
   onOpenSettings: () => void;
   state?: WorkspaceState;
+  /** 启动现场的工作台目标（票03）：冷启动恢复的第一优先级；缺省走现有回退链 */
+  initialTarget?: WorkbenchTarget | null;
 }) {
   const [localState] = useState(() =>
     createWorkspaceState(
@@ -173,6 +177,10 @@ export function WorkspacePage(props: {
    */
   const [followSignal, setFollowSignal] = useState(0);
   const currentIdRef = useRef<string | null>(null);
+  /** 启动现场的工作台目标（票03）：固定挂载时刻值，冷启动一次性恢复用 */
+  const initialTargetRef = useRef<WorkbenchTarget | null>(
+    props.initialTarget ?? null
+  );
 
   currentIdRef.current = currentId;
   /** 当前会话记录（审批模式选择器 / 改动面板 / 顶栏共用；sessions 列表随事件刷新） */
@@ -196,6 +204,17 @@ export function WorkspacePage(props: {
     const list = await window.codexlike.sessions.list();
     if (listRequestRef.current === request) setSessions(list);
     return list;
+  }, []);
+
+  /**
+   * 工作台目标上报启动现场（票03）：切换会话 / 进出新建草稿时即时落盘
+   * （低频事件不防抖），重开回到退出前正在查看的目标；失败不阻塞界面。
+   */
+  const reportWorkbenchTarget = useCallback((target: WorkbenchTarget) => {
+    reportLaunchState(
+      window.codexlike.launchState.setWorkbenchTarget(target),
+      "保存工作台目标现场失败"
+    );
   }, []);
 
   async function revokeAutoApprove(id: string) {
@@ -292,6 +311,7 @@ export function WorkspacePage(props: {
 
   const openSession = useCallback(
     async (id: string) => {
+      reportWorkbenchTarget({ kind: "session", sessionId: id });
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
       // 编辑中的排队消息随会话归属：切走先还原该会话的输入框草稿，不丢文字（票 03）
@@ -378,7 +398,13 @@ export function WorkspacePage(props: {
         if (isCurrent()) setWorkspaceFiles([]);
       }
     },
-    [refreshContextWarning, refreshResources, refreshSessions, workspaceState]
+    [
+      refreshContextWarning,
+      refreshResources,
+      refreshSessions,
+      reportWorkbenchTarget,
+      workspaceState,
+    ]
   );
 
   useEffect(() => {
@@ -393,7 +419,37 @@ export function WorkspacePage(props: {
       if (!active) return;
       setSessions(list);
       setProfiles(profileList);
-      // 启动时自动打开最近的未归档会话（若有）
+      // 冷启动恢复（票03）：第一优先级取启动现场的工作台目标——记住的会话
+      // （归档照常恢复）或新建草稿入口（连同项目关联，草稿文本由 workbench_state
+      // 既有机制恢复）。项目已删除的草稿目标视为失效，走回退链。
+      // 真冷启动守卫（对照下方回退链守卫的语义）：只在无已打开会话、无草稿时
+      // 恢复并上报。currentIdRef 在重挂后恒为 null（组件级），故「无已打开会话」
+      // 由 App 级 workspaceState.activeSessionId 承载——切设置页卸载本页后重挂
+      // 时它仍是用户最后查看的会话，不得以挂载时刻固化的启动目标抢占，否则
+      // 拉回旧会话并把它重新写回启动现场。
+      const target = initialTargetRef.current;
+      const coldStart =
+        workspaceState.activeSessionId === null &&
+        workspaceState.activeDraftProjectId === undefined;
+      if (coldStart && target?.kind === "session") {
+        const remembered = list.find(
+          (session) => session.id === target.sessionId
+        );
+        if (remembered !== undefined) {
+          await openSession(remembered.id);
+          return;
+        }
+      } else if (coldStart && target?.kind === "new") {
+        const projectId = target.projectId;
+        if (
+          projectId === null ||
+          projectList.some((project) => project.id === projectId)
+        ) {
+          await startCreateSession(projectId);
+          return;
+        }
+      }
+      // 回退链（现状不变）：内存活动会话 → 排序最前的未归档会话；都没有则停在新建草稿入口
       const latest =
         list.find((session) => session.id === workspaceState.activeSessionId) ??
         list.find((session) => session.archivedAt === null);
@@ -408,7 +464,7 @@ export function WorkspacePage(props: {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：activeSessionId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 冷启动一次性恢复：initialTarget/activeSessionId/activeDraftProjectId 取挂载时刻的持久化值，后续变化不得重新触发自动打开
   }, [openSession]);
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
@@ -528,6 +584,8 @@ export function WorkspacePage(props: {
       return;
     }
     if (sessionRequestRef.current !== request) return;
+    // 进入新建草稿也更新启动现场（票03）：重开回到同一草稿状态（含项目关联）
+    reportWorkbenchTarget({ kind: "new", projectId });
     workspaceState.activeDraftProjectId = projectId;
     workspaceState.activeSessionId = null;
     setDraftProjectId(projectId);

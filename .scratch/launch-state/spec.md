@@ -1,6 +1,6 @@
 # Spec: 启动现场恢复（Launch State Restore）
 
-Status: ready-for-agent
+Status: done
 
 术语依 `GLOSSARY.md`：**启动现场**、**工作台目标**、**会话**、**独立会话**、**项目**、**主题**。本 feature 不涉及 ADR。
 
