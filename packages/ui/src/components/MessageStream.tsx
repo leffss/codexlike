@@ -424,7 +424,7 @@ function WorkedHistory(props: {
       {open && (
         <ol
           data-testid="worked-history-items"
-          className="mt-3 flex flex-col gap-3"
+          className="mt-3 flex flex-col gap-3 pl-4"
         >
           {groupConsecutiveTools(turn.history).map((item) => (
             <ToolSequenceView
@@ -506,7 +506,7 @@ function ToolGroupView(props: {
       {open && (
         <ol
           data-testid="tool-call-group-items"
-          className="mt-2 flex flex-col gap-2"
+          className="mt-2 flex flex-col gap-2 pl-4"
         >
           {item.segments.map((call) => (
             <ToolCallCard key={call.id} call={call} />
@@ -602,7 +602,7 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
         </summary>
         <div
           data-testid="thinking-content"
-          className="mt-2 whitespace-pre-wrap border-t border-line pt-2 text-fg"
+          className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
         >
           {segment.content}
           {streaming && (

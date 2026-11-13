@@ -126,7 +126,7 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-line px-3 py-2">
+        <div className="border-t border-line py-2 pl-7 pr-3">
           <details className="group mb-2" open>
             <summary className="cursor-pointer text-xs text-fg-subtle">
               参数

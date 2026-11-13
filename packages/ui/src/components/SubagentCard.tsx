@@ -97,7 +97,7 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
       </button>
 
       {subagent.state === "running" && (
-        <div className="border-t border-line px-3 py-2 text-xs text-fg-muted">
+        <div className="border-t border-line py-2 pl-7 pr-3 text-xs text-fg-muted">
           {hasReasoning && (
             <SubagentThinking
               reasoning={subagent.reasoning!}
@@ -127,7 +127,7 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
       )}
 
       {expanded && subagent.state === "done" && (
-        <div className="border-t border-line px-3 py-2">
+        <div className="border-t border-line py-2 pl-7 pr-3">
           {hasReasoning && (
             <SubagentThinking
               reasoning={subagent.reasoning!}
@@ -176,7 +176,7 @@ export function SubagentCard(props: { subagent: SubagentSegment }) {
       )}
 
       {expanded && subagent.state === "queued" && (
-        <div className="border-t border-line px-3 py-2 text-xs text-warn-fg">
+        <div className="border-t border-line py-2 pl-7 pr-3 text-xs text-warn-fg">
           并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
         </div>
       )}
@@ -250,7 +250,7 @@ function SubagentThinking(props: {
       </summary>
       <div
         data-testid="subagent-thinking-content"
-        className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 text-fg"
+        className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
       >
         {reasoning}
         {streaming === true && (
