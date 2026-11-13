@@ -46,6 +46,7 @@
     "test:e2e:input-queue": "node e2e/input-queue.mjs",
     "test:e2e:input-queue-pause": "node e2e/input-queue-pause.mjs",
     "test:e2e:input-queue-composer": "node e2e/input-queue-composer.mjs",
+    "test:e2e:input-queue-restart": "node e2e/input-queue-restart.mjs",
     "test:e2e:worked-history": "node e2e/worked-history.mjs",
     "test:e2e:width": "node e2e/width-tiers.mjs",
     "test:e2e:window": "node e2e/window-controls.mjs",
