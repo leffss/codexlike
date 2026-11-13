@@ -212,7 +212,7 @@ async function main() {
     // 只让真实 IPC 检查失败一次；同一正式会话再次发送，靠事件订阅刷新恢复。
     // 不切换 target、不重挂组件、不新增会话，避免掩盖 effect 订阅回归。
     await app.evaluate(({ ipcMain }) => {
-      const channel = "sessions:workspace-sharing";
+      const channel = "tasks:workspace-sharing";
       const original = ipcMain._invokeHandlers.get(channel);
       if (!original) throw new Error("未注册工作区共享检查 IPC");
       globalThis.worktreeSharingOriginal = original;
@@ -260,7 +260,7 @@ async function main() {
       );
     } finally {
       await app.evaluate(({ ipcMain }) => {
-        const channel = "sessions:workspace-sharing";
+        const channel = "tasks:workspace-sharing";
         ipcMain.removeHandler(channel);
         ipcMain.handle(channel, globalThis.worktreeSharingOriginal);
         delete globalThis.worktreeSharingOriginal;

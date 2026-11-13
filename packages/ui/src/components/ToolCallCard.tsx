@@ -19,7 +19,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     setImage(null);
     setFailed(false);
     if (!call.isError) {
-      window.codexlike.sessions
+      window.codexlike.tasks
         .toolImage(call.sessionId, call.id)
         .then((dataUrl) => {
           if (alive) {

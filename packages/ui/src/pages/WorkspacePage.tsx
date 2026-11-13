@@ -202,7 +202,7 @@ export function WorkspacePage(props: {
   const listRequestRef = useRef(0);
   const refreshTasks = useCallback(async () => {
     const request = ++listRequestRef.current;
-    const list = await window.codexlike.sessions.list();
+    const list = await window.codexlike.tasks.list();
     if (listRequestRef.current === request) setTasks(list);
     return list;
   }, []);
@@ -224,7 +224,7 @@ export function WorkspacePage(props: {
     setRevoking(new Set(revokingRef.current));
     setRevokeErrors((errors) => ({ ...errors, [id]: null }));
     try {
-      const record = await window.codexlike.sessions.revokeAutoApprove(id);
+      const record = await window.codexlike.tasks.revokeAutoApprove(id);
       // 落盘成功才更新，按原会话标识归并，切换查看不会改错会话。
       listRequestRef.current += 1;
       setTasks((list) =>
@@ -255,7 +255,7 @@ export function WorkspacePage(props: {
     setResourcesLoading(true);
     setResourcesError(null);
     try {
-      const view = await window.codexlike.sessions.resources(sessionId);
+      const view = await window.codexlike.tasks.resources(sessionId);
       if (!isCurrent()) return;
       setResources(view);
       if (view === null) setResourcesError("会话资源不可用");
@@ -293,7 +293,7 @@ export function WorkspacePage(props: {
       currentIdRef.current === sessionId &&
       taskRequestRef.current === taskRequest;
     try {
-      const status = await window.codexlike.sessions.status(sessionId);
+      const status = await window.codexlike.tasks.status(sessionId);
       if (!isCurrent()) return;
       setContextWarning(
         status === null
@@ -343,7 +343,7 @@ export function WorkspacePage(props: {
       const snapshotVersion = workspaceState.version();
       try {
         const [view] = await Promise.all([
-          window.codexlike.sessions.view(id),
+          window.codexlike.tasks.view(id),
           workspaceState.loadTask(id),
         ]);
         if (!isCurrent()) return;
@@ -368,7 +368,7 @@ export function WorkspacePage(props: {
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
         );
-        void window.codexlike.sessions
+        void window.codexlike.tasks
           .markViewed(id, live.sequence)
           .then(() => refreshTasks());
       } catch (error) {
@@ -389,7 +389,7 @@ export function WorkspacePage(props: {
       void refreshContextWarning(id);
       // @引用 菜单候选：随会话（工作区）切换重新枚举
       try {
-        const files = await window.codexlike.sessions.workspaceFiles(id);
+        const files = await window.codexlike.tasks.workspaceFiles(id);
         if (isCurrent()) setWorkspaceFiles(files);
       } catch {
         if (isCurrent()) setWorkspaceFiles([]);
@@ -408,7 +408,7 @@ export function WorkspacePage(props: {
     let active = true;
     void (async () => {
       const [list, profileList, projectList] = await Promise.all([
-        window.codexlike.sessions.list(),
+        window.codexlike.tasks.list(),
         window.codexlike.providerProfiles.list(),
         window.codexlike.projects.list(),
       ]);
@@ -464,7 +464,7 @@ export function WorkspacePage(props: {
 
   // 订阅会话事件流：只归并当前打开会话的消息，其余会话仅刷新侧栏状态
   useEffect(() => {
-    return window.codexlike.onSessionEvent((envelope) => {
+    return window.codexlike.onTaskEvent((envelope) => {
       const { sessionId, event } = envelope;
       if (sessionId === currentIdRef.current) {
         if (loadingRef.current?.sessionId === sessionId) {
@@ -494,7 +494,7 @@ export function WorkspacePage(props: {
             live.activity.running && live.activity.operation === "compact"
           );
           if (!live.activity.running)
-            void window.codexlike.sessions
+            void window.codexlike.tasks
               .markViewed(sessionId, live.sequence)
               .then(() => refreshTasks());
         }
@@ -596,7 +596,7 @@ export function WorkspacePage(props: {
 
   async function addProject() {
     try {
-      const path = await window.codexlike.sessions.selectWorkspace();
+      const path = await window.codexlike.tasks.selectWorkspace();
       if (path === null) return;
       await window.codexlike.projects.add(path);
       setProjects(await window.codexlike.projects.list());
@@ -609,7 +609,7 @@ export function WorkspacePage(props: {
 
   async function selectDraftWorkspace() {
     if (!draft || draft.projectId !== null || draft.busy) return;
-    const path = await window.codexlike.sessions.selectWorkspace();
+    const path = await window.codexlike.tasks.selectWorkspace();
     if (path !== null)
       workspaceState.editNewDraft(null, { workspacePath: path });
   }
@@ -631,7 +631,7 @@ export function WorkspacePage(props: {
     workspaceState.editNewDraft(projectId, { busy: true, error: null });
     try {
       await workspaceState.flush();
-      const record = await window.codexlike.sessions.start(request);
+      const record = await window.codexlike.tasks.start(request);
       await workspaceState.completeNewDraft(projectId);
       await refreshTasks();
       if (workspaceState.activeDraftProjectId === projectId) {
@@ -661,7 +661,7 @@ export function WorkspacePage(props: {
     const composerSnapshot = workspaceState.composer(currentId);
     try {
       await workspaceState.flush();
-      await window.codexlike.sessions.send(
+      await window.codexlike.tasks.send(
         currentId,
         text,
         selectedProfileId,
@@ -693,7 +693,7 @@ export function WorkspacePage(props: {
       return;
     }
     try {
-      await window.codexlike.sessions.interrupt(currentId);
+      await window.codexlike.tasks.interrupt(currentId);
     } catch (error) {
       pushLocalStatus(
         `停止失败：${error instanceof Error ? error.message : String(error)}`
@@ -724,28 +724,28 @@ export function WorkspacePage(props: {
   /** 队列暂停手动恢复（票 02）：清暂停标志并立即从队首继续逐条消费。 */
   function resumeQueue() {
     return runQueueOperation("恢复队列失败", (sessionId) =>
-      window.codexlike.sessions.queueResume(sessionId)
+      window.codexlike.tasks.queueResume(sessionId)
     );
   }
 
   /** 队列清空（票 02）：作废全部排队消息并清暂停标志，队列条消失。 */
   function clearQueue() {
     return runQueueOperation("清空队列失败", (sessionId) =>
-      window.codexlike.sessions.queueClear(sessionId)
+      window.codexlike.tasks.queueClear(sessionId)
     );
   }
 
   /** 删除单条排队消息（票 03）：立即作废，不会被消费。 */
   function removeQueueItem(itemId: string) {
     return runQueueOperation("删除排队消息失败", (sessionId) =>
-      window.codexlike.sessions.queueRemove(sessionId, itemId)
+      window.codexlike.tasks.queueRemove(sessionId, itemId)
     );
   }
 
   /** 拖拽重排（票 03）：提交仍在排队条目的完整新顺序，顺序即时生效并持久化。 */
   function reorderQueue(orderedIds: string[]) {
     return runQueueOperation("调整发送顺序失败", (sessionId) =>
-      window.codexlike.sessions.queueReorder(sessionId, orderedIds)
+      window.codexlike.tasks.queueReorder(sessionId, orderedIds)
     );
   }
 
@@ -788,7 +788,7 @@ export function WorkspacePage(props: {
     const { sessionId, itemId, originalText } = editing;
     const composerSnapshot = workspaceState.composer(sessionId);
     try {
-      const result = await window.codexlike.sessions.queueUpdate(
+      const result = await window.codexlike.tasks.queueUpdate(
         sessionId,
         itemId,
         text,
@@ -834,7 +834,7 @@ export function WorkspacePage(props: {
   async function renameTask(id: string, title: string, announce = false) {
     const generation = taskRequestRef.current;
     try {
-      await window.codexlike.sessions.rename(id, title);
+      await window.codexlike.tasks.rename(id, title);
       setRecordsRevision((value) => value + 1);
       await refreshTasks();
       if (
@@ -854,7 +854,7 @@ export function WorkspacePage(props: {
   async function archiveTask(id: string, archived: boolean) {
     const generation = taskRequestRef.current;
     try {
-      await window.codexlike.sessions.archive(id, archived);
+      await window.codexlike.tasks.archive(id, archived);
       setRecordsRevision((value) => value + 1);
       const list = await refreshTasks();
       if (currentIdRef.current !== id || taskRequestRef.current !== generation)
@@ -950,7 +950,7 @@ export function WorkspacePage(props: {
           taskRequestRef.current === compactGeneration;
         setCompacting(true);
         try {
-          const result = await window.codexlike.sessions.compact(
+          const result = await window.codexlike.tasks.compact(
             current!.id,
             selectedProfileId
           );
@@ -1005,7 +1005,7 @@ export function WorkspacePage(props: {
         const sessionId = current!.id;
         const request = taskRequestRef.current;
         try {
-          const status = await window.codexlike.sessions.status(sessionId);
+          const status = await window.codexlike.tasks.status(sessionId);
           if (
             currentIdRef.current !== sessionId ||
             taskRequestRef.current !== request
@@ -1171,7 +1171,7 @@ export function WorkspacePage(props: {
           setMembershipTask(tasks.find((task) => task.id === id) ?? null)
         }
         onPin={(id, pinned) => {
-          void window.codexlike.sessions
+          void window.codexlike.tasks
             .setPinned(id, pinned)
             .then(refreshTasks)
             .catch((error: unknown) =>
@@ -1467,7 +1467,7 @@ export function WorkspacePage(props: {
                   interaction.request.id,
                   response,
                   (sessionId, requestId, payload) =>
-                    window.codexlike.sessions.respondInteraction(
+                    window.codexlike.tasks.respondInteraction(
                       sessionId,
                       requestId,
                       payload

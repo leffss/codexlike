@@ -53,7 +53,7 @@ export function WorkspaceSharingNotice(props: {
     async function refresh() {
       const generation = ++request;
       try {
-        const view = await window.codexlike.sessions.workspaceSharing(
+        const view = await window.codexlike.tasks.workspaceSharing(
           JSON.parse(targetKey)
         );
         if (active && generation === request) {
@@ -70,7 +70,7 @@ export function WorkspaceSharingNotice(props: {
       }
     }
     void refresh();
-    const unsubscribe = window.codexlike.onSessionEvent(({ event }) => {
+    const unsubscribe = window.codexlike.onTaskEvent(({ event }) => {
       if (
         [
           "user-message",

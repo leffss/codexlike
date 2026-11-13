@@ -96,7 +96,7 @@ export function MembershipDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      await window.codexlike.sessions.setProject(
+      await window.codexlike.tasks.setProject(
         props.task.id,
         movingOut ? null : target
       );

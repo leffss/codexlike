@@ -22,7 +22,7 @@ export function TaskSearch(props: {
     setLoading(true);
     // 每次查询及关闭/清空都会淘汰旧请求；成功和失败都不能覆盖后来的查询。
     let active = true;
-    void window.codexlike.sessions.search(query, includeArchived).then(
+    void window.codexlike.tasks.search(query, includeArchived).then(
       (found) => {
         if (!active) return;
         setResults(found);
