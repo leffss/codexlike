@@ -482,7 +482,7 @@ export function MessageComposer(props: {
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger-solid text-on-accent hover:bg-danger-solid-hover"
                   title="打断本轮回复：中断流式输出、终止正在执行的工具子进程"
                 >
-                  <StopIcon className="h-3 w-3" />
+                  <StopIcon className="h-5 w-5" />
                 </button>
               ) : (
                 <button
@@ -589,7 +589,7 @@ function StopIcon(props: { className?: string }) {
       className={props.className}
       aria-hidden="true"
     >
-      <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />
+      <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor" />
     </svg>
   );
 }

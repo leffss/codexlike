@@ -30,7 +30,9 @@ export function SessionActivityBadge({
     ? "bg-warn-bg text-warn-fg"
     : activity?.outcome === "failed"
       ? "bg-danger-bg text-danger-fg"
-      : "bg-ok-bg text-ok-fg";
+      : running
+        ? "text-ok-fg"
+        : "bg-ok-bg text-ok-fg";
   return (
     <span
       data-testid="session-activity"
@@ -53,11 +55,13 @@ export function SessionActivityBadge({
             strokeWidth="1.5"
             strokeLinecap="round"
             aria-hidden="true"
+            className={running ? "animate-spin" : undefined}
           >
             {waiting ? (
               <path d="M4 3v6m4-6v6" />
             ) : running ? (
-              <circle cx="6" cy="6" r="3.5" strokeDasharray="15 7" />
+              /* 圆弧缺口约 130°，配合 animate-spin 呈转圈加载效果 */
+              <circle cx="6" cy="6" r="3.5" strokeDasharray="8 14" />
             ) : activity?.outcome === "failed" ? (
               <path d="m3 3 6 6m0-6L3 9" />
             ) : activity?.outcome === "interrupted" ? (
