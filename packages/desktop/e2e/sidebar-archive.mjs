@@ -86,8 +86,8 @@ async function assertProjectHierarchy(window) {
     "项目任务"
   );
   assert(
-    child.x >= heading.x + 8,
-    `子任务文字应明显位于项目文字右侧：${JSON.stringify({ heading, child })}`
+    Math.abs(child.x - heading.x) <= 8,
+    `任务标题起点应与项目名文字对齐（无竖线导轨、为标题让出宽度）：${JSON.stringify({ heading, child })}`
   );
   assert(heading.weight >= 600, "项目名称使用清晰的半粗字重");
   const colors = await window.getByTestId("task-list").evaluate((node) => {
@@ -106,20 +106,15 @@ async function assertProjectHierarchy(window) {
   const guide = await project.getByTestId("group-tasks").evaluate((node) => {
     const style = getComputedStyle(node);
     return {
-      width: Number.parseFloat(style.borderLeftWidth),
-      color: style.borderLeftColor,
-      style: style.borderLeftStyle,
+      border: Number.parseFloat(style.borderLeftWidth),
+      indent: Number.parseFloat(style.marginLeft),
       height: node.getBoundingClientRect().height,
     };
   });
-  // Windows 125% DPI 下 1px CSS 边框可能计算为 0.8px，验证可见细线而非精确整数。
+  // 97851e7（票 04）起无竖线缩进导轨：任务标题起点对齐原竖线位置、为标题让出宽度。
   assert(
-    guide.width > 0 &&
-      guide.width <= 1.5 &&
-      guide.color === colors.line &&
-      guide.style === "solid" &&
-      guide.height > 0,
-    `展开任务使用淡色竖向引导线：${JSON.stringify(guide)}`
+    guide.border === 0 && guide.indent >= 20 && guide.height > 0,
+    `展开任务不使用竖线导轨、保留组缩进：${JSON.stringify(guide)}`
   );
   const projectBox = await project.boundingBox();
   const standaloneBox = await window
@@ -223,7 +218,7 @@ async function main() {
     const order = (scope, archived = false) =>
       scope
         .getByTestId(archived ? "archived-task-item" : "task-item")
-        .evaluateAll((nodes) => nodes.map((node) => node.dataset.sessionId));
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.taskId));
     const timestamps = async () =>
       Object.fromEntries((await records()).map((s) => [s.id, s.lastUsedAt]));
     async function action(title, testId, archived = false) {
