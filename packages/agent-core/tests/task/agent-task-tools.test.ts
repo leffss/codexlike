@@ -380,7 +380,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     persistence.close();
   });
 
-  it("工具轮次上限（50）：满 50 轮后停止剩余调用，error 提示落库且消息流可见", async () => {
+  it("工具轮次上限（200）：满 200 轮后停止剩余调用，error 提示落库且消息流可见", async () => {
     // 每轮返回一次 update_plan 调用（toolCallId 逐轮唯一，模拟失控循环）
     let callNo = 0;
     const model = new MockLanguageModelV4({
@@ -397,10 +397,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
 
     const events = await collect(task.sendMessage({ text: "开工", profile }));
 
-    // scriptedModel 重复末步：第 51 轮的调用被丢弃，恰好执行 50 轮
-    expect(model.doStreamCalls).toHaveLength(51);
+    // 第 201 轮的调用被丢弃，恰好执行 200 轮
+    expect(model.doStreamCalls).toHaveLength(201);
     expect(events.filter((event) => event.type === "tool-result")).toHaveLength(
-      50
+      200
     );
     const capErrors = events.filter(
       (event): event is Extract<TaskEvent, { type: "error" }> =>

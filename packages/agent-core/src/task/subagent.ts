@@ -59,8 +59,8 @@ export const SUBAGENT_DELEGATION_POLICY = [
 /** 单任务子代理并发上限默认值（spec：默认 3，设置页可配） */
 export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 3;
 
-/** 子代理单次运行允许的工具轮次上限（与主任务 MAX_TOOL_ROUNDS 一致，防失控循环） */
-const MAX_SUBAGENT_TOOL_ROUNDS = 50;
+/** 子代理单次运行允许的工具轮次上限（与主任务 MAX_TOOL_ROUNDS 一致：失控兜底，非日常约束） */
+const MAX_SUBAGENT_TOOL_ROUNDS = 200;
 
 /** 运行时子代理设置（设置页全局配置的内存快照，逐次解析以便改动即时生效） */
 export interface SubagentRuntimeSettings {

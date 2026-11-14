@@ -174,8 +174,14 @@ export interface AgentTask {
   }): Promise<CompactResult>;
 }
 
-/** 单次回复允许的工具轮次上限（防模型失控循环；多步工作计划任务一步即可含多次调用，16 轮会截断正常任务，取 50） */
-const MAX_TOOL_ROUNDS = 50;
+/**
+ * 单次回复允许的工具轮次上限（防模型失控循环的兜底，非日常约束）。
+ * 大功能开发一个回合动辄上百次工具调用，取 200 让正常任务单回合装得下；
+ * 真正的天花板是上下文窗口——200 轮往返已接近多数模型上限。撞限可见提示
+ * 且可发消息继续，但回合内工具往返不进后续上下文（需靠落盘文件与最终
+ * 文本重新定位），故正常任务不应撞到。
+ */
+const MAX_TOOL_ROUNDS = 200;
 
 /** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {

@@ -632,7 +632,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(stored?.output).toContain("调研报告：本项目使用 vitest");
   });
 
-  it("子代理轮次上限（50）：截断报告带标记回流，不伪造成完成", async () => {
+  it("子代理轮次上限（200）：截断报告带标记回流，不伪造成完成", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { task, persistence, subModel } = makeSubagentTask({
       workspacePath: workspace,
@@ -662,15 +662,15 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       task.sendMessage({ text: "委派循环任务", profile })
     );
 
-    // 恰好 51 次子模型请求：50 轮执行 + 第 51 轮触发上限被丢弃
-    expect(subModel.doStreamCalls).toHaveLength(51);
+    // 恰好 201 次子模型请求：200 轮执行 + 第 201 轮触发上限被丢弃
+    expect(subModel.doStreamCalls).toHaveLength(201);
     const resultEvent = events.find(
       (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result" && e.call.toolName === "spawn_subagent"
     );
     expect(resultEvent).toBeDefined();
     expect(resultEvent!.call.isError).toBe(false);
-    expect(resultEvent!.call.output).toContain("工具轮次上限（50 轮）");
+    expect(resultEvent!.call.output).toContain("工具轮次上限（200 轮）");
     expect(resultEvent!.call.output).toContain("工作被截断，未全部完成");
     persistence.close();
   });
