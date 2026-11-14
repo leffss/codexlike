@@ -15,9 +15,9 @@ export function createInteractionController(options: {
   waiting(waiting: boolean, persisted?: boolean): void;
   answered(snapshot: QuestionAnswerSnapshot): void;
   /** 所属任务实时授权；不参与冻结的审批模式/路径权限。 */
-  autoApprove?(sessionId: string): boolean;
+  autoApprove?(taskId: string): boolean;
   /** 仅在授权事务提交后更新任务内存并发布状态事件。 */
-  autoApproved?(sessionId: string): void;
+  autoApproved?(taskId: string): void;
 }) {
   const waiters = new Map<
     string,
@@ -78,13 +78,13 @@ export function createInteractionController(options: {
       if (
         request.kind === "approval" &&
         !signal?.aborted &&
-        options.autoApprove?.(request.sessionId)
+        options.autoApprove?.(request.taskId)
       ) {
         const resolved: InteractionRecord = {
           ...record,
           status: "resolved",
           resolvedAt: options.now(),
-          response: { kind: "approval", decision: "approve", scope: "session" },
+          response: { kind: "approval", decision: "approve", scope: "task" },
         };
         if (!options.persistence.settleInteraction(resolved))
           throw new Error("审批请求已失效，未执行工具");
@@ -117,11 +117,11 @@ export function createInteractionController(options: {
       if (
         response.kind === "approval" &&
         response.decision === "approve" &&
-        response.scope === "session"
+        response.scope === "task"
       ) {
-        const sessionId = waiter.record.request.sessionId;
+        const taskId = waiter.record.request.taskId;
         const records = options.persistence.approveTaskInteraction(
-          sessionId,
+          taskId,
           id,
           options.now()
         );
@@ -129,13 +129,12 @@ export function createInteractionController(options: {
         // 同步事务返回后不再 await：全部更新内存，再通知，最后一起唤醒。
         const completed = records.flatMap((record) => {
           const pending = waiters.get(record.request.id);
-          if (!pending || pending.record.request.sessionId !== sessionId)
-            return [];
+          if (!pending || pending.record.request.taskId !== taskId) return [];
           waiters.delete(record.request.id);
           pending.dispose();
           return [{ record, waiter: pending }];
         });
-        options.autoApproved?.(sessionId);
+        options.autoApproved?.(taskId);
         options.waiting(waiters.size > 0, true);
         for (const { record } of completed)
           options.emit({

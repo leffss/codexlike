@@ -26,7 +26,7 @@ async function invoke(
   expect(tool.permission).toBe("readonly");
   return tool.execute(args, {
     workspacePath: "",
-    sessionId: "test",
+    taskId: "test",
     approvalMode: "full-access",
   });
 }

@@ -30,14 +30,14 @@ describe("BrowserTaskManager（任务级浏览器实例）", () => {
   });
 
   it("同一任务的 pageFor 返回同一页面（任务内复用）", async () => {
-    const page1 = await manager.pageFor("session-a");
-    const page2 = await manager.pageFor("session-a");
+    const page1 = await manager.pageFor("task-a");
+    const page2 = await manager.pageFor("task-a");
     expect(page1).toBe(page2);
   }, 60_000);
 
   it("不同任务拿到不同 context：Cookie 互不共享", async () => {
-    const pageA = await manager.pageFor("session-cookie-a");
-    const pageB = await manager.pageFor("session-cookie-b");
+    const pageA = await manager.pageFor("task-cookie-a");
+    const pageB = await manager.pageFor("task-cookie-b");
     await pageA.goto(`${fixture.origin}/set-cookie`);
     const cookieA = await pageA.evaluate<string>("document.cookie");
     expect(cookieA).toContain("fixture_sid=abc123");
@@ -47,12 +47,12 @@ describe("BrowserTaskManager（任务级浏览器实例）", () => {
   }, 60_000);
 
   it("closeTask 关闭该任务页面；再次 pageFor 得到全新页面（旧 Cookie 不残留）", async () => {
-    const page = await manager.pageFor("session-recycled");
+    const page = await manager.pageFor("task-recycled");
     await page.goto(`${fixture.origin}/set-cookie`);
-    await manager.closeTask("session-recycled");
+    await manager.closeTask("task-recycled");
     // 旧 page 已关闭
     expect(page.isClosed()).toBe(true);
-    const fresh = await manager.pageFor("session-recycled");
+    const fresh = await manager.pageFor("task-recycled");
     expect(fresh).not.toBe(page);
     await fresh.goto(`${fixture.origin}/form`);
     const cookie = await fresh.evaluate<string>("document.cookie");
@@ -61,12 +61,12 @@ describe("BrowserTaskManager（任务级浏览器实例）", () => {
 
   it("closeTask 对未知任务安全；close 幂等且清理全部任务", async () => {
     await expect(manager.closeTask("never-opened")).resolves.toBeUndefined();
-    const page = await manager.pageFor("session-final");
+    const page = await manager.pageFor("task-final");
     await manager.close();
     expect(page.isClosed()).toBe(true);
     await expect(manager.close()).resolves.toBeUndefined();
     // close 后可重新拉起（应用生命周期内 manager 不重建也可用）
-    const revived = await manager.pageFor("session-after-close");
+    const revived = await manager.pageFor("task-after-close");
     expect(revived.isClosed()).toBe(false);
   }, 60_000);
 });

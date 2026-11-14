@@ -15,7 +15,7 @@ function makeWorkspace(): string {
 function context(workspacePath: string): ToolExecutionContext {
   return {
     workspacePath,
-    sessionId: "unit-test-session",
+    taskId: "unit-test-task",
     approvalMode: "assist",
   };
 }

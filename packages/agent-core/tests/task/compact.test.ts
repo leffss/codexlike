@@ -26,7 +26,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath: "C:\\work\\demo",
     providerProfileId: null,
@@ -142,12 +142,12 @@ afterEach(() => {
 
 /** 驱动 N 轮对话（user「第k轮问题」→ assistant「第k轮回复」） */
 async function talkRounds(
-  session: ReturnType<typeof createAgentTask>,
+  task: ReturnType<typeof createAgentTask>,
   rounds: number
 ): Promise<void> {
   for (let i = 1; i <= rounds; i += 1) {
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: `第${i}轮问题`,
       profile,
     })) {
@@ -162,12 +162,12 @@ describe("AgentTask.compact（手动压缩）", () => {
     const persistence = memoryStore();
     persistence.insertTask(taskRecord());
     let body: Record<string, unknown> = {};
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: Array.from({ length: 8 }, (_, index) => ({
         id: `history-${index}`,
-        sessionId: "session-1",
+        taskId: "task-1",
         role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
         content: `历史 ${index}`,
         createdAt: `2026-11-11T08:00:0${index}.000Z`,
@@ -190,7 +190,7 @@ describe("AgentTask.compact（手动压缩）", () => {
           },
         }),
     });
-    await session.compact({ profile });
+    await task.compact({ profile });
     expect(body.model).toBe(profile.model);
     expect(body).not.toHaveProperty("thinking");
     expect(body).not.toHaveProperty("reasoning_effort");
@@ -212,23 +212,23 @@ describe("AgentTask.compact（手动压缩）", () => {
       resourcesFor,
       now: fakeClock(),
     });
-    const session = manager.create({ workspacePath: "C:/work/demo" });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
     for (const text of ["第一轮 $alpha", "第二轮", "第三轮", "第四轮 $alpha"]) {
-      for await (const _event of session.sendMessage({ text, profile })) {
+      for await (const _event of task.sendMessage({ text, profile })) {
       }
     }
-    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    expect(task.resourceState.last?.loaded).toHaveLength(1);
     available = false;
-    await session.compact({ profile });
+    await task.compact({ profile });
     expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).toContain(
       "$alpha"
     );
     expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).not.toContain(
       "ALPHA_PRIVATE_BODY"
     );
-    expect(session.resourceState.active).toBeNull();
-    expect(session.resourceState.last?.loaded).toHaveLength(1);
-    for await (const _event of session.sendMessage({
+    expect(task.resourceState.active).toBeNull();
+    expect(task.resourceState.last?.loaded).toHaveLength(1);
+    for await (const _event of task.sendMessage({
       text: "压缩后继续",
       profile,
     })) {
@@ -236,12 +236,12 @@ describe("AgentTask.compact（手动压缩）", () => {
     expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).not.toContain(
       "ALPHA_PRIVATE_BODY"
     );
-    expect(session.resourceState.last?.loaded).toEqual([]);
+    expect(task.resourceState.last?.loaded).toEqual([]);
     const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
       resourcesFor,
-    }).get(session.id)!;
+    }).get(task.id)!;
     expect(restored.resourceState).toEqual({ active: null, last: null });
     for await (const _event of restored.sendMessage({
       text: "重启后继续",
@@ -261,7 +261,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     const persistence = memoryStore();
     persistence.insertTask(taskRecord());
     const model = compactableModel("此前对话的压缩摘要：修复了登录 bug。");
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -273,9 +273,9 @@ describe("AgentTask.compact（手动压缩）", () => {
       })(),
     });
 
-    await talkRounds(session, 5);
+    await talkRounds(task, 5);
 
-    const result = await session.compact({ profile });
+    const result = await task.compact({ profile });
 
     // 压缩请求确实带上了被压缩的旧历史（前 2 轮），且不含将被保留的后 3 轮
     const generateCall = model.doGenerateCalls.at(-1)!;
@@ -285,7 +285,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     expect(JSON.stringify(generateCall.prompt)).not.toContain("第4轮问题");
 
     // 库中消息历史 = 1 条摘要 + 最近 3 轮（6 条原文，顺序在前的是更早轮次）
-    const stored = persistence.listMessages("session-1");
+    const stored = persistence.listMessages("task-1");
     expect(stored).toHaveLength(7);
     expect(stored[0]).toMatchObject({
       role: "compact-summary",
@@ -301,10 +301,10 @@ describe("AgentTask.compact（手动压缩）", () => {
     ]);
 
     // compact 记录入库
-    const compacts = persistence.listCompacts("session-1");
+    const compacts = persistence.listCompacts("task-1");
     expect(compacts).toHaveLength(1);
     expect(compacts[0]).toMatchObject({
-      sessionId: "session-1",
+      taskId: "task-1",
       summary: "此前对话的压缩摘要：修复了登录 bug。",
       messagesCompacted: 4,
     });
@@ -319,7 +319,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     const persistence = memoryStore();
     persistence.insertTask(taskRecord());
     const model = compactableModel("压缩摘要：调通了安装流程。");
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -331,11 +331,11 @@ describe("AgentTask.compact（手动压缩）", () => {
       })(),
     });
 
-    await talkRounds(session, 4);
+    await talkRounds(task, 4);
     const streamCallsBefore = model.doStreamCalls.length;
-    await session.compact({ profile });
+    await task.compact({ profile });
 
-    for await (const event of session.sendMessage({ text: "继续", profile })) {
+    for await (const event of task.sendMessage({ text: "继续", profile })) {
       expect(event.type).not.toBe("error");
     }
 
@@ -407,7 +407,7 @@ describe("AgentTask.compact（手动压缩）", () => {
         };
       },
     });
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -419,20 +419,20 @@ describe("AgentTask.compact（手动压缩）", () => {
       })(),
     });
 
-    await talkRounds(session, 5);
-    const before = persistence.listMessages("session-1");
+    await talkRounds(task, 5);
+    const before = persistence.listMessages("task-1");
 
-    await expect(session.compact({ profile })).rejects.toThrow(
+    await expect(task.compact({ profile })).rejects.toThrow(
       "模型请求失败（HTTP 401）"
     );
 
     // 原历史不受损：库与 compact 记录原样
-    expect(persistence.listMessages("session-1")).toEqual(before);
-    expect(persistence.listCompacts("session-1")).toEqual([]);
+    expect(persistence.listMessages("task-1")).toEqual(before);
+    expect(persistence.listCompacts("task-1")).toEqual([]);
 
     // 可重试：第二次成功，替换生效
-    await session.compact({ profile });
-    expect(persistence.listMessages("session-1")[0]).toMatchObject({
+    await task.compact({ profile });
+    expect(persistence.listMessages("task-1")[0]).toMatchObject({
       role: "compact-summary",
       content: "重试后的摘要",
     });
@@ -464,7 +464,7 @@ describe("AgentTask.compact（手动压缩）", () => {
         };
       },
     });
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -476,13 +476,11 @@ describe("AgentTask.compact（手动压缩）", () => {
       })(),
     });
 
-    await talkRounds(session, 4);
-    const compacting = session.compact({ profile });
+    await talkRounds(task, 4);
+    const compacting = task.compact({ profile });
     // 压缩挂起（doGenerate 未返回）时：发送与再次压缩都被拒绝
-    await expect(session.compact({ profile })).rejects.toThrow(
-      "正在回复或压缩中"
-    );
-    const sending = session.sendMessage({ text: "插队", profile });
+    await expect(task.compact({ profile })).rejects.toThrow("正在回复或压缩中");
+    const sending = task.sendMessage({ text: "插队", profile });
     const sendDone = (async () => {
       for await (const event of sending) {
         void event;
@@ -499,7 +497,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     await compacting;
 
     // 压缩完成后可正常发送
-    for await (const event of session.sendMessage({ text: "继续", profile })) {
+    for await (const event of task.sendMessage({ text: "继续", profile })) {
       expect(event.type).not.toBe("error");
     }
   });
@@ -508,7 +506,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     const persistence = memoryStore();
     persistence.insertTask(taskRecord());
     const model = compactableModel("摘要");
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -520,11 +518,9 @@ describe("AgentTask.compact（手动压缩）", () => {
       })(),
     });
 
-    await talkRounds(session, 3);
-    await expect(session.compact({ profile })).rejects.toThrow(
-      "没有可压缩的内容"
-    );
-    expect(persistence.listMessages("session-1")).toHaveLength(6);
+    await talkRounds(task, 3);
+    await expect(task.compact({ profile })).rejects.toThrow("没有可压缩的内容");
+    expect(persistence.listMessages("task-1")).toHaveLength(6);
     expect(model.doGenerateCalls).toHaveLength(0);
   });
 
@@ -553,7 +549,7 @@ describe("AgentTask.compact（手动压缩）", () => {
         warnings: [],
       }),
     });
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -567,14 +563,14 @@ describe("AgentTask.compact（手动压缩）", () => {
 
     // 4 轮对话；第 4 轮带 @引用（将落入保留的最近 3 轮内）
     for (let i = 1; i <= 3; i += 1) {
-      for await (const event of session.sendMessage({
+      for await (const event of task.sendMessage({
         text: `第${i}轮问题`,
         profile,
       })) {
         expect(event.type).not.toBe("error");
       }
     }
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "第4轮问题",
       profile,
       mentions: [{ path: "docs/说明.md", content: "被引用的文件内容" }],
@@ -582,10 +578,10 @@ describe("AgentTask.compact（手动压缩）", () => {
       expect(event.type).not.toBe("error");
     }
 
-    await session.compact({ profile });
+    await task.compact({ profile });
 
     // 压缩后立即发送：保留轮次的 @引用 附加内容仍在内存上下文中
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "压缩后立即",
       profile,
     })) {
@@ -600,7 +596,7 @@ describe("AgentTask.compact（手动压缩）", () => {
     const restored = createAgentTask({
       record: taskRecord(),
       persistence,
-      history: persistence.listMessages("session-1"),
+      history: persistence.listMessages("task-1"),
       languageModelFor: () => model,
       now: fakeClock(),
       generateId: (() => {
@@ -654,7 +650,7 @@ describe("compact 与工具调用记录的合并融合（工单 03+08）", () =>
         warnings: [],
       }),
     });
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: taskRecord(),
       persistence,
       history: [],
@@ -668,19 +664,19 @@ describe("compact 与工具调用记录的合并融合（工单 03+08）", () =>
 
     // 5 轮对话，第 1、2 轮带工具调用记录（模拟 03 的 insertToolCall）
     for (let i = 1; i <= 5; i += 1) {
-      for await (const event of session.sendMessage({
+      for await (const event of task.sendMessage({
         text: `第${i}轮问题`,
         profile,
       })) {
         expect(event.type).not.toBe("error");
       }
     }
-    const stored = persistence.listMessages("session-1");
+    const stored = persistence.listMessages("task-1");
     const secondRoundEndAt = stored.filter((m) => m.role === "assistant")[1]!
       .createdAt;
     persistence.insertToolCall({
       id: "tc-1",
-      sessionId: "session-1",
+      taskId: "task-1",
       toolName: "read_file",
       arguments: "{}",
       output: "第1轮的读取结果",
@@ -689,7 +685,7 @@ describe("compact 与工具调用记录的合并融合（工单 03+08）", () =>
     });
     persistence.insertToolCall({
       id: "tc-2",
-      sessionId: "session-1",
+      taskId: "task-1",
       toolName: "read_file",
       arguments: "{}",
       output: "第2轮的读取结果",
@@ -699,19 +695,19 @@ describe("compact 与工具调用记录的合并融合（工单 03+08）", () =>
     // 保留轮次（第 3 轮内）的工具调用：晚于第 3 轮 user 消息
     persistence.insertToolCall({
       id: "tc-3",
-      sessionId: "session-1",
+      taskId: "task-1",
       toolName: "grep",
       arguments: "{}",
       output: "第3轮的搜索结果",
       isError: false,
       createdAt: stored.filter((m) => m.role === "user")[3]!.createdAt,
     });
-    expect(persistence.listToolCalls("session-1")).toHaveLength(3);
+    expect(persistence.listToolCalls("task-1")).toHaveLength(3);
 
-    await session.compact({ profile });
+    await task.compact({ profile });
 
     // 被压缩轮次（1、2）的工具调用清理；保留轮次（3）的不动
-    const remaining = persistence.listToolCalls("session-1");
+    const remaining = persistence.listToolCalls("task-1");
     expect(remaining.map((call) => call.id)).toEqual(["tc-3"]);
   });
 });

@@ -104,18 +104,15 @@ async function collect(iterable: AsyncIterable<TaskEvent>) {
 describe("用户交互公开 seam", () => {
   it("任务授权与全部当前审批同事务落库，失败回滚且不处理问答或其他任务", () => {
     const directory = mkdtempSync(join(tmpdir(), "approval-atomic-"));
-    const path = join(directory, "session.db");
+    const path = join(directory, "task.db");
     const store = createSqliteTaskStore(path);
     const manager = createTaskManager({ persistence: store });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const other = manager.create({ workspacePath: "C:/other" });
-    const pending = (
-      id: string,
-      sessionId = session.id
-    ): InteractionRecord => ({
+    const pending = (id: string, taskId = task.id): InteractionRecord => ({
       request: {
         id,
-        sessionId,
+        taskId,
         turnId: "turn",
         toolCallId: id,
         source: { kind: "main" },
@@ -142,47 +139,43 @@ describe("用户交互公开 seam", () => {
       `CREATE TRIGGER fail_batch BEFORE UPDATE ON interactions WHEN OLD.id = 'b' BEGIN SELECT RAISE(ABORT, '批量失败'); END;`
     );
     expect(() =>
-      store.approveTaskInteraction(session.id, "a", "2026-01-02")
+      store.approveTaskInteraction(task.id, "a", "2026-01-02")
     ).toThrow("批量失败");
-    expect(
-      store.listTasks().find((s) => s.id === session.id)?.autoApprove
-    ).toBe(false);
-    expect(store.listInteractions(session.id).map((i) => i.status)).toEqual([
+    expect(store.listTasks().find((s) => s.id === task.id)?.autoApprove).toBe(
+      false
+    );
+    expect(store.listInteractions(task.id).map((i) => i.status)).toEqual([
       "pending",
       "pending",
       "pending",
     ]);
     raw.exec("DROP TRIGGER fail_batch");
     expect(
-      store.approveTaskInteraction(session.id, "other", "2026-01-02")
+      store.approveTaskInteraction(task.id, "other", "2026-01-02")
     ).toBeNull();
-    expect(
-      store.approveTaskInteraction(session.id, "q", "2026-01-02")
-    ).toBeNull();
-    const settled = store.approveTaskInteraction(session.id, "a", "2026-01-02");
+    expect(store.approveTaskInteraction(task.id, "q", "2026-01-02")).toBeNull();
+    const settled = store.approveTaskInteraction(task.id, "a", "2026-01-02");
     expect(settled?.map((i) => i.response)).toEqual([
-      { kind: "approval", decision: "approve", scope: "session" },
-      { kind: "approval", decision: "approve", scope: "session" },
+      { kind: "approval", decision: "approve", scope: "task" },
+      { kind: "approval", decision: "approve", scope: "task" },
     ]);
-    expect(
-      store.listTasks().find((s) => s.id === session.id)?.autoApprove
-    ).toBe(true);
-    expect(store.listInteractions(session.id)[2]?.status).toBe("pending");
+    expect(store.listTasks().find((s) => s.id === task.id)?.autoApprove).toBe(
+      true
+    );
+    expect(store.listInteractions(task.id)[2]?.status).toBe("pending");
     expect(store.listInteractions(other.id)[0]?.status).toBe("pending");
-    store.updateTask(session.id, { autoApprove: false });
-    expect(
-      store.approveTaskInteraction(session.id, "a", "2026-01-03")
-    ).toBeNull();
-    expect(
-      store.listTasks().find((s) => s.id === session.id)?.autoApprove
-    ).toBe(false);
+    store.updateTask(task.id, { autoApprove: false });
+    expect(store.approveTaskInteraction(task.id, "a", "2026-01-03")).toBeNull();
+    expect(store.listTasks().find((s) => s.id === task.id)?.autoApprove).toBe(
+      false
+    );
     raw.close();
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
   it("控制器先持久化再批量更新内存和事件，失败不唤醒且审批并发入队不遗漏", async () => {
     const store = createSqliteTaskStore(":memory:");
-    const session = createTaskManager({ persistence: store }).create({
+    const task = createTaskManager({ persistence: store }).create({
       workspacePath: "C:/work",
     });
     let fail = true;
@@ -215,7 +208,7 @@ describe("用户交互公开 seam", () => {
     const request = (id: string) => ({
       kind: "approval" as const,
       id,
-      sessionId: session.id,
+      taskId: task.id,
       turnId: "turn",
       toolCallId: id,
       source: { kind: "main" as const },
@@ -235,12 +228,12 @@ describe("用户交互公开 seam", () => {
       questions,
     });
     for (const input of [
-      { kind: "approval", decision: "reject", scope: "session" },
+      { kind: "approval", decision: "reject", scope: "task" },
       { kind: "approval", decision: "approve", scope: "bad" },
     ]) {
       expect(() => controller.respond("a", input)).toThrow();
     }
-    const grant = { kind: "approval", decision: "approve", scope: "session" };
+    const grant = { kind: "approval", decision: "approve", scope: "task" };
     expect(() => controller.respond("a", grant)).toThrow("保存失败");
     expect(autoApprove).toBe(false);
     expect(seen).toEqual([]);
@@ -289,25 +282,25 @@ describe("用户交互公开 seam", () => {
       tools: [tool],
       languageModelFor: () => model,
     });
-    const session = manager.create({
+    const task = manager.create({
       workspacePath: "C:/work",
       approvalMode: "ask",
     });
-    expect(session.record.autoApprove).toBe(false);
+    expect(task.record.autoApprove).toBe(false);
     const events: TaskEvent[] = [];
     let firstId = "";
-    for await (const event of session.sendMessage({ text: "开始", profile })) {
+    for await (const event of task.sendMessage({ text: "开始", profile })) {
       events.push(event);
       if (event.type === "interaction-request") {
         firstId = event.interaction.request.id;
         expect(
-          session.respondInteraction(firstId, {
+          task.respondInteraction(firstId, {
             kind: "approval",
             decision: "approve",
-            scope: "session",
+            scope: "task",
           })
         ).toBe(true);
-        expect(session.record.autoApprove).toBe(true);
+        expect(task.record.autoApprove).toBe(true);
       }
     }
     expect(events.filter((e) => e.type === "interaction-request")).toHaveLength(
@@ -315,31 +308,31 @@ describe("用户交互公开 seam", () => {
     );
     expect(events.find((e) => e.type === "task-auto-approve-changed")).toEqual({
       type: "task-auto-approve-changed",
-      taskId: session.id,
+      taskId: task.id,
       autoApprove: true,
     });
     expect(
-      (await collect(session.sendMessage({ text: "后轮", profile }))).some(
+      (await collect(task.sendMessage({ text: "后轮", profile }))).some(
         (e) => e.type === "interaction-request"
       )
     ).toBe(false);
-    expect(manager.revokeAutoApprove(session.id).autoApprove).toBe(false);
+    expect(manager.revokeAutoApprove(task.id).autoApprove).toBe(false);
     expect(
-      session.respondInteraction(firstId, {
+      task.respondInteraction(firstId, {
         kind: "approval",
         decision: "approve",
-        scope: "session",
+        scope: "task",
       })
     ).toBe(false);
-    expect(session.record.autoApprove).toBe(false);
+    expect(task.record.autoApprove).toBe(false);
     let count = 0;
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "撤销后",
       profile,
     })) {
       if (event.type === "interaction-request") {
         count++;
-        session.respondInteraction(event.interaction.request.id, {
+        task.respondInteraction(event.interaction.request.id, {
           kind: "approval",
           decision: "approve",
           scope: "once",
@@ -348,7 +341,7 @@ describe("用户交互公开 seam", () => {
     }
     expect(count).toBe(2);
     expect(modes).toEqual(["ask", "ask", "ask", "ask", "ask"]);
-    expect(persistence.listApprovals(session.id)).toEqual([]);
+    expect(persistence.listApprovals(task.id)).toEqual([]);
     persistence.close();
   });
   it("主子代理排队审批全部放行而问答仍等待，实时授权不改变本轮冻结模式", async () => {
@@ -402,26 +395,26 @@ describe("用户交互公开 seam", () => {
         resolveProfile: async () => profile,
       },
     });
-    const session = manager.create({
+    const task = manager.create({
       workspacePath: "C:/work",
       approvalMode: "ask",
     });
     let count = 0;
-    for await (const event of session.sendMessage({ text: "并行", profile })) {
+    for await (const event of task.sendMessage({ text: "并行", profile })) {
       if (event.type === "interaction-request" && ++count === 4) {
-        const pending = session.pendingInteractions;
+        const pending = task.pendingInteractions;
         expect(
           pending.filter((r) => r.request.kind === "approval")
         ).toHaveLength(3);
-        manager.setApprovalMode(session.id, "full-access");
-        session.respondInteraction(
+        manager.setApprovalMode(task.id, "full-access");
+        task.respondInteraction(
           pending.find((r) => r.request.kind === "approval")!.request.id,
-          { kind: "approval", decision: "approve", scope: "session" }
+          { kind: "approval", decision: "approve", scope: "task" }
         );
-        expect(session.pendingInteractions).toHaveLength(1);
-        expect(session.pendingInteractions[0]?.request.kind).toBe("questions");
-        session.respondInteraction(
-          session.pendingInteractions[0]!.request.id,
+        expect(task.pendingInteractions).toHaveLength(1);
+        expect(task.pendingInteractions[0]?.request.kind).toBe("questions");
+        task.respondInteraction(
+          task.pendingInteractions[0]!.request.id,
           answer
         );
       }
@@ -430,11 +423,11 @@ describe("用户交互公开 seam", () => {
     expect(modes).toEqual(["ask", "ask", "ask", "ask", "ask", "ask"]);
     expect(
       store
-        .listInteractions(session.id)
+        .listInteractions(task.id)
         .filter((r) => r.request.kind === "approval")
     ).toHaveLength(3);
-    expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(1);
-    expect(session.record.autoApprove).toBe(true);
+    expect(manager.messages(task.id)[0]?.questionAnswers).toHaveLength(1);
+    expect(task.record.autoApprove).toBe(true);
     store.close();
   });
   it("授权保存失败不执行工具；撤销保存失败保留授权，成功撤销在本轮立即发事件并重新询问", async () => {
@@ -479,7 +472,7 @@ describe("用户交互公开 seam", () => {
       tools: [write],
       languageModelFor: () => model,
     });
-    const session = manager.create({
+    const task = manager.create({
       workspacePath: "C:/work",
       approvalMode: "ask",
     });
@@ -489,7 +482,7 @@ describe("用户交互公开 seam", () => {
     });
     let count = 0;
     const changes: boolean[] = [];
-    for await (const event of session.sendMessage({ text: "执行", profile })) {
+    for await (const event of task.sendMessage({ text: "执行", profile })) {
       if (event.type === "task-auto-approve-changed")
         changes.push(event.autoApprove);
       if (event.type === "interaction-request") {
@@ -497,37 +490,37 @@ describe("用户交互公开 seam", () => {
         const response = {
           kind: "approval",
           decision: "approve",
-          scope: "session",
+          scope: "task",
         };
         if (++count === 1) {
           expect(other.respondInteraction(id, response)).toBe(false);
-          expect(() => session.respondInteraction(id, response)).toThrow(
+          expect(() => task.respondInteraction(id, response)).toThrow(
             "授权保存失败"
           );
           expect(executed).toBe(0);
-          expect(session.record.autoApprove).toBe(false);
-          expect(session.pendingInteractions).toHaveLength(1);
+          expect(task.record.autoApprove).toBe(false);
+          expect(task.pendingInteractions).toHaveLength(1);
           failGrant = false;
-          session.respondInteraction(id, response);
-        } else session.respondApproval(id, "always");
+          task.respondInteraction(id, response);
+        } else task.respondApproval(id, "always");
       }
       if (event.type === "tool-result" && executed === 1) {
-        expect(() => manager.revokeAutoApprove(session.id)).toThrow(
+        expect(() => manager.revokeAutoApprove(task.id)).toThrow(
           "撤销保存失败"
         );
-        expect(session.record.autoApprove).toBe(true);
+        expect(task.record.autoApprove).toBe(true);
         expect(
-          store.listTasks().find((s) => s.id === session.id)?.autoApprove
+          store.listTasks().find((s) => s.id === task.id)?.autoApprove
         ).toBe(true);
         failRevoke = false;
-        expect(manager.revokeAutoApprove(session.id).autoApprove).toBe(false);
+        expect(manager.revokeAutoApprove(task.id).autoApprove).toBe(false);
       }
     }
     expect(count).toBe(2);
     expect(changes).toEqual([true, false]);
     expect(executed).toBe(2);
     expect(other.record.autoApprove).toBe(false);
-    expect(session.record.autoApprove).toBe(false);
+    expect(task.record.autoApprove).toBe(false);
     store.close();
   });
   it("批量授权事务已保存任务等待状态，不在提交后额外写库导致部分放行", async () => {
@@ -562,17 +555,17 @@ describe("用户交互公开 seam", () => {
       languageModelFor: () =>
         modelFor([{ toolName: "write", toolCallId: "a", input: {} }], "完成"),
     });
-    const session = manager.create({
+    const task = manager.create({
       workspacePath: "C:/work",
       approvalMode: "ask",
     });
-    for await (const event of session.sendMessage({ text: "授权", profile })) {
+    for await (const event of task.sendMessage({ text: "授权", profile })) {
       if (event.type === "interaction-request") {
         expect(
-          session.respondInteraction(event.interaction.request.id, {
+          task.respondInteraction(event.interaction.request.id, {
             kind: "approval",
             decision: "approve",
-            scope: "session",
+            scope: "task",
           })
         ).toBe(true);
         expect(store.listTasks()[0]?.status).toBe("streaming");
@@ -587,7 +580,7 @@ describe("用户交互公开 seam", () => {
     const workspace = join(directory, "workspace");
     mkdirSync(workspace);
     const outside = join(directory, "outside.txt");
-    const path = join(directory, "session.db");
+    const path = join(directory, "task.db");
     const store = createSqliteTaskStore(path);
     const model = modelFor(
       [
@@ -604,21 +597,21 @@ describe("用户交互公开 seam", () => {
       tools: [createWriteFileTool()],
       languageModelFor: () => model,
     });
-    const session = manager.create({
+    const task = manager.create({
       workspacePath: workspace,
       approvalMode: "ask",
     });
-    for await (const event of session.sendMessage({ text: "授权", profile })) {
+    for await (const event of task.sendMessage({ text: "授权", profile })) {
       if (event.type === "interaction-request")
-        session.respondInteraction(event.interaction.request.id, {
+        task.respondInteraction(event.interaction.request.id, {
           kind: "approval",
           decision: "approve",
-          scope: "session",
+          scope: "task",
         });
     }
     expect(existsSync(outside)).toBe(false);
-    expect(store.listToolCalls(session.id)[0]?.isError).toBe(true);
-    const historical = store.listInteractions(session.id)[0]!;
+    expect(store.listToolCalls(task.id)[0]?.isError).toBe(true);
+    const historical = store.listInteractions(task.id)[0]!;
     store.insertInteraction({
       ...historical,
       request: { ...historical.request, id: "leftover" },
@@ -626,9 +619,9 @@ describe("用户交互公开 seam", () => {
       response: null,
       resolvedAt: null,
     });
-    manager.setApprovalMode(session.id, "assist");
-    session.cancelInteractions("停止");
-    expect(session.record.autoApprove).toBe(true);
+    manager.setApprovalMode(task.id, "assist");
+    task.cancelInteractions("停止");
+    expect(task.record.autoApprove).toBe(true);
     store.close();
     const reopened = createSqliteTaskStore(path);
     const restoredModel = modelFor(
@@ -648,32 +641,30 @@ describe("用户交互公开 seam", () => {
     });
     expect(restoredModel.doStreamCalls).toHaveLength(0);
     expect(
-      restored.interactions(session.id).find((r) => r.request.id === "leftover")
+      restored.interactions(task.id).find((r) => r.request.id === "leftover")
         ?.status
     ).toBe("cancelled");
-    expect(restored.get(session.id)?.record.autoApprove).toBe(true);
+    expect(restored.get(task.id)?.record.autoApprove).toBe(true);
     expect(
-      restored.get(session.id)?.respondInteraction("leftover", {
+      restored.get(task.id)?.respondInteraction("leftover", {
         kind: "approval",
         decision: "approve",
-        scope: "session",
+        scope: "task",
       })
     ).toBe(false);
     const events = await collect(
-      restored.get(session.id)!.sendMessage({ text: "新轮", profile })
+      restored.get(task.id)!.sendMessage({ text: "新轮", profile })
     );
     expect(events.some((e) => e.type === "interaction-request")).toBe(false);
     expect(existsSync(outside)).toBe(false);
-    expect(reopened.listToolCalls(session.id).every((c) => c.isError)).toBe(
-      true
-    );
+    expect(reopened.listToolCalls(task.id).every((c) => c.isError)).toBe(true);
     expect(
       restored.create({ workspacePath: workspace }).record.autoApprove
     ).toBe(false);
     // 未缓存任务也可撤销，返回新记录供空闲UI同步。
     const uncached = createTaskManager({ persistence: reopened });
-    expect(uncached.revokeAutoApprove(session.id).autoApprove).toBe(false);
-    expect(uncached.get(session.id)?.record.autoApprove).toBe(false);
+    expect(uncached.revokeAutoApprove(task.id).autoApprove).toBe(false);
+    expect(uncached.get(task.id)?.record.autoApprove).toBe(false);
     reopened.close();
     rmSync(directory, { recursive: true, force: true });
   });
@@ -721,9 +712,9 @@ describe("用户交互公开 seam", () => {
         resolveProfile: async () => profile,
       },
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({ text: "任务", profile })) {
+    for await (const event of task.sendMessage({ text: "任务", profile })) {
       events.push(event);
       if (event.type === "interaction-request") release();
     }
@@ -731,8 +722,8 @@ describe("用户交互公开 seam", () => {
     expect(
       events.find((event) => event.type === "interaction-resolved")
     ).toMatchObject({ interaction: { status: "cancelled", response: null } });
-    expect(session.pendingInteractions).toEqual([]);
-    expect(store.listInteractions(session.id)[0]?.status).toBe("cancelled");
+    expect(task.pendingInteractions).toEqual([]);
+    expect(store.listInteractions(task.id)[0]?.status).toBe("cancelled");
     expect(sub.doStreamCalls).toHaveLength(1);
     expect(main.doStreamCalls).toHaveLength(1);
     store.close();
@@ -748,23 +739,23 @@ describe("用户交互公开 seam", () => {
       ],
       "完成"
     );
-    const session = createTaskManager({
+    const task = createTaskManager({
       persistence,
       languageModelFor: () => model,
     }).create({ workspacePath: "C:/work" });
-    for await (const event of session.sendMessage({ text: "选择", profile })) {
+    for await (const event of task.sendMessage({ text: "选择", profile })) {
       if (event.type !== "interaction-request") continue;
       expect(() =>
-        session.respondInteraction(event.interaction.request.id, answer)
+        task.respondInteraction(event.interaction.request.id, answer)
       ).toThrow("单选");
-      expect(session.pendingInteractions).toHaveLength(1);
-      session.respondInteraction(event.interaction.request.id, {
+      expect(task.pendingInteractions).toHaveLength(1);
+      task.respondInteraction(event.interaction.request.id, {
         kind: "questions",
         answers: [{ ...answer.answers[0], selectedOptionIds: [] }],
       });
     }
     expect(
-      persistence.listMessages(session.id)[0]?.questionAnswers?.[0]?.answers[0]
+      persistence.listMessages(task.id)[0]?.questionAnswers?.[0]?.answers[0]
     ).toMatchObject({ selectedOptions: [], text: "仅本地" });
     persistence.close();
   });
@@ -797,30 +788,30 @@ describe("用户交互公开 seam", () => {
         resolveProfile: async () => profile,
       },
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const abort = new AbortController();
     let count = 0;
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "任务",
       profile,
       signal: abort.signal,
     })) {
       if (event.type === "interaction-request" && ++count === 3) {
-        expect(session.pendingInteractions).toHaveLength(3);
+        expect(task.pendingInteractions).toHaveLength(3);
         abort.abort();
-        expect(session.pendingInteractions).toEqual([]);
+        expect(task.pendingInteractions).toEqual([]);
       }
     }
     expect(count).toBe(3);
     expect(
-      persistence.listInteractions(session.id).map((item) => item.status)
+      persistence.listInteractions(task.id).map((item) => item.status)
     ).toEqual(["cancelled", "cancelled", "cancelled"]);
     expect(sub.doStreamCalls).toHaveLength(2);
     expect(main.doStreamCalls).toHaveLength(1);
-    expect(manager.messages(session.id)[0]?.questionAnswers).toBeUndefined();
-    await collect(session.sendMessage({ text: "新轮", profile }));
-    expect(session.pendingInteractions).toEqual([]);
-    expect(persistence.listInteractions(session.id)).toHaveLength(3);
+    expect(manager.messages(task.id)[0]?.questionAnswers).toBeUndefined();
+    await collect(task.sendMessage({ text: "新轮", profile }));
+    expect(task.pendingInteractions).toEqual([]);
+    expect(persistence.listInteractions(task.id)).toHaveLength(3);
     persistence.close();
   });
 
@@ -831,24 +822,22 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const abort = new AbortController();
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "任务",
       profile,
       signal: abort.signal,
     })) {
       if (event.type === "interaction-request") {
-        session.respondInteraction(event.interaction.request.id, answer);
+        task.respondInteraction(event.interaction.request.id, answer);
         abort.abort();
       }
     }
-    expect(persistence.listInteractions(session.id)[0]?.status).toBe(
-      "resolved"
-    );
-    expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(1);
+    expect(persistence.listInteractions(task.id)[0]?.status).toBe("resolved");
+    expect(manager.messages(task.id)[0]?.questionAnswers).toHaveLength(1);
     expect(model.doStreamCalls).toHaveLength(1);
-    await collect(session.sendMessage({ text: "下一轮", profile }));
+    await collect(task.sendMessage({ text: "下一轮", profile }));
     expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain("仅本地");
     persistence.close();
   });
@@ -873,18 +862,18 @@ describe("用户交互公开 seam", () => {
         },
       ],
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     await expect(
-      collect(session.sendMessage({ text: "任务", profile }))
+      collect(task.sendMessage({ text: "任务", profile }))
     ).rejects.toThrow("工具名称冲突：ask_user_question");
     expect(executed).toBe(false);
     expect(model.doStreamCalls).toHaveLength(0);
-    expect(session.pendingInteractions).toEqual([]);
+    expect(task.pendingInteractions).toEqual([]);
     persistence.close();
   });
   it("旧库迁移后重启即取消所有 pending（含 idle 任务），历史读取不依赖 get", () => {
     const directory = mkdtempSync(join(tmpdir(), "interaction-store-"));
-    const path = join(directory, "session.db");
+    const path = join(directory, "task.db");
     const raw = new DatabaseSync(path);
     raw.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -899,7 +888,7 @@ describe("用户交互公开 seam", () => {
         kind: "questions",
         questions,
         id: "pending",
-        sessionId: "legacy",
+        taskId: "legacy",
         turnId: "turn",
         toolCallId: "call",
         source: { kind: "main" },
@@ -952,13 +941,13 @@ describe("用户交互公开 seam", () => {
   it("快照提交失败事务回滚 pending，修复所属消息后可原子提交且重复不写入", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({ persistence });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const interaction: InteractionRecord = {
       request: {
         kind: "questions",
         questions,
         id: "request",
-        sessionId: session.id,
+        taskId: task.id,
         turnId: "missing-turn",
         toolCallId: "call",
         source: { kind: "main" },
@@ -1002,20 +991,20 @@ describe("用户交互公开 seam", () => {
     expect(() => persistence.settleInteraction(final, snapshot)).toThrow(
       "用户消息不存在"
     );
-    expect(persistence.listInteractions(session.id)[0]?.status).toBe("pending");
+    expect(persistence.listInteractions(task.id)[0]?.status).toBe("pending");
     persistence.insertMessage({
       id: "missing-turn",
-      sessionId: session.id,
+      taskId: task.id,
       role: "user",
       content: "任务",
       createdAt: "2026-01-01",
     });
     expect(persistence.settleInteraction(final, snapshot)).toBe(true);
     expect(persistence.settleInteraction(final, snapshot)).toBe(false);
-    expect(persistence.listMessages(session.id)[0]?.questionAnswers).toEqual([
+    expect(persistence.listMessages(task.id)[0]?.questionAnswers).toEqual([
       snapshot,
     ]);
-    expect(persistence.listInteractions(session.id)).toEqual([final]);
+    expect(persistence.listInteractions(task.id)).toEqual([final]);
     persistence.close();
   });
 
@@ -1026,15 +1015,15 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const abort = new AbortController();
     abort.abort();
     const events = await collect(
-      session.sendMessage({ text: "取消任务", profile, signal: abort.signal })
+      task.sendMessage({ text: "取消任务", profile, signal: abort.signal })
     );
     expect(events.at(-1)?.type).toBe("assistant-aborted");
     expect(model.doStreamCalls).toHaveLength(0);
-    expect(persistence.listInteractions(session.id)).toEqual([]);
+    expect(persistence.listInteractions(task.id)).toEqual([]);
     persistence.close();
   });
   it("响应严格校验且非法响应不消耗请求；纯文本、多选、跳过可提交", async () => {
@@ -1053,7 +1042,7 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const valid = {
       kind: "questions",
       answers: [
@@ -1106,27 +1095,25 @@ describe("用户交互公开 seam", () => {
         answers: [first, ...valid.answers.slice(1)],
       })),
     ];
-    for await (const event of session.sendMessage({ text: "问题", profile })) {
+    for await (const event of task.sendMessage({ text: "问题", profile })) {
       if (event.type !== "interaction-request") continue;
       for (const response of invalid) {
         expect(() =>
-          session.respondInteraction(event.interaction.request.id, response)
+          task.respondInteraction(event.interaction.request.id, response)
         ).toThrow(/[\u4e00-\u9fff]/);
-        expect(session.pendingInteractions).toHaveLength(1);
-        expect(persistence.listInteractions(session.id)[0]?.status).toBe(
+        expect(task.pendingInteractions).toHaveLength(1);
+        expect(persistence.listInteractions(task.id)[0]?.status).toBe(
           "pending"
         );
-        expect(
-          manager.messages(session.id)[0]?.questionAnswers
-        ).toBeUndefined();
+        expect(manager.messages(task.id)[0]?.questionAnswers).toBeUndefined();
       }
-      expect(session.respondInteraction("不存在", valid)).toBe(false);
-      expect(
-        session.respondInteraction(event.interaction.request.id, valid)
-      ).toBe(true);
+      expect(task.respondInteraction("不存在", valid)).toBe(false);
+      expect(task.respondInteraction(event.interaction.request.id, valid)).toBe(
+        true
+      );
     }
     expect(
-      manager.messages(session.id)[0]?.questionAnswers?.[0]?.answers
+      manager.messages(task.id)[0]?.questionAnswers?.[0]?.answers
     ).toMatchObject([
       { selectedOptions: ["开发环境"] },
       { selectedOptions: ["开发环境", "生产环境"] },
@@ -1182,19 +1169,19 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     let requests = 0;
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "验证输入",
       profile,
     })) {
       if (event.type === "interaction-request") {
         requests++;
-        expect(persistence.listToolCalls(session.id)).toHaveLength(bad.length);
+        expect(persistence.listToolCalls(task.id)).toHaveLength(bad.length);
         expect(
-          persistence.listToolCalls(session.id).every((call) => call.isError)
+          persistence.listToolCalls(task.id).every((call) => call.isError)
         ).toBe(true);
-        session.respondInteraction(event.interaction.request.id, {
+        task.respondInteraction(event.interaction.request.id, {
           kind: "questions",
           answers: maximum.map((question) => ({
             questionId: question.id,
@@ -1206,7 +1193,7 @@ describe("用户交互公开 seam", () => {
       }
     }
     expect(requests).toBe(1);
-    expect(persistence.listInteractions(session.id)).toHaveLength(1);
+    expect(persistence.listInteractions(task.id)).toHaveLength(1);
     persistence.close();
   });
 
@@ -1234,10 +1221,10 @@ describe("用户交互公开 seam", () => {
         tools: [tool],
         languageModelFor: () => model,
       });
-      const session = manager.create({ workspacePath: "C:/work" });
-      session.setApprovalMode("ask");
+      const task = manager.create({ workspacePath: "C:/work" });
+      task.setApprovalMode("ask");
       const abort = new AbortController();
-      const iterator = session
+      const iterator = task
         .sendMessage({ text: "任务", profile, signal: abort.signal })
         [Symbol.asyncIterator]();
       let id = "";
@@ -1253,10 +1240,10 @@ describe("用户交互公开 seam", () => {
       }
       expect(id).not.toBe("");
       expect(() =>
-        session.respondInteraction(id, { kind: "approval", decision: "always" })
+        task.respondInteraction(id, { kind: "approval", decision: "always" })
       ).toThrow("审批决定");
       if (mode === "response-then-abort")
-        session.respondInteraction(id, {
+        task.respondInteraction(id, {
           kind: "approval",
           decision: "approve",
         });
@@ -1268,9 +1255,9 @@ describe("用户交互公开 seam", () => {
       while (!(await iterator.next()).done) {
         /* 消费收尾 */
       }
-      expect(session.pendingInteractions).toEqual([]);
+      expect(task.pendingInteractions).toEqual([]);
       expect(
-        session.respondInteraction(id, {
+        task.respondInteraction(id, {
           kind: "approval",
           decision: "approve",
         })
@@ -1278,7 +1265,7 @@ describe("用户交互公开 seam", () => {
       expect(executed).toBe(0);
       expect(model.doStreamCalls).toHaveLength(1);
       if (mode !== "cancel") {
-        const interaction = persistence.listInteractions(session.id)[0]!;
+        const interaction = persistence.listInteractions(task.id)[0]!;
         expect(interaction.status).toBe(
           mode === "response-then-abort" ? "resolved" : "cancelled"
         );
@@ -1310,21 +1297,21 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
+    const task = manager.create({ workspacePath: "C:/work" });
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({ text: "任务", profile })) {
+    for await (const event of task.sendMessage({ text: "任务", profile })) {
       events.push(event);
       if (event.type === "interaction-request")
-        session.respondInteraction(event.interaction.request.id, answer);
+        task.respondInteraction(event.interaction.request.id, answer);
     }
     expect(events.at(-1)?.type).toBe("error");
-    expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(1);
-    await collect(session.sendMessage({ text: "重试", profile }));
+    expect(manager.messages(task.id)[0]?.questionAnswers).toHaveLength(1);
+    await collect(task.sendMessage({ text: "重试", profile }));
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain("仅本地");
     const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
-    }).get(session.id)!;
+    }).get(task.id)!;
     await collect(restored.sendMessage({ text: "恢复", profile }));
     expect(JSON.stringify(model.doStreamCalls[3]?.prompt)).toContain(
       "开发环境"
@@ -1413,11 +1400,11 @@ describe("用户交互公开 seam", () => {
         resolveProfile: async () => profile,
       },
     });
-    const session = manager.create({ workspacePath: "C:/work" });
-    session.setApprovalMode("ask");
+    const task = manager.create({ workspacePath: "C:/work" });
+    task.setApprovalMode("ask");
     const requests: InteractionRecord[] = [];
     let slowDone = false;
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "并行工作",
       profile,
     })) {
@@ -1431,12 +1418,12 @@ describe("用户交互公开 seam", () => {
           expect(request.toolCallId).toBe("same-model-id");
           expect(request.source.task).toMatch(/任务/);
           if (requests.length === 2) {
-            expect(session.pendingInteractions).toHaveLength(2);
+            expect(task.pendingInteractions).toHaveLength(2);
             expect(new Set(requests.map((item) => item.request.id)).size).toBe(
               2
             );
             for (const item of requests)
-              session.respondInteraction(
+              task.respondInteraction(
                 item.request.id,
                 item.request.kind === "approval"
                   ? { kind: "approval", decision: "approve" }
@@ -1446,14 +1433,14 @@ describe("用户交互公开 seam", () => {
           }
         } else {
           expect(slowDone).toBe(true);
-          session.respondInteraction(request.id, answer);
+          task.respondInteraction(request.id, answer);
         }
       }
     }
     expect(requests).toHaveLength(3);
     expect(executions).toBe(1);
     expect(new Set(requests.map((item) => item.request.turnId)).size).toBe(1);
-    expect(manager.messages(session.id)[0]?.questionAnswers).toHaveLength(2);
+    expect(manager.messages(task.id)[0]?.questionAnswers).toHaveLength(2);
     expect(JSON.stringify(main.doStreamCalls[1]?.prompt)).toContain("开发环境");
     expect(JSON.stringify(sub.doStreamCalls.at(-1)?.prompt)).toContain(
       "仅本地"
@@ -1491,22 +1478,22 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
-    for await (const event of session.sendMessage({
+    const task = manager.create({ workspacePath: "C:/work" });
+    for await (const event of task.sendMessage({
       text: "第一轮问答",
       profile,
     })) {
       if (event.type === "interaction-request")
-        session.respondInteraction(event.interaction.request.id, answer);
+        task.respondInteraction(event.interaction.request.id, answer);
     }
     for (const text of ["第二轮", "第三轮", "第四轮"]) {
-      for await (const event of session.sendMessage({ text, profile })) {
+      for await (const event of task.sendMessage({ text, profile })) {
         if (event.type === "interaction-request")
-          session.respondInteraction(event.interaction.request.id, answer);
+          task.respondInteraction(event.interaction.request.id, answer);
       }
     }
-    const before = manager.messages(session.id);
-    const compacted = await session.compact({ profile });
+    const before = manager.messages(task.id);
+    const compacted = await task.compact({ profile });
     expect(compacted.keptMessages.map((message) => message.id)).toEqual(
       before.slice(2).map((message) => message.id)
     );
@@ -1517,25 +1504,23 @@ describe("用户交互公开 seam", () => {
     expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).toContain(
       "开发环境"
     );
-    await collect(session.sendMessage({ text: "压缩后", profile }));
+    await collect(task.sendMessage({ text: "压缩后", profile }));
     expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
       "仅本地"
     );
     const restored = createTaskManager({
       persistence,
       languageModelFor: () => model,
-    }).get(session.id)!;
+    }).get(task.id)!;
     await collect(restored.sendMessage({ text: "重启后", profile }));
     expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
       "仅本地"
     );
-    expect(persistence.listInteractions(session.id)[0]?.request.turnId).toBe(
+    expect(persistence.listInteractions(task.id)[0]?.request.turnId).toBe(
       before[0]?.id
     );
     expect(
-      manager
-        .transcript(session.id)
-        .filter((item) => item.kind === "interaction")
+      manager.transcript(task.id).filter((item) => item.kind === "interaction")
     ).toHaveLength(1);
     persistence.close();
   });
@@ -1546,10 +1531,10 @@ describe("用户交互公开 seam", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work" });
-    session.setApprovalMode("full-access");
+    const task = manager.create({ workspacePath: "C:/work" });
+    task.setApprovalMode("full-access");
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "开始任务",
       profile,
     })) {
@@ -1562,15 +1547,15 @@ describe("用户交互公开 seam", () => {
           source: { kind: "main" },
           toolCallId: "model-call",
         });
-        expect(persistence.listInteractions(session.id)).toEqual([
+        expect(persistence.listInteractions(task.id)).toEqual([
           event.interaction,
         ]);
-        expect(session.pendingInteractions).toEqual([event.interaction]);
+        expect(task.pendingInteractions).toEqual([event.interaction]);
         expect(manager.list()[0]?.status).toBe("waiting-user");
         expect(model.doStreamCalls).toHaveLength(1);
-        expect(session.respondInteraction(request.id, answer)).toBe(true);
-        expect(session.respondInteraction(request.id, answer)).toBe(false);
-        expect(manager.messages(session.id)[0]?.questionAnswers).toMatchObject([
+        expect(task.respondInteraction(request.id, answer)).toBe(true);
+        expect(task.respondInteraction(request.id, answer)).toBe(false);
+        expect(manager.messages(task.id)[0]?.questionAnswers).toMatchObject([
           {
             interactionId: request.id,
             answers: [
@@ -1587,22 +1572,18 @@ describe("用户交互公开 seam", () => {
     expect(
       events.filter((event) => event.type === "interaction-request")
     ).toHaveLength(1);
-    expect(session.pendingInteractions).toEqual([]);
-    expect(persistence.listInteractions(session.id)[0]?.status).toBe(
-      "resolved"
-    );
+    expect(task.pendingInteractions).toEqual([]);
+    expect(persistence.listInteractions(task.id)[0]?.status).toBe("resolved");
     expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain("仅本地");
-    await collect(session.sendMessage({ text: "继续", profile }));
+    await collect(task.sendMessage({ text: "继续", profile }));
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(
       "开发环境"
     );
     expect(
-      manager.messages(session.id).filter((message) => message.role === "user")
+      manager.messages(task.id).filter((message) => message.role === "user")
     ).toHaveLength(2);
     expect(
-      manager
-        .transcript(session.id)
-        .filter((item) => item.kind === "interaction")
+      manager.transcript(task.id).filter((item) => item.kind === "interaction")
     ).toHaveLength(1);
     persistence.close();
   });

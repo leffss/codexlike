@@ -19,7 +19,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath: "C:\\work\\demo",
     providerProfileId: null,
@@ -148,7 +148,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     persistence.insertTask(record);
     const model = scriptedModel([{ deltas: ["你好，", "世界"] }]);
 
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -156,7 +156,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     });
 
     const events = await collect(
-      session.sendMessage({ text: "打个招呼", profile })
+      task.sendMessage({ text: "打个招呼", profile })
     );
 
     // 事件序列（正常路径）
@@ -182,7 +182,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
 
     // 消息落库：user + assistant
     expect(
-      persistence.listMessages("session-1").map((m) => [m.role, m.content])
+      persistence.listMessages("task-1").map((m) => [m.role, m.content])
     ).toEqual([
       ["user", "打个招呼"],
       ["assistant", "你好，世界"],
@@ -204,15 +204,15 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
       { deltas: ["第二轮回答"] },
     ]);
 
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    await collect(session.sendMessage({ text: "第一问", profile }));
-    await collect(session.sendMessage({ text: "第二问", profile }));
+    await collect(task.sendMessage({ text: "第一问", profile }));
+    await collect(task.sendMessage({ text: "第二问", profile }));
 
     // 第二次调用的 prompt 序列化后包含第一轮完整往返
     expect(model.doStreamCalls).toHaveLength(2);
@@ -225,7 +225,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     const restored = createAgentTask({
       record: persistence.listTasks().at(0)!,
       persistence,
-      history: persistence.listMessages("session-1"),
+      history: persistence.listMessages("task-1"),
       languageModelFor: () => model,
       now: fakeClock(),
     });
@@ -254,7 +254,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
       },
     });
 
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -263,7 +263,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
 
     const controller = new AbortController();
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "慢慢说",
       profile,
       signal: controller.signal,
@@ -282,7 +282,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     }
 
     // 中断后落库的是部分文本（带中断标记）；状态回 idle
-    const messages = persistence.listMessages("session-1");
+    const messages = persistence.listMessages("task-1");
     expect(messages.map((m) => [m.role, m.content])).toEqual([
       ["user", "慢慢说"],
       ["assistant", "部分回复"],
@@ -292,7 +292,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
 
     // 任务可继续：下一轮正常完成
     const second = await collect(
-      session.sendMessage({ text: "再来一次", profile })
+      task.sendMessage({ text: "再来一次", profile })
     );
     const secondLast = second.at(-1);
     expect(secondLast?.type).toBe("assistant-done");
@@ -317,16 +317,14 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
       { deltas: ["恢复后的回答"] },
     ]);
 
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    const events = await collect(
-      session.sendMessage({ text: "第一问", profile })
-    );
+    const events = await collect(task.sendMessage({ text: "第一问", profile }));
 
     const errorEvent = events.find((e) => e.type === "error");
     expect(errorEvent).toBeDefined();
@@ -338,7 +336,7 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
 
     // 落库：user + error（无 assistant）
     expect(
-      persistence.listMessages("session-1").map((m) => [m.role, m.content])
+      persistence.listMessages("task-1").map((m) => [m.role, m.content])
     ).toEqual([
       ["user", "第一问"],
       ["error", expect.stringContaining("模型请求失败")],
@@ -346,11 +344,9 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
     // 任务可继续使用，且 error 提示不进入第二轮上下文
-    const second = await collect(
-      session.sendMessage({ text: "第二问", profile })
-    );
+    const second = await collect(task.sendMessage({ text: "第二问", profile }));
     expect(second.at(-1)?.type).toBe("assistant-done");
-    expect(persistence.listMessages("session-1").map((m) => m.role)).toEqual([
+    expect(persistence.listMessages("task-1").map((m) => m.role)).toEqual([
       "user",
       "error",
       "user",
@@ -379,19 +375,19 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
       },
     });
 
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    const first = session.sendMessage({ text: "慢消息", profile });
+    const first = task.sendMessage({ text: "慢消息", profile });
     const firstIterator = first[Symbol.asyncIterator]();
     await firstIterator.next(); // user-message 事件已产出，任务进入 streaming
 
     await expect(
-      collect(session.sendMessage({ text: "并发消息", profile }))
+      collect(task.sendMessage({ text: "并发消息", profile }))
     ).rejects.toThrow("仍在回复中");
 
     openGate();

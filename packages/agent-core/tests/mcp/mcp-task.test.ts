@@ -57,7 +57,7 @@ function taskRecord(
   approvalMode: ApprovalMode
 ): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath,
     providerProfileId: null,
@@ -164,7 +164,7 @@ function makeTask(
   const persistence = createSqliteTaskStore(":memory:");
   const base = taskRecord(workspacePath, approvalMode);
   persistence.insertTask(base);
-  const session = createAgentTask({
+  const task = createAgentTask({
     record: base,
     persistence,
     history: persistence.listMessages(base.id),
@@ -173,7 +173,7 @@ function makeTask(
     resources,
     now: fakeClock(),
   });
-  return { session, persistence, model };
+  return { task, persistence, model };
 }
 
 async function collect(
@@ -188,20 +188,18 @@ async function collect(
 
 /** 拉取事件流；interaction-request 到达时自动响应（模拟审批卡片三键） */
 async function drive(
-  session: ReturnType<typeof makeTask>["session"],
+  task: ReturnType<typeof makeTask>["task"],
   text: string,
   decide: "approve" | "reject" | "always"
 ): Promise<TaskEvent[]> {
   const events: TaskEvent[] = [];
-  const iterator = session
-    .sendMessage({ text, profile })
-    [Symbol.asyncIterator]();
+  const iterator = task.sendMessage({ text, profile })[Symbol.asyncIterator]();
   let head = await iterator.next();
   while (!head.done) {
     const event = head.value;
     events.push(event);
     if (event.type === "interaction-request") {
-      session.respondApproval(event.interaction.request.id, decide);
+      task.respondApproval(event.interaction.request.id, decide);
     }
     head = await iterator.next();
   }
@@ -237,14 +235,14 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       { kind: "text", deltas: ["完成"] },
       { kind: "text", deltas: ["下一轮"] },
     ]);
-    const { session, persistence } = makeTask(
+    const { task, persistence } = makeTask(
       model,
       workspace,
       () => (enabled ? manager.tools() : []),
       "ask",
       () => fakeResourceSnapshot()
     );
-    const events = await drive(session, "先加载技能再调用 MCP", "approve");
+    const events = await drive(task, "先加载技能再调用 MCP", "approve");
     expect(
       events
         .filter((event) => event.type === "interaction-request")
@@ -262,9 +260,9 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(
       "ALPHA_PRIVATE_BODY"
     );
-    expect(session.resourceState.last?.loaded).toHaveLength(1);
+    expect(task.resourceState.last?.loaded).toHaveLength(1);
     enabled = false;
-    await collect(session.sendMessage({ text: "下一轮", profile }));
+    await collect(task.sendMessage({ text: "下一轮", profile }));
     const toolNames = model.doStreamCalls[3]?.tools?.map((tool) => tool.name);
     expect(toolNames).toContain("load_skill");
     expect(toolNames).not.toContain("mcp_fake_echo");
@@ -290,14 +288,9 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["MCP 工具返回了：", "echo: 你好 MCP"] },
     ]);
-    const { session } = makeTask(
-      model,
-      workspace,
-      () => manager.tools(),
-      "ask"
-    );
+    const { task } = makeTask(model, workspace, () => manager.tools(), "ask");
 
-    const events = await drive(session, "调用 MCP echo", "approve");
+    const events = await drive(task, "调用 MCP echo", "approve");
 
     const request = events.find(
       (e): e is Extract<TaskEvent, { type: "interaction-request" }> =>
@@ -354,7 +347,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["完成"] },
     ]);
-    const { session } = makeTask(
+    const { task } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -362,7 +355,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     );
 
     const events = await collect(
-      session.sendMessage({ text: "连续两次 echo", profile })
+      task.sendMessage({ text: "连续两次 echo", profile })
     );
     const requests = events.filter((e) => e.type === "interaction-request");
     const results = events.filter((e) => e.type === "tool-result");
@@ -400,14 +393,14 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["完成"] },
     ]);
-    const { session, persistence } = makeTask(
+    const { task, persistence } = makeTask(
       model,
       workspace,
       () => manager.tools(),
       "ask"
     );
 
-    const events = await drive(session, "连续两次 echo", "always");
+    const events = await drive(task, "连续两次 echo", "always");
     const requests = events.filter((e) => e.type === "interaction-request");
     const results = events.filter((e) => e.type === "tool-result");
 
@@ -416,7 +409,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     expect(
       results.map((e) => (e as { call: { output: string } }).call.output)
     ).toEqual(["echo: 第一次", "echo: 第二次"]);
-    expect(persistence.listApprovals("session-1")).toEqual([]);
+    expect(persistence.listApprovals("task-1")).toEqual([]);
   });
 
   it("ask 模式拒绝：MCP 工具被拦截，拒绝原因回填，server 未被调用", async () => {
@@ -431,14 +424,9 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["用户没批"] },
     ]);
-    const { session } = makeTask(
-      model,
-      workspace,
-      () => manager.tools(),
-      "ask"
-    );
+    const { task } = makeTask(model, workspace, () => manager.tools(), "ask");
 
-    const events = await drive(session, "调用", "reject");
+    const events = await drive(task, "调用", "reject");
 
     const result = events.find(
       (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
@@ -459,7 +447,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["server 崩了，但任务还在"] },
     ]);
-    const { session } = makeTask(
+    const { task } = makeTask(
       model,
       workspace,
       () => manager.tools(),
@@ -467,7 +455,7 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
     );
 
     const events = await collect(
-      session.sendMessage({ text: "触发崩溃", profile })
+      task.sendMessage({ text: "触发崩溃", profile })
     );
 
     const result = events.find(
@@ -511,16 +499,14 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["超时了但任务没死"] },
     ]);
-    const { session } = makeTask(
+    const { task } = makeTask(
       model,
       workspace,
       () => manager.tools(),
       "full-access"
     );
 
-    const events = await collect(
-      session.sendMessage({ text: "慢调用", profile })
-    );
+    const events = await collect(task.sendMessage({ text: "慢调用", profile }));
     const result = events.find(
       (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"
@@ -555,19 +541,15 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
       },
       { kind: "text", deltas: ["工具没了"] },
     ]);
-    const { session } = makeTask(model, workspace, tools, "full-access");
+    const { task } = makeTask(model, workspace, tools, "full-access");
 
     // 第一条消息：工具在（模型未调用，仅确认不炸）
-    const first = await collect(
-      session.sendMessage({ text: "第一轮", profile })
-    );
+    const first = await collect(task.sendMessage({ text: "第一轮", profile }));
     expect(first.at(-1)?.type).toBe("assistant-done");
 
     // 设置页禁用 echo → 第二条消息模型仍调它 → 「未注册」可读错误回填，任务不崩
     gate = "off";
-    const second = await collect(
-      session.sendMessage({ text: "第二轮", profile })
-    );
+    const second = await collect(task.sendMessage({ text: "第二轮", profile }));
     const result = second.find(
       (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
         e.type === "tool-result"

@@ -26,7 +26,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(workspacePath: string): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath,
     providerProfileId: null,
@@ -205,7 +205,7 @@ describe("任务快照恢复等价性", () => {
       { kind: "text", deltas: ["原地续跑"] },
     ]);
     let activeModel = historyModel;
-    const session = createAgentTask({
+    const task = createAgentTask({
       record: base,
       persistence,
       tools,
@@ -215,7 +215,7 @@ describe("任务快照恢复等价性", () => {
 
     // 第 1 轮：@引用 附件 + 工具调用
     await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "读取材料并写入 a.txt",
         profile,
         mentions: [{ path: "material.txt", content: "被引用的文件内容" }],
@@ -223,7 +223,7 @@ describe("任务快照恢复等价性", () => {
     );
     // 第 2 轮：流式中断
     const controller = new AbortController();
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "慢慢说",
       profile,
       signal: controller.signal,
@@ -242,10 +242,10 @@ describe("任务快照恢复等价性", () => {
     const resumedAfterRestart = scriptedModel([
       { kind: "text", deltas: ["恢复后续跑"] },
     ]);
-    const restoredSession = createAgentTask({
+    const restoredTask = createAgentTask({
       record: restoredRecord,
       persistence,
-      history: persistence.listMessages("session-1"),
+      history: persistence.listMessages("task-1"),
       tools,
       languageModelFor: () => resumedAfterRestart,
       now: fakeClock(),
@@ -253,10 +253,10 @@ describe("任务快照恢复等价性", () => {
 
     // 路径 A（不重启）：原任务对象直接续跑（内存上下文：含 @引用 组装后的 user 消息）
     activeModel = resumedInPlace;
-    await collect(session.sendMessage({ text: "继续", profile }));
+    await collect(task.sendMessage({ text: "继续", profile }));
 
     // 路径 B（重启恢复）：恢复的任务续跑
-    await collect(restoredSession.sendMessage({ text: "继续", profile }));
+    await collect(restoredTask.sendMessage({ text: "继续", profile }));
 
     // 两条路径发给模型的 prompt 必须完全一致（mentions 内容、工具轮、中断消息都不丢）
     expect(resumedAfterRestart.doStreamCalls).toHaveLength(1);

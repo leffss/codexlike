@@ -29,7 +29,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
   function context(toolCallId = "call-1"): ToolExecutionContext {
     return {
       workspacePath: tmpdir(),
-      sessionId: "browser-tools-test",
+      taskId: "browser-tools-test",
       approvalMode: "assist",
       toolCallId,
     };
@@ -182,11 +182,11 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     });
     const read = fresh.find((tool) => tool.name === "browser_read")!;
     const shot = fresh.find((tool) => tool.name === "browser_screenshot")!;
-    // 另一个 sessionId：全新 context，从未导航
+    // 另一个 taskId：全新 context，从未导航
     const virginContext: ToolExecutionContext = {
       workspacePath: tmpdir(),
       approvalMode: "assist",
-      sessionId: "never-navigated",
+      taskId: "never-navigated",
       toolCallId: "call-9",
     };
     const readResult = await read.execute({}, virginContext);
@@ -205,7 +205,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
       { url: `${fixture.origin}/article` },
       {
         workspacePath: tmpdir(),
-        sessionId: "isolated-a",
+        taskId: "isolated-a",
         approvalMode: "assist",
         toolCallId: "ia",
       }
@@ -214,7 +214,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
       { url: `${fixture.origin}/form` },
       {
         workspacePath: tmpdir(),
-        sessionId: "isolated-b",
+        taskId: "isolated-b",
         approvalMode: "assist",
         toolCallId: "ib",
       }
@@ -223,7 +223,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
       {},
       {
         workspacePath: tmpdir(),
-        sessionId: "isolated-a",
+        taskId: "isolated-a",
         approvalMode: "assist",
         toolCallId: "ia2",
       }

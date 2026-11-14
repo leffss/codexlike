@@ -23,7 +23,7 @@ export interface ToolExecutionContext {
   /** 当前审批模式：full-access 档文件工具放开工作区边界（ADR 0004），其余档强制边界 */
   approvalMode: ApprovalMode;
   /** 调用所属任务：任务级资源（如浏览器 context/Cookie）按它隔离复用 */
-  sessionId: string;
+  taskId: string;
   /** 任务中断信号：长任务应尊重（终端命令用于超时外的人工打断） */
   signal?: AbortSignal;
   /**
@@ -89,7 +89,7 @@ export interface ToolDefinition {
 export interface ToolCallRecord {
   /** 模型给定的 tool call id */
   id: string;
-  sessionId: string;
+  taskId: string;
   toolName: string;
   /** 参数的 JSON 字符串（UI 展示时解析） */
   arguments: string;

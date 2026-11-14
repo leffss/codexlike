@@ -36,7 +36,7 @@ const subProfile: ProviderProfile = {
 
 function taskRecord(workspacePath: string): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath,
     providerProfileId: null,
@@ -238,7 +238,7 @@ interface SubagentThinkingHarnessOptions {
  * 主任务与子代理的 languageModelFor 均为 (profile, options) 双参签名，
  * 子代理的档位继承链 = 主任务工具上下文 → 编排器快照 → 子代理模型工厂。
  */
-function makeSubagentThinkingSession(
+function makeSubagentThinkingTask(
   options: SubagentThinkingHarnessOptions,
   factoryCalls?: FactoryCall[]
 ) {
@@ -258,7 +258,7 @@ function makeSubagentThinkingSession(
     factoryCalls?.push({ profile: modelProfile, options: factoryOptions });
     return modelProfile.id === subProfile.id ? subModel : mainModel;
   };
-  const session = createAgentTask({
+  const task = createAgentTask({
     record,
     persistence,
     languageModelFor: factory,
@@ -271,7 +271,7 @@ function makeSubagentThinkingSession(
     },
     now: fakeClock(),
   });
-  return { session, persistence, mainModel, subModel };
+  return { task, persistence, mainModel, subModel };
 }
 
 /** 主任务脚本：一轮 spawn_subagent 委派 → 一轮汇总文本 */
@@ -295,7 +295,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
   it("独立 Profile 路径：子代理模型工厂收到触发消息的档位快照", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
-    const { session } = makeSubagentThinkingSession(
+    const { task } = makeSubagentThinkingTask(
       {
         workspacePath: workspace,
         main: delegateThenSummarize("调研测试框架"),
@@ -305,7 +305,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
     );
 
     await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "帮我调研",
         profile,
         thinkingEffort: "high",
@@ -332,7 +332,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
   it("回退主模型路径（子代理 Profile = null）：子代理沿用主任务 Profile 且继承档位", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
-    const { session } = makeSubagentThinkingSession(
+    const { task } = makeSubagentThinkingTask(
       {
         workspacePath: workspace,
         main: delegateThenSummarize("调研测试框架"),
@@ -343,7 +343,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
     );
 
     await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "帮我调研",
         profile,
         thinkingEffort: "low",
@@ -365,7 +365,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
   it("排队快照：并发上限 1 时第二个委派出队启动，仍用触发消息的档位", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
-    const { session } = makeSubagentThinkingSession(
+    const { task } = makeSubagentThinkingTask(
       {
         workspacePath: workspace,
         maxConcurrent: 1,
@@ -386,7 +386,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
     );
 
     const events = await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "并行调研两件事",
         profile,
         thinkingEffort: "medium",
@@ -415,7 +415,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
   it("未传档位：子代理与主任务一样按 auto 处理（既有调用方不受影响）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
-    const { session } = makeSubagentThinkingSession(
+    const { task } = makeSubagentThinkingTask(
       {
         workspacePath: workspace,
         main: delegateThenSummarize("调研测试框架"),
@@ -424,7 +424,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
       factoryCalls
     );
 
-    await collect(session.sendMessage({ text: "帮我调研", profile }));
+    await collect(task.sendMessage({ text: "帮我调研", profile }));
 
     expect(factoryCalls.length).toBe(3);
     expect(
@@ -436,7 +436,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
 describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）", () => {
   it("子代理思考转为 subagent-reasoning 事件：带 subagentId、与主任务 reasoning 及正文分离", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-    const { session } = makeSubagentThinkingSession({
+    const { task } = makeSubagentThinkingTask({
       workspacePath: workspace,
       main: [
         {
@@ -462,7 +462,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     });
 
     const events = await collect(
-      session.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
+      task.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
     );
 
     // 子代理 reasoning：独立事件类型、增量有序、subagentId 正确
@@ -511,7 +511,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
 
   it("并发子代理的 reasoning 互不串流：各 subagentId 只收到自己的增量", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-    const { session } = makeSubagentThinkingSession({
+    const { task } = makeSubagentThinkingTask({
       workspacePath: workspace,
       main: [
         {
@@ -543,7 +543,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     });
 
     const events = await collect(
-      session.sendMessage({ text: "并行调研", profile })
+      task.sendMessage({ text: "并行调研", profile })
     );
 
     const reasoning = events.filter(
@@ -568,7 +568,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
 
   it("思考随 spawn_subagent 记录落库（票 02）：报告与思考分离、消息表不含思考", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
-    const { session, persistence } = makeSubagentThinkingSession({
+    const { task, persistence } = makeSubagentThinkingTask({
       workspacePath: workspace,
       main: delegateThenSummarize("调研测试框架"),
       sub: [
@@ -581,17 +581,17 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     });
 
     await collect(
-      session.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
+      task.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
     );
 
-    const calls = persistence.listToolCalls("session-1");
+    const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.toolName).toBe("spawn_subagent");
     // 报告（output）与思考（reasoning）分离；思考全文多段拼接
     expect(calls[0]?.output).toBe("调研报告");
     expect(calls[0]?.reasoning).toBe("子代理的思考全文（第二段）");
     // 消息表不含子代理思考（主任务 assistant 正文不混入）
-    const messagesJson = JSON.stringify(persistence.listMessages("session-1"));
+    const messagesJson = JSON.stringify(persistence.listMessages("task-1"));
     expect(messagesJson).not.toContain("子代理的思考全文");
   });
 
@@ -636,7 +636,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
         }),
       }),
     });
-    const { session } = makeSubagentThinkingSession({
+    const { task } = makeSubagentThinkingTask({
       workspacePath: workspace,
       main: delegateThenSummarize("长调研"),
       subModel,
@@ -644,7 +644,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
 
     const controller = new AbortController();
     const events: TaskEvent[] = [];
-    const iterator = session
+    const iterator = task
       .sendMessage({
         text: "委派后中断",
         profile,
@@ -790,7 +790,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         ...factoryOptions,
         fetch: fetchSpy,
       });
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: realFactory,
@@ -805,7 +805,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
     });
 
     const events = await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "委派读文件",
         profile,
         thinkingEffort: "high",
@@ -837,7 +837,7 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         event.type === "tool-result" && event.call.toolName === "spawn_subagent"
     );
     expect(delegation?.call.output).toBe("子代理最终报告");
-    expect(JSON.stringify(persistence.listMessages("session-1"))).not.toContain(
+    expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
       "子代理真实端点思考ABC"
     );
   });

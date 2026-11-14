@@ -11,7 +11,7 @@ import type { TaskRecord, StoredMessage } from "../../src/task/types";
 /** 最小合法任务记录（固定时间戳避免测试不稳定） */
 function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     creationRequestId: null,
     title: "demo",
     workspacePath: "C:\\work\\demo",
@@ -36,7 +36,7 @@ function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
 function message(overrides: Partial<StoredMessage> = {}): StoredMessage {
   return {
     id: "message-1",
-    sessionId: "session-1",
+    taskId: "task-1",
     role: "user",
     content: "你好",
     createdAt: "2026-11-10T08:00:01.000Z",
@@ -87,9 +87,9 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     const path = tempDbPath();
     const first = createSqliteTaskStore(path);
     first.insertTask(taskRecord());
-    first.insertApproval("session-1", "git");
+    first.insertApproval("task-1", "git");
     expect(first.listTasks()[0]?.autoApprove).toBe(false);
-    first.updateTask("session-1", { autoApprove: true });
+    first.updateTask("task-1", { autoApprove: true });
     first.close();
     const reopened = createSqliteTaskStore(path);
     expect(reopened.listTasks()[0]?.autoApprove).toBe(true);
@@ -114,7 +114,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     );
 
     expect(store.listTasks()).toEqual([taskRecord()]);
-    expect(store.listMessages("session-1")).toEqual([
+    expect(store.listMessages("task-1")).toEqual([
       message(),
       message({
         id: "message-2",
@@ -129,23 +129,23 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     const dbPath = tempDbPath();
 
     const first = createSqliteTaskStore(dbPath);
-    first.insertTask(taskRecord({ id: "session-a", title: "项目A" }));
+    first.insertTask(taskRecord({ id: "task-a", title: "项目A" }));
     first.insertTask(
       taskRecord({
-        id: "session-b",
+        id: "task-b",
         title: "项目B",
         createdAt: "2026-11-10T09:00:00.000Z",
         updatedAt: "2026-11-10T09:00:00.000Z",
       })
     );
-    first.insertMessage(message({ sessionId: "session-b" }));
+    first.insertMessage(message({ taskId: "task-b" }));
     first.close();
 
     const reopened = createSqliteTaskStore(dbPath);
-    // 最近使用倒序：session-b（09:00）比 session-a（08:00）新
+    // 最近使用倒序：task-b（09:00）比 task-a（08:00）新
     const ids = reopened.listTasks().map((s) => s.id);
-    expect(ids).toEqual(["session-b", "session-a"]);
-    expect(reopened.listMessages("session-b")).toHaveLength(1);
+    expect(ids).toEqual(["task-b", "task-a"]);
+    expect(reopened.listMessages("task-b")).toHaveLength(1);
     reopened.close();
   });
 
@@ -181,7 +181,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     store.insertTask(taskRecord({ approvalMode: "ask" }));
     expect(store.listTasks()[0]?.approvalMode).toBe("ask");
 
-    store.updateTask("session-1", {
+    store.updateTask("task-1", {
       approvalMode: "full-access",
       updatedAt: "2026-11-10T08:30:00.000Z",
     });
@@ -233,7 +233,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     store.insertTask(taskRecord({ workspaceMode: "worktree" }));
     expect(store.listTasks()[0]?.workspaceMode).toBe("worktree");
 
-    store.updateTask("session-1", {
+    store.updateTask("task-1", {
       workspaceMode: "local",
       updatedAt: "2026-11-10T08:40:00.000Z",
     });
@@ -244,9 +244,9 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     const store = createSqliteTaskStore(":memory:");
     store.insertTask(
       taskRecord({
-        id: "session-wt",
+        id: "task-wt",
         workspaceMode: "worktree",
-        workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
+        workspacePath: "C:\\home\\.codexlike\\worktrees\\task-wt",
         workspaceOriginPath: "C:\\work\\demo",
         updatedAt: "2026-11-10T08:30:00.000Z",
       })
@@ -256,8 +256,8 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     const byId = new Map(
       store.listTasks().map((r) => [r.id, r.workspaceOriginPath])
     );
-    expect(byId.get("session-wt")).toBe("C:\\work\\demo");
-    expect(byId.get("session-1")).toBeNull();
+    expect(byId.get("task-wt")).toBe("C:\\work\\demo");
+    expect(byId.get("task-1")).toBeNull();
     store.close();
   });
 
@@ -286,9 +286,9 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     const store = createSqliteTaskStore(dbPath);
     store.insertTask(
       taskRecord({
-        id: "session-wt",
+        id: "task-wt",
         workspaceMode: "worktree",
-        workspacePath: "C:\\home\\.codexlike\\worktrees\\session-wt",
+        workspacePath: "C:\\home\\.codexlike\\worktrees\\task-wt",
         workspaceOriginPath: "C:\\work\\demo",
       })
     );
@@ -297,7 +297,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
       store.listTasks().map((r) => [r.id, r.workspaceOriginPath])
     );
     expect(byId.get("legacy-wt")).toBeNull();
-    expect(byId.get("session-wt")).toBe("C:\\work\\demo");
+    expect(byId.get("task-wt")).toBe("C:\\work\\demo");
     store.close();
   });
 
@@ -327,28 +327,28 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
   it("「总是允许」记忆入库：幂等（同词不重复）、按任务隔离、重开库完整恢复", () => {
     const dbPath = tempDbPath();
     const first = createSqliteTaskStore(dbPath);
-    first.insertTask(taskRecord({ id: "session-a" }));
+    first.insertTask(taskRecord({ id: "task-a" }));
     first.insertTask(
       taskRecord({
-        id: "session-b",
+        id: "task-b",
         createdAt: "2026-11-10T09:00:00.000Z",
         updatedAt: "2026-11-10T09:00:00.000Z",
       })
     );
 
-    first.insertApproval("session-a", "git");
-    first.insertApproval("session-a", "git"); // 幂等：同词重复写入不重复
-    first.insertApproval("session-a", "pnpm");
-    first.insertApproval("session-b", "npm");
+    first.insertApproval("task-a", "git");
+    first.insertApproval("task-a", "git"); // 幂等：同词重复写入不重复
+    first.insertApproval("task-a", "pnpm");
+    first.insertApproval("task-b", "npm");
 
-    expect(first.listApprovals("session-a")).toEqual(["git", "pnpm"]);
-    expect(first.listApprovals("session-b")).toEqual(["npm"]);
+    expect(first.listApprovals("task-a")).toEqual(["git", "pnpm"]);
+    expect(first.listApprovals("task-b")).toEqual(["npm"]);
     expect(first.listApprovals("nope")).toEqual([]);
     first.close();
 
     // 等价应用重启：记忆完整恢复（审批恢复后仍生效的数据来源）
     const reopened = createSqliteTaskStore(dbPath);
-    expect(reopened.listApprovals("session-a")).toEqual(["git", "pnpm"]);
+    expect(reopened.listApprovals("task-a")).toEqual(["git", "pnpm"]);
     reopened.close();
   });
 
@@ -407,7 +407,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     store.close();
 
     const reopened = createSqliteTaskStore(dbPath);
-    const restored = reopened.listMessages("session-1");
+    const restored = reopened.listMessages("task-1");
     expect(restored[0]?.mentions).toEqual([
       { path: "material.txt", content: "被引用的文件内容" },
     ]);
@@ -440,7 +440,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     );
     store.insertToolCall({
       id: "delegate-1",
-      sessionId: "session-1",
+      taskId: "task-1",
       toolName: "spawn_subagent",
       arguments: '{"task":"调研"}',
       output: "子代理报告",
@@ -450,7 +450,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     });
     store.insertToolCall({
       id: "call-1",
-      sessionId: "session-1",
+      taskId: "task-1",
       toolName: "read_file",
       arguments: '{"path":"a.txt"}',
       output: "内容",
@@ -460,12 +460,12 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     store.close();
 
     const reopened = createSqliteTaskStore(dbPath);
-    const messages = reopened.listMessages("session-1");
+    const messages = reopened.listMessages("task-1");
     expect(messages[0]?.reasoning).toBe("先想想再回答");
     expect(messages[0]?.content).toBe("正文回答");
     // 无思考的消息：reasoning 保持 undefined（旧数据等价，不产生空字符串）
     expect(messages[1]?.reasoning).toBeUndefined();
-    const calls = reopened.listToolCalls("session-1");
+    const calls = reopened.listToolCalls("task-1");
     expect(calls[0]?.reasoning).toBe("子代理思考全文");
     expect(calls[0]?.output).toBe("子代理报告");
     expect(calls[1]?.reasoning).toBeUndefined();
@@ -502,17 +502,17 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
       created_at TEXT NOT NULL
     )`);
     raw.exec(`INSERT INTO tasks (id, title, workspace_path, status, created_at, updated_at)
-      VALUES ('session-1', 'demo', 'C:\\work\\demo', 'idle', '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z')`);
+      VALUES ('task-1', 'demo', 'C:\\work\\demo', 'idle', '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z')`);
     raw.exec(`INSERT INTO messages (id, task_id, role, content, created_at)
-      VALUES ('legacy-a', 'session-1', 'assistant', '旧回答', '2026-11-10T08:00:01.000Z')`);
+      VALUES ('legacy-a', 'task-1', 'assistant', '旧回答', '2026-11-10T08:00:01.000Z')`);
     raw.exec(`INSERT INTO tool_calls (id, task_id, tool_name, arguments, output, is_error, created_at)
-      VALUES ('legacy-d', 'session-1', 'spawn_subagent', '{"task":"旧任务"}', '旧报告', 0, '2026-11-10T08:00:02.000Z')`);
+      VALUES ('legacy-d', 'task-1', 'spawn_subagent', '{"task":"旧任务"}', '旧报告', 0, '2026-11-10T08:00:02.000Z')`);
     raw.close();
 
     const migrated = createSqliteTaskStore(dbPath);
     // 旧行读回：reasoning 自然缺失（undefined），不报错、不产生空思考
-    expect(migrated.listMessages("session-1")[0]?.reasoning).toBeUndefined();
-    expect(migrated.listToolCalls("session-1")[0]?.reasoning).toBeUndefined();
+    expect(migrated.listMessages("task-1")[0]?.reasoning).toBeUndefined();
+    expect(migrated.listToolCalls("task-1")[0]?.reasoning).toBeUndefined();
     // 迁移后可按新 schema 写入思考
     migrated.insertMessage(
       message({
@@ -523,7 +523,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
         createdAt: "2026-11-10T08:00:03.000Z",
       })
     );
-    expect(migrated.listMessages("session-1")[1]?.reasoning).toBe("新思考");
+    expect(migrated.listMessages("task-1")[1]?.reasoning).toBe("新思考");
     migrated.close();
   });
 
@@ -547,7 +547,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     db.prepare(
       "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
-      "session-1",
+      "task-1",
       "demo",
       "C:\\work\\demo",
       null,
@@ -559,21 +559,15 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     );
     db.prepare(
       "INSERT INTO messages (id, task_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(
-      "legacy-1",
-      "session-1",
-      "user",
-      "旧消息",
-      "2026-11-10T08:00:01.000Z"
-    );
+    ).run("legacy-1", "task-1", "user", "旧消息", "2026-11-10T08:00:01.000Z");
     db.close();
 
     const migrated = createSqliteTaskStore(dbPath);
-    const messages = migrated.listMessages("session-1");
+    const messages = migrated.listMessages("task-1");
     expect(messages).toEqual([
       {
         id: "legacy-1",
-        sessionId: "session-1",
+        taskId: "task-1",
         role: "user",
         content: "旧消息",
         createdAt: "2026-11-10T08:00:01.000Z",
@@ -583,7 +577,7 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     migrated.insertMessage(
       message({ id: "new-1", createdAt: "2026-11-10T08:00:02.000Z" })
     );
-    expect(migrated.listMessages("session-1")).toHaveLength(2);
+    expect(migrated.listMessages("task-1")).toHaveLength(2);
     migrated.close();
   });
 });
@@ -611,7 +605,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
     );
 
     store.replaceHistory(
-      "session-1",
+      "task-1",
       [
         message({
           id: "summary-1",
@@ -627,7 +621,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
       ],
       {
         id: "compact-1",
-        sessionId: "session-1",
+        taskId: "task-1",
         summary: "摘要",
         messagesCompacted: 2,
         createdAt: "2026-11-10T09:00:02.000Z",
@@ -636,16 +630,14 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
     store.close();
 
     const reopened = createSqliteTaskStore(dbPath);
-    expect(
-      reopened.listMessages("session-1").map((m) => [m.id, m.role])
-    ).toEqual([
+    expect(reopened.listMessages("task-1").map((m) => [m.id, m.role])).toEqual([
       ["summary-1", "compact-summary"],
       ["kept-1", "user"],
     ]);
-    expect(reopened.listCompacts("session-1")).toEqual([
+    expect(reopened.listCompacts("task-1")).toEqual([
       {
         id: "compact-1",
-        sessionId: "session-1",
+        taskId: "task-1",
         summary: "摘要",
         messagesCompacted: 2,
         createdAt: "2026-11-10T09:00:02.000Z",
@@ -659,7 +651,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
     store.insertTask(taskRecord());
     const compact = (id: string, at: string) =>
       store.replaceHistory(
-        "session-1",
+        "task-1",
         [
           message({
             id: `s-${id}`,
@@ -670,7 +662,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
         ],
         {
           id,
-          sessionId: "session-1",
+          taskId: "task-1",
           summary: `摘要${id}`,
           messagesCompacted: 2,
           createdAt: at,
@@ -679,7 +671,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
     compact("c-2", "2026-11-10T09:00:00.000Z");
     compact("c-1", "2026-11-10T08:00:00.000Z");
 
-    expect(store.listCompacts("session-1").map((c) => c.id)).toEqual([
+    expect(store.listCompacts("task-1").map((c) => c.id)).toEqual([
       "c-1",
       "c-2",
     ]);
@@ -700,14 +692,14 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
       );
-      INSERT INTO tasks VALUES ('session-1', 'demo', 'C:\\work', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
-      INSERT INTO messages VALUES ('m1', 'session-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
+      INSERT INTO tasks VALUES ('task-1', 'demo', 'C:\\work', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO messages VALUES ('m1', 'task-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
     `);
     db.close();
 
     const store = createSqliteTaskStore(dbPath);
-    expect(store.listMessages("session-1")).toHaveLength(1);
-    expect(store.listCompacts("session-1")).toEqual([]);
+    expect(store.listMessages("task-1")).toHaveLength(1);
+    expect(store.listCompacts("task-1")).toEqual([]);
     store.close();
   });
 
@@ -723,7 +715,7 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
 
     // 重开验证：目录由 store 自建，库文件落在嵌套路径且可读回
     const reopened = createSqliteTaskStore(dbPath);
-    expect(reopened.listMessages("session-1")).toHaveLength(1);
+    expect(reopened.listMessages("task-1")).toHaveLength(1);
     reopened.close();
   });
 });
