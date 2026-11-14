@@ -31,12 +31,15 @@ afterEach(() => {
 });
 
 /**
- * 任务→任务改名（票 03）的 expand 兼容：每个 tasks:* channel 与对应
- * sessions:* channel 必须注册同一 handler——现有 UI 与 e2e 经旧 channel
- * 调用不改仍绿，票 06 contract 阶段删除旧注册。
+ * 会话→任务改名（票 06 contract）：票 03 的 expand 兼容层必须删除干净——
+ * IPC 契约不再携带旧 sessions channel 常量，主进程也不再注册任何
+ * `sessions:*` handler（旧名不存在，防止兼容层悄悄回流）。
  */
-it("全部 sessions:* channel 与 tasks:* 双注册同一 handler", async () => {
-  const root = mkdtempSync(join(tmpdir(), "channel-aliases-"));
+it("旧 sessions channel 兼容层已删除：IPC 无 sessions 键、无 sessions:* 注册", async () => {
+  expect("sessions" in IPC).toBe(false);
+  expect("sessionEvents" in IPC).toBe(false);
+
+  const root = mkdtempSync(join(tmpdir(), "legacy-channels-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "project"));
   const persistence = createSqliteTaskStore(join(root, "tasks.db"));
@@ -72,20 +75,12 @@ it("全部 sessions:* channel 与 tasks:* 双注册同一 handler", async () => 
     resourcesFor,
   });
 
-  // IPC.tasks 与 IPC.sessions 键一一对应；同名键的 handler 必须是同一函数。
-  const taskKeys = Object.keys(IPC.tasks).sort();
-  const sessionKeys = Object.keys(IPC.sessions).sort();
-  expect(taskKeys).toEqual(sessionKeys);
-  expect(taskKeys.length).toBeGreaterThan(0);
-  for (const key of taskKeys) {
-    const taskChannel = IPC.tasks[key as keyof typeof IPC.tasks];
-    const sessionChannel = IPC.sessions[key as keyof typeof IPC.sessions];
-    expect(handlers.get(taskChannel), `${key}: ${taskChannel} 未注册`).toBe(
-      handlers.get(sessionChannel)
-    );
-  }
+  expect([...handlers.keys()].filter((c) => c.startsWith("sessions:"))).toEqual(
+    []
+  );
+  expect(handlers.has("session:events")).toBe(false);
 
-  // 新 channel 独立可用：list 返回数组、view 参数校验照常生效。
+  // 正式 channel 独立可用：list 返回数组、view 参数校验照常生效。
   const window = {
     isDestroyed: () => false,
     webContents: { send: () => {} },

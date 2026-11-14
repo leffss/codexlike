@@ -127,7 +127,7 @@ async function main() {
     const bId = await b.getAttribute("data-task-id");
     const wrong = await window.evaluate(
       async ({ id, requestId }) =>
-        window.codexlike.sessions.respondInteraction(id, requestId, {
+        window.codexlike.tasks.respondInteraction(id, requestId, {
           kind: "approval",
           decision: "approve",
         }),
@@ -208,7 +208,7 @@ async function main() {
       .waitFor();
     await until(() => gates.get("A-final").res.destroyed, "显式停止关闭模型流");
     const stopped = await window.evaluate(
-      (id) => window.codexlike.sessions.view(id),
+      (id) => window.codexlike.tasks.view(id),
       aId
     );
     assert(stopped.activity.outcome === "interrupted", "停止终态由宿主保存");
@@ -260,7 +260,7 @@ async function main() {
       "审批与问答工具结果无丢失无重复"
     );
     console.log(
-      "[e2e] live sessions：未完成A→B→A、后台工具/审批/问答、跨任务响应隔离、未查看/失败/中断通过"
+      "[e2e] live tasks：未完成A→B→A、后台工具/审批/问答、跨任务响应隔离、未查看/失败/中断通过"
     );
   } finally {
     if (app) await closeApp(app);

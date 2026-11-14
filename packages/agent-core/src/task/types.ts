@@ -46,7 +46,7 @@ export interface ProjectRecord {
   createdAt: string;
 }
 
-/** 任务记录（sessions 表一行；重启恢复的数据来源） */
+/** 任务记录（tasks 表一行；重启恢复的数据来源） */
 export interface TaskRecord {
   id: string;
   /** 管理归属；null 为独立任务，绝不从目录推导。 */
@@ -88,7 +88,7 @@ export interface TaskRecord {
  */
 export interface ApprovalDecisionRecord {
   id: string;
-  sessionId: string;
+  taskId: string;
   decision: "allow" | "allow-always" | "deny";
   /** 记忆主体：命令首词/前缀（如 `npm`），或工具名 */
   subject: string;
@@ -103,7 +103,7 @@ export type MessageRole = "user" | "assistant" | "error" | "compact-summary";
 /** 消息记录（messages 表一行） */
 export interface StoredMessage {
   id: string;
-  sessionId: string;
+  taskId: string;
   role: MessageRole;
   /** 用户原文 / 助手回复全文 / 错误提示；@引用 内容不混入（单独存 mentions） */
   content: string;
@@ -147,7 +147,7 @@ export interface MentionAttachment {
 /** compact 记录（compact_records 表一行；/compact 的审计与 /status「已压缩」标记数据源） */
 export interface CompactRecord {
   id: string;
-  sessionId: string;
+  taskId: string;
   /** 压缩生成的摘要全文（与 compact-summary 消息内容一致） */
   summary: string;
   /** 被压缩替换的历史消息条数（user + assistant） */

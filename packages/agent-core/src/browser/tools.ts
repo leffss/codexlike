@@ -19,7 +19,7 @@ import type { BrowserTaskManager } from "./manager";
 export interface BrowserToolsOptions {
   manager: BrowserTaskManager;
   /** 截图保存目录（按任务；默认 <系统临时目录>/codexlike-screenshots/<任务>） */
-  screenshotDirFor?: (sessionId: string) => string;
+  screenshotDirFor?: (taskId: string) => string;
 }
 
 /** browser_read 正文提取的字符上限（与终端输出同档；标记格式一致） */
@@ -71,12 +71,12 @@ export function createBrowserTools(
   const { manager } = options;
   const screenshotDirFor =
     options.screenshotDirFor ??
-    ((sessionId: string) => join(tmpdir(), "codexlike-screenshots", sessionId));
+    ((taskId: string) => join(tmpdir(), "codexlike-screenshots", taskId));
 
   /** 未导航任务的统一引导错误 */
   async function requireOpenedPage(context: ToolExecutionContext) {
     await manager.prepare();
-    const page = await manager.pageFor(context.sessionId);
+    const page = await manager.pageFor(context.taskId);
     if (page.url() === "about:blank") {
       throw new Error(
         "当前任务尚未打开任何页面，请先使用 browser_navigate 打开一个网址"
@@ -123,7 +123,7 @@ export function createBrowserTools(
       const progressLines: string[] = [];
       try {
         await manager.prepare((line) => progressLines.push(line));
-        const page = await manager.pageFor(context.sessionId);
+        const page = await manager.pageFor(context.taskId);
         let response: Awaited<ReturnType<typeof page.goto>> = null;
         try {
           response = await page.goto(parsed.toString(), {
@@ -133,7 +133,7 @@ export function createBrowserTools(
         } catch (error) {
           // 失败后页面停在 chrome-error://，后续导航会被其挂起的任务打断——
           // 整页换新（同一 context，Cookie 保留）是最可靠复位，任务保持可用
-          await manager.resetPage(context.sessionId).catch(() => {});
+          await manager.resetPage(context.taskId).catch(() => {});
           throw error;
         }
         const title = await page.title();
@@ -258,7 +258,7 @@ export function createBrowserTools(
           fullPage: true,
           timeout: SCREENSHOT_TIMEOUT_MS,
         });
-        const dir = screenshotDirFor(context.sessionId);
+        const dir = screenshotDirFor(context.taskId);
         mkdirSync(dir, { recursive: true });
         const name = `${context.toolCallId ?? Date.now()}.png`;
         const path = join(dir, name);

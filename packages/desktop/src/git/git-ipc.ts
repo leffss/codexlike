@@ -25,7 +25,7 @@ export function registerGitHandlers(options: {
   const { manager, profiles } = options;
 
   /** IPC 边界不信任渲染进程：taskId 必须对应存在的任务 */
-  function findSession(taskId: unknown): TaskRecord {
+  function findTask(taskId: unknown): TaskRecord {
     if (typeof taskId !== "string") {
       throw new Error("git：taskId 必须是字符串");
     }
@@ -41,7 +41,7 @@ export function registerGitHandlers(options: {
   ipcMain.handle(
     IPC.git.status,
     async (_e: IpcMainInvokeEvent, taskId: unknown) => {
-      const record = findSession(taskId);
+      const record = findTask(taskId);
       try {
         return await createGitService(record.workspacePath).status();
       } catch (error) {
@@ -61,7 +61,7 @@ export function registerGitHandlers(options: {
       path: unknown,
       oldPath: unknown
     ) => {
-      const record = findSession(taskId);
+      const record = findTask(taskId);
       if (typeof path !== "string" || path === "") {
         throw new Error("git diff：文件路径不合法");
       }
@@ -85,7 +85,7 @@ export function registerGitHandlers(options: {
   ipcMain.handle(
     IPC.git.createBranch,
     async (_e: IpcMainInvokeEvent, taskId: unknown) => {
-      const record = findSession(taskId);
+      const record = findTask(taskId);
       // 分支名由任务名生成（codexlike/<任务名>，sanitize 在 agent-core 纯函数）
       try {
         return await createGitService(record.workspacePath).createTaskBranch(
@@ -103,7 +103,7 @@ export function registerGitHandlers(options: {
   ipcMain.handle(
     IPC.git.commitMessage,
     async (_e: IpcMainInvokeEvent, taskId: unknown, profileId: unknown) => {
-      const record = findSession(taskId);
+      const record = findTask(taskId);
       if (typeof profileId !== "string" || profileId === "") {
         throw new Error("生成提交消息需要先选择模型（Provider Profile）");
       }
@@ -137,7 +137,7 @@ export function registerGitHandlers(options: {
   ipcMain.handle(
     IPC.git.commit,
     async (_e: IpcMainInvokeEvent, taskId: unknown, message: unknown) => {
-      const record = findSession(taskId);
+      const record = findTask(taskId);
       if (typeof message !== "string" || message.trim() === "") {
         throw new Error("提交消息不能为空");
       }

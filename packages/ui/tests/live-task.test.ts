@@ -34,7 +34,7 @@ const snapshot: TaskView = {
 it("终态完成时刻由消息提供，快照重放、错过增量与重启恢复保持一致", () => {
   const message = {
     id: "m1",
-    sessionId: "a",
+    taskId: "a",
     role: "assistant" as const,
     content: "最终正文",
     createdAt: "2026-11-11T08:00:09.000Z",
@@ -128,7 +128,7 @@ it("Compact启动和终态按水位接续并原子替换历史，切换快照与
           kind: "message",
           message: {
             id: "summary",
-            sessionId: "a",
+            taskId: "a",
             role: "compact-summary",
             content: "权威摘要",
             createdAt: "2026-11-11T09:00:00Z",
@@ -176,7 +176,7 @@ it("在停止清理期间切回仍接收中断终态，不能残留流式标记"
       type: "assistant-aborted",
       message: {
         id: "m1",
-        sessionId: "a",
+        taskId: "a",
         role: "assistant",
         content: "第一段第二段",
         aborted: true,
@@ -212,7 +212,7 @@ it("初始现场与订阅缓冲交错仍完整且无重，其他任务和旧执�
       type: "user-message",
       message: {
         id: "user2",
-        sessionId: "a",
+        taskId: "a",
         role: "user",
         content: "继续",
         createdAt: "2026-11-11T08:00:00Z",
@@ -230,7 +230,7 @@ it("初始现场与订阅缓冲交错仍完整且无重，其他任务和旧执�
       type: "assistant-done",
       message: {
         id: "m2",
-        sessionId: "a",
+        taskId: "a",
         role: "assistant",
         content: "完成",
         createdAt: "2026-11-11T08:00:00Z",
@@ -253,7 +253,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
       kind: "message" as const,
       message: {
         id: "u1",
-        sessionId: "a",
+        taskId: "a",
         role: "user" as const,
         content: "查一下",
         createdAt: "2026-11-11T08:00:00Z",
@@ -263,7 +263,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
       kind: "tool-call" as const,
       call: {
         id: "t1",
-        sessionId: "a",
+        taskId: "a",
         toolName: "read_file",
         arguments: '{"path":"a.txt"}',
         output: "内容",
@@ -275,7 +275,7 @@ it("历史恢复与运行期流式输出形状一致：同一消息段模型、�
       kind: "message" as const,
       message: {
         id: "a1",
-        sessionId: "a",
+        taskId: "a",
         role: "assistant" as const,
         content: "结论",
         createdAt: "2026-11-11T08:00:02Z",
@@ -369,7 +369,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
         kind: "message",
         message: {
           id: "u1",
-          sessionId: "a",
+          taskId: "a",
           role: "user",
           content: "任务内的问题",
           createdAt: "2026-11-11T08:00:00Z",
@@ -379,7 +379,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
         kind: "message",
         message: {
           id: "m1",
-          sessionId: "a",
+          taskId: "a",
           role: "assistant",
           content: "终态正文",
           reasoning: "第一段思考，第二段",
@@ -542,7 +542,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
       type: "assistant-done",
       message: {
         id: "m1",
-        sessionId: "a",
+        taskId: "a",
         role: "assistant",
         content: "完成",
         createdAt: "2026-11-13T00:00:01Z",

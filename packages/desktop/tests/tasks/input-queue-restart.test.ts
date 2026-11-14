@@ -33,8 +33,8 @@ afterEach(async () => {
   handlers.clear();
 });
 function invoke(name: string, ...args: unknown[]): any {
-  const handler = handlers.get(`sessions:${name}`);
-  if (!handler) throw new Error(`未注册通道 sessions:${name}`);
+  const handler = handlers.get(`tasks:${name}`);
+  if (!handler) throw new Error(`未注册通道 tasks:${name}`);
   return handler({}, ...args);
 }
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 8000 });
@@ -43,7 +43,7 @@ async function setup() {
   const root = mkdtempSync(join(tmpdir(), "input-queue-restart-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   // 父目录刻意不存在，两个生产 store 必须自行建目录。
-  const dbPath = join(root, "fresh", "session-workbench.db");
+  const dbPath = join(root, "fresh", "task-workbench.db");
   const responses = new Map<string, ServerResponse>();
   const requests: string[] = [];
   const server = createServer((req, res) => {

@@ -8,7 +8,7 @@ import {
 
 const request: QuestionsInteractionRequest = {
   id: "r1",
-  sessionId: "s1",
+  taskId: "s1",
   turnId: "t1",
   toolCallId: "c1",
   kind: "questions",

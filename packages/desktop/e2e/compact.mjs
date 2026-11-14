@@ -142,10 +142,10 @@ async function main() {
     await chooseA();
     await window.getByTestId("compacting-indicator").waitFor();
     await window.waitForFunction(async () => {
-      const session = (await window.codexlike.sessions.list()).find(
+      const task = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "第1轮问题"
       );
-      const view = await window.codexlike.sessions.view(session.id);
+      const view = await window.codexlike.tasks.view(task.id);
       return view.activity.running && view.activity.operation === "compact";
     });
     assert(typeof heldSummary === "function", "压缩请求已进入模型闸门");

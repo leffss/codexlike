@@ -7,9 +7,6 @@
 // - `./node`（node.ts）：Node 宿主（Electron 主进程）专用，
 //   含任务对象、任务管理器与 SQLite 持久化（依赖 node:sqlite 等 Node API）。
 //
-// 「任务→任务」改名 expand 阶段（ADR 0014）：task 系新名为正式名，
-// 各处以 `Xxx as SessionXxx` 保留旧名 re-export 别名，desktop/ui 既有 import
-// 不改即可编译；票 06（contract 阶段）统一删除别名。
 export type {
   ProviderProfile,
   ProviderProfileErrors,
@@ -32,7 +29,6 @@ export type {
   WorkbenchValue,
   WorkbenchEntry,
   TaskPreferences,
-  TaskPreferences as SessionPreferences,
   ReadingPosition,
   SavedQuestionDraft,
 } from "./task/workbench-state";
@@ -48,20 +44,14 @@ export type {
   MessageRole,
   ProjectRecord,
   TaskEvent,
-  TaskEvent as SessionEvent,
   TaskRecord,
-  TaskRecord as SessionRecord,
   TaskStatus,
-  TaskStatus as SessionStatus,
   StoredMessage,
   TranscriptItem,
   WorkspaceMode,
 } from "./task/types";
 
-export type {
-  TaskSearchResult,
-  TaskSearchResult as SessionSearchResult,
-} from "./task/search";
+export type { TaskSearchResult } from "./task/search";
 
 // 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
 export type {
@@ -115,9 +105,7 @@ export type {
   ResourceExecution,
   ResourceSnapshotSummary,
   TaskResourcesView,
-  TaskResourcesView as SessionResourcesView,
   TaskResourceState,
-  TaskResourceState as SessionResourceState,
   SkillDescriptor,
   SkillLoadRecord,
 } from "./context/resource-types";

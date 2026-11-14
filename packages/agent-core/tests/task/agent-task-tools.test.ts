@@ -23,7 +23,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(workspacePath: string): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath,
     providerProfileId: null,
@@ -135,7 +135,7 @@ async function collect(
   return events;
 }
 
-function makeSession(
+function makeTask(
   model: MockLanguageModelV4,
   workspacePath: string,
   record?: TaskRecord
@@ -143,7 +143,7 @@ function makeSession(
   const persistence = createSqliteTaskStore(":memory:");
   const base = record ?? taskRecord(workspacePath);
   persistence.insertTask(base);
-  const session = createAgentTask({
+  const task = createAgentTask({
     record: base,
     persistence,
     history: persistence.listMessages(base.id),
@@ -151,7 +151,7 @@ function makeSession(
     tools: createBuiltinTools(),
     now: fakeClock(),
   });
-  return { session, persistence };
+  return { task, persistence };
 }
 
 describe("AgentTask 工具循环（六件工具默认放行）", () => {
@@ -193,19 +193,19 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["需要重新加载"] },
     ]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       resources: () => fakeResourceSnapshot(),
       languageModelFor: () => model,
     });
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "处理任务",
       profile,
     })) {
       if (event.type === "tool-result" && event.call.id === "load") {
         expect(event.call.isError).toBe(false);
-        expect(session.resourceState.active?.loaded).toHaveLength(1);
+        expect(task.resourceState.active?.loaded).toHaveLength(1);
       }
     }
     expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).not.toContain(
@@ -217,18 +217,16 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(
       "RESOURCE_PRIVATE_BODY"
     );
-    expect(session.resourceState.last?.loaded).toHaveLength(2);
-    expect(session.resourceState.active).toBeNull();
-    const next = await collect(
-      session.sendMessage({ text: "下一轮", profile })
-    );
+    expect(task.resourceState.last?.loaded).toHaveLength(2);
+    expect(task.resourceState.active).toBeNull();
+    const next = await collect(task.sendMessage({ text: "下一轮", profile }));
     expect(JSON.stringify(model.doStreamCalls[3]?.prompt)).not.toContain(
       "PRIVATE_BODY"
     );
     expect(next.find((event) => event.type === "tool-result")).toMatchObject({
       call: { isError: true, output: expect.stringContaining("尚未加载") },
     });
-    expect(session.resourceState.last?.loaded).toEqual([]);
+    expect(task.resourceState.last?.loaded).toEqual([]);
     persistence.close();
   });
 
@@ -239,7 +237,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       const record = taskRecord("C:/work/demo");
       persistence.insertTask(record);
       const model = scriptedModel([{ kind: "text", deltas: ["不应请求"] }]);
-      const session = createAgentTask({
+      const task = createAgentTask({
         record,
         persistence,
         resources: () => fakeResourceSnapshot(),
@@ -257,11 +255,11 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
         ],
       });
       await expect(
-        collect(session.sendMessage({ text: "任务", profile }))
+        collect(task.sendMessage({ text: "任务", profile }))
       ).rejects.toThrow(`工具名称冲突：${name}`);
       expect(model.doStreamCalls).toHaveLength(0);
       expect(persistence.listMessages(record.id)).toEqual([]);
-      expect(session.resourceState.active).toBeNull();
+      expect(task.resourceState.active).toBeNull();
       persistence.close();
     }
   );
@@ -281,10 +279,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["已为你创建 ", "hello.txt"] },
     ]);
-    const { session, persistence } = makeSession(model, workspace);
+    const { task, persistence } = makeTask(model, workspace);
 
     const events = await collect(
-      session.sendMessage({ text: "帮我创建 hello.txt", profile })
+      task.sendMessage({ text: "帮我创建 hello.txt", profile })
     );
 
     // 事件序列：工具卡片事件夹在 assistant-start 与最终文本之间
@@ -325,7 +323,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(secondPrompt).toContain("已写入 hello.txt");
 
     // 工具调用记录落库
-    const calls = persistence.listToolCalls("session-1");
+    const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       id: "call-1",
@@ -335,7 +333,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
 
     // 最终 assistant 消息照常落库（02 的行为不变）
     expect(
-      persistence.listMessages("session-1").map((m) => [m.role, m.content])
+      persistence.listMessages("task-1").map((m) => [m.role, m.content])
     ).toContainEqual(["assistant", "已为你创建 hello.txt"]);
   });
 
@@ -370,19 +368,20 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["已把 debug 打开"] },
     ]);
-    const { session, persistence } = makeSession(model, workspace);
+    const { task, persistence } = makeTask(model, workspace);
 
     const events = await collect(
-      session.sendMessage({ text: "打开 debug", profile })
+      task.sendMessage({ text: "打开 debug", profile })
     );
 
     expect(events.filter((e) => e.type === "tool-result")).toHaveLength(2);
     expect(fs.readFileSync(join(workspace, "config.txt"), "utf8")).toBe(
       "debug=true\n"
     );
-    expect(
-      persistence.listToolCalls("session-1").map((c) => c.toolName)
-    ).toEqual(["read_file", "apply_patch"]);
+    expect(persistence.listToolCalls("task-1").map((c) => c.toolName)).toEqual([
+      "read_file",
+      "apply_patch",
+    ]);
   });
 
   it("工具失败（如文件不存在）：isError 结果回填模型，任务继续到最终回复", async () => {
@@ -401,10 +400,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       { kind: "text", deltas: ["文件不存在，我来新建"] },
       // （第三步不需要：第二轮文本即结束）
     ]);
-    const { session, persistence } = makeSession(model, workspace);
+    const { task, persistence } = makeTask(model, workspace);
 
     const events = await collect(
-      session.sendMessage({ text: "读一下 ghost.txt", profile })
+      task.sendMessage({ text: "读一下 ghost.txt", profile })
     );
 
     const resultEvent = events.find(
@@ -419,7 +418,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(secondPrompt).toContain("不存在");
 
     expect(events.at(-1)?.type).toBe("assistant-done");
-    expect(persistence.listToolCalls("session-1")[0]?.isError).toBe(true);
+    expect(persistence.listToolCalls("task-1")[0]?.isError).toBe(true);
   });
 
   it("模型调用未注册的工具名：返回可读错误结果而不是中断任务", async () => {
@@ -431,10 +430,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["好吧"] },
     ]);
-    const { session } = makeSession(model, workspace);
+    const { task } = makeTask(model, workspace);
 
     const events = await collect(
-      session.sendMessage({ text: "试试神秘工具", profile })
+      task.sendMessage({ text: "试试神秘工具", profile })
     );
 
     const resultEvent = events.find(
@@ -452,16 +451,14 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     const record = taskRecord(workspace);
     persistence.insertTask(record);
     const model = scriptedModel([{ kind: "text", deltas: ["纯文本回答"] }]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    const events = await collect(
-      session.sendMessage({ text: "你好", profile })
-    );
+    const events = await collect(task.sendMessage({ text: "你好", profile }));
     expect(events.map((e) => e.type)).toEqual([
       "user-message",
       "assistant-start",
@@ -501,7 +498,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord(workspace);
     persistence.insertTask(record);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       history: persistence.listMessages(record.id),
@@ -511,7 +508,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     });
 
     const events = await collect(
-      session.sendMessage({ text: "查一下 tavily", profile })
+      task.sendMessage({ text: "查一下 tavily", profile })
     );
 
     // 搜索源被真实调用，结果以标题/URL/摘要回填模型上下文
@@ -544,7 +541,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord(workspace);
     persistence.insertTask(record);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       history: persistence.listMessages(record.id),
@@ -554,7 +551,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     });
 
     const events = await collect(
-      session.sendMessage({ text: "搜个东西", profile })
+      task.sendMessage({ text: "搜个东西", profile })
     );
 
     const resultEvent = events.find(
@@ -587,7 +584,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     // ask 档：echo 长命令也弹审批（本用例以批准点为 abort 计时锚点，见下）
     const askRecord = taskRecord(workspace);
     askRecord.approvalMode = "ask";
-    const { session, persistence } = makeSession(model, workspace, askRecord);
+    const { task, persistence } = makeTask(model, workspace, askRecord);
 
     const controller = new AbortController();
     const events: TaskEvent[] = [];
@@ -598,14 +595,14 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     // abort 落在等待审批期（2026-11-11 全量并发 flaky 实证）。
     // 从批准点起算，abort 必落执行中（子进程被杀）。
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "跑个长命令",
       profile,
       signal: controller.signal,
     })) {
       events.push(event);
       if (event.type === "interaction-request") {
-        session.respondApproval(event.interaction.request.id, "approve");
+        task.respondApproval(event.interaction.request.id, "approve");
         stopTimer = setTimeout(() => controller.abort(), 1000);
       }
     }
@@ -628,14 +625,14 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
 
     // 中断的工具调用记录落库（含用户中断标记）
-    const stored = persistence.listToolCalls("session-1");
+    const stored = persistence.listToolCalls("task-1");
     expect(stored).toHaveLength(1);
     expect(stored[0]?.isError).toBe(true);
     expect(stored[0]?.output).toContain("已被用户中断");
 
     // 中断后可继续发新消息，上下文包含中断前的历史
     const second = await collect(
-      session.sendMessage({ text: "刚才怎样", profile })
+      task.sendMessage({ text: "刚才怎样", profile })
     );
     expect(second.at(-1)?.type).toBe("assistant-done");
     const secondPrompt = JSON.stringify(model.doStreamCalls.at(-1)?.prompt);
@@ -659,11 +656,11 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       },
       { kind: "text", deltas: ["（不应被请求）"] },
     ]);
-    const { session, persistence } = makeSession(model, workspace);
+    const { task, persistence } = makeTask(model, workspace);
 
     const controller = new AbortController();
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "写个文件",
       profile,
       signal: controller.signal,
@@ -685,7 +682,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
 
     // 工具确实未执行（无痕迹文件），记录落库
     expect(existsSync(join(workspace, "interrupted-marker.txt"))).toBe(false);
-    expect(persistence.listToolCalls("session-1")[0]?.output).toContain(
+    expect(persistence.listToolCalls("task-1")[0]?.output).toContain(
       "已被用户中断"
     );
   });

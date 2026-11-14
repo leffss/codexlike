@@ -128,15 +128,15 @@ export function parseInteractionResponse(
     if (
       Object.hasOwn(response, "scope") &&
       response.scope !== "once" &&
-      response.scope !== "session"
+      response.scope !== "task"
     )
-      throw new Error("审批 scope 必须是 once 或 session");
+      throw new Error("审批 scope 必须是 once 或 task");
     return {
       kind: "approval",
       decision: "approve",
       ...(response.scope === undefined
         ? {}
-        : { scope: response.scope as "once" | "session" }),
+        : { scope: response.scope as "once" | "task" }),
     };
   }
   const answers = array(

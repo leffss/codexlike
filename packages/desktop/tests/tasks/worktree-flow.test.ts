@@ -61,7 +61,7 @@ async function setup(hold = false) {
   writeFileSync(join(repo, "tracked.txt"), "来源内容");
   git(repo, "add", "tracked.txt");
   git(repo, "commit", "-m", "fixture");
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanups.push(() => store.close());
   const profiles = createProfileStore({
     dir: home,
@@ -124,28 +124,28 @@ async function setup(hold = false) {
     manager,
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };
 }
 async function idle(id: string) {
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", id)).running).toBe(false)
+    expect((await invoke("tasks:execution", id)).running).toBe(false)
   );
 }
 
 it("共享提示按真实目录识别项目与独立执行，不误报隔离副本也不禁止并行", async () => {
   const app = await setup(true);
   const project = await invoke("projects:add", app.repo);
-  const standalone = await invoke("sessions:start", {
+  const standalone = await invoke("tasks:start", {
     requestId: "shared-a",
     projectId: null,
     workspacePath: app.repo,
     text: "独立执行",
   });
   const target = { projectId: project.id, workspaceMode: "local" };
-  expect(await invoke("sessions:workspace-sharing", target)).toMatchObject({
+  expect(await invoke("tasks:workspace-sharing", target)).toMatchObject({
     workspacePath: app.repo,
     runningTasks: [{ id: standalone.id }],
   });
@@ -153,7 +153,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
   symlinkSync(app.repo, alias, "junction");
   expect(
     (
-      await invoke("sessions:workspace-sharing", {
+      await invoke("tasks:workspace-sharing", {
         projectId: null,
         workspacePath: alias,
       })
@@ -163,7 +163,7 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
   mkdirSync(sibling);
   expect(
     (
-      await invoke("sessions:workspace-sharing", {
+      await invoke("tasks:workspace-sharing", {
         projectId: null,
         workspacePath: sibling,
       })
@@ -171,38 +171,36 @@ it("共享提示按真实目录识别项目与独立执行，不误报隔离副�
   ).toEqual([]);
   expect(
     (
-      await invoke("sessions:workspace-sharing", {
+      await invoke("tasks:workspace-sharing", {
         ...target,
         workspaceMode: "worktree",
       })
     ).runningTasks
   ).toEqual([]);
-  const local = await invoke("sessions:start", {
+  const local = await invoke("tasks:start", {
     ...target,
     requestId: "shared-b",
     text: "继续并行",
   });
-  expect((await invoke("sessions:execution", standalone.id)).running).toBe(
-    true
-  );
-  expect((await invoke("sessions:execution", local.id)).running).toBe(true);
+  expect((await invoke("tasks:execution", standalone.id)).running).toBe(true);
+  expect((await invoke("tasks:execution", local.id)).running).toBe(true);
   expect(
     (
-      await invoke("sessions:workspace-sharing", { taskId: local.id })
+      await invoke("tasks:workspace-sharing", { taskId: local.id })
     ).runningTasks.map((item: any) => item.id)
   ).toEqual([standalone.id]);
-  const isolated = await invoke("sessions:start", {
+  const isolated = await invoke("tasks:start", {
     projectId: project.id,
     workspaceMode: "worktree",
     requestId: "isolated",
     text: "隔离",
   });
   expect(
-    (await invoke("sessions:workspace-sharing", { taskId: isolated.id }))
+    (await invoke("tasks:workspace-sharing", { taskId: isolated.id }))
       .runningTasks
   ).toEqual([]);
   for (const record of [standalone, local, isolated]) {
-    await invoke("sessions:interrupt", record.id);
+    await invoke("tasks:interrupt", record.id);
     await idle(record.id);
   }
 });
@@ -219,12 +217,10 @@ it("非Git和Worktree目录创建失败保留用户文件，同请求修复后�
     workspaceMode: "worktree",
     text: "处理任务",
   };
-  await expect(invoke("sessions:start", request)).rejects.toThrow(
-    "不是 git 仓库"
-  );
-  expect(await invoke("sessions:list")).toEqual([]);
+  await expect(invoke("tasks:start", request)).rejects.toThrow("不是 git 仓库");
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(readFileSync(join(plain, "keep.txt"), "utf8")).toBe("已有文件");
-  const local = await invoke("sessions:start", {
+  const local = await invoke("tasks:start", {
     ...request,
     workspaceMode: "local",
   });
@@ -237,13 +233,13 @@ it("非Git和Worktree目录创建失败保留用户文件，同请求修复后�
     requestId: "mkdir-retry",
     projectId: gitProject.id,
   };
-  await expect(invoke("sessions:start", retry)).rejects.toThrow();
+  await expect(invoke("tasks:start", retry)).rejects.toThrow();
   expect(readFileSync(blocker, "utf8")).toBe("不可删除的现有文件");
-  expect(await invoke("sessions:list")).toHaveLength(1);
+  expect(await invoke("tasks:list")).toHaveLength(1);
   rmSync(blocker);
-  const worktree = await invoke("sessions:start", retry);
+  const worktree = await invoke("tasks:start", retry);
   await idle(worktree.id);
-  expect(await invoke("sessions:list")).toHaveLength(2);
+  expect(await invoke("tasks:list")).toHaveLength(2);
 });
 
 it("失败期间出现额外成果时保留副本并明确返回位置，不将失败显示为成功任务", async () => {
@@ -255,14 +251,14 @@ it("失败期间出现额外成果时保留副本并明确返回位置，不将�
     { mode: 0o755 }
   );
   await expect(
-    invoke("sessions:start", {
+    invoke("tasks:start", {
       requestId: "preserve-result",
       projectId: project.id,
       workspaceMode: "worktree",
       text: "$missing-skill 失败",
     })
   ).rejects.toThrow("已保留");
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   const ids = readdirSync(join(app.home, "worktrees"));
   expect(ids).toHaveLength(1);
   expect(
@@ -279,24 +275,24 @@ it("首条消息启动失败撤销本次 Worktree 和分支，同一草稿可重
     workspaceMode: "worktree",
     text: "$missing-skill 启动失败",
   };
-  await expect(invoke("sessions:start", request)).rejects.toThrow();
-  expect(await invoke("sessions:list")).toEqual([]);
+  await expect(invoke("tasks:start", request)).rejects.toThrow();
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(readdirSync(join(app.home, "worktrees"))).toEqual([]);
   expect(git(app.repo, "branch", "--list", "codexlike/*").trim()).toBe("");
   expect(readFileSync(join(app.repo, "tracked.txt"), "utf8")).toBe("来源内容");
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     ...request,
     text: "重试成功",
   });
   await idle(record.id);
-  expect(await invoke("sessions:list")).toHaveLength(1);
+  expect(await invoke("tasks:list")).toHaveLength(1);
   expect(readdirSync(join(app.home, "worktrees"))).toEqual([record.id]);
 });
 
 it("项目首次发送才创建独立 Worktree，双击幂等、来源与实际目录重开后保留", async () => {
   const app = await setup();
   const project = await invoke("projects:add", app.repo);
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(existsSync(join(app.home, "worktrees"))).toBe(false);
   expect(git(app.repo, "branch", "--list", "codexlike/*").trim()).toBe("");
   const request = {
@@ -306,8 +302,8 @@ it("项目首次发送才创建独立 Worktree，双击幂等、来源与实际�
     text: "隔离任务",
   };
   const [record, duplicate] = await Promise.all([
-    invoke("sessions:start", request),
-    invoke("sessions:start", request),
+    invoke("tasks:start", request),
+    invoke("tasks:start", request),
   ]);
   expect(duplicate.id).toBe(record.id);
   expect(record).toMatchObject({
@@ -324,18 +320,18 @@ it("项目首次发送才创建独立 Worktree，双击幂等、来源与实际�
   expect(readFileSync(join(app.repo, "tracked.txt"), "utf8")).toBe("来源内容");
   await idle(record.id);
   expect(readdirSync(join(app.home, "worktrees"))).toEqual([record.id]);
-  await invoke("sessions:archive", record.id, true);
+  await invoke("tasks:archive", record.id, true);
   expect(readFileSync(join(record.workspacePath, "tracked.txt"), "utf8")).toBe(
     "隔离修改"
   );
   app.reopen();
-  expect(await invoke("sessions:start", request)).toMatchObject({
+  expect(await invoke("tasks:start", request)).toMatchObject({
     id: record.id,
     workspaceOriginPath: app.repo,
     workspacePath: record.workspacePath,
   });
   expect(
-    (await invoke("sessions:messages", record.id)).filter(
+    (await invoke("tasks:messages", record.id)).filter(
       (item: any) => item.kind === "message" && item.message.role === "user"
     )
   ).toHaveLength(1);

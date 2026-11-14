@@ -28,7 +28,7 @@ const PNG_BASE64 =
 
 function taskRecord(workspacePath: string): TaskRecord {
   return {
-    id: "session-shot",
+    id: "task-shot",
     title: "截图任务",
     workspacePath,
     providerProfileId: null,
@@ -165,7 +165,7 @@ function singleToolResult(message: ToolModelMessage) {
   return part;
 }
 
-async function runSession(
+async function runTask(
   options: { attachToolImages?: boolean },
   captured: ToolExecutionContext[]
 ) {
@@ -174,7 +174,7 @@ async function runSession(
   const record = taskRecord(workspace);
   persistence.insertTask(record);
   const model = scriptedToolThenText();
-  const session = createAgentTask({
+  const task = createAgentTask({
     record,
     persistence,
     history: [],
@@ -183,20 +183,18 @@ async function runSession(
     attachToolImages: options.attachToolImages,
     now: () => "2026-11-11T08:00:01.000Z",
   });
-  const events = await collect(
-    session.sendMessage({ text: "截个图", profile })
-  );
+  const events = await collect(task.sendMessage({ text: "截个图", profile }));
   return { events, model };
 }
 
 describe("工具结果附图（截图回填模型：多模态附图 / 纯文本降级）", () => {
   it("默认：截图工具收到任务标识，图片作为 content 块回填模型", async () => {
     const captured: ToolExecutionContext[] = [];
-    const { events, model } = await runSession({}, captured);
+    const { events, model } = await runTask({}, captured);
 
     expect(events.at(-1)?.type).toBe("assistant-done");
-    // 工具执行上下文带 sessionId / toolCallId（任务级浏览器与截图文件命名依赖它们）
-    expect(captured[0]?.sessionId).toBe("session-shot");
+    // 工具执行上下文带 taskId / toolCallId（任务级浏览器与截图文件命名依赖它们）
+    expect(captured[0]?.taskId).toBe("task-shot");
     expect(captured[0]?.toolCallId).toBe("call-1");
 
     // 第二轮 prompt：tool 消息的 output 为 content 块（text + file 图片）
@@ -219,7 +217,7 @@ describe("工具结果附图（截图回填模型：多模态附图 / 纯文本�
   });
 
   it("降级（attachToolImages=false）：图片不回填，模型只看到文本输出", async () => {
-    const { model } = await runSession({ attachToolImages: false }, []);
+    const { model } = await runTask({ attachToolImages: false }, []);
     const toolMessage = lastToolMessage(model.doStreamCalls[1]!.prompt);
     const part = singleToolResult(toolMessage);
     expect(part.output).toEqual({

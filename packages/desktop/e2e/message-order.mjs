@@ -156,7 +156,7 @@ async function main() {
     // 从公开事件接口记录终态消息，不通过数据库或 UI 当前时间反推。
     await window.evaluate(() => {
       window.messageCompletion = null;
-      window.removeCompletionListener = window.codexlike.onSessionEvent(
+      window.removeCompletionListener = window.codexlike.onTaskEvent(
         ({ event }) => {
           if (event.type === "assistant-done")
             window.messageCompletion = event.message;

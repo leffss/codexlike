@@ -116,11 +116,11 @@ export interface SubagentHostPort {
     request:
       | Omit<
           Extract<InteractionRequest, { kind: "questions" }>,
-          "id" | "sessionId" | "turnId" | "createdAt"
+          "id" | "taskId" | "turnId" | "createdAt"
         >
       | Omit<
           Extract<InteractionRequest, { kind: "approval" }>,
-          "id" | "sessionId" | "turnId" | "createdAt"
+          "id" | "taskId" | "turnId" | "createdAt"
         >
   ): Promise<InteractionRecord>;
   emit(event: TaskEvent): void;
@@ -318,7 +318,7 @@ export function createSubagentOrchestrator(
       workspacePath: port.workspacePath,
       approvalMode,
       // 工单 11：子代理与主任务共享同一任务级浏览器 context/Cookie
-      sessionId: port.taskId,
+      taskId: port.taskId,
       toolCallId,
       signal,
     });
@@ -442,7 +442,7 @@ export function createSubagentOrchestrator(
         for (const call of toolCalls) {
           const base: ToolCallRecord = {
             id: call.toolCallId,
-            sessionId: port.taskId,
+            taskId: port.taskId,
             toolName: call.toolName,
             arguments: safeJsonStringify(call.input),
             output: "",

@@ -60,7 +60,7 @@ function setup(now?: () => string, beforeResources?: () => void) {
   const home = join(root, "nested", "home");
   const workspace = join(root, "普通项目");
   mkdirSync(workspace);
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanup.push(() => store.close());
   const safeStorage = {
     isEncryptionAvailable: async () => true,
@@ -105,7 +105,7 @@ function setup(now?: () => string, beforeResources?: () => void) {
     },
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };
@@ -205,15 +205,15 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
   const model = await provider(app);
   const project = await invoke("projects:add", app.workspace);
   expect(existsSync(join(app.home, "tasks"))).toBe(false);
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   const request = {
     requestId: "draft-standalone",
     projectId: null,
     text: "整理任务资料",
   };
   const [first, duplicate] = await Promise.all([
-    invoke("sessions:start", request),
-    invoke("sessions:start", request),
+    invoke("tasks:start", request),
+    invoke("tasks:start", request),
   ]);
   expect(first.id).toBe(duplicate.id);
   expect(first).toMatchObject({
@@ -229,21 +229,21 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
   expect(statSync(first.workspacePath).isDirectory()).toBe(true);
   await waitFor(async () =>
     expect(
-      (await invoke("sessions:messages", first.id)).filter(
+      (await invoke("tasks:messages", first.id)).filter(
         (item: any) => item.kind === "message"
       )
     ).toHaveLength(2)
   );
   expect(model.requests()).toBe(1);
-  expect((await invoke("sessions:messages", first.id))[0].message.content).toBe(
+  expect((await invoke("tasks:messages", first.id))[0].message.content).toBe(
     "整理任务资料"
   );
-  const local = await invoke("sessions:start", {
+  const local = await invoke("tasks:start", {
     requestId: "draft-project",
     projectId: project.id,
     text: "项目任务",
   });
-  const standalone = await invoke("sessions:start", {
+  const standalone = await invoke("tasks:start", {
     requestId: "draft-matching",
     projectId: null,
     workspacePath: app.workspace,
@@ -259,17 +259,15 @@ it("首次发送才分配专用目录和任务；重复请求只执行一遍且�
   });
   await waitFor(async () =>
     expect(
-      (await invoke("sessions:list")).every(
-        (session: any) => session.status === "idle"
-      )
+      (await invoke("tasks:list")).every((task: any) => task.status === "idle")
     ).toBe(true)
   );
-  await invoke("sessions:rename", first.id, "持久标题");
+  await invoke("tasks:rename", first.id, "持久标题");
   app.reopen();
   expect(
-    (await invoke("sessions:list")).find((s: any) => s.id === first.id).title
+    (await invoke("tasks:list")).find((s: any) => s.id === first.id).title
   ).toBe("持久标题");
-  expect((await invoke("sessions:start", request)).id).toBe(first.id);
+  expect((await invoke("tasks:start", request)).id).toBe(first.id);
   expect(model.requests()).toBe(3);
 });
 
@@ -279,24 +277,24 @@ it("目录与首条消息建立失败可用同一草稿重试，无空任务且�
   const blocker = join(app.home, "tasks");
   writeFileSync(blocker, "用户已有文件");
   const request = { requestId: "retry", projectId: null, text: "开始任务" };
-  await expect(invoke("sessions:start", request)).rejects.toThrow("专用目录");
-  expect(await invoke("sessions:list")).toEqual([]);
+  await expect(invoke("tasks:start", request)).rejects.toThrow("专用目录");
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(readFileSync(blocker, "utf8")).toBe("用户已有文件");
   rmSync(blocker);
   await expect(
-    invoke("sessions:start", { ...request, text: "$missing-skill 开始任务" })
+    invoke("tasks:start", { ...request, text: "$missing-skill 开始任务" })
   ).rejects.toThrow();
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(readdirSync(blocker)).toEqual([]);
-  const record = await invoke("sessions:start", request);
+  const record = await invoke("tasks:start", request);
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", record.id)).running).toBe(false)
+    expect((await invoke("tasks:execution", record.id)).running).toBe(false)
   );
-  expect(await invoke("sessions:list")).toHaveLength(1);
+  expect(await invoke("tasks:list")).toHaveLength(1);
   const keep = join(app.workspace, "keep.txt");
   writeFileSync(keep, "保留成果");
   await expect(
-    invoke("sessions:start", {
+    invoke("tasks:start", {
       ...request,
       requestId: "user-directory",
       workspacePath: app.workspace,
@@ -304,9 +302,9 @@ it("目录与首条消息建立失败可用同一草稿重试，无空任务且�
     })
   ).rejects.toThrow();
   expect(readFileSync(keep, "utf8")).toBe("保留成果");
-  expect(await invoke("sessions:list")).toHaveLength(1);
+  expect(await invoke("tasks:list")).toHaveLength(1);
   await expect(
-    invoke("sessions:start", {
+    invoke("tasks:start", {
       ...request,
       requestId: "missing-dir",
       workspacePath: join(app.root, "missing"),
@@ -318,41 +316,38 @@ it("目录与首条消息建立失败可用同一草稿重试，无空任务且�
 it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送不会失去停止通道", async () => {
   const app = setup();
   const model = await provider(app, true);
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "waiting",
     projectId: null,
     text: "询问我",
   });
   await waitFor(async () =>
-    expect(
-      (await invoke("sessions:execution", session.id)).waitingForUser
-    ).toBe(true)
+    expect((await invoke("tasks:execution", task.id)).waitingForUser).toBe(true)
   );
-  const state = await invoke("sessions:execution", session.id);
+  const state = await invoke("tasks:execution", task.id);
   expect(state).toMatchObject({
-    taskId: session.id,
+    taskId: task.id,
     executionId: expect.any(String),
     running: true,
     waitingForUser: true,
   });
   expect(state.pendingInteractionIds).toHaveLength(1);
-  expect(() => invoke("sessions:archive", session.id, true)).toThrow("先停止");
+  expect(() => invoke("tasks:archive", task.id, true)).toThrow("先停止");
   expect(
-    (await invoke("sessions:list")).find((s: any) => s.id === session.id)
-      .archivedAt
+    (await invoke("tasks:list")).find((s: any) => s.id === task.id).archivedAt
   ).toBeNull();
-  expect(await invoke("sessions:execution", session.id)).toEqual(state);
+  expect(await invoke("tasks:execution", task.id)).toEqual(state);
   // 等待用户交互期间直发被明确拒绝（review 修复，spec 用户故事 17）：不入队
   //（排队消息会卡在无法消费的时机），执行通道不被覆盖，executionId 稳定
   await expect(
-    invoke("sessions:send", session.id, "重复发送", model.profile.id)
+    invoke("tasks:send", task.id, "重复发送", model.profile.id)
   ).rejects.toThrow("任务正在等待审批或问答");
-  expect((await invoke("sessions:execution", session.id)).executionId).toBe(
+  expect((await invoke("tasks:execution", task.id)).executionId).toBe(
     state.executionId
   );
-  expect(await invoke("sessions:interrupt", session.id)).toBe(true);
+  expect(await invoke("tasks:interrupt", task.id)).toBe(true);
   await waitFor(async () =>
-    expect(await invoke("sessions:execution", session.id)).toMatchObject({
+    expect(await invoke("tasks:execution", task.id)).toMatchObject({
       executionId: null,
       running: false,
       waitingForUser: false,
@@ -376,10 +371,10 @@ it("拒绝伪造项目、目录覆盖和非法设置，不创建任务或目录"
     { workspacePath: "relative" },
   ]) {
     await expect(
-      invoke("sessions:start", { ...base, ...patch })
+      invoke("tasks:start", { ...base, ...patch })
     ).rejects.toThrow();
   }
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(existsSync(join(app.home, "tasks"))).toBe(false);
 });
 
@@ -417,7 +412,7 @@ it("各新建入口草稿经宿主保存，真实关闭重开 SQLite 后恢复�
   expect((await invoke("workbench:read", inProject)).value.text).toBe(
     "项目入口未发送"
   );
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   expect(existsSync(join(app.home, "tasks"))).toBe(false);
 });
 
@@ -442,17 +437,17 @@ it("成功首次发送只消费同一意图，失败保留设置；迟到保存�
     text: value.text,
     ...value.preferences,
   };
-  await expect(invoke("sessions:start", request)).rejects.toThrow();
+  await expect(invoke("tasks:start", request)).rejects.toThrow();
   expect((await invoke("workbench:read", target)).value).toEqual(value);
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     ...request,
     text: "重试成功",
   });
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", session.id)).running).toBe(false)
+    expect((await invoke("tasks:execution", task.id)).running).toBe(false)
   );
   expect(
-    (await invoke("workbench:read", { kind: "task", taskId: session.id })).value
+    (await invoke("workbench:read", { kind: "task", taskId: task.id })).value
       .preferences
   ).toEqual(value.preferences);
   const consumed = await invoke("workbench:read", target);
@@ -487,11 +482,11 @@ it("首条消息接受后不再解密默认配置，成功重试不重放且新�
     projectId: null,
     text: "首个意图",
   };
-  const first = await invoke("sessions:start", request);
+  const first = await invoke("tasks:start", request);
   await waitFor(() =>
-    expect(invoke("sessions:execution", first.id).running).toBe(false)
+    expect(invoke("tasks:execution", first.id).running).toBe(false)
   );
-  expect((await invoke("sessions:start", request)).id).toBe(first.id);
+  expect((await invoke("tasks:start", request)).id).toBe(first.id);
   decrypt.mockRestore();
   const next = await invoke("workbench:read", target);
   expect(next.value.requestId).not.toBe(request.requestId);
@@ -504,13 +499,13 @@ it("首条消息接受后不再解密默认配置，成功重试不重放且新�
     revision: next.revision + 1,
     value: { ...next.value, text: "全新任务" },
   });
-  const second = await invoke("sessions:start", {
+  const second = await invoke("tasks:start", {
     requestId: next.value.requestId,
     projectId: null,
     text: "全新任务",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", second.id).running).toBe(false)
+    expect(invoke("tasks:execution", second.id).running).toBe(false)
   );
   expect(second.id).not.toBe(first.id);
   expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
@@ -536,22 +531,22 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
     text: value.text,
     ...value.preferences,
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       `CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state WHEN OLD.key = '${workbenchKey(target as { kind: "new"; projectId: null })}' BEGIN SELECT RAISE(ABORT, 'injected consume disk failure'); END`
     );
-    await expect(invoke("sessions:start", request)).rejects.toThrow(
+    await expect(invoke("tasks:start", request)).rejects.toThrow(
       "injected consume disk failure"
     );
-    const [first] = invoke("sessions:list");
+    const [first] = invoke("tasks:list");
     await waitFor(() =>
-      expect(invoke("sessions:execution", first.id).running).toBe(false)
+      expect(invoke("tasks:execution", first.id).running).toBe(false)
     );
     expect((await invoke("workbench:read", target)).value).toEqual(value);
     fault.exec("DROP TRIGGER fail_consume");
     app.reopen();
-    expect((await invoke("sessions:start", request)).id).toBe(first.id);
+    expect((await invoke("tasks:start", request)).id).toBe(first.id);
     const consumed = await invoke("workbench:read", target);
     expect(consumed.value.requestId).not.toBe(value.requestId);
     expect(consumed.value.text).toBe("");
@@ -563,16 +558,16 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
       revision: consumed.revision + 1,
       value: { ...consumed.value, text: "补偿后新任务" },
     });
-    const second = await invoke("sessions:start", {
+    const second = await invoke("tasks:start", {
       requestId: consumed.value.requestId,
       projectId: null,
       text: "补偿后新任务",
     });
     await waitFor(() =>
-      expect(invoke("sessions:execution", second.id).running).toBe(false)
+      expect(invoke("tasks:execution", second.id).running).toBe(false)
     );
     expect(second.id).not.toBe(first.id);
-    expect((await invoke("sessions:start", request)).id).toBe(first.id);
+    expect((await invoke("tasks:start", request)).id).toBe(first.id);
     expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
       "已接收任务",
       "补偿后新任务",
@@ -596,21 +591,21 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
     projectId: null,
     text: "首个已接受任务",
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"
     );
-    await expect(invoke("sessions:start", request)).rejects.toThrow(
+    await expect(invoke("tasks:start", request)).rejects.toThrow(
       "injected consume failure"
     );
     fault.exec("DROP TRIGGER fail_consume");
   } finally {
     fault.close();
   }
-  const [first] = invoke("sessions:list");
+  const [first] = invoke("tasks:list");
   await waitFor(() =>
-    expect(invoke("sessions:execution", first.id).running).toBe(false)
+    expect(invoke("tasks:execution", first.id).running).toBe(false)
   );
   invoke("workbench:write", target, {
     revision: 2,
@@ -618,7 +613,7 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
   });
   expect(
     (
-      await invoke("sessions:start", {
+      await invoke("tasks:start", {
         ...request,
         text: "失败后准备的不同任务",
       })
@@ -627,13 +622,13 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
   const next = await invoke("workbench:read", target);
   expect(next.value.text).toBe("失败后准备的不同任务");
   expect(next.value.requestId).not.toBe(request.requestId);
-  const second = await invoke("sessions:start", {
+  const second = await invoke("tasks:start", {
     requestId: next.value.requestId,
     projectId: null,
     text: next.value.text,
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", second.id).running).toBe(false)
+    expect(invoke("tasks:execution", second.id).running).toBe(false)
   );
   expect(model.bodies.map((body) => body.messages.at(-1).content)).toEqual([
     "首个已接受任务",
@@ -644,21 +639,16 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
 it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟到保存与伪造问答", async () => {
   const app = setup();
   await provider(app, true);
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "question-draft",
     projectId: null,
     text: "询问",
   });
   await waitFor(async () =>
-    expect(
-      (await invoke("sessions:pending-interactions", session.id)).length
-    ).toBe(1)
+    expect((await invoke("tasks:pending-interactions", task.id)).length).toBe(1)
   );
-  const [interaction] = await invoke(
-    "sessions:pending-interactions",
-    session.id
-  );
-  const target = { kind: "task", taskId: session.id };
+  const [interaction] = await invoke("tasks:pending-interactions", task.id);
+  const target = { kind: "task", taskId: task.id };
   const original = await invoke("workbench:read", target);
   const question = {
     index: 0,
@@ -694,20 +684,18 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
       value: { ...value, questionDrafts: { forged: question } },
     })
   ).toThrow("问答");
-  await invoke("sessions:interrupt", session.id);
+  await invoke("tasks:interrupt", task.id);
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", session.id)).running).toBe(false)
+    expect((await invoke("tasks:execution", task.id)).running).toBe(false)
   );
   app.reopen();
   expect((await invoke("workbench:read", target)).value).toEqual(value);
-  expect(await invoke("sessions:pending-interactions", session.id)).toEqual([]);
+  expect(await invoke("tasks:pending-interactions", task.id)).toEqual([]);
   expect(
-    await invoke(
-      "sessions:respond-interaction",
-      session.id,
-      interaction.request.id,
-      { kind: "questions", answers: [] }
-    )
+    await invoke("tasks:respond-interaction", task.id, interaction.request.id, {
+      kind: "questions",
+      answers: [],
+    })
   ).toBe(false);
   expect(
     (await invoke("workbench:read", { kind: "new", projectId: null })).value
@@ -718,16 +706,16 @@ it("普通草稿、阅读位置、问答文本和偏好独立持久，拒绝迟�
 it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重开不复活授权且拒绝跨任务请求", async () => {
   const app = setup();
   const model = await provider(app, true);
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "compact-question-draft",
     projectId: null,
     text: "将被压缩的问答轮次",
   });
   await waitFor(() =>
-    expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(1)
+    expect(invoke("tasks:pending-interactions", task.id)).toHaveLength(1)
   );
-  const [interaction] = invoke("sessions:pending-interactions", session.id);
-  const target = { kind: "task", taskId: session.id };
+  const [interaction] = invoke("tasks:pending-interactions", task.id);
+  const target = { kind: "task", taskId: task.id };
   const original = await invoke("workbench:read", target);
   const questionDrafts = {
     [interaction.request.id]: {
@@ -741,24 +729,19 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     revision: 1,
     value: { ...original.value, questionDrafts },
   });
-  invoke("sessions:interrupt", session.id);
+  invoke("tasks:interrupt", task.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
   for (let round = 0; round < 4; round++) {
-    await invoke(
-      "sessions:send",
-      session.id,
-      `后续任务${round}`,
-      model.profile.id
-    );
+    await invoke("tasks:send", task.id, `后续任务${round}`, model.profile.id);
     await waitFor(() =>
-      expect(invoke("sessions:execution", session.id).running).toBe(false)
+      expect(invoke("tasks:execution", task.id).running).toBe(false)
     );
   }
-  await invoke("sessions:compact", session.id, model.profile.id);
+  await invoke("tasks:compact", task.id, model.profile.id);
   expect(
-    invoke("sessions:messages", session.id).some(
+    invoke("tasks:messages", task.id).some(
       (item: any) =>
         item.kind === "message" &&
         item.message.id === interaction.request.turnId
@@ -775,25 +758,25 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
     text: "压缩后编辑",
     questionDrafts,
   });
-  expect(invoke("sessions:messages", session.id)).toContainEqual(
+  expect(invoke("tasks:messages", task.id)).toContainEqual(
     expect.objectContaining({
       kind: "interaction",
       interaction: expect.objectContaining({ status: "cancelled" }),
     })
   );
   expect(
-    invoke("sessions:respond-interaction", session.id, interaction.request.id, {
+    invoke("tasks:respond-interaction", task.id, interaction.request.id, {
       kind: "questions",
       answers: [],
     })
   ).toBe(false);
-  const other = await invoke("sessions:start", {
+  const other = await invoke("tasks:start", {
     requestId: "other-draft",
     projectId: null,
     text: "另一任务",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", other.id).running).toBe(false)
+    expect(invoke("tasks:execution", other.id).running).toBe(false)
   );
   for (const invalidDrafts of [
     questionDrafts,
@@ -810,9 +793,9 @@ it("Compact裁去问答所在轮次后仍能保存只读草稿与新输入，重
       )
     ).toThrow("问答草稿与任务请求不匹配");
   }
-  await invoke("sessions:send", session.id, "压缩后编辑", model.profile.id);
+  await invoke("tasks:send", task.id, "压缩后编辑", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
   expect(model.bodies.at(-1).messages.at(-1).content).toBe("压缩后编辑");
 });
@@ -826,22 +809,17 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
     apiKey: "other-secret",
     baseURL: model.profile.baseURL,
   });
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "freeze-settings",
     projectId: null,
     text: "第一轮",
     thinkingEffort: "high",
   });
   await waitFor(async () =>
-    expect(
-      (await invoke("sessions:pending-interactions", session.id)).length
-    ).toBe(1)
+    expect((await invoke("tasks:pending-interactions", task.id)).length).toBe(1)
   );
-  const [interaction] = await invoke(
-    "sessions:pending-interactions",
-    session.id
-  );
-  const target = { kind: "task", taskId: session.id };
+  const [interaction] = await invoke("tasks:pending-interactions", task.id);
+  const target = { kind: "task", taskId: task.id };
   const saved = await invoke("workbench:read", target);
   await invoke("workbench:write", target, {
     revision: saved.revision + 1,
@@ -854,24 +832,19 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
       },
     },
   });
-  await invoke(
-    "sessions:respond-interaction",
-    session.id,
-    interaction.request.id,
-    {
-      kind: "questions",
-      answers: [
-        {
-          questionId: "q",
-          status: "answered",
-          selectedOptionIds: ["yes"],
-          text: "",
-        },
-      ],
-    }
-  );
+  await invoke("tasks:respond-interaction", task.id, interaction.request.id, {
+    kind: "questions",
+    answers: [
+      {
+        questionId: "q",
+        status: "answered",
+        selectedOptionIds: ["yes"],
+        text: "",
+      },
+    ],
+  });
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", session.id)).running).toBe(false)
+    expect((await invoke("tasks:execution", task.id)).running).toBe(false)
   );
   expect(
     model.bodies.slice(0, 2).map((body) => [body.model, body.reasoning_effort])
@@ -879,9 +852,9 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
     ["mock", "high"],
     ["mock", "high"],
   ]);
-  await invoke("sessions:send", session.id, "第二轮");
+  await invoke("tasks:send", task.id, "第二轮");
   await waitFor(async () =>
-    expect((await invoke("sessions:execution", session.id)).running).toBe(false)
+    expect((await invoke("tasks:execution", task.id)).running).toBe(false)
   );
   expect(model.bodies[2]).toMatchObject({
     model: "next-model",
@@ -892,9 +865,9 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
   ).not.toContain("other-secret");
   await app.profiles.remove(other.id);
   const before = model.requests();
-  await expect(
-    invoke("sessions:send", session.id, "不能换默认模型")
-  ).rejects.toThrow("不存在");
+  await expect(invoke("tasks:send", task.id, "不能换默认模型")).rejects.toThrow(
+    "不存在"
+  );
   expect(model.requests()).toBe(before);
 });
 
@@ -903,46 +876,46 @@ it("执行已占位但Core尚未更新状态时，过时的idle列表也不能�
   let checked = false;
   const app = setup(undefined, () => {
     if (!taskId) return;
-    expect(
-      invoke("sessions:list").find((s: any) => s.id === taskId).status
-    ).toBe("idle");
-    expect(invoke("sessions:execution", taskId)).toMatchObject({
+    expect(invoke("tasks:list").find((s: any) => s.id === taskId).status).toBe(
+      "idle"
+    );
+    expect(invoke("tasks:execution", taskId)).toMatchObject({
       running: true,
       executionId: expect.any(String),
     });
-    expect(() => invoke("sessions:archive", taskId, true)).toThrow("先停止");
+    expect(() => invoke("tasks:archive", taskId, true)).toThrow("先停止");
     checked = true;
   });
   const model = await provider(app);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "reserved",
     projectId: null,
     text: "初始",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
   taskId = record.id;
-  await invoke("sessions:send", taskId, "开始另一轮", model.profile.id);
+  await invoke("tasks:send", taskId, "开始另一轮", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", taskId).running).toBe(false)
+    expect(invoke("tasks:execution", taskId).running).toBe(false)
   );
   expect(checked).toBe(true);
-  expect(invoke("sessions:list")[0].archivedAt).toBeNull();
+  expect(invoke("tasks:list")[0].archivedAt).toBeNull();
 });
 
 it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍可继续", async () => {
   const app = setup();
   const model = await provider(app);
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "race",
     projectId: null,
     text: "初始任务",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
-  const history = invoke("sessions:messages", session.id);
+  const history = invoke("tasks:messages", task.id);
   const available = await app.profiles.list();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -955,24 +928,22 @@ it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍�
       return available;
     });
   const sending = invoke(
-    "sessions:send",
-    session.id,
+    "tasks:send",
+    task.id,
     "不得在归档后启动",
     model.profile.id
   );
   const rejected = expect(sending).rejects.toThrow("归档");
-  expect(
-    invoke("sessions:archive", session.id, true).archivedAt
-  ).not.toBeNull();
+  expect(invoke("tasks:archive", task.id, true).archivedAt).not.toBeNull();
   release();
   await rejected;
   lookup.mockRestore();
-  expect(invoke("sessions:messages", session.id)).toEqual(history);
+  expect(invoke("tasks:messages", task.id)).toEqual(history);
   expect(model.requests()).toBe(1);
-  expect(invoke("sessions:archive", session.id, false).archivedAt).toBeNull();
-  await invoke("sessions:send", session.id, "恢复后继续", model.profile.id);
+  expect(invoke("tasks:archive", task.id, false).archivedAt).toBeNull();
+  await invoke("tasks:send", task.id, "恢复后继续", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
   expect(model.requests()).toBe(2);
 });
@@ -982,45 +953,45 @@ it("独立与项目任务按用户使用排序、置顶优先，重开保留整�
   const app = setup(() => clock);
   await provider(app);
   const project = invoke("projects:add", app.workspace);
-  const a = await invoke("sessions:start", {
+  const a = await invoke("tasks:start", {
     requestId: "sort-a",
     projectId: project.id,
     text: "项目历史",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", a.id).running).toBe(false)
+    expect(invoke("tasks:execution", a.id).running).toBe(false)
   );
   clock = "2026-11-11T02:00:00.000Z";
-  const b = await invoke("sessions:start", {
+  const b = await invoke("tasks:start", {
     requestId: "sort-b",
     projectId: null,
     workspacePath: app.workspace,
     text: "同目录独立历史",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", b.id).running).toBe(false)
+    expect(invoke("tasks:execution", b.id).running).toBe(false)
   );
-  const ids = () => invoke("sessions:list").map((s: any) => s.id);
+  const ids = () => invoke("tasks:list").map((s: any) => s.id);
   expect(ids()).toEqual([b.id, a.id]);
   clock = "2026-11-11T03:00:00.000Z";
-  invoke("sessions:mark-used", a.id);
+  invoke("tasks:mark-used", a.id);
   expect(ids()).toEqual([a.id, b.id]);
   clock = "2026-11-11T04:00:00.000Z";
-  invoke("sessions:rename", b.id, "独立标题已改");
+  invoke("tasks:rename", b.id, "独立标题已改");
   expect(ids()).toEqual([a.id, b.id]);
-  invoke("sessions:set-pinned", b.id, true);
+  invoke("tasks:set-pinned", b.id, true);
   expect(ids()).toEqual([b.id, a.id]);
   invoke("projects:set-collapsed", project.id, true);
   const marker = join(app.workspace, "成果.txt");
   writeFileSync(marker, "不因归档删除");
-  const history = invoke("sessions:messages", b.id);
-  invoke("sessions:archive", b.id, true);
+  const history = invoke("tasks:messages", b.id);
+  invoke("tasks:archive", b.id, true);
   app.reopen();
   expect(invoke("projects:list")[0]).toMatchObject({
     id: project.id,
     collapsed: true,
   });
-  expect(invoke("sessions:list")[0]).toMatchObject({
+  expect(invoke("tasks:list")[0]).toMatchObject({
     id: b.id,
     pinned: true,
     projectId: null,
@@ -1028,14 +999,14 @@ it("独立与项目任务按用户使用排序、置顶优先，重开保留整�
     lastUsedAt: "2026-11-11T02:00:00.000Z",
     archivedAt: clock,
   });
-  expect(invoke("sessions:messages", b.id)).toEqual(history);
-  expect(invoke("sessions:archive", b.id, false)).toMatchObject({
+  expect(invoke("tasks:messages", b.id)).toEqual(history);
+  expect(invoke("tasks:archive", b.id, false)).toMatchObject({
     projectId: null,
     workspacePath: app.workspace,
     archivedAt: null,
   });
   expect(readFileSync(marker, "utf8")).toBe("不因归档删除");
-  invoke("sessions:set-pinned", b.id, false);
+  invoke("tasks:set-pinned", b.id, false);
   expect(ids()).toEqual([a.id, b.id]);
 });
 
@@ -1047,40 +1018,40 @@ it("发送登记最近使用，后台增量与完成不抢走后来查看的任�
     finish = resolve;
   });
   const model = await provider(app, false, gate);
-  const a = await invoke("sessions:start", {
+  const a = await invoke("tasks:start", {
     requestId: "stream-a",
     projectId: null,
     text: "A",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", a.id).running).toBe(false)
+    expect(invoke("tasks:execution", a.id).running).toBe(false)
   );
   clock = "2026-11-11T02:00:00.000Z";
-  const b = await invoke("sessions:start", {
+  const b = await invoke("tasks:start", {
     requestId: "stream-b",
     projectId: null,
     text: "B",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", b.id).running).toBe(false)
+    expect(invoke("tasks:execution", b.id).running).toBe(false)
   );
   clock = "2026-11-11T03:00:00.000Z";
-  await invoke("sessions:send", a.id, "后台工作", model.profile.id);
+  await invoke("tasks:send", a.id, "后台工作", model.profile.id);
   try {
-    expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([a.id, b.id]);
+    expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([a.id, b.id]);
     await waitFor(() => expect(model.requests()).toBe(3));
-    expect(() => invoke("sessions:archive", a.id, true)).toThrow("先停止");
+    expect(() => invoke("tasks:archive", a.id, true)).toThrow("先停止");
     clock = "2026-11-11T04:00:00.000Z";
-    invoke("sessions:mark-used", b.id);
-    expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
+    invoke("tasks:mark-used", b.id);
+    expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
   } finally {
     clock = "2026-11-11T05:00:00.000Z";
     finish();
     await waitFor(() =>
-      expect(invoke("sessions:execution", a.id).running).toBe(false)
+      expect(invoke("tasks:execution", a.id).running).toBe(false)
     );
   }
-  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
+  expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
 });
 
 it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文件原样保留", async () => {
@@ -1100,29 +1071,29 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
     taskId: "archive-worktree",
     workspacePath: app.workspace,
   });
-  const session = app.manager.create({
+  const task = app.manager.create({
     id: "archive-worktree",
     projectId: project.id,
     workspacePath: worktree.path,
     workspaceMode: "worktree",
     workspaceOriginPath: app.workspace,
   }).record;
-  await invoke("sessions:send", session.id, "保留隔离成果", model.profile.id);
+  await invoke("tasks:send", task.id, "保留隔离成果", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
   const marker = join(worktree.path, "keep.txt");
   writeFileSync(marker, "未提交成果");
   const before = git("worktree", "list", "--porcelain");
-  const history = invoke("sessions:messages", session.id);
-  invoke("sessions:archive", session.id, true);
+  const history = invoke("tasks:messages", task.id);
+  invoke("tasks:archive", task.id, true);
   expect(readFileSync(marker, "utf8")).toBe("未提交成果");
   expect(readFileSync(join(app.workspace, "source.txt"), "utf8")).toBe(
     "来源成果"
   );
   app.reopen();
-  expect(invoke("sessions:messages", session.id)).toEqual(history);
-  expect(invoke("sessions:archive", session.id, false)).toMatchObject({
+  expect(invoke("tasks:messages", task.id)).toEqual(history);
+  expect(invoke("tasks:archive", task.id, false)).toMatchObject({
     projectId: project.id,
     workspaceMode: "worktree",
     workspaceOriginPath: app.workspace,
@@ -1136,7 +1107,7 @@ it("任务移入与移出只改变显式归属，SQLite重开后目录历史与�
   const app = setup();
   await provider(app);
   const project = invoke("projects:add", app.workspace);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "membership-local",
     projectId: null,
     workspacePath: app.workspace,
@@ -1144,24 +1115,24 @@ it("任务移入与移出只改变显式归属，SQLite重开后目录历史与�
     approvalMode: "assist",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
-  invoke("sessions:set-pinned", record.id, true);
-  const { activity: _activity, ...before } = invoke("sessions:list")[0];
-  const history = invoke("sessions:messages", record.id);
-  expect(invoke("sessions:set-project", record.id, project.id)).toMatchObject({
+  invoke("tasks:set-pinned", record.id, true);
+  const { activity: _activity, ...before } = invoke("tasks:list")[0];
+  const history = invoke("tasks:messages", record.id);
+  expect(invoke("tasks:set-project", record.id, project.id)).toMatchObject({
     ...before,
     projectId: project.id,
   });
   app.reopen();
-  expect(invoke("sessions:list")[0]).toMatchObject({
+  expect(invoke("tasks:list")[0]).toMatchObject({
     ...before,
     projectId: project.id,
   });
-  expect(invoke("sessions:set-project", record.id, null)).toMatchObject(before);
+  expect(invoke("tasks:set-project", record.id, null)).toMatchObject(before);
   app.reopen();
-  expect(invoke("sessions:list")[0]).toMatchObject(before);
-  expect(invoke("sessions:messages", record.id)).toEqual(history);
+  expect(invoke("tasks:list")[0]).toMatchObject(before);
+  expect(invoke("tasks:messages", record.id)).toEqual(history);
 });
 
 it("确认移除仅删除显式所属含归档记录，清除现场与首次发送重试而保留同目录独立任务", async () => {
@@ -1176,63 +1147,54 @@ it("确认移除仅删除显式所属含归档记录，清除现场与首次发�
     workspacePath: app.workspace,
     text: "移入后删除",
   };
-  const member = await invoke("sessions:start", request);
-  const standalone = await invoke("sessions:start", {
+  const member = await invoke("tasks:start", request);
+  const standalone = await invoke("tasks:start", {
     ...request,
     requestId: "keep-independent",
     text: "保留独立",
   });
-  const archived = await invoke("sessions:start", {
+  const archived = await invoke("tasks:start", {
     requestId: "removed-archive",
     projectId: project.id,
     text: "归档历史",
   });
   await waitFor(() =>
     expect(
-      invoke("sessions:list").every(
-        (s: any) => !invoke("sessions:execution", s.id).running
+      invoke("tasks:list").every(
+        (s: any) => !invoke("tasks:execution", s.id).running
       )
     ).toBe(true)
   );
-  invoke("sessions:set-project", member.id, project.id);
-  invoke("sessions:archive", archived.id, true);
-  const before = invoke("sessions:list");
-  const survivorView = invoke("sessions:view", standalone.id);
+  invoke("tasks:set-project", member.id, project.id);
+  invoke("tasks:archive", archived.id, true);
+  const before = invoke("tasks:list");
+  const survivorView = invoke("tasks:view", standalone.id);
   expect(invoke("projects:remove", project.id, false)).toBeNull();
-  expect(invoke("sessions:list")).toEqual(before);
+  expect(invoke("tasks:list")).toEqual(before);
   expect(invoke("projects:list")).toEqual([project]);
   expect(invoke("projects:remove", project.id, true)).toEqual({
     projectId: project.id,
     taskIds: expect.arrayContaining([member.id, archived.id]),
   });
   expect(invoke("projects:list")).toEqual([]);
-  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([
-    standalone.id,
-  ]);
-  expect(invoke("sessions:view", standalone.id)).toEqual(survivorView);
+  expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([standalone.id]);
+  expect(invoke("tasks:view", standalone.id)).toEqual(survivorView);
   for (const id of [member.id, archived.id]) {
-    expect(invoke("sessions:view", id)).toBeNull();
-    expect(invoke("sessions:messages", id)).toEqual([]);
-    expect(invoke("sessions:resources", id)).toBeNull();
+    expect(invoke("tasks:view", id)).toBeNull();
+    expect(invoke("tasks:messages", id)).toEqual([]);
+    expect(invoke("tasks:resources", id)).toBeNull();
     await expect(
-      invoke("sessions:send", id, "不应执行", model.profile.id)
+      invoke("tasks:send", id, "不应执行", model.profile.id)
     ).rejects.toThrow(/不存在|移除|损坏/);
   }
-  await expect(invoke("sessions:start", request)).rejects.toThrow("已移除");
+  await expect(invoke("tasks:start", request)).rejects.toThrow("已移除");
   app.reopen();
-  await expect(invoke("sessions:start", request)).rejects.toThrow("已移除");
-  expect(invoke("sessions:list").map((s: any) => s.id)).toEqual([
-    standalone.id,
-  ]);
+  await expect(invoke("tasks:start", request)).rejects.toThrow("已移除");
+  expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([standalone.id]);
   expect(readFileSync(marker, "utf8")).toBe("不删除磁盘成果");
-  await invoke(
-    "sessions:send",
-    standalone.id,
-    "独立仍可执行",
-    model.profile.id
-  );
+  await invoke("tasks:send", standalone.id, "独立仍可执行", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", standalone.id).running).toBe(false)
+    expect(invoke("tasks:execution", standalone.id).running).toBe(false)
   );
   expect(model.requests()).toBe(4);
 });
@@ -1255,7 +1217,7 @@ it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删�
     alias,
     process.platform === "win32" ? "junction" : "dir"
   );
-  const local = await invoke("sessions:start", {
+  const local = await invoke("tasks:start", {
     requestId: "alias",
     projectId: null,
     workspacePath: alias,
@@ -1264,13 +1226,13 @@ it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删�
   const sibling = `${app.workspace}-other`;
   mkdirSync(sibling);
   const wrong = invoke("projects:add", sibling);
-  const worktree = await invoke("sessions:start", {
+  const worktree = await invoke("tasks:start", {
     requestId: "origin-only",
     projectId: project.id,
     workspaceMode: "worktree",
     text: "隔离成果",
   });
-  const owned = await invoke("sessions:start", {
+  const owned = await invoke("tasks:start", {
     requestId: "owned-tree",
     projectId: project.id,
     workspaceMode: "worktree",
@@ -1278,43 +1240,41 @@ it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删�
   });
   await waitFor(() =>
     expect(
-      invoke("sessions:list").every(
-        (s: any) => !invoke("sessions:execution", s.id).running
+      invoke("tasks:list").every(
+        (s: any) => !invoke("tasks:execution", s.id).running
       )
     ).toBe(true)
   );
-  expect(() => invoke("sessions:set-project", local.id, wrong.id)).toThrow(
+  expect(() => invoke("tasks:set-project", local.id, wrong.id)).toThrow(
     "目录不匹配"
   );
-  expect(invoke("sessions:set-project", local.id, project.id).projectId).toBe(
+  expect(invoke("tasks:set-project", local.id, project.id).projectId).toBe(
     project.id
   );
-  invoke("sessions:set-project", local.id, null);
-  invoke("sessions:set-project", worktree.id, null);
+  invoke("tasks:set-project", local.id, null);
+  invoke("tasks:set-project", worktree.id, null);
   const copyProject = invoke("projects:add", worktree.workspacePath);
   expect(() =>
-    invoke("sessions:set-project", worktree.id, copyProject.id)
+    invoke("tasks:set-project", worktree.id, copyProject.id)
   ).toThrow("来源项目");
-  expect(() => invoke("sessions:set-project", worktree.id, wrong.id)).toThrow(
+  expect(() => invoke("tasks:set-project", worktree.id, wrong.id)).toThrow(
     "来源项目"
   );
-  expect(invoke("sessions:set-project", worktree.id, project.id)).toMatchObject(
-    {
-      workspacePath: worktree.workspacePath,
-      workspaceOriginPath: app.workspace,
-    }
-  );
-  invoke("sessions:set-project", worktree.id, null);
-  const history = invoke("sessions:messages", worktree.id);
+  expect(invoke("tasks:set-project", worktree.id, project.id)).toMatchObject({
+    workspacePath: worktree.workspacePath,
+    workspaceOriginPath: app.workspace,
+  });
+  invoke("tasks:set-project", worktree.id, null);
+  const history = invoke("tasks:messages", worktree.id);
   for (const record of [worktree, owned])
     writeFileSync(join(record.workspacePath, "keep.txt"), "隔离成果不能删");
   const branches = git("worktree", "list", "--porcelain");
   invoke("projects:remove", project.id, true);
-  expect(invoke("sessions:view", owned.id)).toBeNull();
+  expect(invoke("tasks:view", owned.id)).toBeNull();
   app.reopen();
-  expect(invoke("sessions:messages", worktree.id)).toEqual(history);
+  expect(invoke("tasks:messages", worktree.id)).toEqual(history);
   expect(
-    invoke("sessions:list").find((s: any) => s.id === worktree.id)
+    invoke("tasks:list").find((s: any) => s.id === worktree.id)
   ).toMatchObject({
     projectId: null,
     workspaceOriginPath: app.workspace,
@@ -1326,9 +1286,9 @@ it("目录匹配遵循真实路径，Worktree移出只回来源且移除不删�
       "隔离成果不能删"
     );
   const readded = invoke("projects:add", app.workspace);
-  expect(
-    invoke("sessions:set-project", worktree.id, readded.id).projectId
-  ).toBe(readded.id);
+  expect(invoke("tasks:set-project", worktree.id, readded.id).projectId).toBe(
+    readded.id
+  );
 });
 
 it("准备Worktree期间项目被移除，首次发送必须重查且不留悬挂记录", async () => {
@@ -1361,7 +1321,7 @@ it("准备Worktree期间项目被移除，首次发送必须重查且不留悬�
       return result;
     }
   );
-  const sending = invoke("sessions:start", {
+  const sending = invoke("tasks:start", {
     requestId: "project-removed-during-prepare",
     projectId: project.id,
     workspaceMode: "worktree",
@@ -1372,7 +1332,7 @@ it("准备Worktree期间项目被移除，首次发送必须重查且不留悬�
   invoke("projects:remove", project.id, true);
   release();
   await rejected;
-  expect(invoke("sessions:list")).toEqual([]);
+  expect(invoke("tasks:list")).toEqual([]);
   expect(model.requests()).toBe(0);
 });
 
@@ -1382,8 +1342,8 @@ it("等待问答或宿主执行占位时不能移出移除，停止后才可整�
   const app = setup(undefined, () => {
     const active = target;
     if (!active) return;
-    expect(invoke("sessions:execution", active.id).running).toBe(true);
-    expect(() => invoke("sessions:set-project", active.id, null)).toThrow(
+    expect(invoke("tasks:execution", active.id).running).toBe(true);
+    expect(() => invoke("tasks:set-project", active.id, null)).toThrow(
       "先停止"
     );
     expect(() => invoke("projects:remove", active.projectId, true)).toThrow(
@@ -1393,47 +1353,45 @@ it("等待问答或宿主执行占位时不能移出移除，停止后才可整�
   });
   const model = await provider(app, true);
   const project = invoke("projects:add", app.workspace);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "protected-member",
     projectId: project.id,
     text: "等待问题",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
+    expect(invoke("tasks:execution", record.id).waitingForUser).toBe(true)
   );
-  const view = invoke("sessions:view", record.id);
-  expect(() => invoke("sessions:set-project", record.id, null)).toThrow(
-    "先停止"
-  );
+  const view = invoke("tasks:view", record.id);
+  expect(() => invoke("tasks:set-project", record.id, null)).toThrow("先停止");
   expect(() => invoke("projects:remove", project.id, true)).toThrow("先停止");
-  expect(invoke("sessions:view", record.id)).toEqual(view);
-  invoke("sessions:interrupt", record.id);
+  expect(invoke("tasks:view", record.id)).toEqual(view);
+  invoke("tasks:interrupt", record.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
   target = { id: record.id, projectId: project.id };
-  await invoke("sessions:send", record.id, "再次运行", model.profile.id);
+  await invoke("tasks:send", record.id, "再次运行", model.profile.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
   expect(reservedChecked).toBe(true);
   target = undefined;
-  invoke("sessions:set-project", record.id, null);
+  invoke("tasks:set-project", record.id, null);
   invoke("projects:remove", project.id, true);
-  expect(invoke("sessions:view", record.id)).not.toBeNull();
+  expect(invoke("tasks:view", record.id)).not.toBeNull();
 });
 
 it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已删除任务", async () => {
   const app = setup();
   const model = await provider(app);
   const project = invoke("projects:add", app.workspace);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "remove-vs-send",
     projectId: project.id,
     text: "首轮",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
   const available = await app.profiles.list();
   let release!: () => void;
@@ -1444,18 +1402,13 @@ it("移除抢先于异步发送准备完成时不能通过旧Core缓存复活已
     await gate;
     return available;
   });
-  const sending = invoke(
-    "sessions:send",
-    record.id,
-    "不应执行",
-    model.profile.id
-  );
+  const sending = invoke("tasks:send", record.id, "不应执行", model.profile.id);
   const rejected = expect(sending).rejects.toThrow("已移除");
   invoke("projects:remove", project.id, true);
   release();
   await rejected;
-  expect(invoke("sessions:list")).toEqual([]);
-  expect(invoke("sessions:messages", record.id)).toEqual([]);
+  expect(invoke("tasks:list")).toEqual([]);
+  expect(invoke("tasks:messages", record.id)).toEqual([]);
   expect(model.requests()).toBe(1);
 });
 
@@ -1474,41 +1427,41 @@ it("压缩执行也复用宿主占位，不能在异步生成摘要期间移除�
     release: gate,
   });
   const project = invoke("projects:add", app.workspace);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "compact-protected",
     projectId: project.id,
     text: "首轮",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
   for (let i = 0; i < 3; i++) {
-    await invoke("sessions:send", record.id, `后续${i}`, model.profile.id);
+    await invoke("tasks:send", record.id, `后续${i}`, model.profile.id);
     await waitFor(() =>
-      expect(invoke("sessions:execution", record.id).running).toBe(false)
+      expect(invoke("tasks:execution", record.id).running).toBe(false)
     );
   }
-  const beforeCompact = invoke("sessions:view", record.id);
-  const compacting = invoke("sessions:compact", record.id, model.profile.id);
+  const beforeCompact = invoke("tasks:view", record.id);
+  const compacting = invoke("tasks:compact", record.id, model.profile.id);
   await ready;
   try {
-    expect(invoke("sessions:execution", record.id).running).toBe(true);
-    const view = invoke("sessions:view", record.id);
+    expect(invoke("tasks:execution", record.id).running).toBe(true);
+    const view = invoke("tasks:view", record.id);
     expect(view.activity).toMatchObject({
       running: true,
       operation: "compact",
       outcome: null,
     });
     expect(view.executionId).toBe(
-      invoke("sessions:execution", record.id).executionId
+      invoke("tasks:execution", record.id).executionId
     );
     expect(view.executionId).not.toBe(beforeCompact.executionId);
     expect(view.sequence).toBeGreaterThan(beforeCompact.sequence);
     expect(view.events.map((envelope: any) => envelope.event.type)).toEqual([
       "compact-start",
     ]);
-    expect(invoke("sessions:list")[0].activity).toEqual(view.activity);
-    expect(() => invoke("sessions:set-project", record.id, null)).toThrow(
+    expect(invoke("tasks:list")[0].activity).toEqual(view.activity);
+    expect(() => invoke("tasks:set-project", record.id, null)).toThrow(
       "先停止"
     );
     expect(() => invoke("projects:remove", project.id, true)).toThrow("先停止");
@@ -1516,7 +1469,7 @@ it("压缩执行也复用宿主占位，不能在异步生成摘要期间移除�
     release();
     await compacting;
   }
-  expect(invoke("sessions:execution", record.id).running).toBe(false);
+  expect(invoke("tasks:execution", record.id).running).toBe(false);
 });
 
 it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现半删除", async () => {
@@ -1528,13 +1481,13 @@ it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现�
     projectId: project.id,
     text: "原始历史",
   };
-  const record = await invoke("sessions:start", request);
+  const record = await invoke("tasks:start", request);
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
-  const before = invoke("sessions:view", record.id);
+  const before = invoke("tasks:view", record.id);
   // 仅在临时测试库注入存储故障；断言仍经宿主公开接口，不查询私有表布局。
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_project_removal BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'injected disk failure'); END"
@@ -1543,38 +1496,38 @@ it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现�
       "injected disk failure"
     );
     expect(invoke("projects:list")).toEqual([project]);
-    expect(invoke("sessions:view", record.id)).toEqual(before);
-    expect((await invoke("sessions:start", request)).id).toBe(record.id);
+    expect(invoke("tasks:view", record.id)).toEqual(before);
+    expect((await invoke("tasks:start", request)).id).toBe(record.id);
     fault.exec("DROP TRIGGER fail_project_removal");
   } finally {
     fault.close();
   }
   invoke("projects:remove", project.id, true);
-  expect(invoke("sessions:view", record.id)).toBeNull();
+  expect(invoke("tasks:view", record.id)).toBeNull();
 });
 
 it("同目录独立任务等待中仍可移除空项目，不能按目录误判运行保护范围", async () => {
   const app = setup();
   await provider(app, true);
   const project = invoke("projects:add", app.workspace);
-  const record = await invoke("sessions:start", {
+  const record = await invoke("tasks:start", {
     requestId: "standalone-waiting",
     projectId: null,
     workspacePath: app.workspace,
     text: "独立等待",
   });
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).waitingForUser).toBe(true)
+    expect(invoke("tasks:execution", record.id).waitingForUser).toBe(true)
   );
-  const before = invoke("sessions:view", record.id);
+  const before = invoke("tasks:view", record.id);
   expect(invoke("projects:remove", project.id, true)).toEqual({
     projectId: project.id,
     taskIds: [],
   });
-  expect(invoke("sessions:view", record.id)).toEqual(before);
-  invoke("sessions:interrupt", record.id);
+  expect(invoke("tasks:view", record.id)).toEqual(before);
+  invoke("tasks:interrupt", record.id);
   await waitFor(() =>
-    expect(invoke("sessions:execution", record.id).running).toBe(false)
+    expect(invoke("tasks:execution", record.id).running).toBe(false)
   );
 });
 
@@ -1582,12 +1535,12 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
   const app = setup();
   await provider(app);
   const project = invoke("projects:add", app.workspace);
-  const member = await invoke("sessions:start", {
+  const member = await invoke("tasks:start", {
     requestId: "combined-member",
     projectId: project.id,
     text: "组合成员",
   });
-  const independent = await invoke("sessions:start", {
+  const independent = await invoke("tasks:start", {
     requestId: "combined-independent",
     projectId: null,
     workspacePath: app.workspace,
@@ -1595,8 +1548,8 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
   });
   await waitFor(() =>
     expect(
-      invoke("sessions:list").every(
-        (s: any) => !invoke("sessions:execution", s.id).running
+      invoke("tasks:list").every(
+        (s: any) => !invoke("tasks:execution", s.id).running
       )
     ).toBe(true)
   );
@@ -1618,10 +1571,10 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
     invoke("workbench:write", target, next);
     saved.push(next);
   }
-  expect(invoke("sessions:search", "组合", true)).toHaveLength(2);
-  invoke("sessions:set-project", independent.id, project.id);
-  expect(invoke("sessions:search", "组合独立")[0].projectId).toBe(project.id);
-  invoke("sessions:set-project", independent.id, null);
+  expect(invoke("tasks:search", "组合", true)).toHaveLength(2);
+  invoke("tasks:set-project", independent.id, project.id);
+  expect(invoke("tasks:search", "组合独立")[0].projectId).toBe(project.id);
+  invoke("tasks:set-project", independent.id, null);
   invoke("projects:remove", project.id, true);
   for (const target of ownedTargets) {
     expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
@@ -1634,13 +1587,13 @@ it("移除与03工作现场及06搜索组合：同事务清理明确归属，迟
     expect(await invoke("workbench:read", keptTargets[i])).toEqual(
       saved[i + 2]
     );
-  expect(invoke("sessions:search", "组合", true)).toMatchObject([
+  expect(invoke("tasks:search", "组合", true)).toMatchObject([
     { id: independent.id, projectId: null },
   ]);
   app.reopen();
   for (const target of ownedTargets)
     expect(app.manager.readWorkbench(workbenchKey(target))).toBeNull();
-  expect(invoke("sessions:search", "组合成员", true)).toEqual([]);
+  expect(invoke("tasks:search", "组合成员", true)).toEqual([]);
   const another = invoke("projects:add", app.workspace);
   const available = await app.profiles.list();
   let release!: () => void;
@@ -1685,12 +1638,12 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
     workspaceMode: "worktree",
     text: "已执行过不能回滚",
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"
     );
-    await expect(invoke("sessions:start", request)).rejects.toThrow(
+    await expect(invoke("tasks:start", request)).rejects.toThrow(
       "injected consume failure"
     );
     fault.exec("DROP TRIGGER fail_consume");
@@ -1701,18 +1654,18 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
     await gate;
     return available;
   });
-  const sending = invoke("sessions:start", request);
-  const duplicate = invoke("sessions:start", request);
+  const sending = invoke("tasks:start", request);
+  const duplicate = invoke("tasks:start", request);
   const rejected = expect(sending).rejects.toThrow("已移除");
   const duplicateRejected = expect(duplicate).rejects.toThrow("已移除");
-  await waitFor(() => expect(invoke("sessions:list")[0]?.status).toBe("idle"));
+  await waitFor(() => expect(invoke("tasks:list")[0]?.status).toBe("idle"));
   await waitFor(() => expect(model.requests()).toBe(1));
   await waitFor(() =>
-    expect(
-      invoke("sessions:execution", invoke("sessions:list")[0].id).running
-    ).toBe(false)
+    expect(invoke("tasks:execution", invoke("tasks:list")[0].id).running).toBe(
+      false
+    )
   );
-  const record = invoke("sessions:list")[0];
+  const record = invoke("tasks:list")[0];
   invoke("projects:remove", project.id, true);
   release();
   await Promise.all([rejected, duplicateRejected]);
@@ -1723,7 +1676,7 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
   expect(
     app.manager.readWorkbench(workbenchKey({ kind: "task", taskId: record.id }))
   ).toBeNull();
-  expect(invoke("sessions:list")).toEqual([]);
+  expect(invoke("tasks:list")).toEqual([]);
 });
 
 it("空的非 Git 项目显式持久存在；规范路径重复添加不创建另一个项目", async () => {
@@ -1737,8 +1690,8 @@ it("空的非 Git 项目显式持久存在；规范路径重复添加不创建�
   expect(await invoke("projects:add", join(app.workspace, "."))).toEqual(
     project
   );
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
   app.reopen();
   expect(await invoke("projects:list")).toEqual([project]);
-  expect(await invoke("sessions:list")).toEqual([]);
+  expect(await invoke("tasks:list")).toEqual([]);
 });

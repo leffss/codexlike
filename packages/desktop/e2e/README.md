@@ -28,14 +28,14 @@
 | 13  | projects            | `projects-sidebar.mjs`     | ADR 0010：项目侧栏布局、分组入口与首次发送纵向验收                                                                           |
 | 14  | sidebar             | `sidebar-archive.mjs`      | 侧栏布局、右键菜单、稳定排序、归档与进程重开                                                                                 |
 | 15  | membership          | `membership.mjs`           | 任务归属与移除确认（仅临时目录 + 模型替身）                                                                                  |
-| 16  | search              | `session-search.mjs`       | 任务搜索与历史导航（真实 SQLite）                                                                                            |
+| 16  | search              | `task-search.mjs`          | 任务搜索与历史导航（真实 SQLite）                                                                                            |
 | 17  | theme               | `theme.mjs`                | ADR 0007：light/dark 切换即时生效 + 偏好落盘重启保持                                                                         |
 | 18  | skills              | `skills.mjs`               | 规范与技能：真实界面 + mock HTTP 请求验证技能菜单/引用链路，非仅菜单检查                                                     |
 | 19  | thinking            | `thinking.mjs`             | 思考档位贯通：五档请求 JSON 契约、reasoning 折叠与正文隔离、运行中切档只影响下一条                                           |
 | 20  | subagent-thinking   | `subagent-thinking.mjs`    | 子代理思考快照继承：主/子请求都带档位、切档不影响已触发任务、思考不回传、SubagentCard 折叠展示                               |
 | 21  | message-order       | `message-order.mjs`        | 时序保真：思考/正文/工具交错回复按事件序排列（严格 testid 序列），折叠交互不变、重启恢复形状                                 |
 | 22  | worked-history      | `worked-history.mjs`       | 已工作折叠区与轮次分组：过程段整体收起、展开回看完整、连续同类工具统计分组、中断轮强制展开                                   |
-| 23  | live-sessions       | `live-sessions.mjs`        | 后台任务状态（SSE 闸门替身）：侧栏实时状态流转                                                                               |
+| 23  | live-tasks          | `live-tasks.mjs`           | 后台任务状态（SSE 闸门替身）：侧栏实时状态流转                                                                               |
 | 24  | persistence         | `persistent-workbench.mjs` | 草稿、设置、滚动位置与空闲进程重启恢复                                                                                       |
 | 25  | exit                | `exit-recovery.mjs`        | 真实进程退出/重开：模型计数与文件追加副作用独立证明不重放                                                                    |
 | 26  | launch-state        | `launch-state.mjs`         | 窗口现场（票01/02）：首启默认居中、预写 bounds 照常恢复、负坐标/部分越界不判失效、无交集回退主屏、maximized、损坏文件回退    |

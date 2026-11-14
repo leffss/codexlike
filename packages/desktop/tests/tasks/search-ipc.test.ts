@@ -10,7 +10,7 @@ import {
   createWorktreeService,
   type ProjectRecord,
   type TaskRecord,
-  type SessionSearchResult,
+  type TaskSearchResult,
 } from "@codexlike/agent-core/node";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
 import { listenMock } from "./mock-server";
@@ -41,14 +41,14 @@ async function invoke<T>(name: string, ...args: unknown[]): Promise<T> {
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
 
 async function setup() {
-  const root = mkdtempSync(join(tmpdir(), "session-search-"));
+  const root = mkdtempSync(join(tmpdir(), "task-search-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "nested", "home");
   const firstPath = join(root, "项目甲");
   const secondPath = join(root, "项目乙");
   mkdirSync(firstPath);
   mkdirSync(secondPath);
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanup.push(() => store.close());
   const profiles = createProfileStore({
     dir: home,
@@ -107,22 +107,22 @@ async function setup() {
     second,
     profile,
     async create(text: string, projectId: string | null) {
-      const session = await invoke<TaskRecord>("sessions:start", {
+      const task = await invoke<TaskRecord>("tasks:start", {
         requestId: text,
         projectId,
         ...(projectId === null ? { workspacePath: firstPath } : {}),
         text,
       });
       await waitFor(async () =>
-        expect(await invoke("sessions:execution", session.id)).toMatchObject({
+        expect(await invoke("tasks:execution", task.id)).toMatchObject({
           running: false,
         })
       );
-      return session;
+      return task;
     },
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };
@@ -130,10 +130,10 @@ async function setup() {
 
 it("空输入不返回全库，特殊字符是字面文本，私有配置与目录内容不参与搜索", async () => {
   const app = await setup();
-  const session = await app.create("普通正文", null);
+  const task = await app.create("普通正文", null);
   await invoke(
-    "sessions:rename",
-    session.id,
+    "tasks:rename",
+    task.id,
     "SQL ' OR 1=1 -- 100%_\\路径 [a] MiXeD"
   );
   writeFileSync(join(app.first.workspacePath, "secret.txt"), "磁盘私密关键词");
@@ -147,7 +147,7 @@ it("空输入不返回全库，特殊字符是字面文本，私有配置与目�
     "磁盘私密关键词",
     "项目甲",
   ]) {
-    expect(await invoke("sessions:search", query, true)).toEqual([]);
+    expect(await invoke("tasks:search", query, true)).toEqual([]);
   }
   for (const query of [
     "' OR 1=1 --",
@@ -157,48 +157,48 @@ it("空输入不返回全库，特殊字符是字面文本，私有配置与目�
     "mixed",
     "  MiXeD  ",
   ]) {
-    expect(await invoke("sessions:search", query)).toMatchObject([
-      { id: session.id },
+    expect(await invoke("tasks:search", query)).toMatchObject([
+      { id: task.id },
     ]);
   }
-  expect(await invoke("sessions:search", "' OR 2=2 --")).toEqual([]);
-  await expect(invoke("sessions:search", null)).rejects.toThrow("search");
-  await expect(invoke("sessions:search", "普通", "false")).rejects.toThrow(
+  expect(await invoke("tasks:search", "' OR 2=2 --")).toEqual([]);
+  await expect(invoke("tasks:search", null)).rejects.toThrow("search");
+  await expect(invoke("tasks:search", "普通", "false")).rejects.toThrow(
     "search"
   );
 });
 
 it("归档默认排除且可选纳入；重命名、归档、恢复与新消息后重新查询读取最新持久内容", async () => {
   const app = await setup();
-  const session = await app.create("历史正文", null);
-  await invoke("sessions:rename", session.id, "旧标题");
-  expect(await invoke("sessions:search", "旧标题")).toHaveLength(1);
-  await invoke("sessions:rename", session.id, "新标题");
-  expect(await invoke("sessions:search", "旧标题")).toEqual([]);
-  await invoke("sessions:archive", session.id, true);
+  const task = await app.create("历史正文", null);
+  await invoke("tasks:rename", task.id, "旧标题");
+  expect(await invoke("tasks:search", "旧标题")).toHaveLength(1);
+  await invoke("tasks:rename", task.id, "新标题");
+  expect(await invoke("tasks:search", "旧标题")).toEqual([]);
+  await invoke("tasks:archive", task.id, true);
   app.reopen();
-  expect(await invoke("sessions:search", "新标题")).toEqual([]);
-  const archived = await invoke<SessionSearchResult[]>(
-    "sessions:search",
+  expect(await invoke("tasks:search", "新标题")).toEqual([]);
+  const archived = await invoke<TaskSearchResult[]>(
+    "tasks:search",
     "新标题",
     true
   );
   expect(archived).toHaveLength(1);
   expect(archived[0]).toMatchObject({
-    id: session.id,
+    id: task.id,
     archivedAt: expect.any(String),
   });
-  expect(await invoke("sessions:search", "新标题", false)).toEqual([]);
-  await invoke("sessions:archive", session.id, false);
-  expect(await invoke("sessions:search", "新标题")).toHaveLength(1);
-  await invoke("sessions:send", session.id, "后续新增正文", app.profile.id);
+  expect(await invoke("tasks:search", "新标题", false)).toEqual([]);
+  await invoke("tasks:archive", task.id, false);
+  expect(await invoke("tasks:search", "新标题")).toHaveLength(1);
+  await invoke("tasks:send", task.id, "后续新增正文", app.profile.id);
   await waitFor(async () =>
-    expect(await invoke("sessions:execution", session.id)).toMatchObject({
+    expect(await invoke("tasks:execution", task.id)).toMatchObject({
       running: false,
     })
   );
-  expect(await invoke("sessions:search", "后续新增正文")).toMatchObject([
-    { id: session.id },
+  expect(await invoke("tasks:search", "后续新增正文")).toMatchObject([
+    { id: task.id },
   ]);
 });
 
@@ -207,11 +207,11 @@ it("标题与用户/助手正文跨项目和独立归属查询；折叠和真实
   const a = await app.create("初始甲正文", app.first.id);
   const b = await app.create("用户正文唯一线索", app.second.id);
   const c = await app.create("同目录但无项目归属", null);
-  await invoke("sessions:rename", a.id, "仅标题流星");
-  await invoke("sessions:rename", b.id, "没有关键词的标题");
+  await invoke("tasks:rename", a.id, "仅标题流星");
+  await invoke("tasks:rename", b.id, "没有关键词的标题");
   await invoke("projects:set-collapsed", app.second.id, true);
   app.reopen();
-  expect(await invoke("sessions:search", "仅标题流星")).toEqual([
+  expect(await invoke("tasks:search", "仅标题流星")).toEqual([
     {
       id: a.id,
       title: "仅标题流星",
@@ -220,7 +220,7 @@ it("标题与用户/助手正文跨项目和独立归属查询；折叠和真实
       archivedAt: null,
     },
   ]);
-  expect(await invoke("sessions:search", "用户正文唯一线索")).toEqual([
+  expect(await invoke("tasks:search", "用户正文唯一线索")).toEqual([
     {
       id: b.id,
       title: "没有关键词的标题",
@@ -229,7 +229,7 @@ it("标题与用户/助手正文跨项目和独立归属查询；折叠和真实
       archivedAt: null,
     },
   ]);
-  expect(await invoke("sessions:search", "同目录但无项目归属")).toEqual([
+  expect(await invoke("tasks:search", "同目录但无项目归属")).toEqual([
     {
       id: c.id,
       title: c.title,
@@ -238,7 +238,7 @@ it("标题与用户/助手正文跨项目和独立归属查询；折叠和真实
       archivedAt: null,
     },
   ]);
-  const results = await invoke<{ id: string }[]>("sessions:search", "星河检索");
+  const results = await invoke<{ id: string }[]>("tasks:search", "星河检索");
   expect(results.map((item) => item.id).sort()).toEqual(
     [a.id, b.id, c.id].sort()
   );

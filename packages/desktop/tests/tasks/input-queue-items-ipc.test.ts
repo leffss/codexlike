@@ -33,8 +33,8 @@ afterEach(async () => {
   handlers.clear();
 });
 function invoke(name: string, ...args: unknown[]): any {
-  const handler = handlers.get(`sessions:${name}`);
-  if (!handler) throw new Error(`未注册通道 sessions:${name}`);
+  const handler = handlers.get(`tasks:${name}`);
+  if (!handler) throw new Error(`未注册通道 tasks:${name}`);
   return handler({}, ...args);
 }
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 8000 });
@@ -44,7 +44,7 @@ async function setup() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
-  const dbPath = join(root, "nested", "session-workbench.db");
+  const dbPath = join(root, "nested", "task-workbench.db");
   const persistence = createSqliteTaskStore(dbPath);
   cleanup.push(() => persistence.close());
   const queueStore = createSqliteInputQueueStore(dbPath);
@@ -121,12 +121,10 @@ async function setup() {
     }),
   });
   cleanup.push(async () => {
-    for (const session of manager.list()) invoke("interrupt", session.id);
+    for (const task of manager.list()) invoke("interrupt", task.id);
     await waitFor(() =>
       expect(
-        manager
-          .list()
-          .every((session) => !invoke("execution", session.id).running)
+        manager.list().every((task) => !invoke("execution", task.id).running)
       ).toBe(true)
     );
   });

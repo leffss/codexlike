@@ -67,12 +67,12 @@ describe("TaskManager /rename 与 /archive（任务管理命令）", () => {
       languageModelFor: () => okModel(),
     });
 
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
     expect(manager.list().at(0)?.archivedAt).toBeNull();
 
-    const renamed = manager.rename(session.id, "修登录 bug");
+    const renamed = manager.rename(task.id, "修登录 bug");
     expect(renamed).toMatchObject({
-      id: session.id,
+      id: task.id,
       title: "修登录 bug",
       archivedAt: null,
     });
@@ -91,12 +91,12 @@ describe("TaskManager /rename 与 /archive（任务管理命令）", () => {
       now: () => "2026-11-11T08:00:00.000Z",
     });
 
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
-    const archived = manager.setArchived(session.id, true);
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+    const archived = manager.setArchived(task.id, true);
     expect(archived?.archivedAt).toBe("2026-11-11T08:00:00.000Z");
     expect(manager.list().at(0)?.archivedAt).toBe("2026-11-11T08:00:00.000Z");
 
-    const unarchived = manager.setArchived(session.id, false);
+    const unarchived = manager.setArchived(task.id, false);
     expect(unarchived?.archivedAt).toBeNull();
     expect(manager.list().at(0)?.archivedAt).toBeNull();
 
@@ -155,8 +155,8 @@ describe("TaskManager 系统提示注入（systemPromptFor）", () => {
       languageModelFor: () => model,
       systemPromptFor: (record) => `规范：${record.workspacePath}`,
     });
-    const session = first.create({ workspacePath: "C:\\work\\demo" });
-    for await (const _event of session.sendMessage({ text: "你好", profile })) {
+    const task = first.create({ workspacePath: "C:\\work\\demo" });
+    for await (const _event of task.sendMessage({ text: "你好", profile })) {
       // 消费完整流
     }
     const firstPrompt = model.doStreamCalls[0]?.prompt as {
@@ -175,7 +175,7 @@ describe("TaskManager 系统提示注入（systemPromptFor）", () => {
       languageModelFor: () => model,
       systemPromptFor: (record) => `规范：${record.workspacePath}`,
     });
-    const restored = second.get(session.id);
+    const restored = second.get(task.id);
     expect(restored).not.toBeNull();
     for await (const _event of restored!.sendMessage({
       text: "第二问",
@@ -259,23 +259,23 @@ describe("TaskManager compact 支持（工单 08）", () => {
       languageModelFor: () => dualModel(),
       now: () => "2026-11-11T08:00:00.000Z",
     });
-    const session = manager.create({ workspacePath: "C:\work\demo" });
+    const task = manager.create({ workspacePath: "C:\work\demo" });
 
-    expect(manager.latestCompact(session.id)).toBeNull();
+    expect(manager.latestCompact(task.id)).toBeNull();
 
     for (let i = 1; i <= 4; i += 1) {
-      for await (const _event of session.sendMessage({
+      for await (const _event of task.sendMessage({
         text: `问${i}`,
         profile,
       })) {
         // 消费完整流
       }
     }
-    await session.compact({ profile });
+    await task.compact({ profile });
 
-    const latest = manager.latestCompact(session.id);
+    const latest = manager.latestCompact(task.id);
     expect(latest).toMatchObject({
-      sessionId: session.id,
+      taskId: task.id,
       summary: "压缩摘要",
       messagesCompacted: 2,
     });
@@ -289,21 +289,21 @@ describe("TaskManager compact 支持（工单 08）", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:\work\demo" });
+    const task = manager.create({ workspacePath: "C:\work\demo" });
     for (let i = 1; i <= 4; i += 1) {
-      for await (const _event of session.sendMessage({
+      for await (const _event of task.sendMessage({
         text: `问${i}`,
         profile,
       })) {
         // 消费完整流
       }
     }
-    await session.compact({ profile });
+    await task.compact({ profile });
     const callsBefore = model.doStreamCalls.length;
 
     // 抛弃缓存实例（模拟重启后 get）：从库恢复，摘要仍在上下文中
-    const restored = manager.get(session.id)!;
-    expect(restored.id).toBe(session.id);
+    const restored = manager.get(task.id)!;
+    expect(restored.id).toBe(task.id);
     for await (const _event of restored.sendMessage({
       text: "继续",
       profile,

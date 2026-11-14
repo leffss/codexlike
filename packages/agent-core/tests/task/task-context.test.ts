@@ -20,7 +20,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath: "C:\\work\\demo",
     providerProfileId: null,
@@ -86,15 +86,15 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       systemPromptFor: () => "旧宿主提示",
       resourcesFor: () => fakeResourceSnapshot(revision),
     });
-    const session = manager.create({ workspacePath: "C:/work/demo" });
-    for await (const _event of session.sendMessage({
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    for await (const _event of task.sendMessage({
       text: "第一轮",
       profile,
     })) {
     }
     revision = "第二版规范";
-    expect(manager.get(session.id)).toBe(session);
-    for await (const _event of session.sendMessage({
+    expect(manager.get(task.id)).toBe(task);
+    for await (const _event of task.sendMessage({
       text: "第二轮",
       profile,
     })) {
@@ -118,8 +118,8 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
     });
-    const session = manager.create({ workspacePath: "C:/work/demo" });
-    for await (const _event of session.sendMessage({
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    for await (const _event of task.sendMessage({
       text: "$beta $alpha $beta",
       profile,
     })) {
@@ -131,11 +131,11 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       first.indexOf("ALPHA_PRIVATE_BODY")
     );
     expect(first.match(/BETA_PRIVATE_BODY/g)).toHaveLength(1);
-    expect(manager.messages(session.id)[0]).toMatchObject({
+    expect(manager.messages(task.id)[0]).toMatchObject({
       content: "$beta $alpha $beta",
     });
-    expect(manager.messages(session.id)[0]?.mentions).toBeUndefined();
-    for await (const _event of session.sendMessage({ text: "继续", profile })) {
+    expect(manager.messages(task.id)[0]?.mentions).toBeUndefined();
+    for await (const _event of task.sendMessage({ text: "继续", profile })) {
     }
     const next = JSON.stringify(model.doStreamCalls[1]?.prompt);
     expect(next).not.toContain("ALPHA_PRIVATE_BODY");
@@ -155,7 +155,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
         throw new Error("不应读取资源");
       },
     });
-    expect(uninstantiated.resourceState("session-1")).toEqual({
+    expect(uninstantiated.resourceState("task-1")).toEqual({
       active: null,
       last: null,
     });
@@ -169,24 +169,24 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
     });
-    const session = manager.get("session-1")!;
-    expect(session.resourceState).toEqual({ active: null, last: null });
-    for await (const _event of session.sendMessage({
+    const task = manager.get("task-1")!;
+    expect(task.resourceState).toEqual({ active: null, last: null });
+    for await (const _event of task.sendMessage({
       text: "$alpha",
       profile,
     })) {
-      expect(manager.resourceState(session.id).active?.loaded).toEqual([
+      expect(manager.resourceState(task.id).active?.loaded).toEqual([
         expect.objectContaining({
           executorId: "main",
           name: "alpha",
           kind: "skill",
         }),
       ]);
-      expect(session.resourceState.last).toBeNull();
+      expect(task.resourceState.last).toBeNull();
     }
-    expect(session.resourceState.active).toBeNull();
-    expect(manager.resourceState(session.id).last?.loaded).toHaveLength(1);
-    expect(JSON.stringify(session.resourceState)).not.toContain(
+    expect(task.resourceState.active).toBeNull();
+    expect(manager.resourceState(task.id).last?.loaded).toHaveLength(1);
+    expect(JSON.stringify(task.resourceState)).not.toContain(
       "ALPHA_PRIVATE_BODY"
     );
     persistence.close();
@@ -200,21 +200,21 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       languageModelFor: () => model,
       resourcesFor: () => fakeResourceSnapshot(),
     });
-    const session = manager.create({ workspacePath: "C:/work/demo" });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
     await expect(
       (async () => {
-        for await (const _event of session.sendMessage({
+        for await (const _event of task.sendMessage({
           text: "$alpha $missing",
           profile,
         })) {
         }
       })()
     ).rejects.toThrow("未知技能");
-    expect(manager.messages(session.id)).toEqual([]);
+    expect(manager.messages(task.id)).toEqual([]);
     expect(model.doStreamCalls).toHaveLength(0);
-    expect(session.resourceState.active).toBeNull();
-    expect(session.resourceState.last?.loaded).toEqual([]);
-    for await (const _event of session.sendMessage({ text: "继续", profile })) {
+    expect(task.resourceState.active).toBeNull();
+    expect(task.resourceState.last?.loaded).toEqual([]);
+    for await (const _event of task.sendMessage({ text: "继续", profile })) {
     }
     expect(model.doStreamCalls).toHaveLength(1);
     expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).not.toContain(
@@ -236,7 +236,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
           return { stream: textStream("收到") };
         },
       });
-      const session = createAgentTask({
+      const task = createAgentTask({
         record,
         persistence,
         languageModelFor: () => model,
@@ -244,7 +244,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       });
       const controller = new AbortController();
       const events = [];
-      for await (const event of session.sendMessage({
+      for await (const event of task.sendMessage({
         text: "$alpha",
         profile,
         signal: controller.signal,
@@ -254,18 +254,18 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
         if (ending === "abort" && event.type === "user-message")
           controller.abort();
       }
-      expect(session.resourceState.active).toBeNull();
-      expect(session.resourceState.last?.loaded).toHaveLength(1);
+      expect(task.resourceState.active).toBeNull();
+      expect(task.resourceState.last?.loaded).toHaveLength(1);
       if (ending === "failure") expect(events.at(-1)?.type).toBe("error");
       if (ending === "abort")
         expect(events.at(-1)?.type).toBe("assistant-aborted");
       fail = false;
-      for await (const _event of session.sendMessage({
+      for await (const _event of task.sendMessage({
         text: "继续",
         profile,
       })) {
       }
-      expect(session.resourceState.last?.loaded).toEqual([]);
+      expect(task.resourceState.last?.loaded).toEqual([]);
       persistence.close();
     }
   );
@@ -277,14 +277,14 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       persistence,
       languageModelFor: () => model,
     });
-    const session = manager.create({ workspacePath: "C:/work/demo" });
-    for await (const _event of session.sendMessage({
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    for await (const _event of task.sendMessage({
       text: "$missing",
       profile,
     })) {
     }
     expect(model.doStreamCalls).toHaveLength(1);
-    expect(session.resourceState).toEqual({ active: null, last: null });
+    expect(task.resourceState).toEqual({ active: null, last: null });
     persistence.close();
   });
 
@@ -293,7 +293,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     const record = taskRecord();
     persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       systemPrompt: "# 用户与项目规范（AGENTS.md）\n\n回答保持简洁。",
@@ -301,7 +301,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
       now: fakeClock(),
     });
 
-    for await (const _event of session.sendMessage({ text: "你好", profile })) {
+    for await (const _event of task.sendMessage({ text: "你好", profile })) {
       // 消费完事件流
     }
 
@@ -314,14 +314,14 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     const record = taskRecord();
     persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    for await (const _event of session.sendMessage({ text: "你好", profile })) {
+    for await (const _event of task.sendMessage({ text: "你好", profile })) {
       // 消费完事件流
     }
 
@@ -334,7 +334,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     const record = taskRecord();
     persistence.insertTask(record);
     const model = scriptedModel(["收到"]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
@@ -342,7 +342,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     });
 
     const events = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "看看 @src/a.ts 和 @docs/b.md",
       profile,
       mentions: [
@@ -369,7 +369,7 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     });
     expect(
       persistence
-        .listMessages("session-1")
+        .listMessages("task-1")
         .map((message) => [message.role, message.content])
     ).toEqual([
       ["user", "看看 @src/a.ts 和 @docs/b.md"],
@@ -382,21 +382,21 @@ describe("AgentTask 上下文注入（系统提示与 @引用）", () => {
     const record = taskRecord();
     persistence.insertTask(record);
     const model = scriptedModel(["第一轮", "第二轮"]);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: () => model,
       now: fakeClock(),
     });
 
-    for await (const _event of session.sendMessage({
+    for await (const _event of task.sendMessage({
       text: "读这个 @x.txt",
       profile,
       mentions: [{ path: "x.txt", content: "被引用的内容" }],
     })) {
       // 消费
     }
-    for await (const _event of session.sendMessage({
+    for await (const _event of task.sendMessage({
       text: "第二条没有引用",
       profile,
     })) {

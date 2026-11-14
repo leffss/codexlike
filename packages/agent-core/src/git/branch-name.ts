@@ -11,8 +11,8 @@ const MAX_SLUG_LENGTH = 48;
 /** 任务名中 git 分支不允许的字符（含空格与常见全角空格） */
 const ILLEGAL_CHARS = /[\s~^:?*[\]\\]/g;
 
-export function codexlikeBranchName(sessionTitle: string): string {
-  let slug = sessionTitle
+export function codexlikeBranchName(taskTitle: string): string {
+  let slug = taskTitle
     .replace(ILLEGAL_CHARS, "-")
     .replace(/\.\./g, "-") // git 不允许 ..
     .replace(/@{/g, "-") // git 不允许 @{
@@ -25,7 +25,7 @@ export function codexlikeBranchName(sessionTitle: string): string {
     slug = slug.slice(0, -".lock".length);
   }
   if (slug === "") {
-    slug = "session";
+    slug = "task";
   }
   return `codexlike/${slug}`;
 }

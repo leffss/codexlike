@@ -14,7 +14,7 @@ function makeWorkspace(): string {
 function context(workspacePath: string): ToolExecutionContext {
   return {
     workspacePath,
-    sessionId: "unit-test-session",
+    taskId: "unit-test-task",
     approvalMode: "assist",
   };
 }
@@ -190,7 +190,7 @@ describe("run_terminal_command 工具（默认 Git Bash）", () => {
       {
         workspacePath: workspace,
         approvalMode: "assist",
-        sessionId: "terminal-test",
+        taskId: "terminal-test",
         signal: controller.signal,
       }
     );

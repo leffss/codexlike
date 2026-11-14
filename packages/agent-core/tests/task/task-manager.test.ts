@@ -87,13 +87,13 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       languageModelFor: () => okModel(),
     });
 
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
     // 消费完整事件流（等价一次消息往返完成）
-    for await (const _event of session.sendMessage({ text: "你好", profile })) {
+    for await (const _event of task.sendMessage({ text: "你好", profile })) {
       // 只驱动流走完
     }
 
-    expect(session.id).not.toBe("");
+    expect(task.id).not.toBe("");
     const records = manager.list();
     expect(records).toHaveLength(1);
     expect(records[0]?.title).toBe(basename("C:\\work\\demo") || "demo");
@@ -113,8 +113,8 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       },
     });
 
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
-    for await (const _event of session.sendMessage({
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+    for await (const _event of task.sendMessage({
       text: "你好",
       profile,
       thinkingEffort: "high",
@@ -136,15 +136,15 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     });
 
     // 宿主（desktop 主进程）先创建托管 worktree、再以同一 id 落库：workspacePath 指向副本
-    const session = manager.create({
-      id: "wt-session-1",
-      workspacePath: "C:\\home\\.codexlike\\worktrees\\wt-session-1",
+    const task = manager.create({
+      id: "wt-task-1",
+      workspacePath: "C:\\home\\.codexlike\\worktrees\\wt-task-1",
       workspaceMode: "worktree",
       title: "demo",
     });
 
-    expect(session.id).toBe("wt-session-1");
-    expect(session.record.workspaceMode).toBe("worktree");
+    expect(task.id).toBe("wt-task-1");
+    expect(task.record.workspaceMode).toBe("worktree");
     expect(manager.list()[0]?.workspaceMode).toBe("worktree");
     // 默认（不传模式）仍是本目录直跑
     const local = manager.create({ workspacePath: "C:\\work\\demo" });
@@ -168,16 +168,14 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       persistence: persistence1,
       languageModelFor: () => model,
     });
-    const session = first.create({ workspacePath: "C:\\work\\demo" });
-    for await (const _event of session.sendMessage({
+    const task = first.create({ workspacePath: "C:\\work\\demo" });
+    for await (const _event of task.sendMessage({
       text: "第一问",
       profile,
     })) {
       // 消费完整流
     }
-    expect(first.messages(session.id).map((m) => m.content)).toContain(
-      "第一问"
-    );
+    expect(first.messages(task.id).map((m) => m.content)).toContain("第一问");
 
     // 等价重启：同一库文件上的新 manager
     const persistence2 = createSqliteTaskStore(dbPath);
@@ -213,9 +211,9 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       persistence,
       languageModelFor: () => okModel(),
     });
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
     // 模拟应用在流式中途被杀：库里残留 streaming
-    persistence.updateTask(session.id, { status: "streaming" });
+    persistence.updateTask(task.id, { status: "streaming" });
     expect(persistence.listTasks().at(0)?.status).toBe("streaming");
 
     // get 惰性恢复：用全新 manager 绕过缓存，读取残留记录并重置为 idle 落库
@@ -223,7 +221,7 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       persistence,
       languageModelFor: () => okModel(),
     });
-    const restored = manager2.get(session.id);
+    const restored = manager2.get(task.id);
     expect(restored).not.toBeNull();
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
     persistence.close();
@@ -235,19 +233,19 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       persistence,
       languageModelFor: () => okModel(),
     });
-    const session = manager.create({ workspacePath: "C:\work\demo" });
+    const task = manager.create({ workspacePath: "C:\work\demo" });
 
     // 手工落库一份交错的记录（真实路径由任务循环产生；此处验证合并语义）
     persistence.insertMessage({
       id: "m1",
-      sessionId: session.id,
+      taskId: task.id,
       role: "user",
       content: "读一下",
       createdAt: "2026-11-11T08:00:01.000Z",
     });
     persistence.insertToolCall({
       id: "t1",
-      sessionId: session.id,
+      taskId: task.id,
       toolName: "read_file",
       arguments: JSON.stringify({ path: "a.txt" }),
       output: "已读",
@@ -256,13 +254,13 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     });
     persistence.insertMessage({
       id: "m2",
-      sessionId: session.id,
+      taskId: task.id,
       role: "assistant",
       content: "读完了",
       createdAt: "2026-11-11T08:00:03.000Z",
     });
 
-    const transcript = manager.transcript(session.id);
+    const transcript = manager.transcript(task.id);
     expect(transcript.map((item) => item.kind)).toEqual([
       "message",
       "tool-call",
@@ -286,8 +284,8 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
 
     expect(manager.get("nope")).toBeNull();
 
-    const session = manager.create({ workspacePath: "C:\\work\\demo" });
-    expect(manager.get(session.id)).toBe(session);
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+    expect(manager.get(task.id)).toBe(task);
     persistence.close();
   });
 
@@ -298,14 +296,14 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       languageModelFor: () => okModel(),
     });
 
-    const session = manager.create({ workspacePath: "C:\work\demo" });
-    expect(session.record.approvalMode).toBe("assist");
+    const task = manager.create({ workspacePath: "C:\work\demo" });
+    expect(task.record.approvalMode).toBe("assist");
     expect(manager.list()[0]?.approvalMode).toBe("assist");
 
     // 切换：落库 + 缓存实例立即拿到新档位（下一次工具调用生效）
-    const updated = manager.setApprovalMode(session.id, "ask");
+    const updated = manager.setApprovalMode(task.id, "ask");
     expect(updated?.approvalMode).toBe("ask");
-    expect(session.record.approvalMode).toBe("ask");
+    expect(task.record.approvalMode).toBe("ask");
     expect(manager.list()[0]?.approvalMode).toBe("ask");
 
     // 不存在的任务返回 null
@@ -371,10 +369,10 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       persistence: persistence1,
       languageModelFor: () => okModel(),
     });
-    const session = first.create({ workspacePath: "C:\\work\\demo" });
-    expect(session.record.approvalMode).toBe("assist");
+    const task = first.create({ workspacePath: "C:\\work\\demo" });
+    expect(task.record.approvalMode).toBe("assist");
 
-    expect(first.setApprovalMode(session.id, "full-access")?.approvalMode).toBe(
+    expect(first.setApprovalMode(task.id, "full-access")?.approvalMode).toBe(
       "full-access"
     );
     expect(first.list()[0]?.approvalMode).toBe("full-access");
@@ -388,7 +386,7 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       languageModelFor: () => okModel(),
     });
     expect(second.list()[0]?.approvalMode).toBe("full-access");
-    expect(second.get(session.id)?.record.approvalMode).toBe("full-access");
+    expect(second.get(task.id)?.record.approvalMode).toBe("full-access");
     persistence2.close();
   });
 });

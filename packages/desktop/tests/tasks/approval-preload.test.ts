@@ -26,25 +26,25 @@ it("公开preload桥只转发项目置顶、有效交互载荷和撤销，不暴
   const response = {
     kind: "approval",
     decision: "approve",
-    scope: "session",
+    scope: "task",
   } as const;
-  await api.sessions.respondInteraction("session", "request", response);
+  await api.tasks.respondInteraction("task", "request", response);
   expect(bridge.invoke).toHaveBeenLastCalledWith(
-    "sessions:respond-interaction",
-    "session",
+    "tasks:respond-interaction",
+    "task",
     "request",
     response
   );
-  await api.sessions.revokeAutoApprove("session");
+  await api.tasks.revokeAutoApprove("task");
   expect(bridge.invoke).toHaveBeenLastCalledWith(
-    "sessions:revoke-auto-approve",
-    "session"
+    "tasks:revoke-auto-approve",
+    "task"
   );
-  expect(api.sessions).not.toHaveProperty("setAutoApprove");
-  await api.sessions.respondApproval("session", "request", "always");
+  expect(api.tasks).not.toHaveProperty("setAutoApprove");
+  await api.tasks.respondApproval("task", "request", "always");
   expect(bridge.invoke).toHaveBeenLastCalledWith(
-    "sessions:respond-approval",
-    "session",
+    "tasks:respond-approval",
+    "task",
     "request",
     "always"
   );

@@ -277,7 +277,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
   const attachToolImages = options.attachToolImages ?? true;
 
   // 审批状态（GLOSSARY「审批模式」）：模式随时可切（只对下一次发送生效）。
-  // autoApprove 独立实时读取；遗留 always 仅批准本次，任务授权必须来自有效 scope: session 响应。
+  // autoApprove 独立实时读取；遗留 always 仅批准本次，任务授权必须来自有效 scope: task 响应。
   // waiter 表（工单 13）：主任务与多个子代理可能并行等待审批，按 requestId 路由。
   let nextApprovalMode =
     options.approvalMode ?? record.approvalMode ?? "assist";
@@ -325,7 +325,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         ? [
             {
               id: request.id,
-              sessionId: request.sessionId,
+              taskId: request.taskId,
               toolName: request.toolName,
               command: request.command,
               commandWord: request.commandWord,
@@ -342,11 +342,11 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     request:
       | Omit<
           Extract<InteractionRequest, { kind: "questions" }>,
-          "id" | "sessionId" | "turnId" | "createdAt"
+          "id" | "taskId" | "turnId" | "createdAt"
         >
       | Omit<
           Extract<InteractionRequest, { kind: "approval" }>,
-          "id" | "sessionId" | "turnId" | "createdAt"
+          "id" | "taskId" | "turnId" | "createdAt"
         >
   ) {
     if (!activeUser || terminated)
@@ -354,7 +354,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         request: {
           ...request,
           id: generateId(),
-          sessionId: record.id,
+          taskId: record.id,
           turnId: activeUser?.id ?? "",
           createdAt: now(),
         },
@@ -367,7 +367,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       {
         ...request,
         id: generateId(),
-        sessionId: record.id,
+        taskId: record.id,
         turnId: activeUser.id,
         createdAt: now(),
       },
@@ -539,7 +539,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
 
         const userMessage: StoredMessage = {
           id: generateId(),
-          sessionId: record.id,
+          taskId: record.id,
           role: "user",
           content: text,
           // @引用 随消息持久化：重启恢复后重组进模型上下文（快照等价性）
@@ -638,7 +638,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             for (const call of toolCalls) {
               const base: ToolCallRecord = {
                 id: call.toolCallId,
-                sessionId: record.id,
+                taskId: record.id,
                 toolName: call.toolName,
                 arguments: safeJsonStringify(call.input),
                 output: "",
@@ -706,7 +706,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                     executed = yield* events.during(
                       runTool(definition, call.input, {
                         workspacePath: record.workspacePath,
-                        sessionId: record.id,
+                        taskId: record.id,
                         approvalMode,
                         toolCallId: call.toolCallId,
                         signal,
@@ -722,7 +722,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                   executed = yield* events.during(
                     runTool(definition, call.input, {
                       workspacePath: record.workspacePath,
-                      sessionId: record.id,
+                      taskId: record.id,
                       approvalMode,
                       toolCallId: call.toolCallId,
                       signal,
@@ -806,7 +806,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             // 错误路径：中文提示落库并广播；不进入对话上下文，任务可继续使用
             const errorMessage: StoredMessage = {
               id: generateId(),
-              sessionId: record.id,
+              taskId: record.id,
               role: "error",
               content: describeModelError(error),
               createdAt: now(),
@@ -820,7 +820,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         if (terminated) return;
         const assistantMessage: StoredMessage = {
           id: assistantMessageId,
-          sessionId: record.id,
+          taskId: record.id,
           role: "assistant",
           content: accumulated,
           // 思考全文随终态消息落库（票 02，ADR 0011）：重启/切回后重建思考段；
@@ -923,7 +923,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         const pruneToolCallsBefore = storedContext[0]?.createdAt;
         const summaryMessage: StoredMessage = {
           id: generateId(),
-          sessionId: record.id,
+          taskId: record.id,
           role: "compact-summary",
           content: summary,
           // 摘要先于保留轮次；保留原始消息 ID/时间，使交互 turnId 不悬空。
@@ -932,7 +932,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         const keptMessages: StoredMessage[] = storedContext;
         const compactRecord: CompactRecord = {
           id: generateId(),
-          sessionId: record.id,
+          taskId: record.id,
           summary,
           messagesCompacted: compactable.length,
           createdAt: now(),
@@ -963,7 +963,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         if (signal?.aborted) {
           const message: StoredMessage = {
             id: generateId(),
-            sessionId: record.id,
+            taskId: record.id,
             role: "assistant",
             content: "压缩已中断，原有历史已保留。",
             aborted: true,

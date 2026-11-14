@@ -42,7 +42,7 @@ export function registerWorkbenchHandlers(
     // 读默认值期间可能已有写入，不能用迟到的默认状态覆盖它。
     const latest = manager.readWorkbench(key);
     if (latest) return latest;
-    const session =
+    const task =
       target.kind === "task"
         ? manager.list().find((s) => s.id === target.taskId)
         : null;
@@ -54,9 +54,9 @@ export function registerWorkbenchHandlers(
         questionDrafts: {},
         readingPosition: null,
         preferences: {
-          providerProfileId: session?.providerProfileId ?? profile?.id ?? "",
+          providerProfileId: task?.providerProfileId ?? profile?.id ?? "",
           thinkingEffort: "auto",
-          approvalMode: session?.approvalMode ?? "ask",
+          approvalMode: task?.approvalMode ?? "ask",
         },
       },
     };
@@ -197,12 +197,12 @@ export function registerWorkbenchHandlers(
       acceptedText?: string
     ) {
       // 首次发送可能已完成且记录刚被用户移除；不能初始化悬挂工作现场。
-      if (!manager.list().some((session) => session.id === taskId)) return;
+      if (!manager.list().some((task) => task.id === taskId)) return;
       const target: WorkbenchTarget = { kind: "new", projectId };
       const key = workbenchKey(target);
-      const sessionKey = workbenchKey({ kind: "task", taskId });
-      if (!manager.readWorkbench(sessionKey))
-        manager.writeWorkbench(sessionKey, {
+      const taskKey = workbenchKey({ kind: "task", taskId });
+      if (!manager.readWorkbench(taskKey))
+        manager.writeWorkbench(taskKey, {
           revision: 0,
           value: {
             text: "",

@@ -85,11 +85,11 @@ export interface TaskManager {
     collapsed: boolean
   ): ProjectRecord | null;
   setProjectPinned(projectId: string, pinned: boolean): ProjectRecord | null;
-  setPinned(sessionId: string, pinned: boolean): TaskRecord | null;
-  markUsed(sessionId: string): TaskRecord | null;
-  removeUnstarted(sessionId: string): void;
+  setPinned(taskId: string, pinned: boolean): TaskRecord | null;
+  markUsed(taskId: string): TaskRecord | null;
+  removeUnstarted(taskId: string): void;
   /** 宿主完成目录与活动检查后，仅同步更改归属。 */
-  setProject(sessionId: string, projectId: string | null): TaskRecord | null;
+  setProject(taskId: string, projectId: string | null): TaskRecord | null;
   create(options: {
     projectId?: string | null;
     creationRequestId?: string;
@@ -110,30 +110,30 @@ export interface TaskManager {
   list(): TaskRecord[];
   search(query: string, includeArchived?: boolean): TaskSearchResult[];
   /** 指定任务的消息历史（读持久层，不实例化任务对象） */
-  messages(sessionId: string): StoredMessage[];
+  messages(taskId: string): StoredMessage[];
   /** 持久交互记录不随上下文压缩消失；仅用于历史与草稿归属校验，不恢复等待。 */
   interactions(
-    sessionId: string
+    taskId: string
   ): import("../interaction/types").InteractionRecord[];
   /** 指定任务的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
-  transcript(sessionId: string): TranscriptItem[];
+  transcript(taskId: string): TranscriptItem[];
   /** 惰性恢复任务对象；不存在返回 null；同 id 返回缓存实例 */
-  get(sessionId: string): AgentTask | null;
+  get(taskId: string): AgentTask | null;
   /** 只读缓存实例的运行/最近一轮摘要；未实例化任务返回空状态。 */
-  resourceState(sessionId: string): TaskResourceState;
+  resourceState(taskId: string): TaskResourceState;
   /** /rename：更新标题并落库；不存在返回 null */
-  rename(sessionId: string, title: string): TaskRecord | null;
+  rename(taskId: string, title: string): TaskRecord | null;
   /** /archive：archived=true 记归档时间，false 取消归档；不存在返回 null */
-  setArchived(sessionId: string, archived: boolean): TaskRecord | null;
+  setArchived(taskId: string, archived: boolean): TaskRecord | null;
   /**
    * 审批模式切换（三档）：落库并更新下次发送偏好；当前执行及子代理不受影响。
    * 不改变最近使用时间；不存在返回 null。
    */
-  setApprovalMode(sessionId: string, mode: ApprovalMode): TaskRecord | null;
+  setApprovalMode(taskId: string, mode: ApprovalMode): TaskRecord | null;
   /** 撤销本任务自动批准，立即作用后续审批；未知任务抛错。 */
-  revokeAutoApprove(sessionId: string): TaskRecord;
+  revokeAutoApprove(taskId: string): TaskRecord;
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
-  latestCompact(sessionId: string): CompactRecord | null;
+  latestCompact(taskId: string): CompactRecord | null;
   cancelInteractions(reason: string): void;
 }
 
@@ -168,7 +168,7 @@ export function createTaskManager(
       if (!persistence.listMessages(task.id).at(-1)?.aborted)
         persistence.insertMessage({
           id: generateId(),
-          sessionId: task.id,
+          taskId: task.id,
           role: "assistant",
           content: "上次执行因应用退出而中断；如需继续，请明确发送新消息。",
           aborted: true,
@@ -224,18 +224,18 @@ export function createTaskManager(
 
   /** 读取最新记录并应用补丁（rename / setArchived 共用）；同步刷新缓存实例的 record */
   function patchRecord(
-    sessionId: string,
+    taskId: string,
     patch: Partial<Omit<TaskRecord, "id" | "createdAt">>
   ): TaskRecord | null {
     const current = persistence
       .listTasks()
-      .find((candidate) => candidate.id === sessionId);
+      .find((candidate) => candidate.id === taskId);
     if (current === undefined) {
       return null;
     }
-    persistence.updateTask(sessionId, patch);
+    persistence.updateTask(taskId, patch);
     const next = { ...current, ...patch };
-    const cached = cache.get(sessionId);
+    const cached = cache.get(taskId);
     if (cached !== undefined) {
       Object.assign(cached.record, next);
     }
@@ -288,23 +288,23 @@ export function createTaskManager(
         persistence.listProjects().find((item) => item.id === projectId) ?? null
       );
     },
-    setProject(sessionId, projectId) {
-      return patchRecord(sessionId, { projectId });
+    setProject(taskId, projectId) {
+      return patchRecord(taskId, { projectId });
     },
-    setPinned(sessionId, pinned) {
-      return patchRecord(sessionId, { pinned });
+    setPinned(taskId, pinned) {
+      return patchRecord(taskId, { pinned });
     },
-    markUsed(sessionId) {
-      return patchRecord(sessionId, { lastUsedAt: now() });
+    markUsed(taskId) {
+      return patchRecord(taskId, { lastUsedAt: now() });
     },
     cancelInteractions(reason) {
       for (const task of cache.values()) task.cancelInteractions(reason);
     },
-    removeUnstarted(sessionId) {
-      if (persistence.listMessages(sessionId).length)
+    removeUnstarted(taskId) {
+      if (persistence.listMessages(taskId).length)
         throw new Error("不能回滚已有历史的任务");
-      persistence.removeUnstartedTask(sessionId);
-      cache.delete(sessionId);
+      persistence.removeUnstartedTask(taskId);
+      cache.delete(taskId);
     },
     create({
       projectId = null,
@@ -348,28 +348,28 @@ export function createTaskManager(
     search: (query, includeArchived) =>
       persistence.searchTasks(query, includeArchived),
 
-    messages(sessionId) {
-      return persistence.listMessages(sessionId);
+    messages(taskId) {
+      return persistence.listMessages(taskId);
     },
 
-    interactions: (sessionId) => persistence.listInteractions(sessionId),
+    interactions: (taskId) => persistence.listInteractions(taskId),
 
-    transcript(sessionId) {
-      const messages = persistence.listMessages(sessionId);
+    transcript(taskId) {
+      const messages = persistence.listMessages(taskId);
       const turnIds = new Set(messages.map((message) => message.id));
       const savedDrafts =
         persistence.readWorkbench(
-          workbenchKey({ kind: "task", taskId: sessionId })
+          workbenchKey({ kind: "task", taskId: taskId })
         )?.value.questionDrafts ?? {};
       const items: TranscriptItem[] = [
         ...persistence
-          .listMessages(sessionId)
+          .listMessages(taskId)
           .map((message): TranscriptItem => ({ kind: "message", message })),
         ...persistence
-          .listToolCalls(sessionId)
+          .listToolCalls(taskId)
           .map((call): TranscriptItem => ({ kind: "tool-call", call })),
         ...persistence
-          .listInteractions(sessionId)
+          .listInteractions(taskId)
           // 压缩只裁模型上下文；有未提交文本的终态问答仍供用户只读查看。
           .filter(
             (interaction) =>
@@ -393,65 +393,63 @@ export function createTaskManager(
       return items;
     },
 
-    get(sessionId) {
-      const cached = cache.get(sessionId);
+    get(taskId) {
+      const cached = cache.get(taskId);
       if (cached !== undefined) {
         return cached;
       }
       const record = persistence
         .listTasks()
-        .find((candidate) => candidate.id === sessionId);
+        .find((candidate) => candidate.id === taskId);
       if (record === undefined) {
         return null;
       }
       return restore(record);
     },
 
-    resourceState(sessionId) {
-      return (
-        cache.get(sessionId)?.resourceState ?? { active: null, last: null }
-      );
+    resourceState(taskId) {
+      return cache.get(taskId)?.resourceState ?? { active: null, last: null };
     },
 
-    rename(sessionId, title) {
+    rename(taskId, title) {
       const trimmed = title.trim();
       if (trimmed === "") {
         throw new Error("任务名称不能为空");
       }
-      return patchRecord(sessionId, { title: trimmed, updatedAt: now() });
+      return patchRecord(taskId, { title: trimmed, updatedAt: now() });
     },
 
-    setArchived(sessionId, archived) {
-      return patchRecord(sessionId, {
+    setArchived(taskId, archived) {
+      return patchRecord(taskId, {
         archivedAt: archived ? now() : null,
         updatedAt: now(),
       });
     },
 
     /** 审批模式切换：落库并更新缓存的下次发送偏好，不更改正在执行的快照。 */
-    setApprovalMode(sessionId, mode) {
-      const next = patchRecord(sessionId, {
+    setApprovalMode(taskId, mode) {
+      const next = patchRecord(taskId, {
         approvalMode: mode,
       });
       if (next !== null) {
-        cache.get(sessionId)?.setApprovalMode(mode);
+        cache.get(taskId)?.setApprovalMode(mode);
       }
       return next;
     },
 
-    revokeAutoApprove(sessionId) {
-      const cached = cache.get(sessionId);
+    revokeAutoApprove(taskId) {
+      const cached = cache.get(taskId);
       if (cached) {
         cached.revokeAutoApprove();
         return { ...cached.record };
       }
-      const next = patchRecord(sessionId, { autoApprove: false });
-      if (!next) throw new Error(`任务不存在：${sessionId}`);
+      const next = patchRecord(taskId, { autoApprove: false });
+      if (!next) throw new Error(`任务不存在：${taskId}`);
       return next;
     },
 
-    latestCompact(sessionId) {
-      const compacts = persistence.listCompacts(sessionId);
+    latestCompact(taskId) {
+      const compacts = persistence.listCompacts(taskId);
       return compacts.length === 0 ? null : compacts[compacts.length - 1]!;
     },
   };

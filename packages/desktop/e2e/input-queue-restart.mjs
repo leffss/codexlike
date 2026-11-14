@@ -228,8 +228,8 @@ async function main() {
     });
     // B：从未打开，其后台轮次已完成（执行状态空闲）
     const bIdle = await window.evaluate(async () => {
-      const list = await window.codexlike.sessions.list();
-      const record = list.find((session) => session.title === "后台任务首轮");
+      const list = await window.codexlike.tasks.list();
+      const record = list.find((task) => task.title === "后台任务首轮");
       return record ? record.activity.running === false : false;
     });
     assert(bIdle, "后台任务消费完成后应回到空闲");

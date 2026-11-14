@@ -29,12 +29,12 @@ export interface BrowserTaskManager {
   /** 确保 Chromium 就绪（必要时下载安装）；onProgress 接收下载进度，缺省走构造时 progress */
   prepare(onProgress?: (line: string) => void): Promise<void>;
   /** 获取任务页面：首次调用确保 Chromium 就绪（必要时下载）并创建独立 context */
-  pageFor(sessionId: string): Promise<Page>;
+  pageFor(taskId: string): Promise<Page>;
   /**
    * 丢弃任务当前页面、在同一 context 上开新页（Cookie 等状态保留）。
    * 导航失败后页面可能停在 chrome-error:// 并打断后续导航——整页换新是最可靠复位。
    */
-  resetPage(sessionId: string): Promise<Page>;
+  resetPage(taskId: string): Promise<Page>;
   /** 任务结束：关闭其 context（页面与 Cookie 随之释放）；未打开的任务安全返回 */
   closeTask(taskId: string): Promise<void>;
   /** 应用退出：关闭 Chromium 与全部任务 context；可重复调用 */
@@ -90,15 +90,15 @@ export function createBrowserTaskManager(
       await browserReady(onProgress ?? progress);
     },
 
-    async pageFor(sessionId) {
+    async pageFor(taskId) {
       const active = await browserReady(progress);
-      const existing = tasks.get(sessionId);
+      const existing = tasks.get(taskId);
       if (existing !== undefined && !existing.page.isClosed()) {
         return existing.page;
       }
       const context = await active.newContext();
       const page = await context.newPage();
-      tasks.set(sessionId, { context, page });
+      tasks.set(taskId, { context, page });
       return page;
     },
 
@@ -111,10 +111,10 @@ export function createBrowserTaskManager(
       await entry.context.close().catch(() => {});
     },
 
-    async resetPage(sessionId) {
-      const entry = tasks.get(sessionId);
+    async resetPage(taskId) {
+      const entry = tasks.get(taskId);
       if (entry === undefined) {
-        return await this.pageFor(sessionId);
+        return await this.pageFor(taskId);
       }
       await entry.page.close({ runBeforeUnload: false }).catch(() => {});
       entry.page = await entry.context.newPage();

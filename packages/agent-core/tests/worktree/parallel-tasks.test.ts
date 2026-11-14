@@ -181,15 +181,15 @@ describe("托管 Worktree 集成（同一仓库双任务并行）", () => {
     });
     const dbPath = join(makeDir("codexlike-par-db-"), "codexlike.db");
 
-    // worktree 副本先检出（desktop 的 createSessionWithMode 同款编排），再以同一 id 落库
+    // worktree 副本先检出（desktop 的 createTaskWithMode 同款编排），再以同一 id 落库
     const worktrees = makeManager(dbPath);
-    const localSession = worktrees.create({ workspacePath: repo });
+    const localTask = worktrees.create({ workspacePath: repo });
     const wtId = "wt-parallel-1";
     const wt = await worktreeService.createForTask({
       taskId: wtId,
       workspacePath: repo,
     });
-    const wtSession = worktrees.create({
+    const wtTask = worktrees.create({
       id: wtId,
       workspacePath: wt.path,
       workspaceMode: "worktree",
@@ -203,10 +203,10 @@ describe("托管 Worktree 集成（同一仓库双任务并行）", () => {
       writeThenTextModel("feature.txt", "worktree-change")
     );
     const localEvents = collect(
-      localSession.sendMessage({ text: "写 local 版本", profile: localProfile })
+      localTask.sendMessage({ text: "写 local 版本", profile: localProfile })
     );
     const wtEvents = collect(
-      wtSession.sendMessage({
+      wtTask.sendMessage({
         text: "写 worktree 版本",
         profile: worktreeProfile,
       })
@@ -245,19 +245,19 @@ describe("托管 Worktree 集成（同一仓库双任务并行）", () => {
       taskId: wtId,
       workspacePath: repo,
     });
-    const session = first.create({
+    const task = first.create({
       id: wtId,
       workspacePath: wt.path,
       workspaceMode: "worktree",
     });
-    const originalPath = session.record.workspacePath;
+    const originalPath = task.record.workspacePath;
 
     // 重启前一轮工具轮次（在副本内写文件）
     modelFactories.set("profile-local", () =>
       writeThenTextModel("first.txt", "重启前")
     );
     await collect(
-      session.sendMessage({ text: "写 first.txt", profile: localProfile })
+      task.sendMessage({ text: "写 first.txt", profile: localProfile })
     );
     expect(existsSync(join(wt.path, "first.txt"))).toBe(true);
 

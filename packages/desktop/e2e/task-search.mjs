@@ -163,25 +163,23 @@ async function main() {
       "同目录独立归属不混淆"
     );
     const beforeOpen = await window.evaluate(() =>
-      window.codexlike.sessions.list()
+      window.codexlike.tasks.list()
     );
-    const projectBeforeOpen = beforeOpen.find(
-      (session) => session.id === projectId
-    );
+    const projectBeforeOpen = beforeOpen.find((task) => task.id === projectId);
     await results().filter({ hasText: "项目任务" }).click();
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "持久正文星河-1" })
       .waitFor();
-    const list = await window.evaluate(() => window.codexlike.sessions.list());
+    const list = await window.evaluate(() => window.codexlike.tasks.list());
     assert(
-      list.find((session) => session.id === projectId).lastUsedAt ===
+      list.find((task) => task.id === projectId).lastUsedAt ===
         projectBeforeOpen.lastUsedAt,
       "搜索打开不得更新 lastUsedAt"
     );
     assert(
-      JSON.stringify(list.map((session) => session.id)) ===
-        JSON.stringify(beforeOpen.map((session) => session.id)),
+      JSON.stringify(list.map((task) => task.id)) ===
+        JSON.stringify(beforeOpen.map((task) => task.id)),
       "搜索打开不得改变最近使用顺序"
     );
     await search("星河");
@@ -291,7 +289,7 @@ async function main() {
       await app.evaluate(() => globalThis.searchGate.release());
       // 同通道往返+绘制帧屏障，确保迟到结果已被页面处理，不用任意延时判竞态。
       await window.evaluate(async () => {
-        await window.codexlike.sessions.search("IPC绘制屏障");
+        await window.codexlike.tasks.search("IPC绘制屏障");
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
       });
@@ -357,7 +355,7 @@ async function main() {
       .filter({ hasText: "持久正文星河-2" })
       .waitFor();
     const execution = await window.evaluate(
-      (id) => window.codexlike.sessions.execution(id),
+      (id) => window.codexlike.tasks.execution(id),
       archivedId
     );
     assert(execution.running, "搜索打开其他任务不停止后台执行");

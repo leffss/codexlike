@@ -292,10 +292,10 @@ async function main() {
       await window.getByTestId("composer-input").fill(`问答后继续${round}`);
       await window.getByTestId("composer-send").click();
       await window.waitForFunction(async (text) => {
-        const sessions = await window.codexlike.sessions.list();
-        const session = sessions.find((s) => s.title === "提问草稿验收");
-        const view = await window.codexlike.sessions.view(session.id);
-        const history = await window.codexlike.sessions.messages(session.id);
+        const tasks = await window.codexlike.tasks.list();
+        const task = tasks.find((s) => s.title === "提问草稿验收");
+        const view = await window.codexlike.tasks.view(task.id);
+        const history = await window.codexlike.tasks.messages(task.id);
         return (
           !view.activity.running &&
           history.some(
@@ -316,14 +316,14 @@ async function main() {
     );
     await window.getByTestId("composer-input").fill("Compact后保存并退出");
     await window.waitForFunction(async () => {
-      const session = (await window.codexlike.sessions.list()).find(
+      const task = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "提问草稿验收"
       );
       return (
         (
           await window.codexlike.workbench.read({
             kind: "task",
-            taskId: session.id,
+            taskId: task.id,
           })
         ).value.text === "Compact后保存并退出"
       );
@@ -361,12 +361,12 @@ async function main() {
     );
     await window.getByTestId("composer-send").click();
     await window.waitForFunction(async () => {
-      const session = (await window.codexlike.sessions.list()).find(
+      const task = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "提问草稿验收"
       );
       return (
-        !(await window.codexlike.sessions.execution(session.id)).running &&
-        (await window.codexlike.sessions.messages(session.id)).some(
+        !(await window.codexlike.tasks.execution(task.id)).running &&
+        (await window.codexlike.tasks.messages(task.id)).some(
           (item) =>
             item.kind === "message" &&
             item.message.content === "Compact后保存并退出"

@@ -47,7 +47,7 @@ export interface TaskPersistence {
   ): void;
   insertMessage(message: StoredMessage): void;
   insertInteraction(interaction: InteractionRecord): void;
-  listInteractions(sessionId: string): InteractionRecord[];
+  listInteractions(taskId: string): InteractionRecord[];
   /** pending → 终态；问答快照与终态在同一事务提交，重复提交返回 false。 */
   settleInteraction(
     interaction: InteractionRecord,
@@ -55,7 +55,7 @@ export interface TaskPersistence {
   ): boolean;
   /** 有效 pending 审批才能授予任务权限；同事务结算该任务全部 pending 审批，问答不变。 */
   approveTaskInteraction(
-    sessionId: string,
+    taskId: string,
     requestId: string,
     resolvedAt: string
   ): InteractionRecord[] | null;
@@ -66,7 +66,7 @@ export interface TaskPersistence {
    * 旧历史要么完整保留、要么完整被替换。
    */
   replaceHistory(
-    sessionId: string,
+    taskId: string,
     messages: StoredMessage[],
     compact: CompactRecord,
     pruneToolCallsBefore?: string
@@ -75,17 +75,17 @@ export interface TaskPersistence {
   listTasks(): TaskRecord[];
   searchTasks(query: string, includeArchived?: boolean): TaskSearchResult[];
   /** 指定任务的全部消息，按写入顺序；未知任务返回空数组 */
-  listMessages(sessionId: string): StoredMessage[];
+  listMessages(taskId: string): StoredMessage[];
   /** 指定任务的 compact 记录，按时间正序（最后一条为当前生效摘要） */
-  listCompacts(sessionId: string): CompactRecord[];
+  listCompacts(taskId: string): CompactRecord[];
   /** 工具调用记录（一次调用完成时写入一条完整记录） */
   insertToolCall(call: ToolCallRecord): void;
   /** 指定任务的工具调用记录，按写入顺序 */
-  listToolCalls(sessionId: string): ToolCallRecord[];
+  listToolCalls(taskId: string): ToolCallRecord[];
   /** 遗留命令首词记录（兼容旧数据；不参与运行时授权；重复写入幂等）。 */
-  insertApproval(sessionId: string, commandWord: string): void;
+  insertApproval(taskId: string, commandWord: string): void;
   /** 读取遗留命令首词记录，仅用于兼容与历史检查，不恢复为授权。 */
-  listApprovals(sessionId: string): string[];
+  listApprovals(taskId: string): string[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -389,7 +389,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   function insertMessage(message: StoredMessage): void {
     insertMessageStmt.run(
       message.id,
-      message.sessionId,
+      message.taskId,
       message.role,
       message.content,
       message.createdAt,
@@ -574,18 +574,18 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         "INSERT INTO interactions (id, task_id, record, created_at) VALUES (?, ?, ?, ?)"
       ).run(
         interaction.request.id,
-        interaction.request.sessionId,
+        interaction.request.taskId,
         JSON.stringify(interaction),
         interaction.request.createdAt
       );
     },
 
-    listInteractions(sessionId) {
+    listInteractions(taskId) {
       return db
         .prepare(
           "SELECT record FROM interactions WHERE task_id = ? ORDER BY created_at, rowid"
         )
-        .all(sessionId)
+        .all(taskId)
         .map((row) => JSON.parse(String(row.record)) as InteractionRecord);
     },
 
@@ -596,7 +596,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           .prepare(
             "SELECT record FROM interactions WHERE id = ? AND task_id = ?"
           )
-          .get(interaction.request.id, interaction.request.sessionId);
+          .get(interaction.request.id, interaction.request.taskId);
         if (
           !row ||
           (JSON.parse(String(row.record)) as InteractionRecord).status !==
@@ -610,7 +610,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
             .prepare(
               "SELECT question_answers FROM messages WHERE id = ? AND task_id = ? AND role = 'user'"
             )
-            .get(interaction.request.turnId, interaction.request.sessionId);
+            .get(interaction.request.turnId, interaction.request.taskId);
           if (!message)
             throw new Error("交互所属的用户消息不存在，无法保存回答");
           const answers = message.question_answers
@@ -635,14 +635,14 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       }
     },
 
-    approveTaskInteraction(sessionId, requestId, resolvedAt) {
+    approveTaskInteraction(taskId, requestId, resolvedAt) {
       db.exec("BEGIN IMMEDIATE");
       try {
         const records = db
           .prepare(
             "SELECT record FROM interactions WHERE task_id = ? ORDER BY created_at, rowid"
           )
-          .all(sessionId)
+          .all(taskId)
           .map((row) => JSON.parse(String(row.record)) as InteractionRecord);
         const pending = records.filter(
           (record) =>
@@ -650,7 +650,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         );
         if (
           !pending.some((record) => record.request.id === requestId) ||
-          !db.prepare("SELECT id FROM tasks WHERE id = ?").get(sessionId)
+          !db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId)
         ) {
           db.exec("ROLLBACK");
           return null;
@@ -661,18 +661,18 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         );
         db.prepare(
           "UPDATE tasks SET auto_approve = 1, status = ?, updated_at = ? WHERE id = ?"
-        ).run(waiting ? "waiting-user" : "streaming", resolvedAt, sessionId);
+        ).run(waiting ? "waiting-user" : "streaming", resolvedAt, taskId);
         const settled = pending.map((record): InteractionRecord => ({
           ...record,
           status: "resolved",
           resolvedAt,
-          response: { kind: "approval", decision: "approve", scope: "session" },
+          response: { kind: "approval", decision: "approve", scope: "task" },
         }));
         const update = db.prepare(
           "UPDATE interactions SET record = ? WHERE id = ? AND task_id = ?"
         );
         for (const record of settled)
-          update.run(JSON.stringify(record), record.request.id, sessionId);
+          update.run(JSON.stringify(record), record.request.id, taskId);
         db.exec("COMMIT");
         return settled;
       } catch (error) {
@@ -681,26 +681,26 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       }
     },
 
-    replaceHistory(sessionId, messages, compact, pruneToolCallsBefore) {
+    replaceHistory(taskId, messages, compact, pruneToolCallsBefore) {
       // 单事务：删除旧消息 + 写入新历史（摘要 + 保留轮次）+ 追加 compact 记录
       // + 清理被压缩轮次的工具调用记录，原子落地（中途失败整体回滚，旧历史不受损）。
       // 重写消息复用 insertMessage（含 mentions / aborted 列）：
       // 保留轮次携带的 @引用 与中断标记在 compact 重写后不丢（恢复等价性，工单 06）
       db.exec("BEGIN");
       try {
-        deleteMessagesStmt.run(sessionId);
+        deleteMessagesStmt.run(taskId);
         for (const message of messages) {
           insertMessage(message);
         }
         insertCompactStmt.run(
           compact.id,
-          compact.sessionId,
+          compact.taskId,
           compact.summary,
           compact.messagesCompacted,
           compact.createdAt
         );
         if (pruneToolCallsBefore !== undefined) {
-          deleteToolCallsBeforeStmt.run(sessionId, pruneToolCallsBefore);
+          deleteToolCallsBeforeStmt.run(taskId, pruneToolCallsBefore);
         }
         db.exec("COMMIT");
       } catch (error) {
@@ -713,12 +713,12 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       return (listTasksStmt.all() as unknown as TaskRow[]).map(toRecord);
     },
 
-    listMessages(sessionId) {
-      return (listMessagesStmt.all(sessionId) as unknown as MessageRow[]).map(
+    listMessages(taskId) {
+      return (listMessagesStmt.all(taskId) as unknown as MessageRow[]).map(
         (row) => {
           const message: StoredMessage = {
             id: row.id,
-            sessionId: row.task_id,
+            taskId: row.task_id,
             role: row.role as StoredMessage["role"],
             content: row.content,
             createdAt: row.created_at,
@@ -754,11 +754,11 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       );
     },
 
-    listCompacts(sessionId) {
-      return (listCompactsStmt.all(sessionId) as unknown as CompactRow[]).map(
+    listCompacts(taskId) {
+      return (listCompactsStmt.all(taskId) as unknown as CompactRow[]).map(
         (row) => ({
           id: row.id,
-          sessionId: row.task_id,
+          taskId: row.task_id,
           summary: row.summary,
           messagesCompacted: row.messages_compacted,
           createdAt: row.created_at,
@@ -769,7 +769,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     insertToolCall(call) {
       insertToolCallStmt.run(
         call.id,
-        call.sessionId,
+        call.taskId,
         call.toolName,
         call.arguments,
         call.output,
@@ -779,11 +779,11 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       );
     },
 
-    listToolCalls(sessionId) {
-      return (listToolCallsStmt.all(sessionId) as unknown as ToolCallRow[]).map(
+    listToolCalls(taskId) {
+      return (listToolCallsStmt.all(taskId) as unknown as ToolCallRow[]).map(
         (row) => ({
           id: row.id,
-          sessionId: row.task_id,
+          taskId: row.task_id,
           toolName: row.tool_name,
           arguments: row.arguments,
           output: row.output,
@@ -795,12 +795,12 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       );
     },
 
-    insertApproval(sessionId, commandWord) {
-      insertApprovalStmt.run(sessionId, commandWord, new Date().toISOString());
+    insertApproval(taskId, commandWord) {
+      insertApprovalStmt.run(taskId, commandWord, new Date().toISOString());
     },
 
-    listApprovals(sessionId) {
-      const rows = listApprovalsStmt.all(sessionId) as unknown as {
+    listApprovals(taskId) {
+      const rows = listApprovalsStmt.all(taskId) as unknown as {
         command_word: string;
       }[];
       return rows.map((row) => row.command_word);

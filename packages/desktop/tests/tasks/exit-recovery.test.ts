@@ -44,7 +44,7 @@ async function setup() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "project");
   mkdirSync(workspace);
-  const dbPath = join(root, "fresh", "sessions.db");
+  const dbPath = join(root, "fresh", "tasks.db");
   const persistence = createSqliteTaskStore(dbPath);
   let closed = false;
   const close = () => {
@@ -156,12 +156,12 @@ async function setup() {
 
 it("退出检测后台项目执行与独立等待；取消不停止，确认后必须等待保存屏障再中断", async () => {
   const app = await setup();
-  const a = await invoke("sessions:start", {
+  const a = await invoke("tasks:start", {
     requestId: "a",
     projectId: app.project.id,
     text: "后台慢任务",
   });
-  const b = await invoke("sessions:start", {
+  const b = await invoke("tasks:start", {
     requestId: "b",
     projectId: null,
     text: "独立等待",
@@ -188,19 +188,19 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
     "tool_calls"
   );
   await waitFor(() =>
-    expect(invoke("sessions:view", b.id).activity.waitingForUser).toBe(true)
+    expect(invoke("tasks:view", b.id).activity.waitingForUser).toBe(true)
   );
-  const request = invoke("sessions:pending-interactions", b.id)[0].request;
+  const request = invoke("tasks:pending-interactions", b.id)[0].request;
   app.exit.request();
   const first = app.exit.state();
   expect(first.phase).toBe("confirming");
-  expect(invoke("sessions:execution", a.id).running).toBe(true);
-  expect(invoke("sessions:pending-interactions", b.id)).toHaveLength(1);
+  expect(invoke("tasks:execution", a.id).running).toBe(true);
+  expect(invoke("tasks:pending-interactions", b.id)).toHaveLength(1);
   await expect(
-    invoke("sessions:send", a.id, "退出竞态", app.profile.id)
+    invoke("tasks:send", a.id, "退出竞态", app.profile.id)
   ).rejects.toThrow("正在退出");
   expect(() =>
-    invoke("sessions:respond-interaction", b.id, request.id, {
+    invoke("tasks:respond-interaction", b.id, request.id, {
       kind: "approval",
       decision: "approve",
     })
@@ -209,11 +209,11 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
   expect(app.exit.state().phase).toBe("idle");
   await app.frame("后台慢任务", { content: "取消后继续生成" });
   await waitFor(() =>
-    expect(JSON.stringify(invoke("sessions:view", a.id))).toContain(
+    expect(JSON.stringify(invoke("tasks:view", a.id))).toContain(
       "取消后继续生成"
     )
   );
-  expect(invoke("sessions:pending-interactions", b.id)).toHaveLength(1);
+  expect(invoke("tasks:pending-interactions", b.id)).toHaveLength(1);
   app.exit.request();
   const second = app.exit.state();
   app.exit.answer(first.id, true);
@@ -221,11 +221,11 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
   app.exit.answer(second.id, true);
   expect(app.exit.state().phase).toBe("flushing");
   expect(app.finished()).toBe(false);
-  expect(invoke("sessions:execution", a.id).running).toBe(true);
+  expect(invoke("tasks:execution", a.id).running).toBe(true);
   await app.exit.flushed(second.id);
   expect(app.finished()).toBe(true);
-  expect(invoke("sessions:execution", a.id).running).toBe(false);
-  expect(invoke("sessions:pending-interactions", b.id)).toEqual([]);
+  expect(invoke("tasks:execution", a.id).running).toBe(false);
+  expect(invoke("tasks:pending-interactions", b.id)).toEqual([]);
   expect(app.manager.messages(a.id).at(-1)).toMatchObject({
     aborted: true,
     content: "已生成部分取消后继续生成",
@@ -254,7 +254,7 @@ it("退出检测后台项目执行与独立等待；取消不停止，确认后�
 
 it("保存失败保留窗口与任务，返回后仍可取消等待；旧保存回执不能完成下一次退出", async () => {
   const app = await setup();
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "save-error",
     projectId: null,
     text: "保存失败任务",
@@ -269,7 +269,7 @@ it("保存失败保留窗口与任务，返回后仍可取消等待；旧保存�
     error: expect.stringContaining("磁盘不可写"),
   });
   expect(app.finished()).toBe(false);
-  expect(invoke("sessions:execution", session.id).running).toBe(true);
+  expect(invoke("tasks:execution", task.id).running).toBe(true);
   app.exit.request();
   app.exit.answer(app.exit.state().id, true);
   await app.exit.flushed(id);
@@ -282,7 +282,7 @@ it("保存失败保留窗口与任务，返回后仍可取消等待；旧保存�
 it("退出提示期间不提前取消已接收的准备任务，取消退出后首次发送继续", async () => {
   const app = await setup();
   let settled = false;
-  const start = invoke("sessions:start", {
+  const start = invoke("tasks:start", {
     requestId: "cancel-preparing",
     projectId: app.project.id,
     text: "准备中取消退出",
@@ -295,14 +295,12 @@ it("退出提示期间不提前取消已接收的准备任务，取消退出后�
   expect(settled).toBe(false);
   expect(app.requests()).toBe(0);
   app.exit.answer(app.exit.state().id, false);
-  const session = await start;
+  const task = await start;
   await app.frame("准备中取消退出", { content: "任务仍正常开始" }, "stop");
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
-  expect(app.manager.messages(session.id).at(-1)?.content).toBe(
-    "任务仍正常开始"
-  );
+  expect(app.manager.messages(task.id).at(-1)?.content).toBe("任务仍正常开始");
 });
 
 it("退出闸门拦住已到达但仍等待profile的首次发送和后续发送，不创建空历史或模型请求", async () => {
@@ -310,13 +308,13 @@ it("退出闸门拦住已到达但仍等待profile的首次发送和后续发送
   const existing = app.manager.create({
     workspacePath: app.project.workspacePath,
   });
-  const start = invoke("sessions:start", {
+  const start = invoke("tasks:start", {
     requestId: "late-start",
     projectId: app.project.id,
     text: "迟到新建",
   }).catch((error: Error) => error);
   const send = invoke(
-    "sessions:send",
+    "tasks:send",
     existing.id,
     "迟到发送",
     app.profile.id
@@ -340,24 +338,24 @@ it("退出闸门拦住已到达但仍等待profile的首次发送和后续发送
 
 it("Compact也参与退出确认与中断，退出不替换未完成的压缩历史", async () => {
   const app = await setup();
-  const session = await invoke("sessions:start", {
+  const task = await invoke("tasks:start", {
     requestId: "compact",
     projectId: null,
     text: "第0轮",
   });
   await app.frame("第0轮", { content: "第0轮答复" }, "stop");
   await waitFor(() =>
-    expect(invoke("sessions:execution", session.id).running).toBe(false)
+    expect(invoke("tasks:execution", task.id).running).toBe(false)
   );
   for (let i = 1; i < 4; i++) {
-    await invoke("sessions:send", session.id, `第${i}轮`, app.profile.id);
+    await invoke("tasks:send", task.id, `第${i}轮`, app.profile.id);
     await app.frame(`第${i}轮`, { content: `第${i}轮答复` }, "stop");
     await waitFor(() =>
-      expect(invoke("sessions:execution", session.id).running).toBe(false)
+      expect(invoke("tasks:execution", task.id).running).toBe(false)
     );
   }
-  const before = app.manager.messages(session.id);
-  const compact = invoke("sessions:compact", session.id, app.profile.id).catch(
+  const before = app.manager.messages(task.id);
+  const compact = invoke("tasks:compact", task.id, app.profile.id).catch(
     (error: Error) => error
   );
   await waitFor(() => expect(app.requests()).toBe(5));
@@ -367,10 +365,8 @@ it("Compact也参与退出确认与中断，退出不替换未完成的压缩历
   app.exit.answer(id, true);
   await app.exit.flushed(id);
   expect(await compact).toBeInstanceOf(Error);
-  expect(app.manager.messages(session.id).slice(0, before.length)).toEqual(
-    before
-  );
-  expect(app.manager.messages(session.id).at(-1)).toMatchObject({
+  expect(app.manager.messages(task.id).slice(0, before.length)).toEqual(before);
+  expect(app.manager.messages(task.id).at(-1)).toMatchObject({
     aborted: true,
   });
   expect(app.finished()).toBe(true);
@@ -378,18 +374,18 @@ it("Compact也参与退出确认与中断，退出不替换未完成的压缩历
 
 it("异常结束的持久执行归一为中断；二次重开不重复追加标记或自动构造模型", async () => {
   const app = await setup();
-  const session = app.manager.create({
+  const task = app.manager.create({
     projectId: app.project.id,
     workspacePath: app.project.workspacePath,
   });
   app.persistence.insertMessage({
     id: "orphan-user",
-    sessionId: session.id,
+    taskId: task.id,
     role: "user",
     content: "异常前最后输入",
     createdAt: "2026-11-11T00:00:00.000Z",
   });
-  app.persistence.updateTask(session.id, { status: "streaming" });
+  app.persistence.updateTask(task.id, { status: "streaming" });
   app.close();
   for (let i = 0; i < 2; i++) {
     const store = createSqliteTaskStore(app.dbPath);
@@ -400,15 +396,13 @@ it("异常结束的持久执行归一为中断；二次重开不重复追加标�
           throw new Error("重启不得调用模型");
         },
       });
-      expect(
-        createLiveTasks(restored).view(session.id)?.activity
-      ).toMatchObject({
+      expect(createLiveTasks(restored).view(task.id)?.activity).toMatchObject({
         running: false,
         waitingForUser: false,
         outcome: "interrupted",
       });
-      expect(restored.messages(session.id)).toHaveLength(2);
-      expect(restored.messages(session.id).at(-1)).toMatchObject({
+      expect(restored.messages(task.id)).toHaveLength(2);
+      expect(restored.messages(task.id).at(-1)).toMatchObject({
         role: "assistant",
         aborted: true,
       });

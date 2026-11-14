@@ -149,7 +149,7 @@ describe("TavilySearchSource", () => {
 describe("web_search 工具", () => {
   const context: ToolExecutionContext = {
     workspacePath: "C:/ws",
-    sessionId: "web-search-test",
+    taskId: "web-search-test",
     approvalMode: "assist",
   };
 

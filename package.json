@@ -41,7 +41,7 @@
     "test:e2e:entries": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:entries",
     "test:e2e:persistence": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:persistence",
     "test:e2e:membership": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:membership",
-    "test:e2e:live-sessions": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:live-sessions",
+    "test:e2e:live-tasks": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:live-tasks",
     "test:e2e:exit": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:exit",
     "test:e2e:width": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:width",
     "test:e2e:window": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:window",

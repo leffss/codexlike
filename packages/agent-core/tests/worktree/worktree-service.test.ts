@@ -227,12 +227,12 @@ describe("worktree 创建", () => {
     });
 
     const info = await service.createForTask({
-      taskId: "session-abc",
+      taskId: "task-abc",
       workspacePath: repo,
     });
 
-    expect(info.path).toBe(join(home, "worktrees", "session-abc"));
-    expect(info.branch).toBe("codexlike/session-abc");
+    expect(info.path).toBe(join(home, "worktrees", "task-abc"));
+    expect(info.branch).toBe("codexlike/task-abc");
     // worktree 真实存在且检出 HEAD 内容
     expect(existsSync(join(info.path, "README.md"))).toBe(true);
     expect(readFileSync(join(info.path, "tracked.txt"), "utf8")).toBe(
@@ -240,12 +240,12 @@ describe("worktree 创建", () => {
     );
     // worktree 当前分支即独立分支；主仓库仍在 main
     expect(git(info.path, "branch", "--show-current").trim()).toBe(
-      "codexlike/session-abc"
+      "codexlike/task-abc"
     );
     expect(git(repo, "branch", "--show-current").trim()).toBe("main");
     // 主仓库分支列表中包含该独立分支（`+` = 分支被检出于其他 worktree，正是预期）
-    expect(git(repo, "branch", "--list", "codexlike/session-abc").trim()).toBe(
-      "+ codexlike/session-abc"
+    expect(git(repo, "branch", "--list", "codexlike/task-abc").trim()).toBe(
+      "+ codexlike/task-abc"
     );
   });
 
@@ -278,7 +278,7 @@ describe("worktree 创建", () => {
     });
 
     const info = await service.createForTask({
-      taskId: "session-env",
+      taskId: "task-env",
       workspacePath: repo,
     });
 
@@ -299,7 +299,7 @@ describe("worktree 创建", () => {
     });
 
     const info = await service.createForTask({
-      taskId: "session-plain",
+      taskId: "task-plain",
       workspacePath: repo,
     });
 
@@ -310,14 +310,14 @@ describe("worktree 创建", () => {
   it("目标目录已存在时中文报错（任务 id 冲突防御）", async () => {
     const repo = makeRepo();
     const home = makeWorktreesDir();
-    mkdirSync(join(home, "worktrees", "session-dup"), { recursive: true });
+    mkdirSync(join(home, "worktrees", "task-dup"), { recursive: true });
     const service = createWorktreeService({
       worktreesDir: join(home, "worktrees"),
     });
 
     await expect(
       service.createForTask({
-        taskId: "session-dup",
+        taskId: "task-dup",
         workspacePath: repo,
       })
     ).rejects.toThrow("已存在");

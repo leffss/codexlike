@@ -5,7 +5,7 @@
  * - `assist` 帮我批准：工作区内写入与联网自动放行，终端命令仅危险黑名单命中时审批；
  * - `full-access` 完全访问：全自动，且放开工作区文件边界（可读写本地任意文件）。
  * autoApprove 是独立实时任务授权，仅跳过执行审批，不放宽文件边界，也不替答问答。
- * 遗留命令首词授权不再使用；兼容入口 always 仍仅批准一次（任务授权需显式 scope: session）。
+ * 遗留命令首词授权不再使用；兼容入口 always 仍仅批准一次（任务授权需显式 scope: task）。
  * 本文件浏览器安全（无 Node 内置模块），UI 与主进程共用类型。
  */
 import type { ToolPermission } from "../tools/types";
@@ -40,7 +40,7 @@ export type ApprovalDecision = "approve" | "reject" | "always";
 export interface ApprovalRequest {
   /** 审批 id（即对应的 tool call id；子代理的审批为独立生成的 id） */
   id: string;
-  sessionId: string;
+  taskId: string;
   toolName: string;
   /** 命令原文（run_terminal_command 的 command 参数；其它命令类工具为工具名） */
   command: string;

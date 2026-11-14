@@ -4,13 +4,13 @@ import { createWorkspaceState } from "../src/lib/workspace-state";
 
 function pending(
   id: string,
-  sessionId = "s1",
+  taskId = "s1",
   createdAt = "2026-11-11T08:00:00Z"
 ): InteractionRecord {
   return {
     request: {
       id,
-      sessionId,
+      taskId,
       turnId: "t1",
       toolCallId: id,
       source: { kind: "main" },

@@ -23,7 +23,7 @@ const profile: ProviderProfile = {
 
 function taskRecord(): TaskRecord {
   return {
-    id: "session-1",
+    id: "task-1",
     title: "demo",
     workspacePath: "C:\\work\\demo",
     providerProfileId: null,
@@ -169,7 +169,7 @@ async function collect(
 }
 
 /** 装配任务：factoryCalls 记录模型工厂每次调用的 (profile, options) */
-function makeSession(
+function makeTask(
   model: MockLanguageModelV4,
   factoryCalls?: {
     profile: ProviderProfile;
@@ -179,7 +179,7 @@ function makeSession(
   const persistence = createSqliteTaskStore(":memory:");
   const record = taskRecord();
   persistence.insertTask(record);
-  const session = createAgentTask({
+  const task = createAgentTask({
     record,
     persistence,
     languageModelFor: (modelProfile, options) => {
@@ -188,7 +188,7 @@ function makeSession(
     },
     now: fakeClock(),
   });
-  return { session, persistence };
+  return { task, persistence };
 }
 
 describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () => {
@@ -201,10 +201,10 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
       { kind: "tool" },
       { kind: "text", deltas: ["已读取文件"] },
     ]);
-    const { session } = makeSession(model, factoryCalls);
+    const { task } = makeTask(model, factoryCalls);
 
     const events = await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "读一下 README",
         profile,
         thinkingEffort: "high",
@@ -225,9 +225,9 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
       options: CreateLanguageModelOptions | undefined;
     }[] = [];
     const model = scriptedModel([{ kind: "text", deltas: ["你好"] }]);
-    const { session } = makeSession(model, factoryCalls);
+    const { task } = makeTask(model, factoryCalls);
 
-    await collect(session.sendMessage({ text: "打个招呼", profile }));
+    await collect(task.sendMessage({ text: "打个招呼", profile }));
 
     expect(factoryCalls.length).toBe(1);
     expect(factoryCalls[0]?.options?.thinkingEffort).toBe("auto");
@@ -239,15 +239,15 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
       options: CreateLanguageModelOptions | undefined;
     }[] = [];
     const model = scriptedModel([{ kind: "text", deltas: ["好"] }]);
-    const { session } = makeSession(model, factoryCalls);
+    const { task } = makeTask(model, factoryCalls);
 
     await collect(
-      session.sendMessage({ text: "第一问", profile, thinkingEffort: "low" })
+      task.sendMessage({ text: "第一问", profile, thinkingEffort: "low" })
     );
     await collect(
-      session.sendMessage({ text: "第二问", profile, thinkingEffort: "off" })
+      task.sendMessage({ text: "第二问", profile, thinkingEffort: "off" })
     );
-    await collect(session.sendMessage({ text: "第三问", profile }));
+    await collect(task.sendMessage({ text: "第三问", profile }));
 
     expect(factoryCalls.map((call) => call.options?.thinkingEffort)).toEqual([
       "low",
@@ -258,11 +258,11 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
 
   it("枚举外的档位值在发送入口被拒绝，不伪造控制值发往服务端", async () => {
     const model = scriptedModel([{ kind: "text", deltas: ["你好"] }]);
-    const { session, persistence } = makeSession(model);
+    const { task, persistence } = makeTask(model);
 
     await expect(
       collect(
-        session.sendMessage({
+        task.sendMessage({
           text: "你好",
           profile,
           thinkingEffort: JSON.parse('"max"'),
@@ -270,11 +270,9 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
       )
     ).rejects.toThrow("无效的思考档位");
     // 入口拒绝：不落任何消息、任务保持可用
-    expect(persistence.listMessages("session-1")).toEqual([]);
+    expect(persistence.listMessages("task-1")).toEqual([]);
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
-    const second = await collect(
-      session.sendMessage({ text: "再来", profile })
-    );
+    const second = await collect(task.sendMessage({ text: "再来", profile }));
     expect(second.at(-1)?.type).toBe("assistant-done");
   });
 });
@@ -288,10 +286,10 @@ describe("主任务 reasoning 流（fullStream → 独立任务事件）", () =>
         text: ["答案", "如下"],
       },
     ]);
-    const { session } = makeSession(model);
+    const { task } = makeTask(model);
 
     const events = await collect(
-      session.sendMessage({ text: "为什么", profile, thinkingEffort: "medium" })
+      task.sendMessage({ text: "为什么", profile, thinkingEffort: "medium" })
     );
 
     const start = events.find((event) => event.type === "assistant-start");
@@ -330,11 +328,11 @@ describe("主任务 reasoning 流（fullStream → 独立任务事件）", () =>
         text: ["正文回答"],
       },
     ]);
-    const { session, persistence } = makeSession(model);
+    const { task, persistence } = makeTask(model);
 
-    await collect(session.sendMessage({ text: "回答我", profile }));
+    await collect(task.sendMessage({ text: "回答我", profile }));
 
-    const messages = persistence.listMessages("session-1");
+    const messages = persistence.listMessages("task-1");
     expect(messages.map((message) => [message.role, message.content])).toEqual([
       ["user", "回答我"],
       ["assistant", "正文回答"],
@@ -360,10 +358,10 @@ describe("主任务 reasoning 流（fullStream → 独立任务事件）", () =>
       ],
       prompts
     );
-    const { session } = makeSession(model);
+    const { task } = makeTask(model);
 
-    await collect(session.sendMessage({ text: "第一问", profile }));
-    await collect(session.sendMessage({ text: "第二问", profile }));
+    await collect(task.sendMessage({ text: "第一问", profile }));
+    await collect(task.sendMessage({ text: "第二问", profile }));
 
     expect(prompts.length).toBe(2);
     expect(JSON.stringify(prompts[1])).not.toContain("第一轮思考");
@@ -377,11 +375,9 @@ describe("主任务 reasoning 流（fullStream → 独立任务事件）", () =>
       { kind: "tool", reasoning: ["调用前思考"] },
       { kind: "reasoning-text", reasoning: ["回填后思考"], text: ["最终回答"] },
     ]);
-    const { session } = makeSession(model);
+    const { task } = makeTask(model);
 
-    const events = await collect(
-      session.sendMessage({ text: "做点事", profile })
-    );
+    const events = await collect(task.sendMessage({ text: "做点事", profile }));
 
     expect(events.some((event) => event.type === "tool-call")).toBe(true);
 
@@ -430,11 +426,11 @@ describe("主任务 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
         return { stream: textRound(["中断后的新回答"]) };
       },
     });
-    const { session, persistence } = makeSession(model);
+    const { task, persistence } = makeTask(model);
 
     const controller = new AbortController();
     const events: TaskEvent[] = [];
-    for await (const event of session.sendMessage({
+    for await (const event of task.sendMessage({
       text: "想想看",
       profile,
       signal: controller.signal,
@@ -458,7 +454,7 @@ describe("主任务 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
     );
     expect(reasoning.map((event) => event.delta)).toEqual(["思考到一半"]);
     // 中断终态同样带思考落库（票 02：重启后中断轮次的过程可回看）
-    const messages = persistence.listMessages("session-1");
+    const messages = persistence.listMessages("task-1");
     expect(messages.map((message) => [message.role, message.content])).toEqual([
       ["user", "想想看"],
       ["assistant", ""],
@@ -494,11 +490,9 @@ describe("主任务 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
         }),
       }),
     });
-    const { session, persistence } = makeSession(model);
+    const { task, persistence } = makeTask(model);
 
-    const events = await collect(
-      session.sendMessage({ text: "会失败", profile })
-    );
+    const events = await collect(task.sendMessage({ text: "会失败", profile }));
 
     // 已流出的 reasoning 事件保留在事件流中，随后 error 事件收敛
     expect(
@@ -509,7 +503,7 @@ describe("主任务 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
     const errorEvent = events.find((event) => event.type === "error");
     expect(errorEvent).toBeDefined();
     // 错误提示落库，思考不落库
-    const messages = persistence.listMessages("session-1");
+    const messages = persistence.listMessages("task-1");
     expect(JSON.stringify(messages)).not.toContain("出错前的思考");
   });
 });
@@ -579,7 +573,7 @@ describe("主任务入口 → 真实 provider 工厂（fetch 替身全链路）"
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
     persistence.insertTask(record);
-    const session = createAgentTask({
+    const task = createAgentTask({
       record,
       persistence,
       languageModelFor: (modelProfile, options) =>
@@ -591,7 +585,7 @@ describe("主任务入口 → 真实 provider 工厂（fetch 替身全链路）"
     });
 
     const events = await collect(
-      session.sendMessage({
+      task.sendMessage({
         text: "读 a.txt",
         profile,
         thinkingEffort: "high",
@@ -618,7 +612,7 @@ describe("主任务入口 → 真实 provider 工厂（fetch 替身全链路）"
     expect(JSON.stringify(second)).not.toContain("真实端点思考");
     expect(JSON.stringify(second)).not.toContain("第二轮思考");
     // 落库：content 与思考分离，思考全文进 reasoning 字段（跨工具轮拼接）
-    const messages = persistence.listMessages("session-1");
+    const messages = persistence.listMessages("task-1");
     const assistant = messages.find((message) => message.role === "assistant");
     expect(assistant?.content).not.toContain("真实端点思考");
     expect(assistant?.reasoning).toBe("真实端点思考第二轮思考");

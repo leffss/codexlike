@@ -16,7 +16,7 @@ import {
 function toolCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   return {
     id: "call-1",
-    sessionId: "task-1",
+    taskId: "task-1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "ok",
@@ -106,7 +106,7 @@ describe("task-view 子代理段归并", () => {
       type: "user-message",
       message: {
         id: "u1",
-        sessionId: "s1",
+        taskId: "s1",
         role: "user",
         content: "委派调研",
         createdAt: "2026-11-11T08:00:00Z",

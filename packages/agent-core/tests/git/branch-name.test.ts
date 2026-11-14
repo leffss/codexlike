@@ -14,9 +14,9 @@ describe("codexlikeBranchName（任务名 → codexlike/<任务名> 分支名）
     expect(codexlikeBranchName("feat: add x?")).toBe("codexlike/feat-add-x");
   });
 
-  it("空标题或全非法字符：回退 session", () => {
-    expect(codexlikeBranchName("")).toBe("codexlike/session");
-    expect(codexlikeBranchName("???")).toBe("codexlike/session");
+  it("空标题或全非法字符：回退 task", () => {
+    expect(codexlikeBranchName("")).toBe("codexlike/task");
+    expect(codexlikeBranchName("???")).toBe("codexlike/task");
   });
 
   it("不以 . 结尾（git 分支名约束），压缩重复分隔符", () => {

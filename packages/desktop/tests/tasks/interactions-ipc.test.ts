@@ -36,7 +36,7 @@ afterEach(() => {
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-interaction-ipc-"));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  const dbPath = join(root, "sessions.sqlite");
+  const dbPath = join(root, "tasks.sqlite");
   let persistence = createSqliteTaskStore(dbPath);
   cleanups.push(() => persistence.close());
   const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
@@ -51,7 +51,7 @@ function setup() {
     resourcesFor,
     tools: createBuiltinTools(),
   });
-  const session = manager.create({ workspacePath: root, approvalMode: "ask" });
+  const task = manager.create({ workspacePath: root, approvalMode: "ask" });
   registerTaskHandlers({
     manager,
     profiles: createProfileStore({
@@ -70,7 +70,7 @@ function setup() {
     resourcesFor,
   });
   return {
-    session,
+    task,
     manager,
     reopen() {
       persistence.close();
@@ -92,27 +92,27 @@ function invoke(name: string, ...args: unknown[]) {
 
 describe("统一用户交互 IPC", () => {
   it("撤销自动批准仅接受有效任务标识且幂等，不提供直接启用IPC", () => {
-    const { session } = setup();
+    const { task } = setup();
     for (const id of ["", null, 1, {}])
-      expect(() => invoke("sessions:revoke-auto-approve", id)).toThrow(
+      expect(() => invoke("tasks:revoke-auto-approve", id)).toThrow(
         "参数不合法"
       );
-    expect(() => invoke("sessions:revoke-auto-approve", "missing")).toThrow();
-    expect(invoke("sessions:revoke-auto-approve", session.id)).toMatchObject({
-      id: session.id,
+    expect(() => invoke("tasks:revoke-auto-approve", "missing")).toThrow();
+    expect(invoke("tasks:revoke-auto-approve", task.id)).toMatchObject({
+      id: task.id,
       autoApprove: false,
     });
-    expect(invoke("sessions:revoke-auto-approve", session.id)).toMatchObject({
+    expect(invoke("tasks:revoke-auto-approve", task.id)).toMatchObject({
       autoApprove: false,
     });
-    expect(invoke("sessions:view", session.id)).toMatchObject({
+    expect(invoke("tasks:view", task.id)).toMatchObject({
       autoApprove: false,
     });
-    expect(handlers.has("sessions:set-auto-approve")).toBe(false);
+    expect(handlers.has("tasks:set-auto-approve")).toBe(false);
   });
   it("项目置顶 IPC 校验参数且保持项目原有列表顺序", () => {
-    const { manager, session } = setup();
-    const project = manager.addProject(session.record.workspacePath);
+    const { manager, task } = setup();
+    const project = manager.addProject(task.record.workspacePath);
     expect(invoke("projects:set-pinned", project.id, true)).toMatchObject({
       id: project.id,
       pinned: true,
@@ -135,11 +135,11 @@ describe("统一用户交互 IPC", () => {
     expect(invoke("projects:set-pinned", "missing", true)).toBeNull();
   });
   it("任务授权拒绝非法和跨任务响应，重复不能重启授权，重开存储仍恢复授权与置顶", async () => {
-    const { session, manager, reopen } = setup();
+    const { task, manager, reopen } = setup();
     const other = manager.create({
-      workspacePath: session.record.workspacePath,
+      workspacePath: task.record.workspacePath,
     });
-    const project = manager.addProject(session.record.workspacePath);
+    const project = manager.addProject(task.record.workspacePath);
     invoke("projects:set-pinned", project.id, true);
     let calls = 0;
     const server = createServer((_request, response) => {
@@ -172,7 +172,7 @@ describe("统一用户交互 IPC", () => {
       server.closeAllConnections();
     });
     const controller = new AbortController();
-    const iterator = session
+    const iterator = task
       .sendMessage({
         text: "检查 git",
         profile: {
@@ -199,41 +199,36 @@ describe("统一用户交互 IPC", () => {
       const approval = {
         kind: "approval",
         decision: "approve",
-        scope: "session",
+        scope: "task",
       };
       for (const response of [
         { ...approval, scope: "global" },
         { ...approval, decision: "reject" },
       ])
         expect(() =>
-          invoke(
-            "sessions:respond-interaction",
-            session.id,
-            requestId,
-            response
-          )
+          invoke("tasks:respond-interaction", task.id, requestId, response)
         ).toThrow();
       expect(
-        invoke("sessions:respond-interaction", other.id, requestId, approval)
+        invoke("tasks:respond-interaction", other.id, requestId, approval)
       ).toBe(false);
       expect(
         manager.list().find((record) => record.id === other.id)?.autoApprove
       ).not.toBe(true);
       expect(
-        invoke("sessions:respond-interaction", session.id, requestId, approval)
+        invoke("tasks:respond-interaction", task.id, requestId, approval)
       ).toBe(true);
-      expect(invoke("sessions:view", session.id)).toMatchObject({
+      expect(invoke("tasks:view", task.id)).toMatchObject({
         autoApprove: true,
       });
       expect(
-        invoke("sessions:respond-interaction", session.id, requestId, approval)
+        invoke("tasks:respond-interaction", task.id, requestId, approval)
       ).toBe(false);
       while (!(await iterator.next()).done) {
         /* 排空本轮。 */
       }
       const restored = reopen();
       expect(
-        restored.list().find((record) => record.id === session.id)
+        restored.list().find((record) => record.id === task.id)
       ).toMatchObject({ autoApprove: true, approvalMode: "ask" });
       expect(restored.projects()).toMatchObject([
         { id: project.id, pinned: true },
@@ -241,11 +236,11 @@ describe("统一用户交互 IPC", () => {
       expect(
         restored.list().find((record) => record.id === other.id)?.autoApprove
       ).not.toBe(true);
-      restored.revokeAutoApprove(session.id);
+      restored.revokeAutoApprove(task.id);
       expect(
         reopen()
           .list()
-          .find((record) => record.id === session.id)
+          .find((record) => record.id === task.id)
       ).toMatchObject({ autoApprove: false });
     } finally {
       controller.abort();
@@ -253,9 +248,9 @@ describe("统一用户交互 IPC", () => {
     }
   });
   it("仅合法响应能恢复所属任务，重复提交和跨任务响应均不消费请求", async () => {
-    const { session, manager } = setup();
+    const { task, manager } = setup();
     const other = manager.create({
-      workspacePath: session.record.workspacePath,
+      workspacePath: task.record.workspacePath,
     });
     const bodies: string[] = [];
     const server = createServer((request, response) => {
@@ -315,7 +310,7 @@ describe("统一用户交互 IPC", () => {
       server.closeAllConnections();
     });
     const controller = new AbortController();
-    const iterator = session
+    const iterator = task
       .sendMessage({
         text: "请询问平台偏好",
         profile: {
@@ -352,39 +347,35 @@ describe("统一用户交互 IPC", () => {
           },
         ],
       };
-      expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(
-        1
-      );
+      expect(invoke("tasks:pending-interactions", task.id)).toHaveLength(1);
       expect(() =>
-        invoke("sessions:respond-interaction", session.id, id, {
+        invoke("tasks:respond-interaction", task.id, id, {
           kind: "approval",
           decision: "approve",
         })
       ).toThrow();
       expect(() =>
-        invoke("sessions:respond-interaction", session.id, id, {
+        invoke("tasks:respond-interaction", task.id, id, {
           ...answer,
           answers: [{ ...answer.answers[0], selectedOptionIds: ["forged"] }],
         })
       ).toThrow();
-      expect(invoke("sessions:respond-interaction", other.id, id, answer)).toBe(
+      expect(invoke("tasks:respond-interaction", other.id, id, answer)).toBe(
         false
       );
-      expect(invoke("sessions:pending-interactions", session.id)).toHaveLength(
-        1
+      expect(invoke("tasks:pending-interactions", task.id)).toHaveLength(1);
+      expect(invoke("tasks:respond-interaction", task.id, id, answer)).toBe(
+        true
       );
-      expect(
-        invoke("sessions:respond-interaction", session.id, id, answer)
-      ).toBe(true);
-      expect(
-        invoke("sessions:respond-interaction", session.id, id, answer)
-      ).toBe(false);
+      expect(invoke("tasks:respond-interaction", task.id, id, answer)).toBe(
+        false
+      );
       while (!(await iterator.next()).done) {
         /* 排空本轮事件直到模型收尾。 */
       }
       expect(bodies).toHaveLength(2);
       expect(bodies[1]).toContain("windows");
-      expect(manager.transcript(session.id)).toContainEqual(
+      expect(manager.transcript(task.id)).toContainEqual(
         expect.objectContaining({
           kind: "interaction",
           interaction: expect.objectContaining({
@@ -393,7 +384,7 @@ describe("统一用户交互 IPC", () => {
           }),
         })
       );
-      expect(invoke("sessions:pending-interactions", session.id)).toEqual([]);
+      expect(invoke("tasks:pending-interactions", task.id)).toEqual([]);
     } finally {
       controller.abort();
       await iterator.return?.();
@@ -403,24 +394,24 @@ describe("统一用户交互 IPC", () => {
   it("拒绝不合法的任务和请求标识，不把渲染层对象当作授权", () => {
     setup();
     expect(() =>
-      invoke("sessions:pending-interactions", { taskId: "other" })
+      invoke("tasks:pending-interactions", { taskId: "other" })
     ).toThrow("taskId 必须是非空字符串");
     expect(() =>
-      invoke("sessions:respond-interaction", "", "request", {
+      invoke("tasks:respond-interaction", "", "request", {
         kind: "approval",
         decision: "approve",
       })
     ).toThrow("参数不合法");
-    expect(() =>
-      invoke("sessions:respond-interaction", "session", {}, {})
-    ).toThrow("参数不合法");
+    expect(() => invoke("tasks:respond-interaction", "task", {}, {})).toThrow(
+      "参数不合法"
+    );
   });
 
   it("未知任务无待处理请求，也不能响应其他任务的请求", () => {
     setup();
-    expect(invoke("sessions:pending-interactions", "unknown")).toEqual([]);
+    expect(invoke("tasks:pending-interactions", "unknown")).toEqual([]);
     expect(() =>
-      invoke("sessions:respond-interaction", "unknown", "request", {
+      invoke("tasks:respond-interaction", "unknown", "request", {
         kind: "approval",
         decision: "approve",
       })

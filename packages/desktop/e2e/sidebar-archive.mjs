@@ -213,8 +213,7 @@ async function main() {
       window
         .getByTestId("task-row")
         .and(window.locator(`[data-task-id="${id}"]`));
-    const records = () =>
-      window.evaluate(() => window.codexlike.sessions.list());
+    const records = () => window.evaluate(() => window.codexlike.tasks.list());
     const order = (scope, archived = false) =>
       scope
         .getByTestId(archived ? "archived-task-item" : "task-item")

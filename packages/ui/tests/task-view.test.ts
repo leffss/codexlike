@@ -20,7 +20,7 @@ import {
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
   return {
     id: "m1",
-    sessionId: "s1",
+    taskId: "s1",
     role: "user",
     content: "你好",
     createdAt: "2026-11-10T08:00:00.000Z",
@@ -45,7 +45,7 @@ function textSegments(items: MessageSegment[]): AssistantSegment[] {
 function toolRecord(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   return {
     id: "c1",
-    sessionId: "s1",
+    taskId: "s1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "文件正文",
@@ -262,7 +262,7 @@ describe("initialTranscript（历史恢复 → 消息段时序序列）", () => 
     const interaction: InteractionRecord = {
       request: {
         id: "r1",
-        sessionId: "s1",
+        taskId: "s1",
         turnId: "m1",
         toolCallId: "c1",
         kind: "approval",
@@ -985,7 +985,7 @@ describe("交互记录段（mergeInteractions）", () => {
     const record: InteractionRecord = {
       request: {
         id: "r",
-        sessionId: "s1",
+        taskId: "s1",
         turnId: "t",
         toolCallId: "c1",
         kind: "approval",
@@ -1035,7 +1035,7 @@ describe("交互记录段（mergeInteractions）", () => {
       type: "approval-request",
       request: {
         id: "c1",
-        sessionId: "s1",
+        taskId: "s1",
         toolName: "run_terminal_command",
         command: "git status",
         commandWord: "git",

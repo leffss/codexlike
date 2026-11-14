@@ -35,7 +35,7 @@ function harness(
 ) {
   const root = mkdtempSync(join(tmpdir(), "input-queue-items-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
-  const dbPath = join(root, "nested", "session-workbench.db");
+  const dbPath = join(root, "nested", "task-workbench.db");
   const store: InputQueueStore =
     kind === "sqlite"
       ? createSqliteInputQueueStore(dbPath)
@@ -56,7 +56,7 @@ function harness(
       if (overrides?.dispatch) await overrides.dispatch(taskId, entry, settled);
       else settled();
     },
-    onChange: (_sessionId, reason, queue, _paused, sendingId) =>
+    onChange: (_taskId, reason, queue, _paused, sendingId) =>
       changes.push({ reason, queue: [...queue], sendingId: sendingId ?? null }),
   });
   return {
@@ -169,7 +169,7 @@ describe.each(["memory", "sqlite"] as const)("队列条目操作（%s）", (kind
   it("正在发出的条目锁定：编辑/删除/包含它的重排被拒，其余条目仍可操作；发送完成后解锁推进", async () => {
     let releaseFirst: (() => void) | null = null;
     const app = harness(kind, {
-      dispatch: (_sessionId, entry, onSettled) => {
+      dispatch: (_taskId, entry, onSettled) => {
         if (entry.text === input.text) {
           // 首条发送挂起：制造确定性的「正在发出」窗口，释放时先完成发送再结束本轮
           return new Promise<void>((resolve) => {

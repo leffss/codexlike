@@ -40,10 +40,10 @@ export function workspaceSharing(
   let path: string | undefined;
   let exclude: string | undefined;
   if ("taskId" in target) {
-    const session = manager.list().find((item) => item.id === target.taskId);
-    if (!session) throw new Error("任务不存在");
-    path = session.workspacePath;
-    exclude = session.id;
+    const task = manager.list().find((item) => item.id === target.taskId);
+    if (!task) throw new Error("任务不存在");
+    path = task.workspacePath;
+    exclude = task.id;
   } else {
     if (
       target.workspaceMode !== undefined &&
