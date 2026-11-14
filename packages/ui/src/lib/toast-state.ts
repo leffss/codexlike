@@ -78,7 +78,11 @@ export function createToastManager() {
       entries.delete(id);
       notify();
     },
-    /** 状态消失：无条件移除，并解除该条目的已确认记录（状态重现须重新可见） */
+    /**
+     * 状态消失：无条件移除，并解除该条目的已确认记录（状态重现须重新可见）。
+     * dismissed 记录以 entryKey 的 `${id}\n${content}` 为键：retract 按同一
+     * 前缀扫描清除该条目的全部内容变体，`\n` 分隔保证不同 id 的前缀不互混。
+     */
     retract(id: string) {
       let removed = false;
       for (const key of [...dismissedKeys]) {

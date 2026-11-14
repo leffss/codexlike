@@ -13,8 +13,12 @@ import {
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
 import { ToastHost } from "../components/ToastHost";
-import { WorkspaceModeSelector } from "../components/WorkspaceModeControl";
-import { createToastManager, type ToastManager } from "../lib/toast-state";
+import { WorkspaceModeSelector } from "../components/WorkspaceModeSelector";
+import {
+  createToastManager,
+  type ToastContent,
+  type ToastManager,
+} from "../lib/toast-state";
 import type {
   QueuedMessage,
   QueueOperationResult,
@@ -69,6 +73,20 @@ import {
   matchProfilesForModelSwitch,
   planSlashCommand,
 } from "../lib/slash-command-actions";
+
+/**
+ * 提示状态同步一元（审查修复 5 抽取）：五类原常驻横条（票02）的
+ * 「状态在 → toast 幂等 upsert；状态消失 → retract 无条件撤除」同构走此入口，
+ * content 为 null 即撤除。dismissed 记录与内容变化语义由 toast-state 承担。
+ */
+function syncToast(
+  toastState: ToastManager,
+  id: string,
+  content: ToastContent | null
+) {
+  if (content) toastState.show(id, content);
+  else toastState.retract(id);
+}
 
 /** 取回编辑任务（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
 interface QueueEditTask {
@@ -347,12 +365,11 @@ export function WorkspacePage(props: {
                 status.estimatedContextTokens,
                 status.contextWindowTokens ?? undefined
               )?.message ?? null);
-        if (message)
-          toastState.show("context-warning", {
-            kind: "warn",
-            content: message,
-          });
-        else toastState.retract("context-warning");
+        syncToast(
+          toastState,
+          "context-warning",
+          message ? { kind: "warn", content: message } : null
+        );
       } catch {
         if (isCurrent()) toastState.retract("context-warning");
       }
@@ -1246,12 +1263,16 @@ export function WorkspacePage(props: {
    */
   const persistenceError = workspaceState.persistenceError();
   useEffect(() => {
-    if (persistenceError !== null)
-      toastState.show("workbench-save-error", {
-        kind: "error",
-        content: `工作现场保存失败：${persistenceError}`,
-      });
-    else toastState.retract("workbench-save-error");
+    syncToast(
+      toastState,
+      "workbench-save-error",
+      persistenceError !== null
+        ? {
+            kind: "error",
+            content: `工作现场保存失败：${persistenceError}`,
+          }
+        : null
+    );
   }, [persistenceError, toastState]);
 
   const pendingProfileId = draft?.providerProfileId ?? selectedProfileId;
@@ -1259,28 +1280,36 @@ export function WorkspacePage(props: {
     Boolean(pendingProfileId) &&
     !profiles.some((profile) => profile.id === pendingProfileId);
   useEffect(() => {
-    if (profileUnavailable)
-      toastState.show("unavailable-profile", {
-        kind: "error",
-        content: "已保存的模型配置不可用，请重新选择模型；不会自动替换。",
-      });
-    else toastState.retract("unavailable-profile");
+    syncToast(
+      toastState,
+      "unavailable-profile",
+      profileUnavailable
+        ? {
+            kind: "error",
+            content: "已保存的模型配置不可用，请重新选择模型；不会自动替换。",
+          }
+        : null
+    );
   }, [profileUnavailable, toastState]);
 
   useEffect(() => {
-    if (sharing.error !== null)
-      toastState.show("workspace-sharing-notice", {
-        kind: "error",
-        content: sharing.error,
-        contentTestId: "workspace-sharing-error",
-      });
-    else if (sharing.warning !== null)
-      toastState.show("workspace-sharing-notice", {
-        kind: "warn",
-        content: sharing.warning,
-        contentTestId: "workspace-sharing-warning",
-      });
-    else toastState.retract("workspace-sharing-notice");
+    syncToast(
+      toastState,
+      "workspace-sharing-notice",
+      sharing.error !== null
+        ? {
+            kind: "error",
+            content: sharing.error,
+            contentTestId: "workspace-sharing-error",
+          }
+        : sharing.warning !== null
+          ? {
+              kind: "warn",
+              content: sharing.warning,
+              contentTestId: "workspace-sharing-warning",
+            }
+          : null
+    );
   }, [sharing.warning, sharing.error, toastState]);
 
   const autoApproveOn = current?.autoApprove ?? false;
@@ -1288,24 +1317,30 @@ export function WorkspacePage(props: {
   const autoApproveError =
     current === null ? null : (revokeErrors[current.id] ?? null);
   useEffect(() => {
-    if (autoApproveOn) {
-      toastState.show("task-auto-approve", {
-        kind: "warn",
-        content: "本任务已开启自动批准",
-        detail: "取消后恢复基础审批模式的允许策略，不撤回已批准的执行。",
-        action: {
-          testId: "task-auto-approve-revoke",
-          label: autoApproveBusy ? "取消中…" : "取消自动批准",
-          disabled: autoApproveBusy,
-          // 读 ref 不闭包捕获：切换任务后 effect 不重跑也不会撤错任务
-          onAction: () => {
-            const id = currentIdRef.current;
-            if (id !== null) void revokeAutoApprove(id);
-          },
-        },
-        ...(autoApproveError !== null ? { actionError: autoApproveError } : {}),
-      });
-    } else toastState.retract("task-auto-approve");
+    syncToast(
+      toastState,
+      "task-auto-approve",
+      autoApproveOn
+        ? {
+            kind: "warn",
+            content: "本任务已开启自动批准",
+            detail: "取消后恢复基础审批模式的允许策略，不撤回已批准的执行。",
+            action: {
+              testId: "task-auto-approve-revoke",
+              label: autoApproveBusy ? "取消中…" : "取消自动批准",
+              disabled: autoApproveBusy,
+              // 读 ref 不闭包捕获：切换任务后 effect 不重跑也不会撤错任务
+              onAction: () => {
+                const id = currentIdRef.current;
+                if (id !== null) void revokeAutoApprove(id);
+              },
+            },
+            ...(autoApproveError !== null
+              ? { actionError: autoApproveError }
+              : {}),
+          }
+        : null
+    );
   }, [autoApproveOn, autoApproveBusy, autoApproveError, toastState]);
 
   return (
