@@ -46,6 +46,7 @@ import {
 } from "@codexlike/agent-core";
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
+import { ChangesChip } from "../components/ChangesChip";
 import { ChangesPanel } from "../components/ChangesPanel";
 import { PanelsDrawer, type DrawerTab } from "../components/PanelsDrawer";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
@@ -208,9 +209,9 @@ export function WorkspacePage(props: {
   }
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   /**
-   * 右栏 overlay 抽屉（票03）：两面板收进同一浮层，状态从两个布尔开关
-   * 合并为「当前 tab 或关」；resourcesOpen/changesOpen 语义由派生值保留
-   * （标题栏 aria-expanded 同步），两开关按钮各自仍可打开抽屉到对应 tab。
+   * 右栏 overlay 抽屉（票03）：两面板收进同一浮层，状态为「当前 tab 或关」。
+   * 入口：标题栏「规范与技能」图标开关（resources tab）与消息区右上角的
+   * 改动摘要胶囊（changes tab），各自经 aria-expanded 与抽屉状态同步。
    */
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
   const [resources, setResources] = useState<TaskResourcesView | null>(null);
@@ -356,6 +357,25 @@ export function WorkspacePage(props: {
     else openDrawer("changes");
   }, [openDrawer]);
   const closeDrawer = useCallback(() => setDrawer(null), []);
+
+  /**
+   * 改动摘要胶囊刷新信号：一轮回答结束（streaming 真转假）与面板抽屉
+   * 关闭（含提交后关闭）时递增，驱动胶囊重新读取 git 状态；任务切换
+   * 由胶囊自身按 taskId 刷新。
+   */
+  const [changesRevision, setChangesRevision] = useState(0);
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming)
+      setChangesRevision((v) => v + 1);
+    prevStreamingRef.current = streaming;
+  }, [streaming]);
+  const prevDrawerRef = useRef<DrawerTab | null>(null);
+  useEffect(() => {
+    if (prevDrawerRef.current !== null && drawer === null)
+      setChangesRevision((v) => v + 1);
+    prevDrawerRef.current = drawer;
+  }, [drawer]);
 
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
@@ -1261,10 +1281,8 @@ export function WorkspacePage(props: {
       search: { recordsRevision, onSelect: selectTask },
       panels: {
         resourcesOpen: drawer === "resources",
-        changesOpen: drawer === "changes",
         disabled: !hasCurrentTask,
         onToggleResources: toggleResources,
-        onToggleChanges: toggleChanges,
       },
     }),
     [
@@ -1274,7 +1292,6 @@ export function WorkspacePage(props: {
       drawer,
       hasCurrentTask,
       toggleResources,
-      toggleChanges,
     ]
   );
   useEffect(() => {
@@ -1354,32 +1371,6 @@ export function WorkspacePage(props: {
   const autoApproveBusy = current !== null && revoking.has(current.id);
   const autoApproveError =
     current === null ? null : (revokeErrors[current.id] ?? null);
-  useEffect(() => {
-    syncToast(
-      toastState,
-      "task-auto-approve",
-      autoApproveOn
-        ? {
-            kind: "warn",
-            content: "本任务已开启自动批准",
-            detail: "取消后恢复基础审批模式的允许策略，不撤回已批准的执行。",
-            action: {
-              testId: "task-auto-approve-revoke",
-              label: autoApproveBusy ? "取消中…" : "取消自动批准",
-              disabled: autoApproveBusy,
-              // 读 ref 不闭包捕获：切换任务后 effect 不重跑也不会撤错任务
-              onAction: () => {
-                const id = currentIdRef.current;
-                if (id !== null) void revokeAutoApprove(id);
-              },
-            },
-            ...(autoApproveError !== null
-              ? { actionError: autoApproveError }
-              : {}),
-          }
-        : null
-    );
-  }, [autoApproveOn, autoApproveBusy, autoApproveError, toastState]);
 
   return (
     <div className="flex h-full">
@@ -1559,6 +1550,64 @@ export function WorkspacePage(props: {
               @container/task 容器宽度（三档分档行为保持稳定）。
               票02：原消息流上方的五类常驻横条已迁为右下角 toast，不再占行。 */}
           <div className="relative flex min-h-0 flex-1 flex-col">
+            {/* 消息流顶部行（同宽对齐正文列）：改动摘要胶囊恒驻右上角
+             * （无任务禁用；抽屉打开期间不渲染，关闭与切 tab 走抽屉控件）；
+             * 「已开启自动批准」提示卡原为右下角 toast，改为与正文同宽的
+             * 常驻卡片——状态在则卡片在，与胶囊同行互不遮挡。左右 padding
+             * 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），contentWidthClass
+             * 的居中基准与消息列完全一致。 */}
+            <div className="shrink-0 pt-3 pl-4" style={contentPadding}>
+              <div
+                className={`${contentWidthClass} flex items-start justify-end gap-2`}
+              >
+                {current !== null && autoApproveOn && (
+                  <div
+                    data-testid="task-auto-approve"
+                    role="status"
+                    className="flex min-w-0 flex-1 items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
+                  >
+                    <span
+                      className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p
+                        data-testid="task-auto-approve-content"
+                        className="break-words"
+                      >
+                        本任务已开启自动批准
+                      </p>
+                      <p className="break-words opacity-80">
+                        取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
+                      </p>
+                      {autoApproveError !== null && (
+                        <p role="alert">{autoApproveError}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="task-auto-approve-revoke"
+                      disabled={autoApproveBusy}
+                      // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
+                      onClick={() => {
+                        const id = currentIdRef.current;
+                        if (id !== null) void revokeAutoApprove(id);
+                      }}
+                      className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                    >
+                      {autoApproveBusy ? "取消中…" : "取消自动批准"}
+                    </button>
+                  </div>
+                )}
+                {drawer === null && (
+                  <ChangesChip
+                    taskId={currentId}
+                    refreshSignal={changesRevision}
+                    onOpen={toggleChanges}
+                  />
+                )}
+              </div>
+            </div>
             <MessageStream
               key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
               taskId={currentId}
@@ -1584,6 +1633,7 @@ export function WorkspacePage(props: {
               compacting={compacting}
               contentWidthClass={contentWidthClass}
               followSignal={followSignal}
+              taskTitle={current?.title ?? null}
               emptyHint={
                 profiles.length === 0 ? (
                   <button

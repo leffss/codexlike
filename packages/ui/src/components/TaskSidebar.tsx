@@ -475,7 +475,7 @@ export function TaskSidebar(props: {
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface-muted">
+    <aside className="flex w-80 shrink-0 flex-col border-r border-line bg-surface-muted">
       {menu && menuTask && (
         <TaskContextMenu
           taskId={menuTask.id}

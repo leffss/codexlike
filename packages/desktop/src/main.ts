@@ -32,6 +32,7 @@ import {
   type ProfileStore,
   type SafeStorageLike,
 } from "./profiles/profile-store";
+import { registerFileHandlers } from "./files/file-ipc";
 import { registerGitHandlers } from "./git/git-ipc";
 import {
   createSearchSettingsStore,
@@ -593,6 +594,8 @@ void app.whenReady().then(async () => {
   });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
+  // 渲染层文件导出（复制旁的「导出 Markdown」）
+  registerFileHandlers({ getWindow: () => mainWindow });
   // 输入队列恢复（票 04 / ADR 0013）：主进程服务与凭据装配完成后启用，
   // 不依赖窗口、view 或渲染层加载；暂停态队列由持久标志保持不消费。
   taskRuntime.startInputQueues();

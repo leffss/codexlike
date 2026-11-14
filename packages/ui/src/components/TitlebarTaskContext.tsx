@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { TaskSearch } from "./TaskSearch";
-
 /** 标题栏任务上下文（票01）：WorkspacePage 上报当前任务，Header 装配渲染。 */
 export interface TitlebarTask {
   taskId: string;
@@ -16,16 +14,16 @@ export interface TitlebarTask {
   workspaceOriginPath: string | null;
 }
 
-/** 标题栏承载的面板开关（票01 迁移位置；票03 起两开关驱动同一 overlay 抽屉）。 */
+/**
+ * 标题栏承载的「规范与技能」开关（改动开关已迁出为消息区右上角的
+ * 改动摘要胶囊，见 ChangesChip）：驱动 overlay 抽屉的 resources tab。
+ */
 export interface TitlebarPanels {
   /** 抽屉当前 tab 为「规范与技能」时 true（与抽屉状态同步） */
   resourcesOpen: boolean;
-  /** 抽屉当前 tab 为「改动」时 true（与抽屉状态同步） */
-  changesOpen: boolean;
-  /** 无当前任务时两个面板都不可用 */
+  /** 无当前任务时不可用 */
   disabled: boolean;
   onToggleResources: () => void;
-  onToggleChanges: () => void;
 }
 
 /** WorkspacePage → 标题栏的单向上下文；null task 回退品牌展示。 */
@@ -140,15 +138,15 @@ function WorkspaceBadge(props: {
 /**
  * 标题栏左区（工作台视图，票01）：任务上下文行。
  * 有当前任务：品牌 › 任务名 +「项目 · Worktree/本地」徽章（完整路径收进徽章）；
- * 无任务：回退品牌展示。任务搜索整体迁入标题栏，两种形态下都可用。
+ * 无任务：回退品牌展示。任务搜索迁入标题栏右侧 nav（图标入口，见 App Header）。
  */
 export function TitlebarTaskContext(props: { context: TitlebarContext }) {
-  const { task, search } = props.context;
+  const { task } = props.context;
   const [badgeOpen, setBadgeOpen] = useState(false);
   return (
     /* 拖动区划分（审查修复 1）：根容器不设 no-drag，跟随父级
      * window-titlebar-drag 作用域——品牌、任务名与控件间空白可拖；
-     * 交互控件（徽章、任务搜索）各自挂在 window-no-drag 作用域内。 */
+     * 交互控件（徽章）挂在 window-no-drag 作用域内。 */
     <div className="flex min-w-0 flex-1 items-center gap-2">
       {task ? (
         <>
@@ -181,61 +179,48 @@ export function TitlebarTaskContext(props: { context: TitlebarContext }) {
           </span>
         </>
       )}
-      <div className="window-no-drag shrink-0 whitespace-nowrap">
-        <TaskSearch
-          recordsRevision={search.recordsRevision}
-          onSelect={search.onSelect}
-        />
-      </div>
     </div>
   );
 }
 
 /**
- * 面板开关（规范与技能 / 改动）：迁入标题栏右侧（票01）；
- * 票03 起驱动同一 overlay 抽屉——aria-expanded 与抽屉状态同步，
- * 抽屉所在 tab 的开关持久高亮（accent），文案恒定。
+ * 「规范与技能」图标开关（标题栏右侧 nav，主题切换之前）：
+ * 驱动 overlay 抽屉的 resources tab——aria-expanded 与抽屉状态同步，
+ * 抽屉所在 tab 时持久高亮（accent）。图标承载语义，文案进无障碍名与
+ * hover 提示；无任务时禁用。
  */
-export function TitlebarPanelToggles(props: { panels: TitlebarPanels }) {
+export function TitlebarResourceToggle(props: { panels: TitlebarPanels }) {
   const { panels } = props;
-  const toggles: Array<{
-    testid: string;
-    label: string;
-    open: boolean;
-    onToggle: () => void;
-  }> = [
-    {
-      testid: "resources-toggle",
-      label: "规范与技能",
-      open: panels.resourcesOpen,
-      onToggle: panels.onToggleResources,
-    },
-    {
-      testid: "changes-toggle",
-      label: "改动",
-      open: panels.changesOpen,
-      onToggle: panels.onToggleChanges,
-    },
-  ];
   return (
-    <>
-      {toggles.map(({ testid, label, open, onToggle }) => (
-        <button
-          key={testid}
-          type="button"
-          data-testid={testid}
-          disabled={panels.disabled}
-          aria-expanded={open}
-          onClick={onToggle}
-          className={`shrink-0 whitespace-nowrap rounded border px-3 py-1 text-xs disabled:opacity-50 ${
-            open
-              ? "border-accent text-accent"
-              : "border-line text-fg-muted hover:border-accent hover:text-accent"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </>
+    <button
+      type="button"
+      data-testid="resources-toggle"
+      disabled={panels.disabled}
+      aria-expanded={panels.resourcesOpen}
+      aria-label="规范与技能"
+      title="规范与技能"
+      onClick={panels.onToggleResources}
+      className={`shrink-0 rounded border px-2 py-1.5 disabled:opacity-50 ${
+        panels.resourcesOpen
+          ? "border-accent text-accent"
+          : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
+      }`}
+    >
+      {/* 摊开的书（规范文档与技能集） */}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M8 3.7C6.9 2.7 5.3 2.2 3.6 2.2H1.8v9.6h2.4c1.4 0 2.8.4 3.8 1.3 1-.9 2.4-1.3 3.8-1.3h2.4V2.2h-1.8c-1.7 0-3.3.5-4.4 1.5z" />
+        <path d="M8 3.7v9.4" />
+      </svg>
+    </button>
   );
 }

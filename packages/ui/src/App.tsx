@@ -7,7 +7,7 @@ import { reportLaunchState } from "./lib/launch-state";
 import { ApplicationExit } from "./components/ApplicationExit";
 import { WindowControls } from "./components/WindowControls";
 import {
-  TitlebarPanelToggles,
+  TitlebarResourceToggle,
   TitlebarTaskContext,
   type TitlebarContext,
 } from "./components/TitlebarTaskContext";
@@ -15,6 +15,7 @@ import {
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
+import { TaskSearch } from "./components/TaskSearch";
 
 type View = "workspace" | "settings";
 
@@ -77,7 +78,15 @@ function Header(props: {
       )}
       <nav className="window-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
         {props.view === "workspace" && props.titlebar && (
-          <TitlebarPanelToggles panels={props.titlebar.panels} />
+          <>
+            {/* 任务搜索与「规范与技能」图标入口：主题切换之前（改动入口
+             * 已迁出为消息区右上角的改动摘要胶囊，见 WorkspacePage） */}
+            <TaskSearch
+              recordsRevision={props.titlebar.search.recordsRevision}
+              onSelect={props.titlebar.search.onSelect}
+            />
+            <TitlebarResourceToggle panels={props.titlebar.panels} />
+          </>
         )}
         <button
           type="button"

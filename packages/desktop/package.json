@@ -22,6 +22,7 @@
     "test:e2e:acceptance": "node e2e/acceptance.mjs",
     "test:e2e:commands": "node e2e/commands.mjs",
     "test:e2e:skills": "node e2e/skills.mjs",
+    "test:e2e:export": "node e2e/export-markdown.mjs",
     "test:e2e:browser": "node e2e/browser.mjs",
     "test:e2e:approvals": "node e2e/approvals.mjs",
     "test:e2e:interactions": "node e2e/interactions.mjs",

@@ -143,8 +143,13 @@ function installBrowserStub(): void {
       setToolEnabled: async () => {},
     },
     onTaskEvent: () => () => {},
+    files: {
+      // 原型环境不出保存对话框，也不落盘
+      saveText: async () => ({ saved: false }),
+    },
     git: {
-      status: async () => ({ isGitRepo: false }),
+      // 形状对齐真实 IPC 契约（agent-core GitStatus：files/branch 恒在）
+      status: async () => ({ isGitRepo: false, branch: null, files: [] }),
       diff: async () => ({ oldText: "", newText: "", oldPath: null }),
       createBranch: async () => ({}),
       generateCommitMessage: async () => "原型环境：提交消息生成不可用",

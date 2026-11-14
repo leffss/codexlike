@@ -2,26 +2,63 @@ import { useEffect, useRef, useState } from "react";
 import type { AssistantSegment } from "../lib/task-view";
 import { formatCompletedTime } from "../lib/completed-time";
 
-/** 最终正文操作栏：时间与段建立时刻独立，复制只针对当前段原始正文。 */
+/** 导出默认文件名的非法字符（Windows 文件名保留字符）→ 连字符 */
+const ILLEGAL_FILENAME_CHARS = /[\\/:*?"<>|]/g;
+
+/** 任务标题 → 导出文件名基础（无标题回退固定名）；保存对话框仍可改名 */
+export function exportFileNameBase(
+  taskTitle: string | null | undefined
+): string {
+  if (taskTitle === null || taskTitle === undefined || taskTitle.trim() === "")
+    return "codexlike-回复";
+  const sanitized = taskTitle
+    .replace(ILLEGAL_FILENAME_CHARS, "-")
+    .replace(/[.\s]+$/g, "")
+    .trim();
+  return sanitized === "" ? "codexlike-回复" : sanitized;
+}
+
+/** 最终正文操作栏：时间与段建立时刻独立，复制/导出只针对当前段原始正文。 */
 export function AssistantActions(props: {
   segment: AssistantSegment;
   now: Date;
   failed?: boolean;
+  /** 导出 Markdown 的默认文件名来源（GLOSSARY「任务」标题）；缺省用固定名 */
+  taskTitle?: string | null;
 }) {
   const { segment } = props;
   const [copyState, setCopyState] = useState<
     "idle" | "copying" | "copied" | "failed"
   >("idle");
+  const [exportState, setExportState] = useState<
+    "idle" | "exporting" | "exported" | "failed"
+  >("idle");
   // 每次尝试独立令牌；卸载后作废，异步拒绝/成功不再更新已离开的段。
   const attempt = useRef<object | null>(null);
+  const exportAttempt = useRef<object | null>(null);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exportResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
       attempt.current = null;
+      exportAttempt.current = null;
       if (resetTimer.current !== null) clearTimeout(resetTimer.current);
+      if (exportResetTimer.current !== null)
+        clearTimeout(exportResetTimer.current);
     },
     []
   );
+
+  /** 瞬时反馈（copied / exported）到点回落 idle；令牌过期不覆盖新状态 */
+  function scheduleReset(
+    setState: (state: "idle") => void,
+    timerRef: typeof resetTimer
+  ) {
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setState("idle");
+    }, 2000);
+  }
 
   async function copy() {
     if (attempt.current !== null) return;
@@ -36,15 +73,41 @@ export function AssistantActions(props: {
       await navigator.clipboard.writeText(segment.content);
       if (attempt.current === current) {
         setCopyState("copied");
-        resetTimer.current = setTimeout(() => {
-          resetTimer.current = null;
-          setCopyState("idle");
-        }, 2000);
+        scheduleReset(setCopyState, resetTimer);
       }
     } catch {
       if (attempt.current === current) setCopyState("failed");
     } finally {
       if (attempt.current === current) attempt.current = null;
+    }
+  }
+
+  /** 导出为 Markdown 文件：原生保存对话框（用户可选位置与文件名）；取消静默 */
+  async function exportMarkdown() {
+    if (exportAttempt.current !== null) return;
+    if (exportResetTimer.current !== null) {
+      clearTimeout(exportResetTimer.current);
+      exportResetTimer.current = null;
+    }
+    const current = {};
+    exportAttempt.current = current;
+    setExportState("exporting");
+    try {
+      const result = await window.codexlike.files.saveText({
+        defaultFileName: `${exportFileNameBase(props.taskTitle)}.md`,
+        content: segment.content,
+      });
+      if (exportAttempt.current !== current) return;
+      if (result.saved) {
+        setExportState("exported");
+        scheduleReset(setExportState, exportResetTimer);
+      } else {
+        setExportState("idle");
+      }
+    } catch {
+      if (exportAttempt.current === current) setExportState("failed");
+    } finally {
+      if (exportAttempt.current === current) exportAttempt.current = null;
     }
   }
 
@@ -65,6 +128,12 @@ export function AssistantActions(props: {
     copied: "已复制",
     failed: "重试复制",
   }[copyState];
+  const exportLabel = {
+    idle: "导出为 Markdown",
+    exporting: "导出中",
+    exported: "已导出",
+    failed: "导出失败，请重试",
+  }[exportState];
   return (
     <div
       data-testid="assistant-actions"
@@ -111,6 +180,43 @@ export function AssistantActions(props: {
           ? "已复制"
           : copyState === "failed"
             ? "复制失败，请重试"
+            : ""}
+      </span>
+      <button
+        type="button"
+        data-testid="assistant-export"
+        onClick={() => void exportMarkdown()}
+        disabled={exportState === "exporting"}
+        aria-label={exportLabel}
+        title={exportLabel}
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+      >
+        {/* 下载（向下箭头 + 托盘） */}
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3v12m0 0-4-4m4 4 4-4" />
+          <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+      </button>
+      <span
+        data-testid="assistant-export-feedback"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className={exportState === "failed" ? "text-danger-fg" : "sr-only"}
+      >
+        {exportState === "exported"
+          ? "已导出"
+          : exportState === "failed"
+            ? "导出失败，请重试"
             : ""}
       </span>
       {completed !== null && (

@@ -1,8 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
+import { TaskSearch } from "../src/components/TaskSearch";
 import {
-  TitlebarPanelToggles,
+  TitlebarResourceToggle,
   TitlebarTaskContext,
   WorkspaceBadgePopover,
   type TitlebarContext,
@@ -28,10 +29,8 @@ function context(overrides: Partial<TitlebarContext> = {}): TitlebarContext {
     search: { recordsRevision: 0, onSelect: () => {} },
     panels: {
       resourcesOpen: false,
-      changesOpen: false,
       disabled: false,
       onToggleResources: () => {},
-      onToggleChanges: () => {},
     },
     ...overrides,
   };
@@ -48,8 +47,8 @@ it("打开任务时标题栏展示品牌、任务名与「项目 · Worktree/本
   expect(html).toMatch(/data-testid="workspace-badge"/);
   expect(html).toContain("ai-agent");
   expect(html).toMatch(/data-testid="workspace-mode"[^>]*>\s*Worktree\s*</);
-  // 任务搜索整体迁入标题栏：关闭态即切换按钮
-  expect(html).toMatch(/data-testid="task-search-toggle"/);
+  // 任务搜索已迁出左区（App Header 右侧 nav 图标入口），左区不再渲染
+  expect(html).not.toMatch(/data-testid="task-search-toggle"/);
 });
 
 it("徽章 hover 提示与点击弹层提供完整工作区路径与来源目录", () => {
@@ -101,90 +100,102 @@ it("无任务（未选任务/草稿）时回退品牌展示，不渲染任务名
   expect(html).toContain("本地 AI coding agent 工作台");
   expect(html).not.toMatch(/data-testid="task-title"/);
   expect(html).not.toMatch(/data-testid="workspace-badge"/);
-  // 任务搜索仍可用（能力不减）
-  expect(html).toMatch(/data-testid="task-search-toggle"/);
 });
 
-it("面板开关保留定位器并同步 aria 状态，无任务时禁用", () => {
+it("任务搜索图标入口：放大镜承载语义，文案进无障碍名，装饰 SVG 不进入无障碍树", () => {
   const html = renderToStaticMarkup(
-    createElement(TitlebarPanelToggles, {
+    createElement(TaskSearch, {
+      recordsRevision: 0,
+      onSelect: () => {},
+    })
+  );
+  const button = html.match(
+    /<button[^>]*data-testid="task-search-toggle"[^>]*>[\s\S]*?<\/button>/
+  )?.[0];
+  expect(button).toContain('aria-label="搜索任务"');
+  expect(button).toContain('title="搜索任务"');
+  expect(button).toContain('aria-expanded="false"');
+  expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
+  expect(button).not.toContain(">搜索任务<");
+  expect(button).not.toContain(">关闭搜索<");
+});
+
+it("「规范与技能」图标开关保留定位器并同步 aria 状态，无任务时禁用", () => {
+  const open = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
       panels: {
         resourcesOpen: true,
-        changesOpen: true,
         disabled: false,
         onToggleResources: () => {},
-        onToggleChanges: () => {},
       },
     })
   );
-  expect(html).toMatch(
+  expect(open).toMatch(
     /data-testid="resources-toggle"[^>]*aria-expanded="true"/
   );
-  expect(html).toMatch(/data-testid="changes-toggle"[^>]*aria-expanded="true"/);
-  const collapsed = renderToStaticMarkup(
-    createElement(TitlebarPanelToggles, {
+  const closed = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
       panels: {
         resourcesOpen: false,
-        changesOpen: false,
         disabled: false,
         onToggleResources: () => {},
-        onToggleChanges: () => {},
       },
     })
   );
-  expect(collapsed).toMatch(
-    /data-testid="changes-toggle"[^>]*aria-expanded="false"/
+  expect(closed).toMatch(
+    /data-testid="resources-toggle"[^>]*aria-expanded="false"/
   );
   const disabled = renderToStaticMarkup(
-    createElement(TitlebarPanelToggles, {
+    createElement(TitlebarResourceToggle, {
       panels: {
         resourcesOpen: false,
-        changesOpen: false,
         disabled: true,
         onToggleResources: () => {},
-        onToggleChanges: () => {},
       },
     })
   );
   expect(disabled).toMatch(/data-testid="resources-toggle"[^>]*disabled/);
 });
 
-it("抽屉所在 tab 的开关按钮高亮（accent），另一开关不高亮（票03）", () => {
-  const html = renderToStaticMarkup(
-    createElement(TitlebarPanelToggles, {
+it("「规范与技能」图标开关：打开态高亮（accent），图标承载语义", () => {
+  const open = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
       panels: {
         resourcesOpen: true,
-        changesOpen: false,
         disabled: false,
         onToggleResources: () => {},
-        onToggleChanges: () => {},
       },
     })
   );
-  // 属性顺序无关：先截完整按钮（开标签 + 文案）再断言；持久高亮 = 非前缀的
-  // `border-accent text-accent`（与 hover:border-accent 等 hover 类区分）
-  const resourcesToggle = html.match(
+  const button = open.match(
     /<button[^>]*data-testid="resources-toggle"[^>]*>[\s\S]*?<\/button>/
   )?.[0];
-  const changesToggle = html.match(
-    /<button[^>]*data-testid="changes-toggle"[^>]*>[\s\S]*?<\/button>/
-  )?.[0];
-  expect(resourcesToggle).toContain("border-accent text-accent");
-  expect(changesToggle).not.toContain("border-accent text-accent");
-  // 两开关文案恒定，开合状态由 aria-expanded 与高亮承载（票03 tab 化）
-  expect(resourcesToggle).toContain("规范与技能");
-  expect(changesToggle).toContain("改动");
-  expect(html).not.toContain("收起改动");
+  // 持久高亮 = 非前缀的 `border-accent text-accent`（与 hover 类区分）
+  expect(button).toContain("border-accent text-accent");
+  expect(button).toContain('aria-label="规范与技能"');
+  expect(button).toContain('title="规范与技能"');
+  expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
+  expect(button).not.toContain(">规范与技能<");
+  const closed = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
+      panels: {
+        resourcesOpen: false,
+        disabled: false,
+        onToggleResources: () => {},
+      },
+    })
+  );
+  expect(closed).not.toContain("border-accent text-accent");
 });
 
-it("拖动区按控件归属划分（审查修复 1）：徽章与搜索免拖，任务名可拖", () => {
+it("拖动区按控件归属划分（审查修复 1）：徽章免拖，任务名可拖", () => {
   const html = renderToStaticMarkup(
     createElement(TitlebarTaskContext, { context: context() })
   );
-  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）与
-  // 任务搜索容器（含搜索面板）各一个；真实拖拽行为由 window-controls
-  // 场景以系统级输入验证（品牌回退态），任务态划分以此静态断言兜底。
-  expect(html.match(/<div class="window-no-drag/g)).toHaveLength(2);
+  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）一个；
+  // 任务搜索迁入右侧 nav（nav 整体免拖），左区仅剩徽章。真实拖拽行为由
+  // window-controls 场景以系统级输入验证（品牌回退态），任务态划分以此静态断言兜底。
+  expect(html.match(/<div class="window-no-drag/g)).toHaveLength(1);
   // 任务名与品牌是纯展示文本：不落入免拖作用域，跟随父级标题栏拖动
   const titleTag =
     html.match(/<span[^>]*data-testid="task-title"[^>]*>/)?.[0] ?? "";
@@ -196,18 +207,13 @@ it("拖动区按控件归属划分（审查修复 1）：徽章与搜索免拖�
 it("面板开关动作透传给宿主（先例：window-controls-ui 直接调用 props）", () => {
   // renderToStaticMarkup 不执行事件；动作透传经组件 props 直接调用验证。
   const onToggleResources = vi.fn();
-  const onToggleChanges = vi.fn();
-  const markup = createElement(TitlebarPanelToggles, {
+  const markup = createElement(TitlebarResourceToggle, {
     panels: {
       resourcesOpen: false,
-      changesOpen: false,
       disabled: false,
       onToggleResources,
-      onToggleChanges,
     },
   });
   markup.props.panels.onToggleResources();
-  markup.props.panels.onToggleChanges();
   expect(onToggleResources).toHaveBeenCalledOnce();
-  expect(onToggleChanges).toHaveBeenCalledOnce();
 });

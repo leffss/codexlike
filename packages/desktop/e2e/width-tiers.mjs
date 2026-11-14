@@ -28,8 +28,8 @@ import {
   startMockProvider,
 } from "./helpers.mjs";
 
-/** 档位换算依据：侧栏固定 w-72（288px），窗口内容区宽 - 288 = 任务容器宽 */
-const SIDEBAR_WIDTH = 288;
+/** 档位换算依据：侧栏固定 w-80（320px），窗口内容区宽 - 320 = 任务容器宽 */
+const SIDEBAR_WIDTH = 320;
 const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
 
 /** 宽内容回复：12 列宽表格 + 220 字符长代码行，在任何档位都超出内容列宽。
@@ -184,7 +184,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
-    // 固定窗口内容区 1280×800：任务容器 = 1280 - 288 = 992px
+    // 固定窗口内容区 1280×800：任务容器 = 1280 - 320 = 960px
     await resizeWindow(app, 1280, 800);
 
     // 场景 1：新建草稿与已有任务采用相同 4xl 档，不再单独收窄。
@@ -346,11 +346,14 @@ async function main() {
       await window.getByTestId(toggle).click();
       await window.getByTestId("panels-drawer").waitFor();
       await window.getByTestId(panel).waitFor();
-      assert(
-        (await window.getByTestId(toggle).getAttribute("aria-expanded")) ===
-          "true",
-        `${toggle} aria-expanded 应与抽屉状态同步`
-      );
+      // 改动胶囊（changes-toggle）已迁消息区右上角：抽屉打开期间被覆盖区
+      // 吞没（覆盖区内无法交互），不渲染；规范开关在标题栏恒可见。
+      if (toggle === "changes-toggle") {
+        assert(
+          (await window.getByTestId("changes-toggle").count()) === 0,
+          "改动胶囊在抽屉打开期间不渲染（关闭与切 tab 走抽屉自带控件）"
+        );
+      }
       const opened = await assertAligned(window, "message-list", panel);
       assert(
         Math.abs(opened.width - closed.width) <= 1,
@@ -364,7 +367,7 @@ async function main() {
         Math.abs(opened.width - (streamWidth - STREAM_PADDING - 192)) <= 1,
         "抽屉打开仍使用外层任务容器的6xl档留白"
       );
-      // 抽屉自身宽度约束：30rem（480px），上限 60% 任务容器宽（侧栏 288px）。
+      // 抽屉自身宽度约束：30rem（480px），上限 60% 任务容器宽（侧栏 320px）。
       const drawerBox = await window.getByTestId("panels-drawer").boundingBox();
       const viewportWidth = await window.evaluate(() => window.innerWidth);
       const expectedDrawer = Math.min(
@@ -381,7 +384,7 @@ async function main() {
         `${panel} 抽屉应覆盖在消息流上方而非并列占位`
       );
       await window.screenshot({ path: join(screenshots, `${panel}.png`) });
-      await window.getByTestId(toggle).click();
+      await window.getByTestId("drawer-close").click();
       await window.getByTestId("panels-drawer").waitFor({ state: "hidden" });
       const restored = await assertAligned(
         window,
@@ -400,7 +403,8 @@ async function main() {
       await resizeWindow(app, width, 800);
       await window.getByTestId("resources-toggle").click();
       await window.getByTestId("resources-panel").waitFor();
-      await window.getByTestId("changes-toggle").click();
+      // 切 tab：改动入口胶囊在抽屉打开期间不渲染，经抽屉自带 tab 头切换
+      await window.getByTestId("drawer-tab-changes").click();
       await window.getByTestId("changes-panel").waitFor();
       assert(
         (await window.getByTestId("panels-drawer").count()) === 1,
@@ -415,9 +419,9 @@ async function main() {
           .getByTestId("resources-toggle")
           .getAttribute("aria-expanded")) === "false" &&
           (await window
-            .getByTestId("changes-toggle")
-            .getAttribute("aria-expanded")) === "true",
-        "两开关 aria-expanded 与抽屉 tab 互斥同步"
+            .getByTestId("drawer-tab-changes")
+            .getAttribute("aria-selected")) === "true",
+        "标题栏开关与抽屉 tab 状态同步（改动入口已迁消息区右上角胶囊）"
       );
       const content = await assertAligned(
         window,
@@ -434,7 +438,6 @@ async function main() {
         "workspace-badge",
         "task-search-toggle",
         "resources-toggle",
-        "changes-toggle",
       ]) {
         const button = await window.getByTestId(testId).boundingBox();
         assert(

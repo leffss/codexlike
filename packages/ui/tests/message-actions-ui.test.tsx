@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 afterEach(() => vi.useRealTimers());
 
 import { MessageStream } from "../src/components/MessageStream";
+import { exportFileNameBase } from "../src/components/AssistantActions";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import type { AssistantSegment, MessageSegment } from "../src/lib/task-view";
 
@@ -47,6 +48,35 @@ describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌�
     expect(html).toMatch(
       /<span[^>]*data-testid="assistant-copy-feedback"[^>]*class="sr-only"/
     );
+  });
+
+  it("导出 Markdown 入口在复制按钮之后，是有明确名称的 28px 图标按钮", () => {
+    const html = render([assistant()]);
+    const exportButton = html.match(
+      /<button[^>]*data-testid="assistant-export"[^>]*>[\s\S]*?<\/button>/
+    )?.[0];
+    expect(exportButton).toContain('aria-label="导出为 Markdown"');
+    expect(exportButton).toContain('title="导出为 Markdown"');
+    expect(exportButton).toContain("h-7 w-7");
+    expect(exportButton).toMatch(/<svg[^>]*aria-hidden="true"/);
+    expect(exportButton).not.toContain(">导出<");
+    expect(html).toMatch(
+      /<span[^>]*data-testid="assistant-export-feedback"[^>]*class="sr-only"/
+    );
+    // 排列顺序：复制在前、导出在后
+    expect(html.indexOf('data-testid="assistant-copy"')).toBeLessThan(
+      html.indexOf('data-testid="assistant-export"')
+    );
+  });
+
+  it("导出默认文件名：标题非法字符替换为连字符，空标题回退固定名", () => {
+    expect(exportFileNameBase("重构:主窗口/布局*测试")).toBe(
+      "重构-主窗口-布局-测试"
+    );
+    expect(exportFileNameBase("标题...")).toBe("标题");
+    expect(exportFileNameBase("  ")).toBe("codexlike-回复");
+    expect(exportFileNameBase(null)).toBe("codexlike-回复");
+    expect(exportFileNameBase(undefined)).toBe("codexlike-回复");
   });
 
   it.each(["正文流式", "宿主仍运行", "工具仍运行"])(

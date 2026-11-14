@@ -199,6 +199,9 @@ const api: CodexLikeApi = {
     commit: (taskId, message) =>
       ipcRenderer.invoke(IPC.git.commit, taskId, message),
   },
+  files: {
+    saveText: (input) => ipcRenderer.invoke(IPC.files.saveText, input),
+  },
 };
 
 contextBridge.exposeInMainWorld("codexlike", api);

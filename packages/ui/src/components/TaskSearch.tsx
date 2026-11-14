@@ -13,9 +13,14 @@ export function TaskSearch(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  /** 面板水平偏移（迁入标题栏，票01）：开关贴近窗口边缘时把面板收口回视口 */
+  /**
+   * 面板定位（fixed，真正贴视口）：开关迁移到标题栏右侧 nav 后贴近窗口
+   * 右缘——absolute 基准是 wrap 的文档坐标，clamp 按视口坐标算，页面一旦
+   * 出现横向滚动（如打开瞬间聚焦输入框把越界内容滚入视口）两系错位；
+   * fixed 以视口为唯一基准，免疫文档滚动。
+   */
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [panelOffset, setPanelOffset] = useState(0);
+  const [panelPos, setPanelPos] = useState({ left: 0, top: 0 });
 
   useEffect(() => {
     setResults([]);
@@ -53,8 +58,10 @@ export function TaskSearch(props: {
       const width = Math.min(384, window.innerWidth * 0.8);
       const margin = 8;
       const maxLeft = Math.max(margin, window.innerWidth - margin - width);
-      const desired = Math.min(Math.max(anchor.left, margin), maxLeft);
-      setPanelOffset(desired - anchor.left);
+      setPanelPos({
+        left: Math.min(Math.max(anchor.left, margin), maxLeft),
+        top: anchor.bottom + 8,
+      });
     }
     place();
     window.addEventListener("resize", place);
@@ -63,20 +70,36 @@ export function TaskSearch(props: {
 
   return (
     <div className="relative" ref={wrapRef}>
+      {/* 图标入口（标题栏右侧 nav）：放大镜承载语义，文案进无障碍名与提示 */}
       <button
         type="button"
         data-testid="task-search-toggle"
+        aria-label={open ? "关闭搜索" : "搜索任务"}
         aria-expanded={open}
-        className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
+        title="搜索任务"
+        className="rounded px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
         onClick={() => setOpen((value) => !value)}
       >
-        {open ? "关闭搜索" : "搜索任务"}
+        {/* 放大镜 */}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="7" cy="7" r="4.5" />
+          <path d="m13.5 13.5-3.6-3.6" />
+        </svg>
       </button>
       {open && (
         <section
           aria-label="跨项目任务搜索"
-          className="absolute top-full z-20 mt-2 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
-          style={{ left: panelOffset }}
+          className="fixed z-20 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
+          style={{ left: panelPos.left, top: panelPos.top }}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
           }}

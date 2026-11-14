@@ -252,7 +252,7 @@ async function main() {
     // ===== 场景 5：同一仓库双任务（本目录直跑 + worktree 模式）并行互不干扰 =====
     enterScenario5();
     // 任务 A：本目录直跑（同一 repo）
-    await window.getByTestId("changes-toggle").click(); // 收起面板回到消息流
+    await window.getByTestId("drawer-close").click(); // 收起面板回到消息流（改动胶囊在抽屉打开期间不渲染）
     await prepareDraft(window, { project: true, approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("写入 a-local.txt");
     await window.getByTestId("composer-send").click();

@@ -191,6 +191,11 @@ export const IPC = {
     /** 提交当前全部变更（消息可编辑后传入） */
     commit: "git:commit",
   },
+  /** 渲染层导出文件（如助手正文导出 Markdown）：原生保存对话框 + 主进程写盘 */
+  files: {
+    /** 保存文本文件：取消返回 { saved: false }；写入成功返回保存路径 */
+    saveText: "files:save-text",
+  },
 } as const;
 
 /** 事件流信封：按任务 ID 多路复用 */
@@ -360,6 +365,16 @@ export interface CodexLikeApi {
     remove(id: string): Promise<boolean>;
   };
   tasks: TaskApi;
+  files: {
+    /**
+     * 原生保存对话框写出文本文件（如助手正文导出 Markdown）：
+     * 用户取消返回 { saved: false }；写入失败以异常抛回。
+     */
+    saveText(input: {
+      defaultFileName: string;
+      content: string;
+    }): Promise<{ saved: boolean; path?: string }>;
+  };
 }
 
 /** 任务域 API：`window.codexlike.tasks` 的形状。 */

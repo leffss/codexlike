@@ -83,6 +83,8 @@ export function MessageStream(props: {
   onScrollbarGutterChange?: (width: number) => void;
   /** 强制回底信号（票 03）：发送新 prompt 时递增，组件立即贴底并进入跟随 */
   followSignal?: number;
+  /** 当前任务标题：最终正文「导出为 Markdown」的默认文件名来源 */
+  taskTitle?: string | null;
 }) {
   const now = useLocalDay();
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
@@ -300,6 +302,7 @@ export function MessageStream(props: {
                   turn={turn}
                   now={now}
                   questionDraft={props.questionDraft}
+                  taskTitle={props.taskTitle}
                 />
               ))}
               {props.compacting === true && (
@@ -381,6 +384,7 @@ function TurnGroupItem(props: {
   turn: TurnView;
   now: Date;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+  taskTitle?: string | null;
 }) {
   const { turn } = props;
   return (
@@ -409,6 +413,7 @@ function TurnGroupItem(props: {
             now={props.now}
             failed={turn.following.some((item) => item.kind === "error")}
             questionDraft={props.questionDraft}
+            taskTitle={props.taskTitle}
           />
         ))}
       </ol>
@@ -586,6 +591,7 @@ function SegmentView(props: {
   now?: Date;
   failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+  taskTitle?: string | null;
 }) {
   const { segment } = props;
   if (segment.kind === "tool-call") {
@@ -611,6 +617,7 @@ function SegmentView(props: {
       showActions={props.showActions}
       now={props.now}
       failed={props.failed}
+      taskTitle={props.taskTitle}
     />
   );
 }
@@ -691,6 +698,7 @@ function MessageBubble(props: {
   showActions?: boolean;
   now?: Date;
   failed?: boolean;
+  taskTitle?: string | null;
   segment: Extract<
     MessageSegment,
     | { kind: "user" }
@@ -799,6 +807,7 @@ function MessageBubble(props: {
           segment={segment}
           now={props.now}
           failed={props.failed}
+          taskTitle={props.taskTitle}
         />
       )}
     </li>

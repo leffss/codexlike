@@ -262,8 +262,8 @@ async function main() {
         .first()
         .evaluate((row) => row.closest("aside").getBoundingClientRect().width);
       assert(
-        Math.abs(sidebarWidth - 288) <= 1,
-        `侧栏宽度为 288px：${sidebarWidth}`
+        Math.abs(sidebarWidth - 320) <= 1,
+        `侧栏宽度为 320px（w-80，放宽侧栏）：${sidebarWidth}`
       );
       const layouts = await window.getByTestId("task-row").evaluateAll((rows) =>
         rows.map((row) => {
@@ -347,10 +347,7 @@ async function main() {
         BrowserWindow.getAllWindows()[0].setSize(width, 720),
       NARROW_WIDTH
     );
-    await window.waitForFunction(
-      (width) => innerWidth <= width,
-      NARROW_WIDTH
-    );
+    await window.waitForFunction((width) => innerWidth <= width, NARROW_WIDTH);
     await assertSingleLineTitles();
     await window.screenshot({
       path: join(screenshotDir, "sidebar-narrow.png"),
