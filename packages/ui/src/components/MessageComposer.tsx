@@ -363,7 +363,7 @@ export function MessageComposer(props: {
         {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
         <form
           data-testid="composer-card"
-          className="-mx-2 rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
+          className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
           onSubmit={(event) => {
             event.preventDefault();
             submit();

@@ -54,7 +54,7 @@ const SCRIPTED_SCROLL_TTL_MS = 500;
 /**
  * 中栏上部：消息流（GLOSSARY「消息流」「消息段」「轮次」「过程段」「跟随」）。
  * 渲染三层（ADR 0011 呈现分层、ADR 0015 逐段呈现）：单段视图按类型分派 →
- * 轮次聚合呈现（细分隔线 + 轮间距，不加 agent 名头/头像）→ 轮内消息段
+ * 轮次聚合呈现（轮间距，不加 agent 名头/头像）→ 轮内消息段
  * 按事件原序平铺：过程段逐段自带工时，活动段默认展开、完成后自动收起
  * （聚合规则见 turn-view 纯函数，开合是渲染层内存态，见 collapse-memory）。
  *
@@ -379,7 +379,7 @@ export function MessageStream(props: {
 }
 
 /**
- * 轮次分组呈现单位（GLOSSARY「轮次」）：细分隔线 + 轮间距，
+ * 轮次分组呈现单位（GLOSSARY「轮次」）：轮间距（pt-4 + 外层 gap-4），
  * 不加 agent 名头/头像（票 04）；轮内依次为用户消息段与全部消息段
  * （过程段逐段平铺，ADR 0015）。
  */
@@ -395,8 +395,8 @@ function TurnGroupItem(props: {
     <li
       data-testid="message-turn"
       data-turn-id={turn.turnId}
-      // 细分隔线 + 轮间距：首轮无线，其后各轮顶部细分隔线（外层 gap-4 提供基本轮间距）
-      className="[&:not(:first-child)]:border-t [&:not(:first-child)]:border-line [&:not(:first-child)]:pt-4"
+      // 轮间距：首轮不加顶部留白，其后各轮 pt-4 与外层 gap-4 共同留出轮次空隙
+      className="[&:not(:first-child)]:pt-4"
     >
       <ol className="flex flex-col gap-3">
         {turn.user !== null && (

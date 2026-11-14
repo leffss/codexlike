@@ -13,6 +13,13 @@ import {
 const actionClass =
   "rounded border border-line px-3 py-2 text-sm text-fg hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50";
 
+/**
+ * 每题选项数上限：与 agent-core 侧 ask_user_question 工具 schema /
+ * parseQuestions 的 0–8 契约一致；渲染层再裁一次，防住绕过工具解析的
+ * 数据来源（历史恢复等）把面板撑出滚动语义。
+ */
+const MAX_QUESTION_OPTIONS = 8;
+
 /** 唯一可操作用户交互区域；停止始终位于提交锁之外。 */
 export function InteractionPanel(props: {
   record: InteractionRecord;
@@ -173,40 +180,45 @@ export function InteractionPanel(props: {
                 aria-labelledby="interaction-question-title"
                 className="min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overscroll-contain"
               >
-                {question.options.map((option, index) => (
-                  <label
-                    key={option.id}
-                    className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${answer.selectedOptionIds.includes(option.id) ? "border-accent bg-selected" : "border-line hover:bg-hover"}`}
-                  >
-                    <input
-                      data-testid={`question-option-${option.id}`}
-                      type={question.multiSelect ? "checkbox" : "radio"}
-                      name={`question-${request.id}-${question.id}`}
-                      checked={answer.selectedOptionIds.includes(option.id)}
-                      aria-describedby={
-                        option.description
-                          ? `question-description-${index}`
-                          : undefined
-                      }
-                      onChange={() =>
-                        props.onChange({ type: "option", optionId: option.id })
-                      }
-                      onKeyDown={(event) => optionKey(event, option.id)}
-                      className="mt-0.5 shrink-0 accent-accent focus-visible:outline-2 focus-visible:outline-accent"
-                    />
-                    <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                      <span className="block">{option.label}</span>
-                      {option.description && (
-                        <span
-                          id={`question-description-${index}`}
-                          className="mt-1 block text-xs text-fg-muted"
-                        >
-                          {option.description}
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                ))}
+                {question.options
+                  .slice(0, MAX_QUESTION_OPTIONS)
+                  .map((option, index) => (
+                    <label
+                      key={option.id}
+                      className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${answer.selectedOptionIds.includes(option.id) ? "border-accent bg-selected" : "border-line hover:bg-hover"}`}
+                    >
+                      <input
+                        data-testid={`question-option-${option.id}`}
+                        type={question.multiSelect ? "checkbox" : "radio"}
+                        name={`question-${request.id}-${question.id}`}
+                        checked={answer.selectedOptionIds.includes(option.id)}
+                        aria-describedby={
+                          option.description
+                            ? `question-description-${index}`
+                            : undefined
+                        }
+                        onChange={() =>
+                          props.onChange({
+                            type: "option",
+                            optionId: option.id,
+                          })
+                        }
+                        onKeyDown={(event) => optionKey(event, option.id)}
+                        className="mt-0.5 shrink-0 accent-accent focus-visible:outline-2 focus-visible:outline-accent"
+                      />
+                      <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                        <span className="block">{option.label}</span>
+                        {option.description && (
+                          <span
+                            id={`question-description-${index}`}
+                            className="mt-1 block text-xs text-fg-muted"
+                          >
+                            {option.description}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  ))}
               </div>
               <label className="mt-2 block shrink-0 text-xs text-fg-muted">
                 自定义回答

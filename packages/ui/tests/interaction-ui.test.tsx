@@ -260,6 +260,36 @@ describe("唯一底部 InteractionPanel", () => {
     expect(customAt).toBeGreaterThan(scrollerAt);
     expect(submitAt).toBeGreaterThan(scrollerAt);
   });
+  it("每题最多渲染 8 个选项：超出部分不进面板（渲染层上限，与 agent-core 0–8 契约一致）", () => {
+    const request = {
+      ...approval.request,
+      kind: "questions" as const,
+      questions: [
+        {
+          id: "q1",
+          header: "方案",
+          question: "选择方案？",
+          multiSelect: false,
+          options: Array.from({ length: 10 }, (_, index) => ({
+            id: `opt-${index + 1}`,
+            label: `选项${index + 1}`,
+          })),
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(InteractionPanel, {
+        ...props,
+        record: { ...approval, request },
+        draft: createQuestionDraft(request),
+      })
+    );
+    for (let index = 1; index <= 8; index += 1) {
+      expect(html).toContain(`question-option-opt-${index}`);
+    }
+    expect(html).not.toContain("question-option-opt-9");
+    expect(html).not.toContain("question-option-opt-10");
+  });
   it("最后一题提交按钮 hover 用 accent-hover 保持文字可见，文案为「提交」（反馈5）", () => {
     const request = {
       ...approval.request,
