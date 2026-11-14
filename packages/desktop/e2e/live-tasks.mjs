@@ -260,7 +260,7 @@ async function main() {
       "审批与问答工具结果无丢失无重复"
     );
     console.log(
-      "[e2e] live sessions：未完成A→B→A、后台工具/审批/问答、跨任务响应隔离、未查看/失败/中断通过"
+      "[e2e] live tasks：未完成A→B→A、后台工具/审批/问答、跨任务响应隔离、未查看/失败/中断通过"
     );
   } finally {
     if (app) await closeApp(app);
