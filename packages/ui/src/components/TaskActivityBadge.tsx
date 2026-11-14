@@ -55,7 +55,7 @@ export function TaskActivityBadge({
             strokeWidth="1.5"
             strokeLinecap="round"
             aria-hidden="true"
-            className={running ? "animate-spin" : undefined}
+            className={running && !waiting ? "animate-spin" : undefined}
           >
             {waiting ? (
               <path d="M4 3v6m4-6v6" />

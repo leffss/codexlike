@@ -96,16 +96,15 @@ export interface SubagentsConfig {
 
 /**
  * 任务（agent-task）向编排器提供的端口：审批状态、审批等待注册与事件出口。
- * 子代理与主任务共享冻结的审批模式、实时 autoApprove 和交互路由；
- * 任务授权不改变本轮 ToolContext 的文件访问边界。
+ * 子代理与主任务共享冻结的审批模式与交互路由；任务授权不改变本轮
+ * ToolContext 的文件访问边界。自动批准留痕经 requestInteraction 的
+ * 控制器即时批准路径完成，端口不再单独读取授权状态。
  */
 export interface SubagentHostPort {
   taskId: string;
   workspacePath: string;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
-  /** 实时读取所属任务的审批授权，不改变本轮路径权限。 */
-  autoApprove?(): boolean;
   /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主任务正文。 */
   resources?(): AgentResourceSnapshot | undefined;
   /**
@@ -272,9 +271,10 @@ export function createSubagentOrchestrator(
       return { output: "工具调用已取消，未执行", isError: true };
     const command = commandOfToolInput(input);
     const approvalMode = port.approvalMode();
+    // 审批门按真实档位判定，不含 autoApprove（与主任务门同构，反馈2留痕）：
+    // autoApprove 开启时本应询问的子代理调用也走交互通道即时批准并落库。
     const gate = decideApproval({
       mode: approvalMode,
-      autoApprove: port.autoApprove?.() ?? false,
       permission: definition.permission,
       toolName: definition.name,
       command,

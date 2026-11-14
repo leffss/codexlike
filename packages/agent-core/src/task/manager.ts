@@ -426,8 +426,27 @@ export function createTaskManager(
       });
     },
 
-    /** 审批模式切换：落库并更新缓存的下次发送偏好，不更改正在执行的快照。 */
+    /**
+     * 审批模式切换：落库并更新缓存的下次发送偏好，不更改正在执行的快照。
+     * 档位实际变更时自动撤销任务自动批准（反馈1：换档即收权），
+     * 同档重复设置（每次发送都会同步偏好）不动授权状态。
+     */
     setApprovalMode(taskId, mode) {
+      const cached = cache.get(taskId);
+      const current =
+        cached?.record ??
+        persistence.listTasks().find((candidate) => candidate.id === taskId);
+      if (current === undefined) {
+        return null;
+      }
+      if (current.approvalMode !== mode && current.autoApprove === true) {
+        if (cached) {
+          cached.setApprovalMode(mode);
+          cached.revokeAutoApprove();
+          return { ...cached.record };
+        }
+        return patchRecord(taskId, { approvalMode: mode, autoApprove: false });
+      }
       const next = patchRecord(taskId, {
         approvalMode: mode,
       });

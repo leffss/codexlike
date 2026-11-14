@@ -78,9 +78,9 @@ export function InteractionPanel(props: {
           停止
         </button>
       </header>
-      <div className="min-h-0 overflow-y-auto overscroll-contain break-words [overflow-wrap:anywhere]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col break-words [overflow-wrap:anywhere]">
         {request.kind === "approval" && (
-          <>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <h2 className="text-sm font-medium">
               执行审批 · {request.toolName}
             </h2>
@@ -130,14 +130,15 @@ export function InteractionPanel(props: {
             <p id="task-approval-warning" className="mt-2 text-xs text-warn-fg">
               将批量批准本任务主代理与子代理当前排队及后续执行审批，危险命令也会自动执行。重启后保留，直到手动取消；不代答问答、不影响其他任务，不切换完全访问或放宽文件工具边界。
             </p>
-          </>
+          </div>
         )}
         {request.kind === "questions" && props.draft && question && answer && (
           <>
+            {/* 反馈4：滚动只作用于选项列表——问题说明与自定义回答、按钮固定显示 */}
             <p
               data-testid="question-progress"
               aria-live="polite"
-              className="mb-1 text-xs text-fg-muted"
+              className="mb-1 shrink-0 text-xs text-fg-muted"
             >
               第 {props.draft.index + 1} / {request.questions.length} 题 ·{" "}
               {question.header}
@@ -147,11 +148,11 @@ export function InteractionPanel(props: {
               tabIndex={-1}
               data-testid="question-title"
               id="interaction-question-title"
-              className="mb-2 whitespace-pre-wrap text-sm font-medium focus:outline-none"
+              className="mb-2 shrink-0 whitespace-pre-wrap text-sm font-medium focus:outline-none"
             >
               {question.question}
             </h2>
-            <p className="mb-2 text-xs text-fg-muted">
+            <p className="mb-2 shrink-0 text-xs text-fg-muted">
               {question.multiSelect
                 ? "可多选，也可补充自定义回答"
                 : "单选，或填写自定义回答"}
@@ -160,7 +161,7 @@ export function InteractionPanel(props: {
             <fieldset
               disabled={disabled}
               aria-labelledby="interaction-question-title"
-              className="min-w-0 space-y-2"
+              className="min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overscroll-contain"
             >
               {question.options.map((option, index) => (
                 <label
@@ -196,65 +197,71 @@ export function InteractionPanel(props: {
                   </span>
                 </label>
               ))}
-              <label className="block text-xs text-fg-muted">
+            </fieldset>
+            <div className="shrink-0">
+              <label className="mt-2 block text-xs text-fg-muted">
                 自定义回答
                 <textarea
                   data-testid="question-custom"
                   value={answer.text}
                   rows={2}
+                  disabled={disabled}
                   onChange={(event) =>
                     props.onChange({ type: "custom", text: event.target.value })
                   }
                   placeholder="输入你的回答（不会按 Enter 提交）"
-                  className="mt-1 block max-h-40 w-full resize-y rounded border border-line bg-surface-muted p-2 text-sm text-fg focus:border-accent focus:outline-none"
+                  className="mt-1 block max-h-40 w-full resize-y rounded border border-line bg-surface-muted p-2 text-sm text-fg focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </label>
-            </fieldset>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                data-testid="question-prev"
-                disabled={disabled || props.draft.index === 0}
-                className={actionClass}
-                onClick={() => props.onChange({ type: "prev" })}
-              >
-                上一题
-              </button>
-              <button
-                type="button"
-                data-testid="question-skip"
-                disabled={disabled}
-                className={actionClass}
-                onClick={() => props.onChange({ type: "skip" })}
-              >
-                忽略
-              </button>
-              {props.draft.index < request.questions.length - 1 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  data-testid="question-next"
-                  disabled={disabled || !answerComplete(answer)}
-                  className={`${actionClass} ml-auto`}
-                  onClick={() => props.onChange({ type: "next" })}
+                  data-testid="question-prev"
+                  disabled={disabled || props.draft.index === 0}
+                  className={actionClass}
+                  onClick={() => props.onChange({ type: "prev" })}
                 >
-                  继续
+                  上一题
                 </button>
-              ) : (
                 <button
                   type="button"
-                  data-testid="question-submit"
-                  disabled={
-                    disabled || questionResponse(request, props.draft) === null
-                  }
-                  className={`${actionClass} ml-auto bg-accent text-on-accent`}
-                  onClick={() => {
-                    const response = questionResponse(request, props.draft!);
-                    if (response && !disabled) props.onRespond(response);
-                  }}
+                  data-testid="question-skip"
+                  disabled={disabled}
+                  className={actionClass}
+                  onClick={() => props.onChange({ type: "skip" })}
                 >
-                  {props.busy ? "提交中…" : "提交整组"}
+                  忽略
                 </button>
-              )}
+                {props.draft.index < request.questions.length - 1 ? (
+                  <button
+                    type="button"
+                    data-testid="question-next"
+                    disabled={disabled || !answerComplete(answer)}
+                    className={`${actionClass} ml-auto`}
+                    onClick={() => props.onChange({ type: "next" })}
+                  >
+                    继续
+                  </button>
+                ) : (
+                  // 反馈5：accent 底按钮不复用 actionClass（其 hover:bg-hover 会盖掉
+                  // accent 底色致浅底白字不可见），hover 用 accent-hover
+                  <button
+                    type="button"
+                    data-testid="question-submit"
+                    disabled={
+                      disabled ||
+                      questionResponse(request, props.draft) === null
+                    }
+                    className="ml-auto rounded border border-line px-3 py-2 text-sm text-on-accent bg-accent hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => {
+                      const response = questionResponse(request, props.draft!);
+                      if (response && !disabled) props.onRespond(response);
+                    }}
+                  >
+                    {props.busy ? "提交中…" : "提交"}
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -262,13 +269,13 @@ export function InteractionPanel(props: {
           <p
             data-testid="interaction-error"
             role="alert"
-            className="mt-2 whitespace-pre-wrap text-sm text-danger-fg"
+            className="mt-2 shrink-0 whitespace-pre-wrap text-sm text-danger-fg"
           >
             {props.error}
           </p>
         )}
         {props.record.status !== "pending" && (
-          <p className="mt-2 text-xs text-fg-muted">
+          <p className="mt-2 shrink-0 text-xs text-fg-muted">
             该交互已结束，不能重复回答
           </p>
         )}

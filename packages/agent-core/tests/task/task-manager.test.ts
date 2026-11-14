@@ -327,6 +327,50 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
 
+  it("setApprovalMode 档位实际变更时自动撤销任务自动批准（反馈1：换档即收权，同档不动）", () => {
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+    // 开启自动批准（任务授权批量批准后的落库状态；走授权事务才置位，这里模拟已置位）
+    persistence.updateTask(task.id, { autoApprove: true });
+    task.record.autoApprove = true;
+    expect(task.record.autoApprove).toBe(true);
+
+    // 换档：自动批准随之撤销（内存 + 落库）
+    const updated = manager.setApprovalMode(task.id, "ask");
+    expect(updated?.approvalMode).toBe("ask");
+    expect(updated?.autoApprove).toBe(false);
+    expect(task.record.autoApprove).toBe(false);
+    expect(task.record.approvalMode).toBe("ask");
+    expect(
+      persistence.listTasks().find((r) => r.id === task.id)?.autoApprove
+    ).toBe(false);
+
+    // 同档重复设置（每次发送都会同步偏好）：不动授权状态
+    persistence.updateTask(task.id, { autoApprove: true });
+    task.record.autoApprove = true;
+    const same = manager.setApprovalMode(task.id, "ask");
+    expect(same?.autoApprove).toBe(true);
+    expect(task.record.autoApprove).toBe(true);
+
+    // 未实例化任务（第二实例未缓存）：换档同样撤销，只落库
+    persistence.updateTask(task.id, { autoApprove: true });
+    const manager2 = createTaskManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const updated2 = manager2.setApprovalMode(task.id, "full-access");
+    expect(updated2?.approvalMode).toBe("full-access");
+    expect(updated2?.autoApprove).toBe(false);
+    expect(
+      persistence.listTasks().find((r) => r.id === task.id)?.autoApprove
+    ).toBe(false);
+    persistence.close();
+  });
+
   it("恢复时把异常残留的 waiting-approval 状态重置为 idle（上次退出时等待审批中途被杀）", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({

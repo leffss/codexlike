@@ -421,13 +421,73 @@ describe("用户交互公开 seam", () => {
     }
     expect(count).toBe(4);
     expect(modes).toEqual(["ask", "ask", "ask", "ask", "ask", "ask"]);
-    expect(
-      store
-        .listInteractions(task.id)
-        .filter((r) => r.request.kind === "approval")
-    ).toHaveLength(3);
+    const approvals = store
+      .listInteractions(task.id)
+      .filter((r) => r.request.kind === "approval");
+    // 反馈2留痕：授权开启后的后续调用即时自动批准并落库（autoApproved 标记
+    // 区分用户授权事务的批量通过）；问答仍走用户响应。
+    expect(approvals).toHaveLength(6);
+    expect(approvals.filter((r) => r.autoApproved === true)).toHaveLength(3);
     expect(manager.messages(task.id)[0]?.questionAnswers).toHaveLength(1);
     expect(task.record.autoApprove).toBe(true);
+    store.close();
+  });
+  it("自动批准开启时本应询问的审批即时放行并留痕：resolved + autoApproved 标记 + 落库（反馈2）", async () => {
+    const store = createSqliteTaskStore(":memory:");
+    let executed = 0;
+    const write: ToolDefinition = {
+      name: "write",
+      permission: "write",
+      description: "写入",
+      parameters: { type: "object" },
+      async execute() {
+        executed++;
+        return { output: "完成", isError: false };
+      },
+    };
+    const model = modelFor(
+      ["a", "b"].map((id) => ({
+        toolName: "write",
+        toolCallId: id,
+        input: {},
+      })),
+      "完成"
+    );
+    const manager = createTaskManager({
+      persistence: store,
+      tools: [write],
+      languageModelFor: () => model,
+    });
+    const task = manager.create({
+      workspacePath: "C:/work",
+      approvalMode: "ask",
+    });
+    // 开启自动批准（任务授权批量批准后的状态；这里模拟已置位）
+    store.updateTask(task.id, { autoApprove: true });
+    task.record.autoApprove = true;
+
+    const events = await collect(task.sendMessage({ text: "跑", profile }));
+    // 不出现等待用户的审批请求；本应询问的调用即时自动批准并执行
+    expect(events.some((event) => event.type === "interaction-request")).toBe(
+      false
+    );
+    expect(executed).toBe(2);
+    const autoResolved = events.filter(
+      (event): event is Extract<TaskEvent, { type: "interaction-resolved" }> =>
+        event.type === "interaction-resolved" &&
+        event.interaction.request.kind === "approval" &&
+        event.interaction.autoApproved === true
+    );
+    expect(autoResolved).toHaveLength(2);
+    expect(task.record.autoApprove).toBe(true);
+    // 落库留痕：重启恢复后消息流仍能看到自动批准记录
+    const stored = store
+      .listInteractions(task.id)
+      .filter((r) => r.request.kind === "approval");
+    expect(stored).toHaveLength(2);
+    expect(
+      stored.every((r) => r.status === "resolved" && r.autoApproved === true)
+    ).toBe(true);
     store.close();
   });
   it("授权保存失败不执行工具；撤销保存失败保留授权，成功撤销在本轮立即发事件并重新询问", async () => {
@@ -619,7 +679,7 @@ describe("用户交互公开 seam", () => {
       response: null,
       resolvedAt: null,
     });
-    manager.setApprovalMode(task.id, "assist");
+    manager.setApprovalMode(task.id, "ask");
     task.cancelInteractions("停止");
     expect(task.record.autoApprove).toBe(true);
     store.close();

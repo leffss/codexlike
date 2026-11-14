@@ -20,11 +20,14 @@ export function InteractionHistory({
           ? "等待审批"
           : "等待回答"
         : response?.kind === "approval"
-          ? response.decision === "approve"
-            ? response.scope === "task"
-              ? "已批准（任务授权批量通过）"
-              : "已批准（本次）"
-            : "已拒绝"
+          ? record.autoApproved === true
+            ? // 反馈2：任务自动批准即时放行的留痕，与用户手动授权区分
+              "已自动批准"
+            : response.decision === "approve"
+              ? response.scope === "task"
+                ? "已批准（任务授权批量通过）"
+                : "已批准（本次）"
+              : "已拒绝"
           : "已回答";
   return (
     <li

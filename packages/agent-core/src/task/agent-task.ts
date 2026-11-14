@@ -388,7 +388,6 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       taskId: record.id,
       workspacePath: record.workspacePath,
       approvalMode: () => approvalMode,
-      autoApprove: () => record.autoApprove === true,
       resources: () => currentResources,
       requestInteraction,
       emit: (event) => events.push(event),
@@ -665,12 +664,13 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                 output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join("、")}`;
                 isError = true;
               } else {
-                // 审批门（插在 tool-call 事件与执行之间）：
-                // ask 全询问 / assist 仅危险命令审批 / full-access 放行（见 decideApproval）
+                // 审批门（插在 tool-call 事件与执行之间）：按真实档位判定，不含
+                // autoApprove——ask 全询问 / assist 仅危险命令审批 / full-access 放行
+                // （见 decideApproval）。autoApprove 开启时本应询问的调用仍走交互
+                // 通道，由控制器即时批准并落库留痕（反馈2）；未开启则等待用户。
                 const command = commandOfToolInput(call.input);
                 const gate = decideApproval({
                   mode: approvalMode,
-                  autoApprove: record.autoApprove === true,
                   permission: definition.permission,
                   toolName: definition.name,
                   command,

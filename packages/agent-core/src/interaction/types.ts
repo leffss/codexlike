@@ -59,6 +59,11 @@ export interface InteractionRecord {
   response: InteractionResponse | null;
   resolvedAt: string | null;
   cancelReason: string | null;
+  /**
+   * 任务自动批准即时放行的审批（反馈2留痕）：与用户点「批准本任务后续所有
+   * 请求」的批量通过区分；问答与用户手动响应不携带。
+   */
+  autoApproved?: boolean;
 }
 
 /** 已提交问答的可读快照，随触发它的消息保存，供后续对话与压缩使用。 */

@@ -75,6 +75,8 @@ export function createInteractionController(options: {
       };
       options.persistence.insertInteraction(record);
       // 审批门读取与入队之间可能已获得授权；入队边界再次检查，不自动回答问答。
+      // 反馈2留痕：自动批准放行的请求同样落库（autoApproved 标记区分用户手动授权），
+      // 经 interaction-resolved 事件进消息流展示。
       if (
         request.kind === "approval" &&
         !signal?.aborted &&
@@ -85,6 +87,7 @@ export function createInteractionController(options: {
           status: "resolved",
           resolvedAt: options.now(),
           response: { kind: "approval", decision: "approve", scope: "task" },
+          autoApproved: true,
         };
         if (!options.persistence.settleInteraction(resolved))
           throw new Error("审批请求已失效，未执行工具");

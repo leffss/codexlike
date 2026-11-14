@@ -1229,9 +1229,20 @@ export function WorkspacePage(props: {
     if (currentId === null) {
       return;
     }
+    // 反馈1：换档即收权——手动改档时自动批准随之撤销（同档不动）。
+    // 主进程 setApprovalMode 同步撤销；这里走撤销 IPC 让提示卡与侧栏即时消失。
+    const previousMode = preferences?.approvalMode;
+    const autoApproveActive = current?.autoApprove ?? false;
     try {
       workspaceState.setPreferences(currentId, { approvalMode: mode });
       await workspaceState.flush();
+      if (
+        previousMode !== undefined &&
+        previousMode !== mode &&
+        autoApproveActive
+      ) {
+        void revokeAutoApprove(currentId);
+      }
     } catch (error) {
       pushLocalStatus(
         `切换审批模式失败：${error instanceof Error ? error.message : String(error)}`

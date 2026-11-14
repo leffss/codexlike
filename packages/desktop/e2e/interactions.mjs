@@ -1215,6 +1215,35 @@ async function autoApproveScenario() {
       await waitText(window, "撤销后重启审批完成");
       await assertAutoFlag(taskId, false);
       await assertReadOnlyHistory(window);
+
+      // 反馈1：换档即收权——开启自动批准后手动改审批档位，自动批准随之撤销。
+      await selectComposerOption(window, "approval-mode-select", "assist");
+      await send(window, "换档后自动放行");
+      await waitText(window, "换档后自动放行完成");
+      assert(
+        existsSync(file("换档后自动放行.txt")),
+        "assist 档工作区内写入自动放行"
+      );
+      await selectComposerOption(window, "approval-mode-select", "ask");
+      await send(window, "换档撤销授权");
+      await pendingPanel().waitFor();
+      await pendingPanel().getByTestId("approval-approve-task").click();
+      await active().waitFor();
+      await assertAutoFlag(taskId, true);
+      await selectComposerOption(window, "approval-mode-select", "assist");
+      await active().waitFor({ state: "detached" });
+      await assertAutoFlag(taskId, false);
+      assert((await active().count()) === 0, "换档后自动批准提示卡必须消失");
+      await send(window, "换档撤销后写入");
+      await waitText(window, "换档撤销后写入完成");
+      assert(
+        existsSync(file("换档撤销后写入.txt")),
+        "换档撤销授权后 assist 档写入不再等待审批"
+      );
+      assert(
+        (await pendingPanel().count()) === 0,
+        "换档撤销授权后不应出现审批卡"
+      );
     }
   );
 }

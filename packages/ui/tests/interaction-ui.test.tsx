@@ -58,6 +58,21 @@ describe("唯一底部 InteractionPanel", () => {
       expect(html).not.toContain("<button");
     }
   });
+  it("自动批准即时放行的审批在历史中显示「已自动批准」，与用户手动授权区分（反馈2）", () => {
+    const html = renderToStaticMarkup(
+      createElement(InteractionHistory, {
+        record: {
+          ...approval,
+          status: "resolved",
+          autoApproved: true,
+          response: { kind: "approval", decision: "approve", scope: "task" },
+        },
+      })
+    );
+    expect(html).toContain("已自动批准");
+    expect(html).not.toContain("任务授权批量通过");
+    expect(html).not.toContain("<button");
+  });
   it("长来源/题目在窄屏可折行，所有颜色都来自双主题语义 token", () => {
     const html = renderToStaticMarkup(
       createElement(InteractionPanel, { ...props, record: approval })
@@ -201,6 +216,72 @@ describe("唯一底部 InteractionPanel", () => {
       /<button[^>]*data-testid="question-submit"[^>]*disabled/
     );
     expect(last).toContain("interaction-error");
+  });
+  it("答案过长时滚动只作用于选项列表：问题说明与自定义回答、按钮固定显示（反馈4）", () => {
+    const request = {
+      ...approval.request,
+      kind: "questions" as const,
+      questions: [
+        {
+          id: "q1",
+          header: "方案",
+          question: "选择方案？",
+          multiSelect: false,
+          options: [
+            { id: "a", label: "方案A" },
+            { id: "b", label: "方案B" },
+          ],
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(InteractionPanel, {
+        ...props,
+        record: { ...approval, request },
+        draft: createQuestionDraft(request),
+      })
+    );
+    // 滚动容器是选项 fieldset 自身：带 min-h-0 + overflow-y-auto
+    const fieldset = html.match(/<fieldset[^>]*>/)?.[0] ?? "";
+    expect(fieldset).toContain("overflow-y-auto");
+    expect(fieldset).toContain("min-h-0");
+    // 顺序保真：问题说明在滚动区之前，自定义回答与提交按钮在滚动区之后
+    const titleAt = html.indexOf('data-testid="question-title"');
+    const fieldsetAt = html.indexOf("<fieldset");
+    const customAt = html.indexOf('data-testid="question-custom"');
+    const submitAt = html.indexOf('data-testid="question-submit"');
+    expect(titleAt).toBeGreaterThanOrEqual(0);
+    expect(customAt).toBeGreaterThan(fieldsetAt);
+    expect(submitAt).toBeGreaterThan(fieldsetAt);
+    expect(titleAt).toBeLessThan(fieldsetAt);
+  });
+  it("最后一题提交按钮 hover 用 accent-hover 保持文字可见，文案为「提交」（反馈5）", () => {
+    const request = {
+      ...approval.request,
+      kind: "questions" as const,
+      questions: [
+        {
+          id: "q1",
+          header: "方案",
+          question: "选择方案？",
+          multiSelect: false,
+          options: [{ id: "a", label: "方案A" }],
+        },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(InteractionPanel, {
+        ...props,
+        record: { ...approval, request },
+        draft: createQuestionDraft(request),
+      })
+    );
+    const submit =
+      html.match(/<button[^>]*data-testid="question-submit"[^>]*>/)?.[0] ?? "";
+    expect(submit).toContain("hover:bg-accent-hover");
+    expect(submit).not.toContain("hover:bg-hover");
+    expect(html).toContain(">提交</button>");
+    expect(html).not.toContain("提交整组");
   });
   it("审批显示单次、任务授权与拒绝，说明批量范围和风险；提交中停止仍可点", () => {
     const html = renderToStaticMarkup(

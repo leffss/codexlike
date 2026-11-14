@@ -457,6 +457,36 @@ it.each([
   }
 );
 
+it("等待用户时侧栏图标保持静态，仅真正运行中转圈（反馈3）", () => {
+  // 等待中 activity.running 仍为 true（轮次未结束），等待图标不得转圈
+  const waiting = task({
+    activity: {
+      running: true,
+      waitingForUser: true,
+      outcome: null,
+      unread: false,
+    },
+  });
+  const waitingHtml = renderToStaticMarkup(
+    createElement(TaskActivityBadge, { task: waiting, compact: true })
+  );
+  expect(waitingHtml).not.toContain("animate-spin");
+  expect(waitingHtml).toContain('d="M4 3v6m4-6v6"');
+
+  const running = task({
+    activity: {
+      running: true,
+      waitingForUser: false,
+      outcome: null,
+      unread: false,
+    },
+  });
+  const runningHtml = renderToStaticMarkup(
+    createElement(TaskActivityBadge, { task: running, compact: true })
+  );
+  expect(runningHtml).toContain("animate-spin");
+});
+
 it.each([false, true])(
   "原始 HTML 不存在嵌套按钮，包括已归档状态 %s",
   (archived) => {
