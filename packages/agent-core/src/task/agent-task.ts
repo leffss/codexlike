@@ -174,8 +174,8 @@ export interface AgentTask {
   }): Promise<CompactResult>;
 }
 
-/** 单次回复允许的工具轮次上限（防模型失控循环） */
-const MAX_TOOL_ROUNDS = 16;
+/** 单次回复允许的工具轮次上限（防模型失控循环；多步工作计划任务一步即可含多次调用，16 轮会截断正常任务，取 50） */
+const MAX_TOOL_ROUNDS = 50;
 
 /** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
@@ -631,7 +631,18 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             }
             round += 1;
             if (round > MAX_TOOL_ROUNDS) {
-              // 达到轮次上限：停止工具循环，已生成文本照常作为助手回复落库
+              // 达到轮次上限：停止工具循环，本轮剩余工具调用不再执行，
+              // 已生成文本照常作为助手回复落库；落库一条 error 提示让用户知道为何停在这里
+              //（role error 不进模型上下文，仅消息流可见）
+              const capMessage: StoredMessage = {
+                id: generateId(),
+                taskId: record.id,
+                role: "error",
+                content: `已达到单回合工具轮次上限（${MAX_TOOL_ROUNDS} 轮），本轮停止执行剩余工具调用；发送消息可继续剩余工作。`,
+                createdAt: now(),
+              };
+              persistence.insertMessage(capMessage);
+              yield { type: "error", message: capMessage };
               break;
             }
 

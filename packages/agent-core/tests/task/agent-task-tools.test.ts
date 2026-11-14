@@ -380,6 +380,41 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     persistence.close();
   });
 
+  it("工具轮次上限（50）：满 50 轮后停止剩余调用，error 提示落库且消息流可见", async () => {
+    // 每轮返回一次 update_plan 调用（toolCallId 逐轮唯一，模拟失控循环）
+    let callNo = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () =>
+        toolCallRound([
+          {
+            toolCallId: `loop-${++callNo}`,
+            toolName: "update_plan",
+            input: { steps: [{ content: "循环步骤", status: "in_progress" }] },
+          },
+        ]),
+    });
+    const { task, persistence } = makeTask(model, "C:/work/demo");
+
+    const events = await collect(task.sendMessage({ text: "开工", profile }));
+
+    // scriptedModel 重复末步：第 51 轮的调用被丢弃，恰好执行 50 轮
+    expect(model.doStreamCalls).toHaveLength(51);
+    expect(events.filter((event) => event.type === "tool-result")).toHaveLength(
+      50
+    );
+    const capErrors = events.filter(
+      (event): event is Extract<TaskEvent, { type: "error" }> =>
+        event.type === "error"
+    );
+    expect(capErrors).toHaveLength(1);
+    expect(capErrors[0]!.message.content).toContain("工具轮次上限");
+    // 提示随 transcript 落库（重启后仍可见）；role error 不进模型上下文
+    expect(
+      persistence.listMessages("task-1").filter((m) => m.role === "error")
+    ).toHaveLength(1);
+    persistence.close();
+  });
+
   it("模型调工具 → 执行 → 结果回填 → 最终回复；文件真实落盘，调用记录入库", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([

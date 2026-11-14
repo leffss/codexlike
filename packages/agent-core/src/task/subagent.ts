@@ -60,7 +60,7 @@ export const SUBAGENT_DELEGATION_POLICY = [
 export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 3;
 
 /** 子代理单次运行允许的工具轮次上限（与主任务 MAX_TOOL_ROUNDS 一致，防失控循环） */
-const MAX_SUBAGENT_TOOL_ROUNDS = 16;
+const MAX_SUBAGENT_TOOL_ROUNDS = 50;
 
 /** 运行时子代理设置（设置页全局配置的内存快照，逐次解析以便改动即时生效） */
 export interface SubagentRuntimeSettings {
@@ -332,6 +332,8 @@ export function createSubagentOrchestrator(
     let output = "";
     let isError = false;
     let aborted = false;
+    // 达到轮次上限被截断：报告须带标记，主模型据此知道工作未完成（不伪造成完成）
+    let capped = false;
     // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
     let reasoning = "";
     try {
@@ -432,6 +434,7 @@ export function createSubagentOrchestrator(
         }
         round += 1;
         if (round > MAX_SUBAGENT_TOOL_ROUNDS) {
+          capped = true;
           break;
         }
 
@@ -511,8 +514,12 @@ export function createSubagentOrchestrator(
         output = "子代理已随主任务中断，未产出报告";
         isError = true;
       }
-    } else if (output.trim() === "" && !isError) {
+    } else if (output.trim() === "" && !isError && !capped) {
       output = "子代理已完成任务，但未产出文本报告";
+    }
+    if (capped) {
+      const marker = `已达到子代理工具轮次上限（${MAX_SUBAGENT_TOOL_ROUNDS} 轮），工作被截断，未全部完成。`;
+      output = output.trim() === "" ? marker : `${output}\n\n${marker}`;
     }
 
     entry.output = output;
