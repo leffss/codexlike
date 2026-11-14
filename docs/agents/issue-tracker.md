@@ -6,6 +6,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The spec is `.scratch/<feature-slug>/spec.md`
+- 多票实现开始前，把探索事实（布局结构 / 依赖面 / repo 约定）沉淀为 `.scratch/<feature-slug>/notes.md`，各实现票以指针复用，避免每个 implementer 重复探索（2026-11-14 ui-redesign 起为惯例）
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading

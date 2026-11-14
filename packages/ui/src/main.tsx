@@ -7,6 +7,13 @@ import "./styles.css";
 // highlight.js token 色不再全局导入 github-dark.css：
 // 已在 styles.css 以 --hl-* 变量随 data-theme 主题化（ADR 0006）
 
+// dev 浏览器预览设施：纯浏览器 vite dev（无 Electron preload）时注入样例 mock，
+// 让渲染层独立于 Electron 挂载完整工作台；Electron 下 window.codexlike 已存在，
+// 生产构建不含此分支（动态引入 + DEV 门控）。见 dev/browser-stub.ts。
+if (import.meta.env.DEV && window.codexlike === undefined) {
+  await import("./dev/browser-stub");
+}
+
 const container = document.getElementById("root");
 if (!container) {
   throw new Error("找不到 #root 挂载点");

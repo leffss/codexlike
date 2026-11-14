@@ -1,0 +1,158 @@
+/**
+ * dev 浏览器预览设施：window.codexlike 缺失（纯浏览器 vite dev server）时注入
+ * 假 API，让渲染层在无 Electron 的情况下挂载出完整工作台（真实组件 + 样例数据）。
+ * Electron 下 preload 已注入 window.codexlike，本模块立即返回（no-op）；
+ * 生产构建不含本模块（main.tsx 经 import.meta.env.DEV 动态引入）。
+ * 写操作一律 no-op，读操作返回 fixtures 静态样例。
+ * 来源：ui-redesign 原型的 throwaway stub 转正（分支 prototype/ui-redesign）。
+ */
+import type { CodexLikeApi } from "@codexlike/desktop/ipc";
+import {
+  PROJECTS,
+  PROFILES,
+  RESOURCES,
+  TASKS,
+  WORKSPACE_FILES,
+  taskView,
+} from "./fixtures";
+
+const THEME_KEY = "codexlike.theme";
+
+function installBrowserStub(): void {
+  if (typeof window === "undefined") return;
+  if (window.codexlike !== undefined) return;
+
+  const emptyQueueResult = (taskId: string) => ({
+    taskId,
+    sequence: 0,
+    queue: [],
+    paused: false,
+    sendingId: null,
+  });
+
+  const api = {
+    windowControls: {
+      getState: async () => ({ maximized: false }),
+      minimize: async () => {},
+      toggleMaximize: async () => {},
+      close: async () => {},
+      onStateChanged: () => () => {},
+    },
+    application: {
+      exitState: async () => ({ id: "", phase: "idle" }),
+      answerExit: async () => {},
+      flushed: async () => {},
+      onExitState: () => () => {},
+    },
+    workbench: {
+      read: async () => undefined,
+      write: async (_target: unknown, entry: unknown) => ({
+        accepted: true,
+        entry,
+      }),
+    },
+    projects: {
+      list: async () => PROJECTS,
+      add: async (workspacePath: string) => ({
+        id: `proj-${Date.now()}`,
+        name: workspacePath.split(/[\\/]/).pop() ?? "新项目",
+        workspacePath,
+        createdAt: new Date().toISOString(),
+      }),
+      remove: async () => null,
+      setPinned: async () => null,
+      setCollapsed: async () => null,
+    },
+    providerProfiles: {
+      list: async () => PROFILES,
+      create: async () => PROFILES[0],
+      update: async () => PROFILES[0],
+      remove: async () => true,
+    },
+    tasks: {
+      list: async () => TASKS,
+      search: async () => [],
+      start: async () => TASKS[0],
+      setProject: async () => null,
+      execution: async () => null,
+      view: async (taskId: string) => taskView(taskId),
+      markViewed: async () => {},
+      setPinned: async () => null,
+      markUsed: async () => null,
+      workspaceSharing: async () => ({ workspacePath: null, runningTasks: [] }),
+      selectWorkspace: async () => null,
+      messages: async () => [],
+      send: async () => {},
+      interrupt: async () => false,
+      queueResume: async (taskId: string) => emptyQueueResult(taskId),
+      queueClear: async (taskId: string) => emptyQueueResult(taskId),
+      queueRemove: async (taskId: string) => emptyQueueResult(taskId),
+      queueUpdate: async (taskId: string) => emptyQueueResult(taskId),
+      queueReorder: async (taskId: string) => emptyQueueResult(taskId),
+      rename: async () => null,
+      archive: async () => null,
+      status: async () => null,
+      resources: async () => RESOURCES,
+      compact: async () => ({ compactedMessages: 0 }),
+      workspaceFiles: async () => WORKSPACE_FILES,
+      toolImage: async () => null,
+      revokeAutoApprove: async () => TASKS[0],
+      setApprovalMode: async () => null,
+      respondApproval: async () => false,
+      pendingApproval: async () => null,
+      pendingApprovals: async () => [],
+      pendingInteractions: async () => [],
+      respondInteraction: async () => false,
+    },
+    searchSettings: {
+      get: async () => ({ apiKey: "" }),
+      set: async (input: { apiKey: string }) => input,
+    },
+    subagentSettings: {
+      get: async () => ({ providerProfileId: null, concurrencyLimit: 3 }),
+      set: async (value: unknown) => value,
+    },
+    terminalSettings: {
+      get: async () => null,
+      set: async (shell: unknown) => shell,
+    },
+    themeSettings: {
+      get: async () =>
+        localStorage.getItem(THEME_KEY) === "dark" ? "dark" : null,
+      set: async (theme: unknown) => {
+        localStorage.setItem(THEME_KEY, String(theme));
+        return theme;
+      },
+    },
+    launchState: {
+      get: async () => null,
+      setWorkbenchTarget: async (target: unknown) => ({
+        view: "workspace",
+        workbenchTarget: target,
+      }),
+      setView: async (view: unknown) => ({
+        view,
+        workbenchTarget: null,
+      }),
+    },
+    mcp: {
+      overview: async () => ({ servers: [] }),
+      addServer: async () => null,
+      removeServer: async () => false,
+      reconnect: async () => null,
+      setToolEnabled: async () => {},
+    },
+    onTaskEvent: () => () => {},
+    git: {
+      status: async () => ({ isGitRepo: false }),
+      diff: async () => ({ oldText: "", newText: "", oldPath: null }),
+      createBranch: async () => ({}),
+      generateCommitMessage: async () => "原型环境：提交消息生成不可用",
+      commit: async () => ({ committed: false }),
+    },
+  } as unknown as CodexLikeApi;
+
+  window.codexlike = api;
+}
+
+installBrowserStub();

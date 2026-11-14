@@ -14,6 +14,10 @@ E2E（`packages/desktop/e2e/*.mjs`）中的元素定位按用途收口（`pnpm c
 
 豁免清单（见 `scripts/check-e2e-locators.mjs`）：`helpers.mjs` / `launch-target.mjs`（共享工具，无场景定位）；`projects-sidebar` / `interactions` / `exit-recovery` / `sidebar-archive`（flaky 治理分支收口，避免两分支碰撞）。新场景不得进豁免。
 
+## 行为断言（真实输入路径）
+
+交互能力的 e2e 验收断言**真实输入路径**，DOM 属性/类名断言只作辅助：窗口拖动这类走系统命中测试（Windows 返回 HTCAPTION）的能力，Playwright 合成鼠标事件只进渲染器输入管线、不经该路径，须以真实输入注入验证（user32 `SetCursorPos` + `mouse_event`，PowerShell P/Invoke，先例：`window-controls.mjs` 的 `nativeDrag`；注意 DPI 虚拟化与前景遮挡，见该文件注释）。审查者按「断言了机制还是行为」检查——2026-11-14 布局重构中拖动区断言只查类名，整左区 no-drag 的实现骗过全链 33 场景，由 Spec 轴人工审查才暴露。
+
 ## 数据目录自建
 
 落盘到用户数据目录（`dataDir()` / 任务 workspace / 临时目录）的组件，打开或写文件前自己 `mkdirSync(dirname(path), { recursive: true })`，不假设调用方已建目录（先例：`json-file.ts`、`write-file.ts`、`apply-patch.ts`、`worktree-service.ts`）。
