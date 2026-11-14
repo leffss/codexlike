@@ -38,7 +38,7 @@
 | 23  | live-tasks          | `live-tasks.mjs`           | 后台任务状态（SSE 闸门替身）：侧栏实时状态流转                                                                                                                               |
 | 24  | persistence         | `persistent-workbench.mjs` | 草稿、设置、滚动位置与空闲进程重启恢复                                                                                                                                       |
 | 25  | exit                | `exit-recovery.mjs`        | 真实进程退出/重开：模型计数与文件追加副作用独立证明不重放                                                                                                                    |
-| 26  | launch-state        | `launch-state.mjs`         | 窗口现场（票01/02）：首启默认居中、预写 bounds 照常恢复、负坐标/部分越界不判失效、无交集回退主屏、maximized、损坏文件回退                                                    |
+| 26  | launch-state        | `launch-state.mjs`         | 窗口现场（票01/02）：首启默认居中、预写 bounds 照常恢复、负坐标/部分越界不判失效、无交集回退主屏、maximized、损坏文件回退、越界小尺寸夹紧窗口底线（票04）                    |
 | 27  | launch-state-target | `launch-state-target.mjs`  | 工作台目标与视图现场（票03）：任务/归档/草稿/设置页/失效回退/强杀/无文件不回归/设置页往返不拉回启动目标                                                                      |
 | 28  | entries             | `entry-consistency.mjs`    | 入口一致性：全局/项目新建入口语义不混淆，跨票组合操作                                                                                                                        |
 | 29  | width               | `width-tiers.mjs`          | 容器分档宽度：任务容器（非视口）三档分宽、内容列对齐、用户消息限宽右对齐、宽表格/代码块内聚滚动；票03 抽屉重基线（overlay 不挤压内容列、30rem/60% 自约束、两开关同抽屉互斥） |

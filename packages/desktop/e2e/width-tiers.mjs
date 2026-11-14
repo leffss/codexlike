@@ -10,7 +10,8 @@
 // 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
 //    头部 / 消息流左右缘对齐，输入卡片外扩；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
-// 5) 窗口内容区 1000px（容器 712px <864）→ 基础档：内容列回落全宽（<896px）。
+// 5) 窗口内容区 1060px（容器 772px <864）→ 基础档：内容列回落全宽（<896px）；
+//    票04 窗口底线（1000）之上留出夹紧/取整余量，窄档基线不再压 minWidth 线。
 // 6) 票03 抽屉重基线：右栏为消息流上方 overlay 抽屉，打开不改变内容列宽度，
 //    抽屉自身受 30rem / 上限 60% 任务容器宽约束；两开关驱动同一抽屉 tab 互斥，
 //    面板本体关闭按钮关闭整个抽屉。
@@ -286,16 +287,18 @@ async function main() {
       `消息流滚动容器不应有横向溢出：scroll ${metrics.stream.scrollWidth} > client ${metrics.stream.clientWidth}`
     );
 
-    // 场景 5：基础档（窗口内容区 1000 → 容器 712px <864）：内容列回落全宽
-    await resizeWindow(app, 1000, 800);
+    // 场景 5：基础档（窗口内容区 1060 → 容器 772px <864）：内容列回落全宽。
+    // 票04 窗口底线：窄档基线从 1000 提到 1060——1000 压 minWidth 线，
+    // 夹紧 + DPI 取整会让 content 实际宽出 1~2px，精确档位断言不再成立。
+    await resizeWindow(app, 1060, 800);
     const gutter = await window
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
-    const expectedFull = 1000 - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
+    const expectedFull = 1060 - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
       max: 895,
-      label: "基础档（容器 712px）",
+      label: "基础档（容器 772px）",
     });
     assert(
       tierBase.width < tier4.width,
@@ -393,7 +396,7 @@ async function main() {
 
     // 默认与窄窗口下两开关驱动同一抽屉（tab 切换互斥）：抽屉受 60% 上限
     // 约束、不越出消息流区域；标题栏控件仍可见、不越出窗口。
-    for (const width of [1280, 1000]) {
+    for (const width of [1280, 1060]) {
       await resizeWindow(app, width, 800);
       await window.getByTestId("resources-toggle").click();
       await window.getByTestId("resources-panel").waitFor();
@@ -441,7 +444,7 @@ async function main() {
           `${width} 抽屉打开 ${testId} 应在标题栏内可见且不越出窗口：${JSON.stringify({ button, viewportWidth })}`
         );
       }
-      // 抽屉自身宽度约束：窄窗口（1000）命中 60% 上限而非 30rem。
+      // 抽屉自身宽度约束：窄窗口（1060，票04 底线之上）命中 60% 上限而非 30rem。
       const drawerBox = await window.getByTestId("panels-drawer").boundingBox();
       const expectedDrawer = Math.min(
         480,
@@ -495,7 +498,7 @@ async function main() {
     // 同一真实任务通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
     const task = window.getByTestId("task-item").first();
     for (const [width, height, min, max] of [
-      [1000, 800, expectedFull - 2, expectedFull + 2],
+      [1060, 800, expectedFull - 2, expectedFull + 2],
       [1280, 800, 769, 896],
       [1600, 900, expectedWide - 2, expectedWide + 2],
     ]) {

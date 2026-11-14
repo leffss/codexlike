@@ -67,7 +67,9 @@ async function main() {
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     window.setDefaultTimeout(8000);
     await window.getByTestId("task-search-toggle").click();
-    for (const width of [1280, 1000]) {
+    // 票04 窗口底线：窄窗基线从 1000 提到 1100——1000 压 minWidth 线，
+    // 夹紧 + DPI 取整下 innerWidth 精确断言（=== width）不再成立
+    for (const width of [1280, 1100]) {
       await app.evaluate(
         ({ BrowserWindow }, width) =>
           BrowserWindow.getAllWindows()[0].setContentSize(width, 800),

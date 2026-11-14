@@ -142,10 +142,12 @@ async function main() {
     await window.getByTestId("settings-open").click();
     await window.getByTestId("settings-back").waitFor();
     await checkTitlebar(window);
+    // 票04 窗口底线：窄窗基线从 640×640 提到 1100×640（minWidth 夹紧后 640
+    // 已缩不到；1000 压 minWidth 线上 innerWidth 精确断言不稳，再抬到线外）
     await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setContentSize(640, 640)
+      BrowserWindow.getAllWindows()[0].setContentSize(1100, 640)
     );
-    await window.waitForFunction(() => window.innerWidth === 640);
+    await window.waitForFunction(() => window.innerWidth === 1100);
     await checkTitlebar(window);
     const beforeTheme = await window.evaluate(
       () => document.documentElement.dataset.theme ?? "light"

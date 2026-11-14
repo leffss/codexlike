@@ -340,10 +340,12 @@ async function main() {
     const originalSize = await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getSize()
     );
+    // 票04 窗口底线：窄窗基线从 1000 提到 1100——1000 压 minWidth 线，
+    // 夹紧 + DPI 取整下 innerWidth 上限断言（<= 1000）不再成立
     await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setSize(1000, 720)
+      BrowserWindow.getAllWindows()[0].setSize(1100, 720)
     );
-    await window.waitForFunction(() => innerWidth <= 1000);
+    await window.waitForFunction(() => innerWidth <= 1100);
     await assertSingleLineTitles();
     await window.screenshot({
       path: join(screenshotDir, "sidebar-narrow.png"),

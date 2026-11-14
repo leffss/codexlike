@@ -538,13 +538,16 @@ async function main() {
       innerWidth,
       innerHeight,
     ]);
+    // 票04 窗口底线：窄矮视口基线从 640×500 提到 1100×640（minWidth/minHeight
+    // 夹紧后 640×500 已缩不到；1000×600 压底线上取整偏差会吃满 ±2 容差，
+    // 再抬到线外；菜单窄矮视口收口语义继续成立）
     await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setContentSize(640, 500)
+      BrowserWindow.getAllWindows()[0].setContentSize(1100, 640)
     );
     try {
       await window.waitForFunction(
         () =>
-          Math.abs(innerWidth - 640) <= 2 && Math.abs(innerHeight - 500) <= 2,
+          Math.abs(innerWidth - 1100) <= 2 && Math.abs(innerHeight - 640) <= 2,
         null,
         { timeout: 5000 }
       );

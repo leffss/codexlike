@@ -174,7 +174,9 @@ export function QueueBar(props: {
   return (
     <div
       data-testid="queue-bar"
-      className="mb-2 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-fg-muted"
+      // 票04 视觉统一（原型变体 D 队列条准绳）：rounded-lg + surface-muted 次级面，
+      // 与 composer 卡（surface 主面）形成层次对比
+      className="mb-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
       aria-label={
         paused
           ? `输入队列 待发 ${waitingCount} 条，已暂停`

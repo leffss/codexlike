@@ -368,8 +368,10 @@ async function questionsScenario() {
         join(tmpdir(), "codexlike-interaction-screenshots-")
       );
       console.log(`[e2e:interactions] 布局截图目录 ${screenshotDir}`);
+      // 票04 窗口底线：窄窗基线从 640×700 提到 1100×700（minWidth 夹紧后
+      // 640 已缩不到，统一抬到压线区之外；窄窗面板布局语义继续成立）
       await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].setContentSize(640, 700)
+        BrowserWindow.getAllWindows()[0].setContentSize(1100, 700)
       );
       for (const theme of ["light", "dark"]) {
         if (

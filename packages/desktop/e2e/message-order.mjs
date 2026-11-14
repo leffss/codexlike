@@ -286,10 +286,12 @@ async function main() {
       height: window.innerHeight,
     }));
     try {
+      // 票04 窗口底线：窄窗基线从 900×720 提到 1100×720（minWidth 夹紧后 900
+      // 已缩不到；1000 压 minWidth 线上 innerWidth 精确断言不稳，再抬到线外）
       await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].setContentSize(900, 720)
+        BrowserWindow.getAllWindows()[0].setContentSize(1100, 720)
       );
-      await window.waitForFunction(() => window.innerWidth === 900);
+      await window.waitForFunction(() => window.innerWidth === 1100);
       for (const theme of ["light", "dark"]) {
         if (
           (await window.evaluate(
