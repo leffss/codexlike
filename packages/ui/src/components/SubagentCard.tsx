@@ -268,9 +268,6 @@ function SubagentThinking(props: {
         className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
       >
         {reasoning}
-        {streaming === true && (
-          <span className="generating-spinner ml-1" aria-hidden="true" />
-        )}
       </div>
     </details>
   );

@@ -64,6 +64,11 @@ export function MessageStream(props: {
   items: MessageSegment[];
   /** 宿主执行态：最后一轮在执行期间保持强制展开（工具间隙不闪收，票 04） */
   streaming?: boolean;
+  /**
+   * 当前运行的起始时刻（epoch ms，WorkspacePage 在进入执行态时记账）：
+   * 底部「运行中」工时的数据来源；宿主执行态期间与 streaming 成对出现。
+   */
+  runStartedAt?: number | null;
   /** /compact 压缩进行中提示（不可重复触发期间显示在消息流底部） */
   compacting?: boolean;
   emptyHint?: ReactNode;
@@ -195,6 +200,16 @@ export function MessageStream(props: {
     lastTurnRunning: props.streaming === true,
   });
 
+  // 底部「运行中」工时：宿主执行态期间每秒跳动；runStartedAt 缺位时
+  // 只显示状态不显示数字（WorkspacePage 发送/恢复时成对记账，正常不缺）
+  const tickNow = useTickingNow(props.streaming === true);
+  const runElapsedMs =
+    props.streaming === true &&
+    props.runStartedAt !== null &&
+    props.runStartedAt !== undefined
+      ? Math.max(0, tickNow - props.runStartedAt)
+      : null;
+
   return (
     <div className="relative min-h-0 flex-1">
       <div
@@ -263,38 +278,65 @@ export function MessageStream(props: {
         style={{ overflowAnchor: "none", scrollbarGutter: "stable" }}
         data-testid="message-stream"
       >
-        {props.items.length === 0 && props.compacting !== true ? (
-          <div
-            data-testid="message-empty"
-            className={`${contentWidthClass} flex h-full flex-col items-center justify-center gap-3 text-fg-subtle`}
-          >
-            <p className="text-sm">消息流为空</p>
-            {props.emptyHint}
-          </div>
-        ) : (
-          <ol
-            data-testid="message-list"
-            className={`${contentWidthClass} flex flex-col gap-4`}
-          >
-            {turns.map((turn) => (
-              <TurnGroupItem
-                key={turn.turnId}
-                turn={turn}
-                now={now}
-                questionDraft={props.questionDraft}
+        {/* min-h-full 弹性列：空流态（新任务发送瞬间尚无用户段）也能把
+            运行指示压到可视区左下角；有消息时紧跟在消息列表之后 */}
+        <div className="flex min-h-full flex-col">
+          {props.items.length === 0 && props.compacting !== true ? (
+            <div
+              data-testid="message-empty"
+              className={`${contentWidthClass} flex flex-1 flex-col items-center justify-center gap-3 text-fg-subtle`}
+            >
+              <p className="text-sm">消息流为空</p>
+              {props.emptyHint}
+            </div>
+          ) : (
+            <ol
+              data-testid="message-list"
+              className={`${contentWidthClass} flex flex-col gap-4`}
+            >
+              {turns.map((turn) => (
+                <TurnGroupItem
+                  key={turn.turnId}
+                  turn={turn}
+                  now={now}
+                  questionDraft={props.questionDraft}
+                />
+              ))}
+              {props.compacting === true && (
+                <li
+                  data-testid="compacting-indicator"
+                  className="flex items-center gap-2 rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
+                >
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-info-fg" />
+                  正在压缩历史为摘要…（压缩期间输入已暂停）
+                </li>
+              )}
+            </ol>
+          )}
+          {/* 运行指示（消息流最底部左下角）：输入已发出即显示，模型尚无输出
+              的间隙也持续可见；与正文列同宽对齐，工时实时跳动。
+              /compact 压缩期间由 compacting-indicator 表达进行中，不重复显示 */}
+          {props.streaming === true && props.compacting !== true && (
+            <div
+              data-testid="running-indicator"
+              className={`${contentWidthClass} flex items-center gap-2 text-xs text-fg-muted`}
+            >
+              <span
+                className="generating-spinner shrink-0"
+                aria-hidden="true"
               />
-            ))}
-            {props.compacting === true && (
-              <li
-                data-testid="compacting-indicator"
-                className="flex items-center gap-2 rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
-              >
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-info-fg" />
-                正在压缩历史为摘要…（压缩期间输入已暂停）
-              </li>
-            )}
-          </ol>
-        )}
+              <span data-testid="running-label">运行中</span>
+              {runElapsedMs !== null && (
+                <span
+                  data-testid="running-elapsed"
+                  className="font-mono text-fg-subtle"
+                >
+                  {formatWorkDuration(runElapsedMs)}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       {/* 「回到最新」入口：脱离跟随且有消息时可见；点击回底并恢复跟随 */}
       {backToLatestVisible(mode, props.items.length) && (
@@ -426,7 +468,9 @@ function WorkedHistory(props: {
       {open && (
         <ol
           data-testid="worked-history-items"
-          className="mt-3 flex flex-col gap-3 pl-4"
+          // 过程段与正文列左对齐（左右都贴齐内容列边界）：不加容器缩进，
+          // 流式跟随区与折叠区的过程段位置一致，不随轮完成左右跳变
+          className="mt-3 flex flex-col gap-3"
         >
           {groupConsecutiveTools(turn.history).map((item) => (
             <ToolSequenceView
@@ -522,7 +566,8 @@ function ToolGroupView(props: {
       {open && (
         <ol
           data-testid="tool-call-group-items"
-          className="mt-2 flex flex-col gap-2 pl-4"
+          // 成员卡与组头左对齐：与已工作折叠区同一对齐规则（过程段贴齐内容列）
+          className="mt-2 flex flex-col gap-2"
         >
           {item.segments.map((call) => (
             <ToolCallCard key={call.id} call={call} />
@@ -639,9 +684,6 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
           className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
         >
           {segment.content}
-          {streaming && (
-            <span className="generating-spinner ml-1" aria-hidden="true" />
-          )}
         </div>
       </details>
     </li>
@@ -734,9 +776,8 @@ function MessageBubble(props: {
             {segment.content}
           </ReactMarkdown>
         </div>
-        {segment.streaming === true && (
-          <span className="generating-spinner" aria-label="正在生成" />
-        )}
+        {/* 流式指示已统一到消息流底部「运行中」行（running-indicator），
+            气泡内不再内联转圈 */}
         {segment.interrupted === true && (
           <p className="mt-2 text-xs text-warn-fg">
             （已中断，以上为部分回复）

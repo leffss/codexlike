@@ -191,7 +191,7 @@ describe("工具组与子代理卡耗时", () => {
 });
 
 describe("流式指示唯一性（多转圈回归的呈现侧）", () => {
-  it("已收敛的思考/正文段不再渲染 spinner：一轮至多末段正文一个转圈", () => {
+  it("已收敛的思考/正文段不再渲染 spinner，流式段不再内联转圈（统一到底部运行行）", () => {
     setRememberedOpen("history-u1", true);
     const html = streamOf([
       userSeg(),
@@ -200,7 +200,51 @@ describe("流式指示唯一性（多转圈回归的呈现侧）", () => {
       toolSeg("c1", { startedAt: 4_000, endedAt: 6_000, running: false }),
       textSeg("text-m1-2", { streaming: true }),
     ]);
-    // 全序列仅最终流式正文段一个 generating-spinner
+    // 流内（气泡/思考内容）零 generating-spinner；宿主执行态的唯一转圈
+    // 在消息流底部「运行中」行（下一用例）
+    expect(html).not.toContain('data-testid="running-indicator"');
+    expect(html.match(/generating-spinner/g)?.length ?? 0).toBe(0);
+  });
+
+  it("底部运行行：宿主执行态显示唯一 spinner + 运行中 + 工时（模型未输出也显示）", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageStream, {
+        items: [userSeg()],
+        taskId: "s1",
+        streaming: true,
+        runStartedAt: Date.now() - 65_000,
+      })
+    );
+    expect(html).toContain('data-testid="running-indicator"');
+    expect(html).toContain('data-testid="running-label"');
     expect(html.match(/generating-spinner/g)?.length).toBe(1);
+    // 工时取整有渲染延迟容差，只断言「1 分 N 秒」形态
+    expect(html).toMatch(/data-testid="running-elapsed"[^<]*>1 分 \d+ 秒/);
+  });
+
+  it("底部运行行：runStartedAt 缺位时只显示状态不显示工时", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageStream, {
+        items: [userSeg()],
+        taskId: "s1",
+        streaming: true,
+      })
+    );
+    expect(html).toContain("运行中");
+    expect(html).not.toContain('data-testid="running-elapsed"');
+  });
+
+  it("底部运行行：/compact 压缩期间由压缩指示表达进行中，不重复显示", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageStream, {
+        items: [userSeg()],
+        taskId: "s1",
+        streaming: true,
+        runStartedAt: Date.now(),
+        compacting: true,
+      })
+    );
+    expect(html).not.toContain('data-testid="running-indicator"');
+    expect(html).toContain('data-testid="compacting-indicator"');
   });
 });

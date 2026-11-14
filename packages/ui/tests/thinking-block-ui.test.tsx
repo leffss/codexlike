@@ -53,8 +53,9 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
     expect(block).toContain('open=""');
     expect(html).toContain('data-testid="thinking-indicator"');
     expect(html).toContain("思考中");
-    // 内容尾部带流式转圈指示
-    expect(html.match(/generating-spinner/g)?.length).toBeGreaterThanOrEqual(2);
+    // 流式指示统一到消息流底部「运行中」行后，思考卡只剩头部指示器
+    // （内容尾部不再内联转圈；本用例未传宿主 streaming，无底部运行行）
+    expect(html.match(/generating-spinner/g)?.length).toBe(1);
   });
 
   it("思考结束默认收起：无 open 属性、无指示器，摘要行显示首行摘要", () => {
@@ -78,7 +79,7 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
     expect(content).toContain("再数入口与依赖边界");
   });
 
-  it("正文流式尾部为转圈加载图标（generating-spinner）", () => {
+  it("正文流式气泡不再内联转圈：流式指示统一到消息流底部运行行", () => {
     const html = streamOf([
       {
         kind: "assistant",
@@ -90,8 +91,7 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
         streaming: true,
       },
     ]);
-    expect(html).toContain('aria-label="正在生成"');
-    expect(html).toContain("generating-spinner");
+    expect(html).not.toContain('aria-label="正在生成"');
   });
 });
 

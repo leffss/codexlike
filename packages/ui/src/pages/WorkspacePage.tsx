@@ -97,6 +97,20 @@ interface QueueEditTask {
 }
 
 /**
+ * 运行起始时刻的恢复推导（消息流底部「运行中」工时的记账基准）：
+ * 取最后一条用户消息段的 at（轮次起点）；无用户段或缺时间数据退回当前时刻。
+ * 本地发送走直接记账（发送瞬间用户段尚未回流），本函数只服务重启/切回恢复
+ * 与事件接续两条路径。
+ */
+function deriveRunStartedAt(items: MessageSegment[]): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item?.kind === "user" && item.at !== undefined) return item.at;
+  }
+  return Date.now();
+}
+
+/**
  * 主界面三栏装配：任务列表 / 消息流 / 输入框。
  * 任务与流式事件经 window.codexlike（类型化 IPC）与主进程交互；
  * 斜杠命令与 @引用 在发送前经解析层分发（工单 07）。
@@ -155,6 +169,12 @@ export function WorkspacePage(props: {
   const queueEditRef = useRef<QueueEditTask | null>(null);
   queueEditRef.current = queueEdit;
   const [streaming, setStreaming] = useState(false);
+  /**
+   * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
+   * 重启/切回恢复与事件接续取最后一条用户消息段的 at；离开执行态清空。
+   * 等待用户交互期间宿主 running 保持 true，工时含等待段（与轮次工时口径一致）。
+   */
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   /** /compact 压缩进行中（不可重复触发、禁用输入） */
   const [compacting, setCompacting] = useState(false);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -403,6 +423,7 @@ export function WorkspacePage(props: {
       void refreshResources(id);
       setLoading(true);
       setStreaming(false);
+      setRunStartedAt(null);
       const buffer = {
         taskId: id,
         generation: request,
@@ -434,6 +455,10 @@ export function WorkspacePage(props: {
         setMessages(live.items);
         setQueueState(live.queueState);
         setStreaming(live.activity.running);
+        // 运行中恢复：从消息段重推运行起点（轮次起点），工时不因重开清零
+        setRunStartedAt(
+          live.activity.running ? deriveRunStartedAt(live.items) : null
+        );
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
         );
@@ -563,6 +588,13 @@ export function WorkspacePage(props: {
           ]);
           setQueueState(live.queueState);
           setStreaming(live.activity.running);
+          // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
+          // 连续计时；本地未记账的运行中接续（prev 为空）才从消息段重推
+          setRunStartedAt((prev) =>
+            live.activity.running
+              ? (prev ?? deriveRunStartedAt(live.items))
+              : null
+          );
           setCompacting(
             live.activity.running && live.activity.operation === "compact"
           );
@@ -662,6 +694,7 @@ export function WorkspacePage(props: {
     setResources(null);
     setLoading(false);
     setStreaming(false);
+    setRunStartedAt(null);
     setCompacting(false);
     toastState.retract("context-warning");
     setFullAccessPending(false);
@@ -731,6 +764,9 @@ export function WorkspacePage(props: {
       return;
     }
     setStreaming(true);
+    // 运行起点记账（消息流底部「运行中」工时）：发送瞬间即起算，
+    // 模型尚无输出的间隙也开始显示
+    setRunStartedAt(Date.now());
     const composerSnapshot = workspaceState.composer(currentId);
     try {
       await workspaceState.flush();
@@ -748,6 +784,7 @@ export function WorkspacePage(props: {
       // 启动失败（含显式技能解析/加载错误）：只在发起任务仍打开时提示。
       if (currentIdRef.current !== currentId) return;
       setStreaming(false);
+      setRunStartedAt(null);
       void refreshResources(currentId);
       setMessages((prev) =>
         appendLocalSegment(prev, {
@@ -972,6 +1009,7 @@ export function WorkspacePage(props: {
       setWorkspaceFiles([]);
       setResources(null);
       setStreaming(false);
+      setRunStartedAt(null);
       setLoading(false);
       setCompacting(false);
       toastState.retract("context-warning");
@@ -1542,6 +1580,7 @@ export function WorkspacePage(props: {
               }}
               items={displayMessages}
               streaming={streaming}
+              runStartedAt={runStartedAt}
               compacting={compacting}
               contentWidthClass={contentWidthClass}
               followSignal={followSignal}

@@ -25,12 +25,13 @@ export function TaskActivityBadge({
             ? "完成未查看"
             : null;
   if (!label) return null;
+  // 运行中统一用 accent 蓝：与消息流 generating-spinner 同色（转圈图标全局一致）
   const tone = waiting
     ? "bg-warn-bg text-warn-fg"
     : activity?.outcome === "failed"
       ? "bg-danger-bg text-danger-fg"
       : running
-        ? "text-ok-fg"
+        ? "text-accent"
         : "bg-ok-bg text-ok-fg";
   return (
     <span
