@@ -1,9 +1,19 @@
 // 自绘标题栏：真实窗口状态、菜单移除、公共顶栏及空闲关闭保存。
+import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { assert, closeApp, launchApp, untilDraft } from "./helpers.mjs";
+import { promisify } from "node:util";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  NARROW_WIDTH,
+  untilDraft,
+} from "./helpers.mjs";
+
+const execFileAsync = promisify(execFile);
 
 async function until(predicate, message) {
   const deadline = Date.now() + 10_000;
@@ -11,6 +21,81 @@ async function until(predicate, message) {
     assert(Date.now() < deadline, message);
     await delay(25);
   }
+}
+
+/**
+ * 渲染层元素中心 → 物理屏幕坐标（真实拖拽断言用）：内容区原点
+ * （getContentBounds，DIP）+ 元素盒（CSS px 与 DIP 同值）按显示器缩放
+ * 换算为物理像素。前置置顶（screen-saver 级）+ 聚焦，保证系统级输入命中
+ * 本窗口而非遮挡物——实测本机环境下默认级别的 setAlwaysOnTop 不生效
+ * （isAlwaysOnTop 仍为 false，输入被前景的其他窗口吃掉），screen-saver
+ * 级别生效且 WindowFromPoint 验证命中（置顶由断言段收尾统一还原）。
+ */
+async function elementScreenPoint(app, locator) {
+  const box = await locator.boundingBox();
+  assert(box, "拖拽目标不可见");
+  return app.evaluate(
+    ({ BrowserWindow, screen }, point) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      win.setAlwaysOnTop(true, "screen-saver");
+      win.focus();
+      win.moveTop();
+      const bounds = win.getContentBounds();
+      const display = screen.getDisplayMatching(bounds);
+      return {
+        x: Math.round(
+          (bounds.x + point.x + point.width / 2) * display.scaleFactor
+        ),
+        y: Math.round(
+          (bounds.y + point.y + point.height / 2) * display.scaleFactor
+        ),
+        scale: display.scaleFactor,
+      };
+    },
+    { x: box.x, y: box.y, width: box.width, height: box.height }
+  );
+}
+
+/**
+ * 系统级真实拖拽（审查修复 2，去假绿）：-webkit-app-region 的窗口拖动由
+ * 系统命中测试处理（Windows 命中 drag 区返回 HTCAPTION，按下即进入系统
+ * 拖动循环），Playwright 合成鼠标事件只进渲染器输入管线、不走该路径——
+ * 合成按下-移动-释放既不会移动窗口，事件本身也被 drag 区吞掉，仅断言
+ * computed style 验证不了拖动行为。这里经 user32 注入与用户手势同路径的
+ * 按下-渐进移动-释放（步距超过系统拖动阈值 SM_CXDRAG），拖动区与免拖
+ * 控件两个方向都能验证。注入前两道环境修复（实测踩坑）：
+ * ① PowerShell 进程默认被 DPI 虚拟化，SetCursorPos 的物理坐标按进程
+ *   awareness 缩放（125% 下放大 1.25 倍、起点偏出拖动区），先置
+ *   per-monitor aware；
+ * ② 前景常有其他窗口遮挡（e2e 期间 Edge 等抢前台，Electron 的
+ *   setAlwaysOnTop 默认级别实测不生效），先对目标窗口 HWND_TOPMOST
+ *   硬置顶，并 WindowFromPoint 验证按下点确实命中本进程窗口，否则
+ *   直接失败（不能让输入砸到无关窗口上）。
+ */
+async function nativeDrag(app, fromX, fromY, toX, toY) {
+  const hwnd = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]
+      .getNativeWindowHandle()
+      .readBigUInt64LE(0)
+      .toString()
+  );
+  const script = [
+    `Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public struct PT { public int X; public int Y; } public static class WinDrag { [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y); [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, System.IntPtr dwExtraInfo); [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); [DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr hWnd, System.IntPtr after, int X, int Y, int cx, int cy, uint flags); [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(PT p); [DllImport("user32.dll")] public static extern System.IntPtr GetAncestor(System.IntPtr hWnd, uint flags); }'`,
+    `if (-not [WinDrag]::SetProcessDpiAwarenessContext([System.IntPtr](-4))) { [void][WinDrag]::SetProcessDPIAware() }`,
+    `$hitOk = $false`,
+    `for ($try = 1; $try -le 10; $try++) { [void][WinDrag]::SetWindowPos([System.IntPtr]${hwnd}, [System.IntPtr](-1), 0, 0, 0, 0, 0x3); [void][WinDrag]::SetCursorPos(${fromX},${fromY}); Start-Sleep -Milliseconds 100; $pt = New-Object PT; $pt.X = ${fromX}; $pt.Y = ${fromY}; $hit = [WinDrag]::WindowFromPoint($pt); $hitRoot = [WinDrag]::GetAncestor($hit, 2); if ($hitRoot -eq [System.IntPtr]${hwnd}) { $hitOk = $true; break }; Start-Sleep -Milliseconds 200 }`,
+    `if (-not $hitOk) { throw "拖拽起点 ${fromX},${fromY} 反复未命中应用窗口（宿主环境遮挡竞争），拒绝注入输入" }`,
+    `[WinDrag]::mouse_event(2,0,0,0,[System.IntPtr]::Zero)`,
+    `Start-Sleep -Milliseconds 120`,
+    `for ($i = 1; $i -le 12; $i++) { [void][WinDrag]::SetCursorPos(${fromX} + [int]((${toX - fromX}) * $i / 12), ${fromY} + [int]((${toY - fromY}) * $i / 12)); Start-Sleep -Milliseconds 30 }`,
+    `Start-Sleep -Milliseconds 150`,
+    `[WinDrag]::mouse_event(4,0,0,0,[System.IntPtr]::Zero)`,
+  ].join("\n");
+  await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { timeout: 30_000, windowsHide: true }
+  );
 }
 
 async function nativeState(app) {
@@ -124,6 +209,90 @@ async function main() {
       "外部还原必须同步按钮"
     );
 
+    // ===== 真实拖拽断言（审查修复 2，去假绿）=====
+    // 上面的 checkTitlebar 只断言 computed style（drag/no-drag 类名生效），
+    // 验证不了拖动行为；这里补系统级真实输入的两个方向：
+    // ① 拖动区（品牌回退态文本，跟随标题栏 drag 作用域）→ 窗口应移动；
+    // ② 免拖控件（主题按钮）同样手势 → 窗口不得移动。
+    assert(
+      !(await nativeState(app)).maximized,
+      "真实拖拽断言需要还原态窗口"
+    );
+    {
+      // 窄窗（压 minWidth 线外，与窄窗基线无关的隔离尺寸）放到工作区左上
+      // 安全位：拖动终点留在屏内（1366 级小屏也不溢出），结束复原位置。
+      const home = await app.evaluate(({ BrowserWindow, screen }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        win.setContentSize(1010, 640);
+        const { workArea } = screen.getPrimaryDisplay();
+        win.setPosition(workArea.x + 16, workArea.y + 16);
+        return win.getContentBounds();
+      });
+      // ① 拖动区：冷启动无任务，标题栏为品牌回退态（纯文本，可拖）
+      const dragFrom = await elementScreenPoint(
+        app,
+        window
+          .getByTestId("window-titlebar")
+          .getByText("CodexLike", { exact: true })
+      );
+      const dragPx = { x: 150, y: 70 };
+      await nativeDrag(
+        app,
+        dragFrom.x,
+        dragFrom.y,
+        dragFrom.x + dragPx.x,
+        dragFrom.y + dragPx.y
+      );
+      // 窗口 bounds 是 DIP：物理位移按显示器缩放折算。系统拖动循环启动会
+      // 吞掉首步移动（实测到位约 90% 期望位移），故按方向一致 + 位移达
+      // 期望六成判定（no-drag 回退下位移恒为 0，同样能揭红）。
+      const minDx = Math.round((dragPx.x / dragFrom.scale) * 0.6);
+      const minDy = Math.round((dragPx.y / dragFrom.scale) * 0.6);
+      await until(
+        async () => {
+          const bounds = await app.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0].getContentBounds()
+          );
+          return bounds.x - home.x >= minDx && bounds.y - home.y >= minDy;
+        },
+        "拖动区真实拖拽应移动窗口"
+      );
+      // ② 免拖控件：同样手势不得移动窗口；按下-移出-释放不落在按钮上，
+      // 也不误触主题切换（②有①作对照，SendInput 通道已被证明有效）
+      const toggleBefore = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].getContentBounds()
+      );
+      const toggleFrom = await elementScreenPoint(
+        app,
+        window.getByTestId("theme-toggle")
+      );
+      await nativeDrag(
+        app,
+        toggleFrom.x,
+        toggleFrom.y,
+        toggleFrom.x + dragPx.x,
+        toggleFrom.y + dragPx.y
+      );
+      await delay(300);
+      const toggleAfter = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].getContentBounds()
+      );
+      assert(
+        Math.abs(toggleAfter.x - toggleBefore.x) <= 2 &&
+          Math.abs(toggleAfter.y - toggleBefore.y) <= 2,
+        "免拖控件上真实拖拽不得移动窗口"
+      );
+      // 复原：窗口回原位并退出置顶，不影响后续场景
+      await app.evaluate(
+        ({ BrowserWindow }, pos) => {
+          const win = BrowserWindow.getAllWindows()[0];
+          win.setPosition(pos.x, pos.y);
+          win.setAlwaysOnTop(false);
+        },
+        { x: home.x, y: home.y }
+      );
+    }
+
     await window.getByTestId("window-minimize").click();
     await until(
       async () => (await nativeState(app)).minimized,
@@ -142,12 +311,16 @@ async function main() {
     await window.getByTestId("settings-open").click();
     await window.getByTestId("settings-back").waitFor();
     await checkTitlebar(window);
-    // 票04 窗口底线：窄窗基线从 640×640 提到 1100×640（minWidth 夹紧后 640
-    // 已缩不到；1000 压 minWidth 线上 innerWidth 精确断言不稳，再抬到线外）
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setContentSize(1100, 640)
+    // 窄窗基线（1100）的理由与取值归 helpers.mjs 的 NARROW_WIDTH 单点说明
+    await app.evaluate(
+      ({ BrowserWindow }, width) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(width, 640),
+      NARROW_WIDTH
     );
-    await window.waitForFunction(() => window.innerWidth === 1100);
+    await window.waitForFunction(
+      (width) => window.innerWidth === width,
+      NARROW_WIDTH
+    );
     await checkTitlebar(window);
     const beforeTheme = await window.evaluate(
       () => document.documentElement.dataset.theme ?? "light"
