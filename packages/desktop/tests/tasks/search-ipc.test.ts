@@ -10,7 +10,7 @@ import {
   createWorktreeService,
   type ProjectRecord,
   type TaskRecord,
-  type SessionSearchResult,
+  type TaskSearchResult,
 } from "@codexlike/agent-core/node";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
 import { listenMock } from "./mock-server";
@@ -178,7 +178,7 @@ it("归档默认排除且可选纳入；重命名、归档、恢复与新消息�
   await invoke("tasks:archive", task.id, true);
   app.reopen();
   expect(await invoke("tasks:search", "新标题")).toEqual([]);
-  const archived = await invoke<SessionSearchResult[]>(
+  const archived = await invoke<TaskSearchResult[]>(
     "tasks:search",
     "新标题",
     true
