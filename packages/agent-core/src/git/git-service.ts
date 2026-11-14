@@ -7,7 +7,7 @@ import { resolveInWorkspace } from "../tools/workspace";
 
 /**
  * git 服务（spec「git 集成」）：改动面板的数据源。
- * `simple-git` 封装，面向会话工作区目录；非 git 目录优雅降级（isGitRepo=false），
+ * `simple-git` 封装，面向任务工作区目录；非 git 目录优雅降级（isGitRepo=false），
  * 供 UI 显示「非 git 工作区」提示而非报错。
  * 依赖 Node 运行时（simple-git 走 child_process），经 `./node` 出口暴露。
  */
@@ -49,10 +49,10 @@ export interface GitService {
    */
   diffFile(path: string, oldPath?: string): Promise<GitFileDiff>;
   /**
-   * 创建（或切换到已存在的）`codexlike/<会话名>` 分支。
+   * 创建（或切换到已存在的）`codexlike/<任务名>` 分支。
    * 创建成功 created=true；分支已存在则切换过去（created=false），可重复调用。
    */
-  createSessionBranch(name: string): Promise<GitBranchResult>;
+  createTaskBranch(name: string): Promise<GitBranchResult>;
   /** 提交当前全部变更（含 untracked，等价 `git add -A` + `git commit`） */
   commitAll(message: string): Promise<GitCommitResult>;
 }
@@ -192,7 +192,7 @@ export function createGitService(workspacePath: string): GitService {
       return { path, original, modified };
     },
 
-    async createSessionBranch(name: string): Promise<GitBranchResult> {
+    async createTaskBranch(name: string): Promise<GitBranchResult> {
       if (!(await git.checkIsRepo())) {
         throw new Error("当前工作区不是 git 仓库，无法创建分支");
       }

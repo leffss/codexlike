@@ -208,10 +208,10 @@ async function main() {
 
     // ---- 场景 5：阅读位置记忆含「离开时是否贴底」 ----
     // 5a. 贴底跟随状态下切走再切回：恢复到当前最新并继续跟随
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("message-empty").waitFor();
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "流式长文" })
       .click();
     await window.getByTestId("message-assistant").first().waitFor();
@@ -232,10 +232,10 @@ async function main() {
       (s) => s.distance > 500,
       "切走前先脱离跟随"
     );
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("message-empty").waitFor();
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "流式长文" })
       .click();
     await window.getByTestId("message-assistant").first().waitFor();

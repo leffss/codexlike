@@ -1,8 +1,8 @@
 // 验收走查 E2E（工单 14）：补齐 spec 九条验收场景中既有 E2E 未串联的两条——
 // 场景 2「修 bug 全流程」：read_file → grep → apply_patch（真实补丁修复）
 //   → run_terminal_command（suggest 模式审批卡 → 批准 → 真实执行）→ 改动面板 diff → 一键 commit；
-// 场景 5「worktree 双会话并行」：同一 git 仓库、会话 A 本目录直跑 + 会话 B worktree 模式，
-//   两会话各写一个文件，断言落盘互不干扰（主仓库/副本各得其所，git status 不串）。
+// 场景 5「worktree 双任务并行」：同一 git 仓库、任务 A 本目录直跑 + 任务 B worktree 模式，
+//   两任务各写一个文件，断言落盘互不干扰（主仓库/副本各得其所，git status 不串）。
 // 与其余九条既有 E2E（smoke/commands/approvals/compact/changes/interrupt/worktree/mcp/subagents/browser）
 // 一起构成九条场景的打包产物走查；设 CODEXLIKE_PACKAGED_EXE 指向安装版/便携版 exe。
 import { execFileSync } from "node:child_process";
@@ -73,7 +73,7 @@ async function configureProfile(window, port) {
 async function main() {
   /**
    * 场景脚本：场景 2 五轮（read → grep → apply_patch → 审批命令 → 收尾）
-   * 与场景 5 四轮（会话 A 写文件/收尾、会话 B 写文件/收尾）合用一个 server，
+   * 与场景 5 四轮（任务 A 写文件/收尾、任务 B 写文件/收尾）合用一个 server，
    * 以「当前阶段 + 请求序号」驱动；非流式请求（提交消息生成）返回固定中文消息。
    */
   let phase = "scenario2";
@@ -118,19 +118,19 @@ async function main() {
         });
       return ctx.textRound("已修复 sumTo 的边界错误：验证输出 sumTo(5) = 15。");
     }
-    // scenario5：A 会话两轮（1 偏移 = 场景 2 已耗 5 次）→ B 会话两轮
+    // scenario5：A 任务两轮（1 偏移 = 场景 2 已耗 5 次）→ B 任务两轮
     if (streamCount === 6)
       return ctx.toolCallRound("call-a5-a", "write_file", {
         path: "a-local.txt",
-        content: "会话 A（本目录直跑）",
+        content: "任务 A（本目录直跑）",
       });
-    if (streamCount === 7) return ctx.textRound("A 会话文件已写入。");
+    if (streamCount === 7) return ctx.textRound("A 任务文件已写入。");
     if (streamCount === 8)
       return ctx.toolCallRound("call-a5-b", "write_file", {
         path: "b-worktree.txt",
-        content: "会话 B（worktree 模式）",
+        content: "任务 B（worktree 模式）",
       });
-    return ctx.textRound("B 会话文件已写入隔离副本。");
+    return ctx.textRound("B 任务文件已写入隔离副本。");
   });
   /** 切到场景 5 分支（在场景 2 的 5 次请求全部完成后调用） */
   const enterScenario5 = () => {
@@ -249,21 +249,21 @@ async function main() {
     );
     console.log("[e2e] 场景2：一键 commit 落库（模型生成消息）✅");
 
-    // ===== 场景 5：同一仓库双会话（本目录直跑 + worktree 模式）并行互不干扰 =====
+    // ===== 场景 5：同一仓库双任务（本目录直跑 + worktree 模式）并行互不干扰 =====
     enterScenario5();
-    // 会话 A：本目录直跑（同一 repo）
+    // 任务 A：本目录直跑（同一 repo）
     await window.getByTestId("changes-toggle").click(); // 收起面板回到消息流
     await prepareDraft(window, { project: true, approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("写入 a-local.txt");
     await window.getByTestId("composer-send").click();
     await window
       .getByTestId("message-assistant")
-      .filter({ hasText: "A 会话文件已写入。" })
+      .filter({ hasText: "A 任务文件已写入。" })
       .waitFor({ timeout: 20_000 });
-    assert(existsSync(join(repo, "a-local.txt")), "会话 A 文件未落主仓库");
-    console.log("[e2e] 场景5：会话 A（本目录直跑）文件落主仓库");
+    assert(existsSync(join(repo, "a-local.txt")), "任务 A 文件未落主仓库");
+    console.log("[e2e] 场景5：任务 A（本目录直跑）文件落主仓库");
 
-    // 会话 B：worktree 模式（同一 repo，托管 Worktree 隔离副本）
+    // 任务 B：worktree 模式（同一 repo，托管 Worktree 隔离副本）
     await prepareDraft(window, {
       project: true,
       worktree: true,
@@ -273,7 +273,7 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window
       .getByTestId("message-assistant")
-      .filter({ hasText: "B 会话文件已写入隔离副本。" })
+      .filter({ hasText: "B 任务文件已写入隔离副本。" })
       .waitFor({ timeout: 20_000 });
 
     // 隔离断言：b 落副本不落主仓库；副本内无 a；主仓库 status 不含 b
@@ -288,23 +288,23 @@ async function main() {
     const copyDir = join(worktreesRoot, copies[0]);
     assert(
       existsSync(join(copyDir, "b-worktree.txt")),
-      "会话 B 文件未落 worktree 副本"
+      "任务 B 文件未落 worktree 副本"
     );
     assert(
       !existsSync(join(copyDir, "a-local.txt")),
-      "会话 A 的文件泄漏进 worktree 副本"
+      "任务 A 的文件泄漏进 worktree 副本"
     );
     assert(
       !existsSync(join(repo, "b-worktree.txt")),
-      "会话 B 的文件泄漏进主仓库"
+      "任务 B 的文件泄漏进主仓库"
     );
     const status = git(repo, "status", "--porcelain").trim();
     assert(
       !status.includes("b-worktree.txt"),
-      `主仓库 status 串入 B 会话文件：${status}`
+      `主仓库 status 串入 B 任务文件：${status}`
     );
     console.log(
-      "[e2e] 场景5：会话 B（worktree 模式）文件落隔离副本，双会话互不干扰 ✅"
+      "[e2e] 场景5：任务 B（worktree 模式）文件落隔离副本，双任务互不干扰 ✅"
     );
 
     await closeApp(app);

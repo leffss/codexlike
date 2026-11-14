@@ -4,7 +4,7 @@ import type { BrowserWindow } from "electron";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { registerApplicationExit } from "../../src/lifecycle/exit-ipc";
-import type { SessionExitRuntime } from "../../src/lifecycle/application-exit";
+import type { TaskExitRuntime } from "../../src/lifecycle/application-exit";
 import { IPC } from "../../src/shared/ipc";
 
 /**
@@ -46,7 +46,7 @@ class FakeWindow extends EventEmitter {
 }
 
 let win: FakeWindow;
-let runtime: SessionExitRuntime & {
+let runtime: TaskExitRuntime & {
   stopAndDrain: ReturnType<typeof vi.fn>;
 };
 

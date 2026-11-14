@@ -22,7 +22,7 @@ export const MCP_DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 export interface McpManagerOptions {
   /** 逐次解析当前 server 配置（设置页改配置免重启对下一次连接生效） */
   servers: () => McpServerConfig[];
-  /** 被禁用工具的全名集合（逐次解析，逐工具启停对之后的会话生效） */
+  /** 被禁用工具的全名集合（逐次解析，逐工具启停对之后的任务生效） */
   disabledTools?: () => Iterable<string>;
   /** 工具调用超时毫秒（默认 30s） */
   callTimeoutMs?: number;
@@ -33,7 +33,7 @@ export interface McpManagerOptions {
 export interface McpManager {
   /**
    * 连接指定 server（spawn stdio 子进程 → initialize 握手 → tools/list 工具发现）。
-   * 连接失败不抛：返回 status=failed + 中文 error（会话与其它 server 不受影响）。
+   * 连接失败不抛：返回 status=failed + 中文 error（任务与其它 server 不受影响）。
    */
   connect(serverId: string): Promise<McpServerState>;
   /** 主动断开指定 server（设置页删除/重连前调用）；未知 id 忽略 */
@@ -43,7 +43,7 @@ export interface McpManager {
   /**
    * 可用工具，适配为 ToolDefinition（内部再防一次撞名：后发现的跳过）。
    * 断线 server 的工具按「最后已知列表」保留：调用时惰性自动重连（工单 12 的重连策略），
-   * 因此会话中途 server 崩溃重启，模型下一轮仍可调用其工具。
+   * 因此任务中途 server 崩溃重启，模型下一轮仍可调用其工具。
    */
   tools(): ToolDefinition[];
   /** 断开全部连接（应用退出时调用） */
@@ -233,7 +233,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       entry.connection = null;
       entry.status = "disconnected";
       entry.error = null;
-      // 主动断开（区别于进程崩溃）：工具列表一并清空，不再提供给会话
+      // 主动断开（区别于进程崩溃）：工具列表一并清空，不再提供给任务
       entry.tools = [];
       await previous.client.close().catch(() => undefined);
     },

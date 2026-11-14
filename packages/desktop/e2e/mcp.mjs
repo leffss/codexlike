@@ -1,6 +1,6 @@
 // E2E MCP 冒烟（工单 12）：真实 Electron 应用走 MCP 最小全链路——
 // 设置页添加 stdio MCP server（node 起进程内 fake server）→ 状态「已连接」+ 工具发现可见
-// → 逐工具启停 → 建会话（suggest）→ 模型调用 mcp_fake_echo → 审批卡片（工具名）→ 批准
+// → 逐工具启停 → 建任务（suggest）→ 模型调用 mcp_fake_echo → 审批卡片（工具名）→ 批准
 // → fake server 经 stdio 真实往返、结果回填模型 → 最终回复
 // → 重启应用 → server 自动重连（startup）。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:mcp（先全仓 build）。
@@ -73,7 +73,7 @@ async function setupSettings(window, port) {
     "[e2e] 设置页：MCP server 已连接，工具发现可见（mcp_fake_echo 等 3 个）"
   );
 
-  // 逐工具启停：禁用 crash → 再启用（对会话生效的开关真实可切换）
+  // 逐工具启停：禁用 crash → 再启用（对任务生效的开关真实可切换）
   const crashToggle = window.getByTestId("mcp-tool-toggle-mcp_fake_crash");
   await crashToggle.uncheck();
   await window.getByText("已禁用").first().waitFor({ timeout: 5_000 });
@@ -101,7 +101,7 @@ async function main() {
     let window = first.window;
     await setupSettings(window, port);
 
-    // 2) 建会话（显式选择 assist）→ 模型调用 mcp_fake_echo → 自动放行（无审批卡）
+    // 2) 建任务（显式选择 assist）→ 模型调用 mcp_fake_echo → 自动放行（无审批卡）
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
@@ -136,15 +136,12 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     console.log("[e2e] 批准后调用真实往返：结果回填工具卡片与模型上下文");
 
-    // 4) 重启应用：MCP server 自动重连（startup），会话中再次调用仍走通
+    // 4) 重启应用：MCP server 自动重连（startup），任务中再次调用仍走通
     await closeApp(app);
     const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 15_000 });
+    await window.getByTestId("task-item").first().waitFor({ timeout: 15_000 });
     await window.getByTestId("settings-open").click();
     await window
       .getByTestId("mcp-status-fake")
@@ -155,7 +152,7 @@ async function main() {
     );
 
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("task-item").first().click();
     await window.getByTestId("composer-input").fill("重启后再调用一次");
     await window.getByTestId("composer-send").click();
 
@@ -166,7 +163,7 @@ async function main() {
       .getByText("重启后 MCP 仍可用")
       .waitFor({ timeout: 20_000 });
     console.log(
-      "[e2e] 重启后会话中 MCP 工具调用仍走通（自动放行 → 执行 → 回填）"
+      "[e2e] 重启后任务中 MCP 工具调用仍走通（自动放行 → 执行 → 回填）"
     );
 
     await closeApp(app);

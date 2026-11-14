@@ -1,5 +1,5 @@
 /**
- * 上下文告警（code review 修复 2，spec 验收场景 4「长会话触发上下文告警」）。
+ * 上下文告警（code review 修复 2，spec 验收场景 4「长任务触发上下文告警」）。
  * 在 /status 的 token 估算（./tokens）基础上，超过阈值时给出中文告警——
  * 阈值 = 模型上下文窗口（Provider Profile 可配，默认 128k）× 占比（80%）。
  * 纯函数（浏览器安全）：估算 → 是否告警的决策与文案都在这里，UI 只负责展示。
@@ -29,10 +29,12 @@ export interface ContextUsageWarning {
  */
 export function evaluateContextWarning(
   estimatedTokens: number,
-  contextWindowTokens?: number,
+  contextWindowTokens?: number
 ): ContextUsageWarning | null {
   const windowTokens =
-    contextWindowTokens !== undefined && Number.isFinite(contextWindowTokens) && contextWindowTokens > 0
+    contextWindowTokens !== undefined &&
+    Number.isFinite(contextWindowTokens) &&
+    contextWindowTokens > 0
       ? contextWindowTokens
       : DEFAULT_CONTEXT_WINDOW_TOKENS;
   const ratio = estimatedTokens / windowTokens;
@@ -46,6 +48,6 @@ export function evaluateContextWarning(
     ratio,
     message:
       `上下文即将耗尽：约 ${estimatedTokens} / ${windowTokens} tokens（${percent}%），` +
-      '建议执行 /compact 压缩历史后继续',
+      "建议执行 /compact 压缩历史后继续",
   };
 }

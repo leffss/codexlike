@@ -1,8 +1,8 @@
-import { jsonSchema, tool as aiTool, type Tool } from 'ai';
+import { jsonSchema, tool as aiTool, type Tool } from "ai";
 
-import type { ToolDefinition, ToolExecutionContext, ToolResult } from './types';
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "./types";
 
-/** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由会话循环掌控，事件与落库都在循环内发生） */
+/** 工具定义 → ai SDK 的 tools 参数（不带 execute：执行由任务循环掌控，事件与落库都在循环内发生） */
 export function toModelTools(tools: ToolDefinition[]): Record<string, Tool> {
   const entries = tools.map((definition) => [
     definition.name,
@@ -48,7 +48,7 @@ export function createToolRegistry(): ToolRegistry {
 export async function runTool(
   tool: ToolDefinition,
   args: unknown,
-  context: ToolExecutionContext,
+  context: ToolExecutionContext
 ): Promise<ToolResult> {
   try {
     return await tool.execute(args, context);

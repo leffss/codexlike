@@ -1,5 +1,5 @@
-// E2E（工单 06）：会话打断（停止按钮）+ 中断点跨重启恢复的真实应用冒烟。
-// 路径：设置页建 Profile（本地 mock SSE）→ 建会话
+// E2E（工单 06）：任务打断（停止按钮）+ 中断点跨重启恢复的真实应用冒烟。
+// 路径：设置页建 Profile（本地 mock SSE）→ 建任务
 // ① 流式输出中点停止 → 本轮立即中断、UI 标记中断点
 // ② 中断后继续发新消息 → 正常完成回复
 // ③ 工具执行中（sleep 30 长命令）点停止 → 子进程被杀、结果标记用户中断、无后续模型请求
@@ -154,11 +154,8 @@ async function main() {
     const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 15_000 });
-    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("task-item").first().waitFor({ timeout: 15_000 });
+    await window.getByTestId("task-item").first().click();
     await window
       .getByTestId("message-user")
       .first()

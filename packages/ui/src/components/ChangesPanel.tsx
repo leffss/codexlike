@@ -28,16 +28,16 @@ const CHANGE_KIND_CLASSES: Record<GitChangeKind, string> = {
 
 /**
  * 改动面板（spec「结果检视与 git」）：工作区 git status 的变更文件列表 +
- * Monaco diff 检视 + 一键创建分支（codexlike/<会话名>）与一键提交。
+ * Monaco diff 检视 + 一键创建分支（codexlike/<任务名>）与一键提交。
  * 非 git 工作区显示降级提示，不报错。
  */
 export function ChangesPanel(props: {
-  sessionId: string;
-  sessionTitle: string;
+  taskId: string;
+  taskTitle: string;
   selectedProfileId: string;
   onClose: () => void;
 }) {
-  const { sessionId, sessionTitle, selectedProfileId, onClose } = props;
+  const { taskId, taskTitle, selectedProfileId, onClose } = props;
 
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,7 @@ export function ChangesPanel(props: {
     setLoading(true);
     setLoadError(null);
     try {
-      const next = await window.codexlike.git.status(sessionId);
+      const next = await window.codexlike.git.status(taskId);
       setStatus(next);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -67,7 +67,7 @@ export function ChangesPanel(props: {
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [taskId]);
 
   useEffect(() => {
     void refresh();
@@ -84,7 +84,7 @@ export function ChangesPanel(props: {
     setDiffLoading(true);
     try {
       const diff = await window.codexlike.git.diff(
-        sessionId,
+        taskId,
         file.path,
         file.oldPath
       );
@@ -101,7 +101,7 @@ export function ChangesPanel(props: {
     setBranchBusy(true);
     setBranchFeedback(null);
     try {
-      const result = await window.codexlike.git.createBranch(sessionId);
+      const result = await window.codexlike.git.createBranch(taskId);
       setBranchFeedback(
         result.created
           ? `已创建并切换到分支 ${result.branch}`
@@ -117,13 +117,13 @@ export function ChangesPanel(props: {
     }
   }
 
-  /** 模型按会话内容生成提交消息草稿（一次不发工具的请求；可编辑、失败可手写） */
+  /** 模型按任务内容生成提交消息草稿（一次不发工具的请求；可编辑、失败可手写） */
   async function generateMessage() {
     setCommitBusy("generate");
     setCommitFeedback(null);
     try {
       const draft = await window.codexlike.git.generateCommitMessage(
-        sessionId,
+        taskId,
         selectedProfileId
       );
       setCommitDraft(draft);
@@ -146,7 +146,7 @@ export function ChangesPanel(props: {
     setCommitFeedback(null);
     try {
       const result = await window.codexlike.git.commit(
-        sessionId,
+        taskId,
         commitDraft.trim()
       );
       if (result.committed) {
@@ -232,7 +232,7 @@ export function ChangesPanel(props: {
           data-testid="changes-not-git"
           className="m-3 rounded border border-line bg-surface-muted p-3 text-sm text-fg-muted"
         >
-          非 git 工作区：当前会话绑定的目录不受 git 管理，无法查看改动或提交。
+          非 git 工作区：当前任务绑定的目录不受 git 管理，无法查看改动或提交。
         </div>
       ) : selected !== null ? (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -308,7 +308,7 @@ export function ChangesPanel(props: {
             >
               {branchBusy
                 ? "创建中…"
-                : `创建分支 ${codexlikeBranchName(sessionTitle)}`}
+                : `创建分支 ${codexlikeBranchName(taskTitle)}`}
             </button>
             {branchFeedback !== null && (
               <p

@@ -311,7 +311,7 @@ describe("窗口现场保存：closed 清理与崩溃衔接", () => {
       const store = createLaunchStateStore({ dir });
       // 渲染层先上报目标与视图（票03 渲染层路径）
       await store.patch({
-        workbenchTarget: { kind: "session", sessionId: "s-remembered" },
+        workbenchTarget: { kind: "task", taskId: "s-remembered" },
         view: "settings",
       });
       trackWindowLaunchState({ win, store });
@@ -320,7 +320,7 @@ describe("窗口现场保存：closed 清理与崩溃衔接", () => {
       await expect(store.get()).resolves.toEqual({
         bounds: { x: 320, y: 240, width: 900, height: 640 },
         maximized: false,
-        workbenchTarget: { kind: "session", sessionId: "s-remembered" },
+        workbenchTarget: { kind: "task", taskId: "s-remembered" },
         view: "settings",
       });
     } finally {

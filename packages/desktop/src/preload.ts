@@ -1,9 +1,97 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import { IPC, type CodexLikeApi } from "./shared/ipc";
+import { IPC, type CodexLikeApi, type TaskApi } from "./shared/ipc";
 
 // contextBridge 暴露类型化 API；渲染进程经 `window.codexlike` 访问，
 // 无 nodeIntegration、无裸 ipcRenderer（安全基线）。
+
+/** 任务域命名空间工厂：转发到 tasks:* channel。 */
+function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
+  return {
+    start: (input) => ipcRenderer.invoke(channels.start, input),
+    setProject: (id, projectId) =>
+      ipcRenderer.invoke(channels.setProject, id, projectId),
+    execution: (id) => ipcRenderer.invoke(channels.execution, id),
+    view: (id) => ipcRenderer.invoke(channels.view, id),
+    markViewed: (id, sequence) =>
+      ipcRenderer.invoke(channels.markViewed, id, sequence),
+    setPinned: (id, pinned) =>
+      ipcRenderer.invoke(channels.setPinned, id, pinned),
+    markUsed: (id) => ipcRenderer.invoke(channels.markUsed, id),
+    workspaceSharing: (target) =>
+      ipcRenderer.invoke(channels.workspaceSharing, target),
+    list: () => ipcRenderer.invoke(channels.list),
+    search: (query, includeArchived) =>
+      ipcRenderer.invoke(channels.search, query, includeArchived),
+    selectWorkspace: () => ipcRenderer.invoke(channels.selectWorkspace),
+    messages: (taskId) => ipcRenderer.invoke(channels.messages, taskId),
+    send: (
+      taskId,
+      text,
+      providerProfileId,
+      mentionPaths,
+      thinkingEffort,
+      approvalMode
+    ) =>
+      ipcRenderer.invoke(
+        channels.send,
+        taskId,
+        text,
+        providerProfileId,
+        mentionPaths,
+        thinkingEffort,
+        approvalMode
+      ),
+    interrupt: (taskId) => ipcRenderer.invoke(channels.interrupt, taskId),
+    queueResume: (taskId) => ipcRenderer.invoke(channels.queueResume, taskId),
+    queueClear: (taskId) => ipcRenderer.invoke(channels.queueClear, taskId),
+    queueRemove: (taskId, itemId) =>
+      ipcRenderer.invoke(channels.queueRemove, taskId, itemId),
+    queueUpdate: (taskId, itemId, text, expectedText, mentionPaths) =>
+      ipcRenderer.invoke(
+        channels.queueUpdate,
+        taskId,
+        itemId,
+        text,
+        expectedText,
+        mentionPaths
+      ),
+    queueReorder: (taskId, orderedIds) =>
+      ipcRenderer.invoke(channels.queueReorder, taskId, orderedIds),
+    rename: (taskId, title) =>
+      ipcRenderer.invoke(channels.rename, taskId, title),
+    archive: (taskId, archived) =>
+      ipcRenderer.invoke(channels.archive, taskId, archived),
+    status: (taskId) => ipcRenderer.invoke(channels.status, taskId),
+    resources: (taskId) => ipcRenderer.invoke(channels.resources, taskId),
+    compact: (taskId, providerProfileId) =>
+      ipcRenderer.invoke(channels.compact, taskId, providerProfileId),
+    workspaceFiles: (taskId) =>
+      ipcRenderer.invoke(channels.workspaceFiles, taskId),
+    toolImage: (taskId, toolCallId) =>
+      ipcRenderer.invoke(channels.toolImage, taskId, toolCallId),
+    revokeAutoApprove: (taskId) =>
+      ipcRenderer.invoke(channels.revokeAutoApprove, taskId),
+    setApprovalMode: (taskId, mode) =>
+      ipcRenderer.invoke(channels.setApprovalMode, taskId, mode),
+    respondApproval: (taskId, requestId, decision) =>
+      ipcRenderer.invoke(channels.respondApproval, taskId, requestId, decision),
+    pendingApproval: (taskId) =>
+      ipcRenderer.invoke(channels.pendingApproval, taskId),
+    pendingApprovals: (taskId) =>
+      ipcRenderer.invoke(channels.pendingApprovals, taskId),
+    pendingInteractions: (taskId) =>
+      ipcRenderer.invoke(channels.pendingInteractions, taskId),
+    respondInteraction: (taskId, requestId, response) =>
+      ipcRenderer.invoke(
+        channels.respondInteraction,
+        taskId,
+        requestId,
+        response
+      ),
+  };
+}
+
 const api: CodexLikeApi = {
   windowControls: {
     getState: () => ipcRenderer.invoke(IPC.windowControls.getState),
@@ -60,99 +148,7 @@ const api: CodexLikeApi = {
       ipcRenderer.invoke(IPC.providerProfiles.update, id, input),
     remove: (id) => ipcRenderer.invoke(IPC.providerProfiles.remove, id),
   },
-  sessions: {
-    start: (input) => ipcRenderer.invoke(IPC.sessions.start, input),
-    setProject: (id, projectId) =>
-      ipcRenderer.invoke(IPC.sessions.setProject, id, projectId),
-    execution: (id) => ipcRenderer.invoke(IPC.sessions.execution, id),
-    view: (id) => ipcRenderer.invoke(IPC.sessions.view, id),
-    markViewed: (id, sequence) =>
-      ipcRenderer.invoke(IPC.sessions.markViewed, id, sequence),
-    setPinned: (id, pinned) =>
-      ipcRenderer.invoke(IPC.sessions.setPinned, id, pinned),
-    markUsed: (id) => ipcRenderer.invoke(IPC.sessions.markUsed, id),
-    workspaceSharing: (target) =>
-      ipcRenderer.invoke(IPC.sessions.workspaceSharing, target),
-    list: () => ipcRenderer.invoke(IPC.sessions.list),
-    search: (query, includeArchived) =>
-      ipcRenderer.invoke(IPC.sessions.search, query, includeArchived),
-    selectWorkspace: () => ipcRenderer.invoke(IPC.sessions.selectWorkspace),
-    messages: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.messages, sessionId),
-    send: (
-      sessionId,
-      text,
-      providerProfileId,
-      mentionPaths,
-      thinkingEffort,
-      approvalMode
-    ) =>
-      ipcRenderer.invoke(
-        IPC.sessions.send,
-        sessionId,
-        text,
-        providerProfileId,
-        mentionPaths,
-        thinkingEffort,
-        approvalMode
-      ),
-    interrupt: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.interrupt, sessionId),
-    queueResume: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.queueResume, sessionId),
-    queueClear: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.queueClear, sessionId),
-    queueRemove: (sessionId, itemId) =>
-      ipcRenderer.invoke(IPC.sessions.queueRemove, sessionId, itemId),
-    queueUpdate: (sessionId, itemId, text, expectedText, mentionPaths) =>
-      ipcRenderer.invoke(
-        IPC.sessions.queueUpdate,
-        sessionId,
-        itemId,
-        text,
-        expectedText,
-        mentionPaths
-      ),
-    queueReorder: (sessionId, orderedIds) =>
-      ipcRenderer.invoke(IPC.sessions.queueReorder, sessionId, orderedIds),
-    rename: (sessionId, title) =>
-      ipcRenderer.invoke(IPC.sessions.rename, sessionId, title),
-    archive: (sessionId, archived) =>
-      ipcRenderer.invoke(IPC.sessions.archive, sessionId, archived),
-    status: (sessionId) => ipcRenderer.invoke(IPC.sessions.status, sessionId),
-    resources: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.resources, sessionId),
-    compact: (sessionId, providerProfileId) =>
-      ipcRenderer.invoke(IPC.sessions.compact, sessionId, providerProfileId),
-    workspaceFiles: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.workspaceFiles, sessionId),
-    toolImage: (sessionId, toolCallId) =>
-      ipcRenderer.invoke(IPC.sessions.toolImage, sessionId, toolCallId),
-    revokeAutoApprove: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.revokeAutoApprove, sessionId),
-    setApprovalMode: (sessionId, mode) =>
-      ipcRenderer.invoke(IPC.sessions.setApprovalMode, sessionId, mode),
-    respondApproval: (sessionId, requestId, decision) =>
-      ipcRenderer.invoke(
-        IPC.sessions.respondApproval,
-        sessionId,
-        requestId,
-        decision
-      ),
-    pendingApproval: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.pendingApproval, sessionId),
-    pendingApprovals: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.pendingApprovals, sessionId),
-    pendingInteractions: (sessionId) =>
-      ipcRenderer.invoke(IPC.sessions.pendingInteractions, sessionId),
-    respondInteraction: (sessionId, requestId, response) =>
-      ipcRenderer.invoke(
-        IPC.sessions.respondInteraction,
-        sessionId,
-        requestId,
-        response
-      ),
-  },
+  tasks: taskApi(IPC.tasks),
   searchSettings: {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
@@ -183,26 +179,25 @@ const api: CodexLikeApi = {
     setToolEnabled: (toolName, enabled) =>
       ipcRenderer.invoke(IPC.mcp.setToolEnabled, toolName, enabled),
   },
-  onSessionEvent: (listener) => {
+  onTaskEvent: (listener) => {
     const handler: (
       _event: Electron.IpcRendererEvent,
       envelope: Parameters<typeof listener>[0]
     ) => void = (_event, envelope) => listener(envelope);
-    ipcRenderer.on(IPC.sessionEvents, handler);
+    ipcRenderer.on(IPC.taskEvents, handler);
     return () => {
-      ipcRenderer.removeListener(IPC.sessionEvents, handler);
+      ipcRenderer.removeListener(IPC.taskEvents, handler);
     };
   },
   git: {
-    status: (sessionId) => ipcRenderer.invoke(IPC.git.status, sessionId),
-    diff: (sessionId, path, oldPath) =>
-      ipcRenderer.invoke(IPC.git.diff, sessionId, path, oldPath),
-    createBranch: (sessionId) =>
-      ipcRenderer.invoke(IPC.git.createBranch, sessionId),
-    generateCommitMessage: (sessionId, providerProfileId) =>
-      ipcRenderer.invoke(IPC.git.commitMessage, sessionId, providerProfileId),
-    commit: (sessionId, message) =>
-      ipcRenderer.invoke(IPC.git.commit, sessionId, message),
+    status: (taskId) => ipcRenderer.invoke(IPC.git.status, taskId),
+    diff: (taskId, path, oldPath) =>
+      ipcRenderer.invoke(IPC.git.diff, taskId, path, oldPath),
+    createBranch: (taskId) => ipcRenderer.invoke(IPC.git.createBranch, taskId),
+    generateCommitMessage: (taskId, providerProfileId) =>
+      ipcRenderer.invoke(IPC.git.commitMessage, taskId, providerProfileId),
+    commit: (taskId, message) =>
+      ipcRenderer.invoke(IPC.git.commit, taskId, message),
   },
 };
 

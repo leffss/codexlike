@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AssistantSegment } from "../lib/session-view";
+import type { AssistantSegment } from "../lib/task-view";
 import { formatCompletedTime } from "../lib/completed-time";
 
 /** 最终正文操作栏：时间与段建立时刻独立，复制只针对当前段原始正文。 */

@@ -101,7 +101,7 @@ describe("launch-state-store", () => {
     const dir = makeDir();
     const full = {
       ...VALID_STATE,
-      workbenchTarget: { kind: "session", sessionId: "s-1" },
+      workbenchTarget: { kind: "task", taskId: "s-1" },
       view: "settings",
     } as const;
     const store = createLaunchStateStore({ dir });
@@ -156,8 +156,8 @@ describe("launch-state-store", () => {
     const store = createLaunchStateStore({ dir });
     const invalidTargets = [
       { kind: "chat" },
-      { kind: "session" },
-      { kind: "session", sessionId: 42 },
+      { kind: "task" },
+      { kind: "task", taskId: 42 },
       { kind: "new", projectId: 7 },
     ];
     for (const workbenchTarget of invalidTargets) {
@@ -172,7 +172,7 @@ describe("launch-state-store", () => {
     const invalidFiles = [
       JSON.stringify({
         ...VALID_STATE,
-        workbenchTarget: { kind: "session", sessionId: 42 },
+        workbenchTarget: { kind: "task", taskId: 42 },
       }),
       JSON.stringify({ ...VALID_STATE, view: "workspace " }),
       JSON.stringify({ workbenchTarget: { kind: "new" } }),
@@ -187,7 +187,7 @@ describe("launch-state-store", () => {
     const store = createLaunchStateStore({ dir: makeDir() });
     await expect(
       store.patch({
-        workbenchTarget: { kind: "session" } as never,
+        workbenchTarget: { kind: "task" } as never,
       })
     ).rejects.toThrow("启动现场");
     await expect(store.patch({ view: "debug" as never })).rejects.toThrow(

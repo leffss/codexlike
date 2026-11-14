@@ -28,7 +28,7 @@ function mockModel(text: string): MockLanguageModelV4 {
 }
 
 describe("buildCommitMessagePrompt（纯函数）", () => {
-  it("包含最近的会话内容与变更文件列表", () => {
+  it("包含最近的任务内容与变更文件列表", () => {
     const prompt = buildCommitMessagePrompt(
       [
         { role: "user", content: "修复登录页的空指针" },
@@ -108,7 +108,7 @@ describe("generateCommitMessage（一次不发工具的 LLM 请求）", () => {
     expect(message).toBe("修复登录页空指针");
   });
 
-  it("请求不带工具且 prompt 含会话内容与变更文件", async () => {
+  it("请求不带工具且 prompt 含任务内容与变更文件", async () => {
     const model = mockModel("提交消息");
     await generateCommitMessage({
       model,

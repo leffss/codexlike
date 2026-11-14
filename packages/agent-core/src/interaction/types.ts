@@ -18,7 +18,7 @@ export interface InteractiveQuestion {
 
 interface InteractionRequestBase {
   id: string;
-  sessionId: string;
+  taskId: string;
   /** 发起本轮执行的用户消息标识，不因中途问答而产生新轮次。 */
   turnId: string;
   toolCallId: string;
@@ -49,7 +49,7 @@ export interface QuestionAnswer {
 }
 
 export type InteractionResponse =
-  | { kind: "approval"; decision: "approve"; scope?: "once" | "session" }
+  | { kind: "approval"; decision: "approve"; scope?: "once" | "task" }
   | { kind: "approval"; decision: "reject"; scope?: never }
   | { kind: "questions"; answers: QuestionAnswer[] };
 

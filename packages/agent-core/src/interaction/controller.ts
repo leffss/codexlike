@@ -1,5 +1,5 @@
-import type { SessionPersistence } from "../session/persistence";
-import type { SessionEvent } from "../session/types";
+import type { TaskPersistence } from "../task/persistence";
+import type { TaskEvent } from "../task/types";
 import type {
   InteractionRecord,
   InteractionRequest,
@@ -9,15 +9,15 @@ import { parseInteractionResponse, questionSnapshot } from "./questions";
 
 /** 审批与问答唯一 waiter 所有者；先持久化，再更新内存并通知，最后唤醒工具。 */
 export function createInteractionController(options: {
-  persistence: SessionPersistence;
+  persistence: TaskPersistence;
   now(): string;
-  emit(event: SessionEvent): void;
+  emit(event: TaskEvent): void;
   waiting(waiting: boolean, persisted?: boolean): void;
   answered(snapshot: QuestionAnswerSnapshot): void;
-  /** 所属会话实时授权；不参与冻结的审批模式/路径权限。 */
-  autoApprove?(sessionId: string): boolean;
-  /** 仅在授权事务提交后更新会话内存并发布状态事件。 */
-  autoApproved?(sessionId: string): void;
+  /** 所属任务实时授权；不参与冻结的审批模式/路径权限。 */
+  autoApprove?(taskId: string): boolean;
+  /** 仅在授权事务提交后更新任务内存并发布状态事件。 */
+  autoApproved?(taskId: string): void;
 }) {
   const waiters = new Map<
     string,
@@ -78,13 +78,13 @@ export function createInteractionController(options: {
       if (
         request.kind === "approval" &&
         !signal?.aborted &&
-        options.autoApprove?.(request.sessionId)
+        options.autoApprove?.(request.taskId)
       ) {
         const resolved: InteractionRecord = {
           ...record,
           status: "resolved",
           resolvedAt: options.now(),
-          response: { kind: "approval", decision: "approve", scope: "session" },
+          response: { kind: "approval", decision: "approve", scope: "task" },
         };
         if (!options.persistence.settleInteraction(resolved))
           throw new Error("审批请求已失效，未执行工具");
@@ -117,11 +117,11 @@ export function createInteractionController(options: {
       if (
         response.kind === "approval" &&
         response.decision === "approve" &&
-        response.scope === "session"
+        response.scope === "task"
       ) {
-        const sessionId = waiter.record.request.sessionId;
-        const records = options.persistence.approveSessionInteraction(
-          sessionId,
+        const taskId = waiter.record.request.taskId;
+        const records = options.persistence.approveTaskInteraction(
+          taskId,
           id,
           options.now()
         );
@@ -129,13 +129,12 @@ export function createInteractionController(options: {
         // 同步事务返回后不再 await：全部更新内存，再通知，最后一起唤醒。
         const completed = records.flatMap((record) => {
           const pending = waiters.get(record.request.id);
-          if (!pending || pending.record.request.sessionId !== sessionId)
-            return [];
+          if (!pending || pending.record.request.taskId !== taskId) return [];
           waiters.delete(record.request.id);
           pending.dispose();
           return [{ record, waiter: pending }];
         });
-        options.autoApproved?.(sessionId);
+        options.autoApproved?.(taskId);
         options.waiting(waiters.size > 0, true);
         for (const { record } of completed)
           options.emit({

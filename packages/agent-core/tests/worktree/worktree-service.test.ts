@@ -68,8 +68,8 @@ describe("worktree 创建", () => {
         worktreesDir: join(home, "worktrees"),
       });
       await expect(
-        service.createForSession({
-          sessionId: "retry-copy",
+        service.createForTask({
+          taskId: "retry-copy",
           workspacePath: repo,
         })
       ).rejects.toThrow();
@@ -83,8 +83,8 @@ describe("worktree 创建", () => {
       writeFileSync(join(repo, ".worktreeinclude"), "");
       expect(
         (
-          await service.createForSession({
-            sessionId: "retry-copy",
+          await service.createForTask({
+            taskId: "retry-copy",
             workspacePath: repo,
           })
         ).path
@@ -102,8 +102,8 @@ describe("worktree 创建", () => {
       });
       expect("cleanup" in service).toBe(false);
       for (let i = 0; i < 17; i++) {
-        const info = await service.createForSession({
-          sessionId: `keep-${i}`,
+        const info = await service.createForTask({
+          taskId: `keep-${i}`,
           workspacePath: repo,
         });
         if (i === 0)
@@ -128,35 +128,35 @@ describe("worktree 创建", () => {
       worktreesDir: join(home, "worktrees"),
     });
     await expect(
-      service.createForSession({ sessionId: "../outside", workspacePath: repo })
+      service.createForTask({ taskId: "../outside", workspacePath: repo })
     ).rejects.toThrow();
     expect(existsSync(join(home, "outside"))).toBe(false);
     writeFileSync(join(repo, ".worktreeinclude"), ".git/config");
     await expect(
-      service.createForSession({ sessionId: "metadata", workspacePath: repo })
+      service.createForTask({ taskId: "metadata", workspacePath: repo })
     ).rejects.toThrow();
     expect(existsSync(join(home, "worktrees", "metadata"))).toBe(false);
     writeFileSync(join(repo, ".worktreeinclude"), "../outside");
     await expect(
-      service.createForSession({ sessionId: "escape", workspacePath: repo })
+      service.createForTask({ taskId: "escape", workspacePath: repo })
     ).rejects.toThrow();
     writeFileSync(join(repo, ".worktreeinclude"), "");
     const existing = join(home, "worktrees", "exists");
     mkdirSync(existing, { recursive: true });
     writeFileSync(join(existing, "keep.txt"), "已有成果");
     await expect(
-      service.createForSession({ sessionId: "exists", workspacePath: repo })
+      service.createForTask({ taskId: "exists", workspacePath: repo })
     ).rejects.toThrow();
     expect(readFileSync(join(existing, "keep.txt"), "utf8")).toBe("已有成果");
     git(repo, "branch", "codexlike/collision");
     await expect(
-      service.createForSession({ sessionId: "collision", workspacePath: repo })
+      service.createForTask({ taskId: "collision", workspacePath: repo })
     ).rejects.toThrow();
     expect(git(repo, "branch", "--list", "codexlike/collision").trim()).toBe(
       "codexlike/collision"
     );
-    const result = await service.createForSession({
-      sessionId: "keep-changes",
+    const result = await service.createForTask({
+      taskId: "keep-changes",
       workspacePath: repo,
     });
     writeFileSync(join(result.path, "new-result.txt"), "新成果");
@@ -177,8 +177,8 @@ describe("worktree 创建", () => {
     const service = createWorktreeService({
       worktreesDir: join(home, "worktrees"),
     });
-    const result = await service.createForSession({
-      sessionId: "hook-result",
+    const result = await service.createForTask({
+      taskId: "hook-result",
       workspacePath: repo,
     });
     expect(readFileSync(join(result.path, "hook-result.txt"), "utf8")).toBe(
@@ -200,7 +200,7 @@ describe("worktree 创建", () => {
       worktreesDir: join(home, "worktrees"),
     });
     await expect(
-      service.createForSession({ sessionId: "unborn", workspacePath: repo })
+      service.createForTask({ taskId: "unborn", workspacePath: repo })
     ).rejects.toThrow();
     expect(existsSync(join(home, "worktrees", "unborn"))).toBe(false);
     writeFileSync(join(repo, "first.txt"), "初始成果");
@@ -208,8 +208,8 @@ describe("worktree 创建", () => {
     git(repo, "commit", "-m", "initial");
     expect(
       (
-        await service.createForSession({
-          sessionId: "unborn",
+        await service.createForTask({
+          taskId: "unborn",
           workspacePath: repo,
         })
       ).branch
@@ -226,13 +226,13 @@ describe("worktree 创建", () => {
       worktreesDir: join(home, "worktrees"),
     });
 
-    const info = await service.createForSession({
-      sessionId: "session-abc",
+    const info = await service.createForTask({
+      taskId: "task-abc",
       workspacePath: repo,
     });
 
-    expect(info.path).toBe(join(home, "worktrees", "session-abc"));
-    expect(info.branch).toBe("codexlike/session-abc");
+    expect(info.path).toBe(join(home, "worktrees", "task-abc"));
+    expect(info.branch).toBe("codexlike/task-abc");
     // worktree 真实存在且检出 HEAD 内容
     expect(existsSync(join(info.path, "README.md"))).toBe(true);
     expect(readFileSync(join(info.path, "tracked.txt"), "utf8")).toBe(
@@ -240,12 +240,12 @@ describe("worktree 创建", () => {
     );
     // worktree 当前分支即独立分支；主仓库仍在 main
     expect(git(info.path, "branch", "--show-current").trim()).toBe(
-      "codexlike/session-abc"
+      "codexlike/task-abc"
     );
     expect(git(repo, "branch", "--show-current").trim()).toBe("main");
     // 主仓库分支列表中包含该独立分支（`+` = 分支被检出于其他 worktree，正是预期）
-    expect(git(repo, "branch", "--list", "codexlike/session-abc").trim()).toBe(
-      "+ codexlike/session-abc"
+    expect(git(repo, "branch", "--list", "codexlike/task-abc").trim()).toBe(
+      "+ codexlike/task-abc"
     );
   });
 
@@ -257,7 +257,7 @@ describe("worktree 创建", () => {
     });
 
     await expect(
-      service.createForSession({ sessionId: "s1", workspacePath: plain })
+      service.createForTask({ taskId: "s1", workspacePath: plain })
     ).rejects.toThrow("不是 git 仓库");
   });
 
@@ -277,8 +277,8 @@ describe("worktree 创建", () => {
       worktreesDir: join(makeWorktreesDir(), "worktrees"),
     });
 
-    const info = await service.createForSession({
-      sessionId: "session-env",
+    const info = await service.createForTask({
+      taskId: "task-env",
       workspacePath: repo,
     });
 
@@ -298,8 +298,8 @@ describe("worktree 创建", () => {
       worktreesDir: join(makeWorktreesDir(), "worktrees"),
     });
 
-    const info = await service.createForSession({
-      sessionId: "session-plain",
+    const info = await service.createForTask({
+      taskId: "task-plain",
       workspacePath: repo,
     });
 
@@ -307,17 +307,17 @@ describe("worktree 创建", () => {
     expect(existsSync(info.path)).toBe(true);
   });
 
-  it("目标目录已存在时中文报错（会话 id 冲突防御）", async () => {
+  it("目标目录已存在时中文报错（任务 id 冲突防御）", async () => {
     const repo = makeRepo();
     const home = makeWorktreesDir();
-    mkdirSync(join(home, "worktrees", "session-dup"), { recursive: true });
+    mkdirSync(join(home, "worktrees", "task-dup"), { recursive: true });
     const service = createWorktreeService({
       worktreesDir: join(home, "worktrees"),
     });
 
     await expect(
-      service.createForSession({
-        sessionId: "session-dup",
+      service.createForTask({
+        taskId: "task-dup",
         workspacePath: repo,
       })
     ).rejects.toThrow("已存在");

@@ -46,16 +46,16 @@ export interface SkillLoadRecord {
 export interface ResourceSnapshotSummary {
   catalog: ResourceCatalog;
   loaded: SkillLoadRecord[];
-  /** 主会话规范、索引与已加载文本的 token 估算，不含历史消息。 */
+  /** 主任务规范、索引与已加载文本的 token 估算，不含历史消息。 */
   estimatedTokens: number;
 }
 
-export interface SessionResourceState {
+export interface TaskResourceState {
   active: ResourceSnapshotSummary | null;
   last: ResourceSnapshotSummary | null;
 }
 
-export interface SessionResourcesView extends SessionResourceState {
+export interface TaskResourcesView extends TaskResourceState {
   /** 最新磁盘预览，不代表当前运行快照。 */
   preview: ResourceSnapshotSummary;
 }

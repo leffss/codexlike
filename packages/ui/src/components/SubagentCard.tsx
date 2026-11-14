@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
-import type { SubagentSegment } from "../lib/session-view";
+import type { SubagentSegment } from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
@@ -16,7 +16,7 @@ import { DisclosureArrow } from "./DisclosureArrow";
  * 子代理嵌套卡片（工单 13，GLOSSARY「子代理」；票 04 开合规则）：
  * 排队（并发上限等待）→ 运行中（当前活动工具 + 已用时）→ 完成（最终报告可展开）。
  * 运行→完成边沿自动收起一次：默认收起（报告折叠），用户已手动操作过则
- * 记忆值不覆盖（开合是渲染层内存态，滚动、切换会话不丢）。
+ * 记忆值不覆盖（开合是渲染层内存态，滚动、切换任务不丢）。
  */
 export function SubagentCard(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
@@ -215,7 +215,7 @@ function formatElapsed(subagent: SubagentSegment, now: number): string {
 }
 
 /**
- * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主会话思考块
+ * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主任务思考块
  * 同构——流式运行中默认展开实时可见、结束自动收起、收起后以一行摘要回看
  * （开合按 collapseKey 记忆，与卡片自身开合互不干扰）；与报告文本分离，
  * 重启后由落盘 reasoning 重建（旧记录自然缺失，不渲染空块）。

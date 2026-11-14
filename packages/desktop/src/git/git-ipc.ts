@@ -4,8 +4,8 @@ import {
   createLanguageModelFromProfile,
   generateCommitMessage,
   type ProviderProfile,
-  type SessionManager,
-  type SessionRecord,
+  type TaskManager,
+  type TaskRecord,
 } from "@codexlike/agent-core/node";
 
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
@@ -16,32 +16,32 @@ import { IPC } from "../shared/ipc";
 /**
  * 改动面板 + git 集成的 IPC 指令（工单 05）。
  * git 逻辑在 agent-core 的 git 服务（真实 git repo 测试覆盖），
- * 这里只做：会话 → 工作区的接线、输入校验、错误中文化。
+ * 这里只做：任务 → 工作区的接线、输入校验、错误中文化。
  */
 export function registerGitHandlers(options: {
-  manager: SessionManager;
+  manager: TaskManager;
   profiles: ProfileStore;
 }): void {
   const { manager, profiles } = options;
 
-  /** IPC 边界不信任渲染进程：sessionId 必须对应存在的会话 */
-  function findSession(sessionId: unknown): SessionRecord {
-    if (typeof sessionId !== "string") {
-      throw new Error("git：sessionId 必须是字符串");
+  /** IPC 边界不信任渲染进程：taskId 必须对应存在的任务 */
+  function findTask(taskId: unknown): TaskRecord {
+    if (typeof taskId !== "string") {
+      throw new Error("git：taskId 必须是字符串");
     }
     const record = manager
       .list()
-      .find((candidate: SessionRecord) => candidate.id === sessionId);
+      .find((candidate: TaskRecord) => candidate.id === taskId);
     if (record === undefined) {
-      throw new Error("会话不存在或已损坏");
+      throw new Error("任务不存在或已损坏");
     }
     return record;
   }
 
   ipcMain.handle(
     IPC.git.status,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      const record = findSession(sessionId);
+    async (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      const record = findTask(taskId);
       try {
         return await createGitService(record.workspacePath).status();
       } catch (error) {
@@ -57,11 +57,11 @@ export function registerGitHandlers(options: {
     IPC.git.diff,
     async (
       _e: IpcMainInvokeEvent,
-      sessionId: unknown,
+      taskId: unknown,
       path: unknown,
       oldPath: unknown
     ) => {
-      const record = findSession(sessionId);
+      const record = findTask(taskId);
       if (typeof path !== "string" || path === "") {
         throw new Error("git diff：文件路径不合法");
       }
@@ -84,11 +84,11 @@ export function registerGitHandlers(options: {
 
   ipcMain.handle(
     IPC.git.createBranch,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown) => {
-      const record = findSession(sessionId);
-      // 分支名由会话名生成（codexlike/<会话名>，sanitize 在 agent-core 纯函数）
+    async (_e: IpcMainInvokeEvent, taskId: unknown) => {
+      const record = findTask(taskId);
+      // 分支名由任务名生成（codexlike/<任务名>，sanitize 在 agent-core 纯函数）
       try {
-        return await createGitService(record.workspacePath).createSessionBranch(
+        return await createGitService(record.workspacePath).createTaskBranch(
           codexlikeBranchName(record.title)
         );
       } catch (error) {
@@ -102,8 +102,8 @@ export function registerGitHandlers(options: {
 
   ipcMain.handle(
     IPC.git.commitMessage,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown, profileId: unknown) => {
-      const record = findSession(sessionId);
+    async (_e: IpcMainInvokeEvent, taskId: unknown, profileId: unknown) => {
+      const record = findTask(taskId);
       if (typeof profileId !== "string" || profileId === "") {
         throw new Error("生成提交消息需要先选择模型（Provider Profile）");
       }
@@ -119,7 +119,7 @@ export function registerGitHandlers(options: {
         throw new Error("当前工作区不是 git 仓库");
       }
       try {
-        // 按会话内容 + 变更文件列表生成（一次不发工具的请求）
+        // 按任务内容 + 变更文件列表生成（一次不发工具的请求）
         return await generateCommitMessage({
           model,
           messages: manager.messages(record.id),
@@ -136,8 +136,8 @@ export function registerGitHandlers(options: {
 
   ipcMain.handle(
     IPC.git.commit,
-    async (_e: IpcMainInvokeEvent, sessionId: unknown, message: unknown) => {
-      const record = findSession(sessionId);
+    async (_e: IpcMainInvokeEvent, taskId: unknown, message: unknown) => {
+      const record = findTask(taskId);
       if (typeof message !== "string" || message.trim() === "") {
         throw new Error("提交消息不能为空");
       }

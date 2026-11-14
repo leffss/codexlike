@@ -66,7 +66,7 @@ async function send(window, text) {
   await window.getByTestId("composer-send").click();
 }
 async function select(window, title) {
-  await window.getByTestId("session-item").filter({ hasText: title }).click();
+  await window.getByTestId("task-item").filter({ hasText: title }).click();
 }
 async function main() {
   const root = mkdtempSync(join(tmpdir(), "codexlike-exit-recovery-"));
@@ -123,7 +123,7 @@ async function main() {
   let window;
   try {
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
-    await window.getByTestId("new-session").waitFor();
+    await window.getByTestId("new-task").waitFor();
     // 只配置外部模型经公开preload；实际发送、草稿、问答、滚动和退出均真实点击。
     await window.evaluate(async (port) => {
       await window.codexlike.providerProfiles.create({
@@ -153,43 +153,43 @@ async function main() {
       "工具只追加一次"
     );
 
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await send(window, "独立问答");
     await window.getByTestId("question-custom").fill("尚未提交的退出问答草稿");
     const pending = await window.evaluate(async () => {
-      const record = (await window.codexlike.sessions.list()).find(
+      const record = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "独立问答"
       );
       return {
-        session: record,
+        task: record,
         request: (
-          await window.codexlike.sessions.pendingInteractions(record.id)
+          await window.codexlike.tasks.pendingInteractions(record.id)
         )[0].request,
       };
     });
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await send(window, "后台审批");
     await window.getByTestId("approval-approve").waitFor();
     const approval = await window.evaluate(async () => {
-      const record = (await window.codexlike.sessions.list()).find(
+      const record = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "后台审批"
       );
       return {
-        session: record,
+        task: record,
         request: (
-          await window.codexlike.sessions.pendingInteractions(record.id)
+          await window.codexlike.tasks.pendingInteractions(record.id)
         )[0].request,
       };
     });
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await send(window, "子代理任务");
     await until(() => held.has("child"), "子代理模型未启动");
     await window.getByTestId("subagent-card").waitFor();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await send(window, "长历史");
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    await window.getByTestId("composer-input").fill("正式会话未发送输入");
+    await window.getByTestId("composer-input").fill("正式任务未发送输入");
     await selectComposerOption(window, "thinking-effort-select", "high");
     const stream = window.getByTestId("message-stream");
     await stream.hover();
@@ -201,13 +201,13 @@ async function main() {
     const readingTop = await stream.evaluate((el) => el.scrollTop);
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await window.getByTestId("project-group").click();
-    await window.getByTestId("session-search-toggle").click();
-    await window.getByTestId("session-search-input").fill("长历史");
+    await window.getByTestId("task-search-toggle").click();
+    await window.getByTestId("task-search-input").fill("长历史");
 
-    // 关闭按钮入口：即使项目折叠/正在搜索/当前非执行会话也提示，取消不提前停止。
+    // 关闭按钮入口：即使项目折叠/正在搜索/当前非执行任务也提示，取消不提前停止。
     await window.getByTestId("window-close").click();
     await window.getByTestId("exit-confirm").waitFor();
     await assertSemanticOverlay(
@@ -218,7 +218,7 @@ async function main() {
     held
       .get("项目慢任务")
       .send({ delta: { content: "取消退出后继续生成" }, finish_reason: null });
-    await window.getByTestId("session-search-toggle").click();
+    await window.getByTestId("task-search-toggle").click();
     await window.getByTestId("project-group").click();
     await select(window, "项目慢任务");
     await window
@@ -322,7 +322,7 @@ async function main() {
     app = null;
     await until(() => childDisconnected, "退出未中断子代理模型连接");
     assert(
-      !existsSync(join(approval.session.workspacePath, "must-not-write.txt")),
+      !existsSync(join(approval.task.workspacePath, "must-not-write.txt")),
       "旧审批未执行"
     );
     assert(model.requestCount() === count, "确认退出未触发额外模型请求");
@@ -349,7 +349,7 @@ async function main() {
     );
     await projectAction(window);
     await untilDraft(window, "项目新建草稿", "项目草稿恢复");
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await untilDraft(window, "独立新建草稿", "独立草稿恢复");
     await select(window, "独立问答");
     await window
@@ -362,13 +362,13 @@ async function main() {
     );
     const responses = await window.evaluate(
       async ({ pending, approval }) => [
-        await window.codexlike.sessions.respondInteraction(
-          pending.session.id,
+        await window.codexlike.tasks.respondInteraction(
+          pending.task.id,
           pending.request.id,
           { kind: "questions", answers: [] }
         ),
-        await window.codexlike.sessions.respondApproval(
-          approval.session.id,
+        await window.codexlike.tasks.respondApproval(
+          approval.task.id,
           approval.request.id,
           "always"
         ),
@@ -380,11 +380,9 @@ async function main() {
       "失效请求不可经IPC回应，always也不授永久许可"
     );
     for (const title of ["项目慢任务", "独立问答", "后台审批", "子代理任务"]) {
-      const item = window
-        .getByTestId("session-item")
-        .filter({ hasText: title });
+      const item = window.getByTestId("task-item").filter({ hasText: title });
       assert(
-        (await item.getByTestId("session-activity").textContent()) === "已中断",
+        (await item.getByTestId("task-activity").textContent()) === "已中断",
         `${title}恢复为中断`
       );
     }
@@ -402,7 +400,7 @@ async function main() {
     await send(window, "后台审批");
     await window.getByTestId("approval-approve").waitFor();
     assert(
-      !existsSync(join(approval.session.workspacePath, "must-not-write.txt")),
+      !existsSync(join(approval.task.workspacePath, "must-not-write.txt")),
       "下一轮仍需新的显式授权"
     );
     await window.getByTestId("composer-stop").click();
@@ -424,9 +422,9 @@ async function main() {
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await select(window, "异常慢任务");
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "异常慢任务" })
-      .getByTestId("session-activity")
+      .getByTestId("task-activity")
       .filter({ hasText: "已中断" })
       .waitFor();
     await delay(300);

@@ -1,33 +1,33 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { ProjectRecord } from "@codexlike/agent-core";
-import type { ProjectRemoval, SessionListItem } from "@codexlike/desktop/ipc";
+import type { ProjectRemoval, TaskListItem } from "@codexlike/desktop/ipc";
 
 const button =
   "rounded border border-line px-3 py-1.5 text-sm hover:bg-hover disabled:opacity-50";
 
 /** 选择与确认只表达用户意图，活动及目录约束仍由宿主在实际写入点复查。 */
 export function MembershipDialog(props: {
-  session: SessionListItem;
+  task: TaskListItem;
   projects: ProjectRecord[];
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
-  const sessionId = props.session.id;
+  const taskId = props.task.id;
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     const previous = document.activeElement;
-    const sessionTarget = () =>
+    const taskTarget = () =>
       Array.from(
-        document.querySelectorAll<HTMLElement>("[data-session-select]")
-      ).find((element) => element.dataset.sessionId === sessionId);
+        document.querySelectorAll<HTMLElement>("[data-task-select]")
+      ).find((element) => element.dataset.taskId === taskId);
     const returnTarget =
       previous instanceof HTMLElement &&
       previous !== document.body &&
       !previous.closest("[role='menu']")
         ? previous
-        : sessionTarget();
+        : taskTarget();
     (
       dialog.querySelector<HTMLElement>(
         "select:not(:disabled), button:not(:disabled)"
@@ -47,13 +47,13 @@ export function MembershipDialog(props: {
           return;
         const target = returnTarget?.isConnected
           ? returnTarget
-          : (sessionTarget() ??
-            document.querySelector<HTMLElement>("[data-testid='new-session']"));
+          : (taskTarget() ??
+            document.querySelector<HTMLElement>("[data-testid='new-task']"));
         target?.focus({ preventScroll: true });
       });
     };
-  }, [sessionId]);
-  const movingOut = props.session.projectId !== null;
+  }, [taskId]);
+  const movingOut = props.task.projectId !== null;
   const [target, setTarget] = useState(props.projects[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,8 +96,8 @@ export function MembershipDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      await window.codexlike.sessions.setProject(
-        props.session.id,
+      await window.codexlike.tasks.setProject(
+        props.task.id,
         movingOut ? null : target
       );
       await props.onChanged();
@@ -118,21 +118,21 @@ export function MembershipDialog(props: {
         onKeyDown={onKeyDown}
         role="dialog"
         aria-modal="true"
-        aria-label="调整会话归属"
+        aria-label="调整任务归属"
         data-testid="membership-dialog"
         className="w-[440px] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl"
       >
         <h2 className="mb-3 font-medium">
-          {movingOut ? "移出项目" : "移入项目"} · {props.session.title}
+          {movingOut ? "移出项目" : "移入项目"} · {props.task.title}
         </h2>
         <p className="mb-3 text-sm text-fg-muted">
-          只调整项目归属，不改变工作区、分支、历史或会话设置。
+          只调整项目归属，不改变工作区、分支、历史或任务设置。
         </p>
         {!movingOut && (
           <>
             <p className="mb-2 text-xs text-fg-muted">
-              {props.session.workspaceMode === "worktree"
-                ? "Worktree 会话只能移回来源项目。"
+              {props.task.workspaceMode === "worktree"
+                ? "Worktree 任务只能移回来源项目。"
                 : "只能移入与实际工作区相同目录的项目。"}
             </p>
             <select
@@ -180,7 +180,7 @@ export function MembershipDialog(props: {
             className={button}
             onClick={() => void confirm()}
           >
-            {busy ? "处理中…" : movingOut ? "移出为独立会话" : "确认移入"}
+            {busy ? "处理中…" : movingOut ? "移出为独立任务" : "确认移入"}
           </button>
         </div>
       </section>
@@ -226,14 +226,14 @@ export function ProjectRemovalDialog(props: {
         <h2 className="mb-3 font-medium">移除项目「{props.project.name}」？</h2>
         <p className="mb-2 text-sm">
           将移除项目及其全部 {props.memberCount}{" "}
-          个所属会话记录（包含归档历史），并清理相关草稿。此操作不可撤销。
+          个所属任务记录（包含归档历史），并清理相关草稿。此操作不可撤销。
         </p>
         <p className="mb-2 text-sm text-fg-muted">
-          项目目录、Worktree 和全部磁盘文件均保留。同目录的独立会话及已移出的
-          Worktree 会话不会被移除。
+          项目目录、Worktree 和全部磁盘文件均保留。同目录的独立任务及已移出的
+          Worktree 任务不会被移除。
         </p>
         <p className="text-xs text-fg-muted">
-          如果所属会话正在执行或等待回应，请先明确停止再整理。
+          如果所属任务正在执行或等待回应，请先明确停止再整理。
         </p>
         {error && (
           <p

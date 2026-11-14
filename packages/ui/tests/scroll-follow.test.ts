@@ -224,7 +224,7 @@ describe("阅读位置记忆与恢复计算", () => {
     ).toEqual({ scrollTop: 120, atBottom: false });
   });
 
-  it("无记忆定位当前最新并跟随（新会话）", () => {
+  it("无记忆定位当前最新并跟随（新任务）", () => {
     expect(restoreReadingPlan({ saved: null, geometry: tall })).toEqual({
       mode: "following",
       scrollTop: 1000,

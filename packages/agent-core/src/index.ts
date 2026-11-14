@@ -5,7 +5,8 @@
 // - `.`（本文件）：浏览器可打包——只含类型与 provider/校验的值导出，
 //   不引入任何 Node 内置模块（渲染进程的 ui 包从这里值导入）；
 // - `./node`（node.ts）：Node 宿主（Electron 主进程）专用，
-//   含会话对象、会话管理器与 SQLite 持久化（依赖 node:sqlite 等 Node API）。
+//   含任务对象、任务管理器与 SQLite 持久化（依赖 node:sqlite 等 Node API）。
+//
 export type {
   ProviderProfile,
   ProviderProfileErrors,
@@ -27,14 +28,14 @@ export type {
   WorkbenchTarget,
   WorkbenchValue,
   WorkbenchEntry,
-  SessionPreferences,
+  TaskPreferences,
   ReadingPosition,
   SavedQuestionDraft,
-} from "./session/workbench-state";
-export { workbenchKey } from "./session/workbench-state";
+} from "./task/workbench-state";
+export { workbenchKey } from "./task/workbench-state";
 
-// 会话域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
-// （ApprovalMode 定义在 ./session/approval，经下方审批域出口统一导出）
+// 任务域类型：type-only 再导出，浏览器侧 import type 会被完全擦除
+// （ApprovalMode 定义在 ./task/approval，经下方审批域出口统一导出）
 export type {
   ApprovalDecisionRecord,
   CompactRecord,
@@ -42,15 +43,15 @@ export type {
   MentionAttachment,
   MessageRole,
   ProjectRecord,
-  SessionEvent,
-  SessionRecord,
-  SessionStatus,
+  TaskEvent,
+  TaskRecord,
+  TaskStatus,
   StoredMessage,
   TranscriptItem,
   WorkspaceMode,
-} from "./session/types";
+} from "./task/types";
 
-export type { SessionSearchResult } from "./session/search";
+export type { TaskSearchResult } from "./task/search";
 
 // 审批域（GLOSSARY「审批模式」）：类型与状态机纯函数均浏览器安全（ui 审批卡片 / 模式选择器共用）
 export type {
@@ -58,14 +59,14 @@ export type {
   ApprovalGate,
   ApprovalMode,
   ApprovalRequest,
-} from "./session/approval";
+} from "./task/approval";
 export {
   APPROVAL_MODES,
   APPROVAL_MODE_NAMES,
   commandFirstWord,
   decideApproval,
   isRiskyCommand,
-} from "./session/approval";
+} from "./task/approval";
 
 // 工具域类型（GLOSSARY「工具注册表」）：type-only，工具实现（Node 专属）在 ./node 出口
 export type {
@@ -103,8 +104,8 @@ export type {
   ResourceDiagnostic,
   ResourceExecution,
   ResourceSnapshotSummary,
-  SessionResourcesView,
-  SessionResourceState,
+  TaskResourcesView,
+  TaskResourceState,
   SkillDescriptor,
   SkillLoadRecord,
 } from "./context/resource-types";
@@ -146,6 +147,6 @@ export type {
   GitService,
   GitStatus,
 } from "./git/git-service";
-// 会话名 → codexlike/<会话名> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
+// 任务名 → codexlike/<任务名> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
 export { codexlikeBranchName } from "./git/branch-name";
 export { buildCommitMessagePrompt } from "./git/commit-message";

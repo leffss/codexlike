@@ -1,7 +1,7 @@
 // E2E 冒烟（工单 02 + 03 扩展）：启动真实 Electron 应用走最小路径——
-// 预置 Provider Profile（指向本地 OpenAI 兼容 mock SSE server）→ 新建会话（固定工作区）
+// 预置 Provider Profile（指向本地 OpenAI 兼容 mock SSE server）→ 新建任务（固定工作区）
 // → 消息往返（第一轮返回 tool_call：真实执行 write_file → 结果回填 → 第二轮流式 markdown）
-// → 工具卡片出现并可展开 → 重启应用断言会话列表、消息历史与工具卡片恢复。
+// → 工具卡片出现并可展开 → 重启应用断言任务列表、消息历史与工具卡片恢复。
 // 运行：pnpm test:e2e（先全仓 build，再用生产产物启动）。
 import {
   existsSync,
@@ -133,13 +133,13 @@ async function main() {
     );
     console.log("[e2e] 搜索源已配置（真实 safeStorage 加密落盘）");
 
-    // 2) 返回工作台 → 新建会话（目录选择器经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
+    // 2) 返回工作台 → 新建任务（目录选择器经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByTestId("settings-back").click();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
     await selectComposerOption(window, "approval-mode-select", "assist");
     assert(
-      (await window.getByTestId("session-item").count()) === 0,
+      (await window.getByTestId("task-item").count()) === 0,
       "首次发送前只有草稿"
     );
     console.log("[e2e] 草稿已选择工作区并显式开启 assist");
@@ -237,7 +237,7 @@ async function main() {
       "[e2e] web_search 全链路：key 配置 → 工具调用 → mock 搜索 → 卡片可展开"
     );
 
-    // 4) 关闭 → 重启（等价应用重启）：侧栏会话列表、消息历史与工具卡片完整恢复
+    // 4) 关闭 → 重启（等价应用重启）：侧栏任务列表、消息历史与工具卡片完整恢复
     await closeApp(app);
     const second = await launchApp({
       homeDir,
@@ -245,11 +245,8 @@ async function main() {
     });
     app = second.app;
     window = second.window;
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 15_000 });
-    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("task-item").first().waitFor({ timeout: 15_000 });
+    await window.getByTestId("task-item").first().click();
     await window
       .getByTestId("message-user")
       .first()
@@ -265,7 +262,7 @@ async function main() {
     }
     const restoredCards = await window.getByTestId("tool-call-card").count();
     assert(restoredCards >= 2, "重启后工具卡片未恢复（两轮各一张）");
-    console.log("[e2e] 重启后侧栏会话列表、消息历史与工具卡片完整恢复");
+    console.log("[e2e] 重启后侧栏任务列表、消息历史与工具卡片完整恢复");
 
     await closeApp(app);
     console.log("[e2e] 冒烟通过 ✅");

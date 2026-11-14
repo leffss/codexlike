@@ -58,7 +58,7 @@ export function ApplicationExit(props: {
               <>
                 <h2 className="mb-3 font-semibold">仍有未完成执行或等待回应</h2>
                 <p className="mb-5 text-sm">
-                  退出将中断所有会话及子代理。已保存的历史和草稿会保留，重启不会自动继续执行。
+                  退出将中断所有任务及子代理。已保存的历史和草稿会保留，重启不会自动继续执行。
                 </p>
                 <div className="flex justify-end gap-3">
                   <button

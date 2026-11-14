@@ -16,7 +16,7 @@ import {
   closeApp,
   launchApp,
   projectAction,
-  sessionMenu,
+  taskMenu,
   startMockProvider,
   untilDraft,
 } from "./helpers.mjs";
@@ -43,15 +43,15 @@ async function main() {
     await window.getByTestId("add-project").click();
     await window.getByTestId("project-group").waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 0,
-      "添加空项目不创建会话"
+      (await window.getByTestId("task-item").count()) === 0,
+      "添加空项目不创建任务"
     );
     await closeApp(app);
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window.getByTestId("project-group").waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 0,
+      (await window.getByTestId("task-item").count()) === 0,
       "真进程重开仍为空项目"
     );
     await window.getByTestId("settings-open").click();
@@ -66,13 +66,10 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目草稿");
-    assert(
-      (await window.getByTestId("session-item").count()) === 0,
-      "新建仅草稿"
-    );
-    await window.getByTestId("new-session").click();
+    assert((await window.getByTestId("task-item").count()) === 0, "新建仅草稿");
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("独立草稿");
-    assert(!existsSync(join(homeDir, "sessions")), "首次发送前不分配专用目录");
+    assert(!existsSync(join(homeDir, "tasks")), "首次发送前不分配专用目录");
     await projectAction(window);
     await untilDraft(window, "项目草稿", "项目草稿切换不丢");
     await window.getByTestId("composer-send").click();
@@ -84,12 +81,12 @@ async function main() {
       ),
       "项目目录明确展示"
     );
-    const projectSession = await window
-      .getByTestId("session-item")
-      .getAttribute("data-session-id");
+    const projectTask = await window
+      .getByTestId("task-item")
+      .getAttribute("data-task-id");
     await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")
@@ -100,7 +97,7 @@ async function main() {
       (await window.getByTestId("composer-input").inputValue()) === "独立草稿",
       "独立草稿切换不丢"
     );
-    writeFileSync(join(homeDir, "sessions"), "保留原文件");
+    writeFileSync(join(homeDir, "tasks"), "保留原文件");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("draft-error").waitFor();
     assert(
@@ -108,20 +105,20 @@ async function main() {
       "失败保留输入"
     );
     assert(
-      (await window.getByTestId("session-item").count()) === 1,
-      "失败没有空会话"
+      (await window.getByTestId("task-item").count()) === 1,
+      "失败没有空任务"
     );
     assert(
-      readFileSync(join(homeDir, "sessions"), "utf8") === "保留原文件",
+      readFileSync(join(homeDir, "tasks"), "utf8") === "保留原文件",
       "失败不删已有文件"
     );
-    rmSync(join(homeDir, "sessions"));
+    rmSync(join(homeDir, "tasks"));
     // Windows 删除竞态：外部句柄（杀毒实时扫描等）尚未释放时文件处于
-    // delete-pending，立即以同名创建目录会 EPERM，被 sessions:start 兜底
-    // 成"无法创建独立会话专用目录"。以同名目录可重建为确定信号后再重发。
+    // delete-pending，立即以同名创建目录会 EPERM，被 tasks:start 兜底
+    // 成"无法创建独立任务专用目录"。以同名目录可重建为确定信号后再重发。
     for (let attempt = 0; ; attempt++) {
       try {
-        mkdirSync(join(homeDir, "sessions"));
+        mkdirSync(join(homeDir, "tasks"));
         break;
       } catch (error) {
         if (attempt >= 40) throw error;
@@ -132,14 +129,14 @@ async function main() {
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 2,
+      (await window.getByTestId("task-item").count()) === 2,
       "双击只创建一次"
     );
     assert(
       (await window
         .getByTestId("standalone-header")
         .locator("..")
-        .getByTestId("session-item")
+        .getByTestId("task-item")
         .count()) === 1,
       "独立分区不伪造项目"
     );
@@ -148,9 +145,9 @@ async function main() {
       .getAttribute("title");
     assert(existsSync(standalonePath), "专用持久目录真实存在");
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
-        window.getByTestId("session-item").filter({ hasText: "独立草稿" })
+        window.getByTestId("task-item").filter({ hasText: "独立草稿" })
       )
     )
       .getByTestId("rename-button")
@@ -158,10 +155,10 @@ async function main() {
     await window.getByTestId("rename-input").fill("独立新标题");
     await window.getByTestId("rename-input").press("Enter");
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立新标题" })
       .waitFor();
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("同目录但独立");
     await window.getByTestId("composer-send").click();
@@ -171,24 +168,24 @@ async function main() {
       (await window
         .getByTestId("standalone-header")
         .locator("..")
-        .getByTestId("session-item")
+        .getByTestId("task-item")
         .count()) === 2,
-      "同项目目录仍是独立会话"
+      "同项目目录仍是独立任务"
     );
     assert(
       (await window.getByTestId("project-group").count()) === 1,
       "选目录不创建项目"
     );
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "项目草稿" })
       .click();
     assert(
       (await window
-        .getByTestId("session-item")
+        .getByTestId("task-item")
         .filter({ hasText: "项目草稿" })
-        .getAttribute("data-session-id")) === projectSession,
-      "会话标识稳定"
+        .getAttribute("data-task-id")) === projectTask,
+      "任务标识稳定"
     );
     await window
       .getByTestId("message-user")
@@ -199,7 +196,7 @@ async function main() {
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立新标题" })
       .click();
     await window
@@ -298,8 +295,8 @@ async function projectPinningScenario() {
         "置顶按钮不触发项目折叠"
       );
       assert(
-        (await window.getByTestId("session-item").count()) === 0,
-        "置顶操作不能创建会话"
+        (await window.getByTestId("task-item").count()) === 0,
+        "置顶操作不能创建任务"
       );
     }
     await waitOrder(normalOrder);

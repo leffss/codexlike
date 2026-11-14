@@ -283,7 +283,7 @@ async function main() {
     assert(
       !subagentRequests[0].includes(PROJECT_BODY) &&
         !subagentRequests[0].includes(REFERENCE_BODY),
-      "子代理继承了主会话已加载正文"
+      "子代理继承了主任务已加载正文"
     );
     assert(
       subagentRequests[2].includes(RESOURCE_BODY),
@@ -310,12 +310,12 @@ async function main() {
     assert(
       changed[0].includes("UPDATED_PROJECT_RULE_15") &&
         !changed[0].includes(PROJECT_RULE),
-      "缓存会话未刷新 AGENTS"
+      "缓存任务未刷新 AGENTS"
     );
     assert(
       changed[0].includes("UPDATED_PROJECT_BODY_27") &&
         !changed[0].includes(PROJECT_BODY),
-      "缓存会话未刷新技能"
+      "缓存任务未刷新技能"
     );
 
     // 不存在的显式技能不能发出模型请求。
@@ -376,12 +376,12 @@ async function main() {
     const relaunched = await launchApp({ homeDir });
     app = relaunched.app;
     window = relaunched.window;
-    await window.getByTestId("session-item").first().waitFor();
+    await window.getByTestId("task-item").first().waitFor();
     const restored = await send("恢复后的普通消息，不使用技能。", "restored");
     assert(
       !restored[0].includes("UPDATED_PROJECT_BODY_27") &&
         !restored[0].includes(REFERENCE_BODY),
-      "恢复会话重新激活了旧技能正文"
+      "恢复任务重新激活了旧技能正文"
     );
     console.log(
       "[e2e] 规范刷新、目录覆盖、$多技能、按需加载、附属资源、子代理隔离与恢复通过"

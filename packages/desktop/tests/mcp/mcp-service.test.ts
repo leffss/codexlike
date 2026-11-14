@@ -1,40 +1,40 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import process from 'node:process';
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import process from "node:process";
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from "vitest";
 
-import type { ToolDefinition } from '@codexlike/agent-core';
+import type { ToolDefinition } from "@codexlike/agent-core";
 
-import { createMcpStore } from '../../src/mcp/mcp-store';
-import { createMcpService, type McpService } from '../../src/mcp/mcp-service';
+import { createMcpStore } from "../../src/mcp/mcp-store";
+import { createMcpService, type McpService } from "../../src/mcp/mcp-service";
 
 /** 复用 agent-core 的 fake MCP server 夹具（纯 .mjs 脚本，node 直接运行） */
 const FIXTURE = join(
   __dirname,
-  '..',
-  '..',
-  '..',
-  'agent-core',
-  'tests',
-  'mcp',
-  'fixtures',
-  'fake-mcp-server.mjs',
+  "..",
+  "..",
+  "..",
+  "agent-core",
+  "tests",
+  "mcp",
+  "fixtures",
+  "fake-mcp-server.mjs"
 );
 
 const fakeSafeStorage = {
   isEncryptionAvailable: async () => true,
   encryptString: async (plainText: string) =>
-    Buffer.from(`enc:${Buffer.from(plainText, 'utf8').toString('base64')}`),
+    Buffer.from(`enc:${Buffer.from(plainText, "utf8").toString("base64")}`),
   decryptString: async (encrypted: Buffer) => {
-    const text = encrypted.toString('utf8');
-    return Buffer.from(text.slice(4), 'base64').toString('utf8');
+    const text = encrypted.toString("utf8");
+    return Buffer.from(text.slice(4), "base64").toString("utf8");
   },
 };
 
 const services: McpService[] = [];
-let tempDir = '';
+let tempDir = "";
 
 afterAll(async () => {
   await Promise.all(services.map((service) => service.shutdown()));
@@ -44,7 +44,7 @@ afterAll(async () => {
 });
 
 function newService(): McpService {
-  tempDir = mkdtempSync(join(tmpdir(), 'codexlike-mcp-service-'));
+  tempDir = mkdtempSync(join(tmpdir(), "codexlike-mcp-service-"));
   const store = createMcpStore({ dir: tempDir, safeStorage: fakeSafeStorage });
   const service = createMcpService({ store });
   services.push(service);
@@ -52,20 +52,23 @@ function newService(): McpService {
 }
 
 const fakeServerInput = {
-  name: 'fake',
+  name: "fake",
   command: process.execPath,
   args: [FIXTURE],
   env: {},
 };
 
-describe('mcp service（desktop 装配：store + McpManager + 会话工具工厂）', () => {
-  it('startup 自动连接已配置 server；addServer 即时连接，overview 可见状态与工具', async () => {
+describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂）", () => {
+  it("startup 自动连接已配置 server；addServer 即时连接，overview 可见状态与工具", async () => {
     const service = newService();
     const added = await service.addServer(fakeServerInput);
-    expect(added.status).toBe('connected'); // 添加即连接
+    expect(added.status).toBe("connected"); // 添加即连接
 
     // 等价重启：新 service 从同一 store 读配置，startup 自动连接
-    const store2 = createMcpStore({ dir: tempDir, safeStorage: fakeSafeStorage });
+    const store2 = createMcpStore({
+      dir: tempDir,
+      safeStorage: fakeSafeStorage,
+    });
     const service2 = createMcpService({ store: store2 });
     services.push(service2);
     await service2.startup();
@@ -73,52 +76,56 @@ describe('mcp service（desktop 装配：store + McpManager + 会话工具工厂
     const overview = await service2.overview();
     expect(overview.servers).toHaveLength(1);
     const server = overview.servers[0]!;
-    expect(server.status).toBe('connected');
+    expect(server.status).toBe("connected");
     expect(server.error).toBeNull();
     expect(server.tools.map((tool) => tool.name)).toEqual([
-      'mcp_fake_echo',
-      'mcp_fake_slow_echo',
-      'mcp_fake_crash',
+      "mcp_fake_echo",
+      "mcp_fake_slow_echo",
+      "mcp_fake_crash",
     ]);
     expect(server.tools.every((tool) => tool.enabled)).toBe(true);
   });
 
-  it('setToolEnabled(false) 后会话工具工厂不再提供该工具；再启用恢复', async () => {
+  it("setToolEnabled(false) 后任务工具工厂不再提供该工具；再启用恢复", async () => {
     const service = newService();
     await service.addServer(fakeServerInput);
 
     const names = () =>
-      service.sessionTools().map((tool: ToolDefinition) => tool.name);
-    expect(names()).toContain('mcp_fake_echo');
+      service.taskTools().map((tool: ToolDefinition) => tool.name);
+    expect(names()).toContain("mcp_fake_echo");
 
-    await service.setToolEnabled('mcp_fake_echo', false);
-    expect(names()).not.toContain('mcp_fake_echo');
-    expect(names()).toContain('mcp_fake_slow_echo');
+    await service.setToolEnabled("mcp_fake_echo", false);
+    expect(names()).not.toContain("mcp_fake_echo");
+    expect(names()).toContain("mcp_fake_slow_echo");
 
-    await service.setToolEnabled('mcp_fake_echo', true);
-    expect(names()).toContain('mcp_fake_echo');
+    await service.setToolEnabled("mcp_fake_echo", true);
+    expect(names()).toContain("mcp_fake_echo");
 
     // overview 中启停状态可见
     const overview = await service.overview();
-    const echo = overview.servers[0]!.tools.find((t) => t.name === 'mcp_fake_echo');
+    const echo = overview.servers[0]!.tools.find(
+      (t) => t.name === "mcp_fake_echo"
+    );
     expect(echo?.enabled).toBe(true);
   });
 
-  it('removeServer 断开连接并从 overview 消失；会话工具同步撤下', async () => {
+  it("removeServer 断开连接并从 overview 消失；任务工具同步撤下", async () => {
     const service = newService();
     await service.addServer(fakeServerInput);
-    expect(service.sessionTools().length).toBeGreaterThan(0);
+    expect(service.taskTools().length).toBeGreaterThan(0);
 
-    await service.removeServer((await service.overview()).servers[0]!.config.id);
+    await service.removeServer(
+      (await service.overview()).servers[0]!.config.id
+    );
     expect((await service.overview()).servers).toEqual([]);
-    expect(service.sessionTools()).toEqual([]);
+    expect(service.taskTools()).toEqual([]);
   });
 
-  it('连接失败的 server 不拖垮整体：failed 状态 + 中文原因可见，其余 server 正常', async () => {
+  it("连接失败的 server 不拖垮整体：failed 状态 + 中文原因可见，其余 server 正常", async () => {
     const service = newService();
     await service.addServer({
-      name: '坏 server',
-      command: 'definitely-not-exist-cmd-xyz',
+      name: "坏 server",
+      command: "definitely-not-exist-cmd-xyz",
       args: [],
       env: {},
     });
@@ -126,37 +133,39 @@ describe('mcp service（desktop 装配：store + McpManager + 会话工具工厂
     await service.startup();
 
     const overview = await service.overview();
-    const broken = overview.servers.find((s) => s.config.name === '坏 server');
-    const healthy = overview.servers.find((s) => s.config.name === 'fake');
-    expect(broken?.status).toBe('failed');
-    expect(broken?.error).toContain('definitely-not-exist-cmd-xyz');
-    expect(healthy?.status).toBe('connected');
+    const broken = overview.servers.find((s) => s.config.name === "坏 server");
+    const healthy = overview.servers.find((s) => s.config.name === "fake");
+    expect(broken?.status).toBe("failed");
+    expect(broken?.error).toContain("definitely-not-exist-cmd-xyz");
+    expect(healthy?.status).toBe("connected");
   });
 
-  it('reconnect 重连指定 server（手动重连入口）', async () => {
+  it("reconnect 重连指定 server（手动重连入口）", async () => {
     const service = newService();
     const created = await service.addServer(fakeServerInput);
     const view = await service.reconnect(created.config.id);
-    expect(view.status).toBe('connected');
+    expect(view.status).toBe("connected");
     expect(view.tools.length).toBe(3);
   });
 
-  it('sessionTools 与内置工具合并时内置优先（MCP 撞名跳过）', async () => {
+  it("taskTools 与内置工具合并时内置优先（MCP 撞名跳过）", async () => {
     const service = newService();
     await service.addServer(fakeServerInput);
     const builtin: ToolDefinition[] = [
       {
-        name: 'mcp_fake_echo',
-        description: '内置同名工具',
-        parameters: { type: 'object' },
-        permission: 'readonly',
-        execute: async () => ({ output: 'builtin', isError: false }),
+        name: "mcp_fake_echo",
+        description: "内置同名工具",
+        parameters: { type: "object" },
+        permission: "readonly",
+        execute: async () => ({ output: "builtin", isError: false }),
       },
     ];
-    const merged = service.sessionTools(builtin);
-    expect(merged.filter((tool) => tool.name === 'mcp_fake_echo')).toHaveLength(1);
-    expect(merged.find((tool) => tool.name === 'mcp_fake_echo')?.description).toBe(
-      '内置同名工具',
+    const merged = service.taskTools(builtin);
+    expect(merged.filter((tool) => tool.name === "mcp_fake_echo")).toHaveLength(
+      1
     );
+    expect(
+      merged.find((tool) => tool.name === "mcp_fake_echo")?.description
+    ).toBe("内置同名工具");
   });
 });

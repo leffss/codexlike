@@ -80,7 +80,7 @@ export function createPersistentWorkbench(
   return {
     load,
     patch,
-    /** 记录已由宿主移除：丢弃排队写入及迟到响应，不能污染其他会话的flush。 */
+    /** 记录已由宿主移除：丢弃排队写入及迟到响应，不能污染其他任务的flush。 */
     remove(target: WorkbenchTarget) {
       const key = workbenchKey(target);
       removed.add(key);

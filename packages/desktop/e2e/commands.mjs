@@ -1,6 +1,6 @@
 // E2E（工单 07）：斜杠命令 + @引用 + AGENTS.md 注入的真实应用冒烟。
 // 路径：预置全局/项目 AGENTS.md 与工作区文件 → 设置页建 Profile（本地 mock SSE）
-// → 建会话 → /status 展示 AGENTS.md 来源 → @引用 发消息并断言真实请求体
+// → 建任务 → /status 展示 AGENTS.md 来源 → @引用 发消息并断言真实请求体
 // 含 AGENTS.md 与被引用文件内容 → /rename /model /new /archive 逐一验证。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:commands（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -13,7 +13,7 @@ import {
   closeApp,
   launchApp,
   prepareDraft,
-  sessionMenu,
+  taskMenu,
   startMockProvider,
 } from "./helpers.mjs";
 
@@ -57,7 +57,7 @@ async function main() {
       .click();
     await window.getByText("Mock").first().waitFor();
 
-    // 2) 建会话（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
+    // 2) 建任务（目录经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
 
@@ -81,7 +81,7 @@ async function main() {
     const statusCard = window.getByTestId("message-status").first();
     await statusCard.waitFor({ timeout: 10_000 });
     const statusText = await statusCard.textContent();
-    // 正式会话只能由首次发送建立；模型、用量与 AGENTS.md 来源仍必须展示。
+    // 正式任务只能由首次发送建立；模型、用量与 AGENTS.md 来源仍必须展示。
     assert(
       statusText?.includes("mock-model") === true,
       `/status 应显示实际模型：${statusText}`
@@ -154,11 +154,11 @@ async function main() {
     console.log("[e2e] /status：发送消息后显示所用模型");
 
     // 5) /rename：侧栏标题更新
-    await composer.fill("/rename E2E改名会话");
+    await composer.fill("/rename E2E改名任务");
     await composer.press("Enter");
     await window
-      .getByTestId("session-item")
-      .filter({ hasText: "E2E改名会话" })
+      .getByTestId("task-item")
+      .filter({ hasText: "E2E改名任务" })
       .waitFor({ timeout: 5_000 });
     console.log("[e2e] /rename：侧栏标题已更新");
 
@@ -176,7 +176,7 @@ async function main() {
     await composer.press("Enter");
     await window.getByTestId("draft-select-workspace").waitFor();
     assert(
-      (await window.getByTestId("session-item").count()) === 1,
+      (await window.getByTestId("task-item").count()) === 1,
       "/new 只打开草稿"
     );
     assert(
@@ -187,38 +187,36 @@ async function main() {
     );
     await composer.fill("第二个独立任务");
     await window.getByTestId("composer-send").click();
-    await window.getByTestId("session-item").nth(1).waitFor();
+    await window.getByTestId("task-item").nth(1).waitFor();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    console.log("[e2e] /new：首次发送才创建第二个独立会话");
+    console.log("[e2e] /new：首次发送才创建第二个独立任务");
 
-    // 8) /archive：当前会话归档后侧栏只剩 1 个，已归档区可展开恢复
+    // 8) /archive：当前任务归档后侧栏只剩 1 个，已归档区可展开恢复
     await composer.fill("/archive");
     await composer.press("Enter");
     await window
-      .getByTestId("session-item")
-      .filter({ hasText: "E2E改名会话" })
+      .getByTestId("task-item")
+      .filter({ hasText: "E2E改名任务" })
       .waitFor();
     await window.waitForFunction(
-      () =>
-        document.querySelectorAll('[data-testid="session-item"]').length === 1,
+      () => document.querySelectorAll('[data-testid="task-item"]').length === 1,
       undefined,
       { timeout: 5_000 }
     );
     await window.getByTestId("toggle-archived").click();
     await (
-      await sessionMenu(
+      await taskMenu(
         window,
         window
-          .getByTestId("archived-session-item")
+          .getByTestId("archived-task-item")
           .filter({ hasText: "第二个独立任务" })
       )
     )
       .getByTestId("unarchive-button")
       .click();
     await window.waitForFunction(
-      () =>
-        document.querySelectorAll('[data-testid="session-item"]').length === 2,
+      () => document.querySelectorAll('[data-testid="task-item"]').length === 2,
       undefined,
       { timeout: 5_000 }
     );

@@ -21,8 +21,8 @@ export function InteractionHistory({
           : "等待回答"
         : response?.kind === "approval"
           ? response.decision === "approve"
-            ? response.scope === "session"
-              ? "已批准（会话授权批量通过）"
+            ? response.scope === "task"
+              ? "已批准（任务授权批量通过）"
               : "已批准（本次）"
             : "已拒绝"
           : "已回答";

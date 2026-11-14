@@ -1,4 +1,4 @@
-import type { ProjectRecord, SessionRecord } from "@codexlike/agent-core";
+import type { ProjectRecord, TaskRecord } from "@codexlike/agent-core";
 
 /** 只按显式归属分区；独立分区不是项目实体，空项目也始终保留。 */
 export interface ProjectGroup {
@@ -7,11 +7,11 @@ export interface ProjectGroup {
   name: string;
   path: string;
   createdAt: string;
-  active: SessionRecord[];
-  archived: SessionRecord[];
+  active: TaskRecord[];
+  archived: TaskRecord[];
 }
-export function groupSessionsByProject(
-  sessions: SessionRecord[],
+export function groupTasksByProject(
+  tasks: TaskRecord[],
   projects: ProjectRecord[]
 ): ProjectGroup[] {
   const groups: ProjectGroup[] = [
@@ -29,7 +29,7 @@ export function groupSessionsByProject(
     {
       key: "standalone",
       projectId: null,
-      name: "独立会话",
+      name: "独立任务",
       path: "",
       createdAt: "",
       active: [],
@@ -37,8 +37,8 @@ export function groupSessionsByProject(
     },
   ];
   for (const group of groups) {
-    const members = sessions
-      .filter((session) => session.projectId === group.projectId)
+    const members = tasks
+      .filter((task) => task.projectId === group.projectId)
       .sort(
         (a, b) =>
           Number(b.pinned ?? false) - Number(a.pinned ?? false) ||
@@ -48,8 +48,8 @@ export function groupSessionsByProject(
           b.createdAt.localeCompare(a.createdAt) ||
           b.id.localeCompare(a.id)
       );
-    group.active = members.filter((session) => session.archivedAt === null);
-    group.archived = members.filter((session) => session.archivedAt !== null);
+    group.active = members.filter((task) => task.archivedAt === null);
+    group.archived = members.filter((task) => task.archivedAt !== null);
   }
   return groups;
 }

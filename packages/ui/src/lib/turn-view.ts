@@ -1,8 +1,4 @@
-import type {
-  MessageSegment,
-  ToolCallSegment,
-  UserSegment,
-} from "./session-view";
+import type { MessageSegment, ToolCallSegment, UserSegment } from "./task-view";
 
 /**
  * 轮次聚合与轮内切分（ADR 0011 呈现分层第三层，GLOSSARY「轮次」「已工作折叠区」）。
@@ -26,7 +22,7 @@ export interface TurnView {
   following: MessageSegment[];
   /**
    * 折叠区默认展开：运行中的轮与中断、失败终态的轮强制展开；
-   * 正常完成的轮默认收起（长会话历史只剩各轮最终正文）。
+   * 正常完成的轮默认收起（长任务历史只剩各轮最终正文）。
    */
   historyDefaultOpen: boolean;
   /** 轮仍在运行（流态正文/思考、运行中工具卡或子代理任一成立） */
@@ -73,7 +69,7 @@ const HISTORY_KINDS = new Set([
  * 分组按 turnId 连续聚簇（段序即事件序，轮内段天然相邻）；
  * 用户消息段是轮次起点但不进折叠区。
  *
- * lastTurnRunning：宿主执行态（会话 activity.running）。段级运行标记在
+ * lastTurnRunning：宿主执行态（任务 activity.running）。段级运行标记在
  * 工具回填后、下一段事件前的间隙会全部静止，宿主态补上这个缺口——
  * 最后一轮在宿主仍执行期间保持强制展开，不闪收。
  */

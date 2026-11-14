@@ -4,32 +4,32 @@ import {
   type SlashCommandName,
 } from "@codexlike/agent-core";
 
-import type { SessionStatusInfo } from "@codexlike/desktop/ipc";
+import type { TaskStatusInfo } from "@codexlike/desktop/ipc";
 
 /**
  * 斜杠命令 → UI 动作的纯函数分发。
  * 命令与等效 UI 操作最终走同一 IPC 通道（/rename ↔ 侧栏重命名、/archive ↔ 侧栏归档、
- * /model ↔ 模型选择器、/new ↔ 新建会话、/status ↔ status 查询），这里只做编排决策。
+ * /model ↔ 模型选择器、/new ↔ 新建任务、/status ↔ status 查询），这里只做编排决策。
  */
 
 export type SlashCommandAction =
-  | { type: "new-session" }
+  | { type: "new-task" }
   | { type: "compact" }
   | { type: "rename"; title: string }
   | { type: "rename-missing-argument" }
   | { type: "archive" }
   | { type: "select-model"; query: string }
   | { type: "status" }
-  | { type: "needs-session" };
+  | { type: "needs-task" };
 
-/** /new 可在草稿页使用；其余命令需要正式会话。归属由入口上下文决定。 */
+/** /new 可在草稿页使用；其余命令需要正式任务。归属由入口上下文决定。 */
 export function planSlashCommand(
   command: { name: SlashCommandName; argument: string },
-  hasSession: boolean
+  hasTask: boolean
 ): SlashCommandAction {
-  if (command.name === "new") return { type: "new-session" };
-  if (!hasSession) {
-    return { type: "needs-session" };
+  if (command.name === "new") return { type: "new-task" };
+  if (!hasTask) {
+    return { type: "needs-task" };
   }
   switch (command.name) {
     case "compact":
@@ -72,16 +72,15 @@ export function matchProfilesForModelSwitch(
 }
 
 /** 审批模式 → /status 中文文案（GLOSSARY「审批模式」：请求批准 / 帮我批准 / 完全访问） */
-const APPROVAL_MODE_LABELS: Record<SessionStatusInfo["approvalMode"], string> =
-  {
-    ask: "请求批准（ask）：编辑文件、执行命令与联网搜索前先询问",
-    assist: "帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问",
-    "full-access":
-      "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
-  };
+const APPROVAL_MODE_LABELS: Record<TaskStatusInfo["approvalMode"], string> = {
+  ask: "请求批准（ask）：编辑文件、执行命令与联网搜索前先询问",
+  assist: "帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问",
+  "full-access":
+    "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
+};
 
 /** /status 展示文案（中文） */
-export function formatSessionStatus(status: SessionStatusInfo): string {
+export function formatTaskStatus(status: TaskStatusInfo): string {
   const model =
     status.model === null
       ? "未选择（发送消息后记录所用模型）"
@@ -98,7 +97,7 @@ export function formatSessionStatus(status: SessionStatusInfo): string {
       ? "未压缩"
       : `已压缩（${status.compacted.at.replace("T", " ").slice(0, 19)}，压缩了 ${status.compacted.messagesCompacted} 条历史消息）`;
   return [
-    "会话状态（/status）",
+    "任务状态（/status）",
     `模型：${model}`,
     `上下文用量（估算）：约 ${status.estimatedContextTokens} tokens（${status.messageCount} 条消息 + 系统提示）`,
     `压缩状态：${compacted}`,

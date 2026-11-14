@@ -149,7 +149,7 @@ describe("TavilySearchSource", () => {
 describe("web_search 工具", () => {
   const context: ToolExecutionContext = {
     workspacePath: "C:/ws",
-    sessionId: "web-search-test",
+    taskId: "web-search-test",
     approvalMode: "assist",
   };
 
@@ -168,7 +168,7 @@ describe("web_search 工具", () => {
     return { source, searches } as const;
   }
 
-  it("未配置搜索源：返回中文错误（不抛出、会话不崩）", async () => {
+  it("未配置搜索源：返回中文错误（不抛出、任务不崩）", async () => {
     const tool = createWebSearchTool({ searchSource: () => null });
     const result = await tool.execute({ query: "anything" }, context);
     expect(result.isError).toBe(true);
@@ -244,7 +244,7 @@ describe("web_search 工具", () => {
     });
     expect(webSearch?.permission).toBe("network");
 
-    // 未传 webSearch 时不注册（会话无搜索能力）
+    // 未传 webSearch 时不注册（任务无搜索能力）
     const without = createBuiltinTools();
     expect(without.map((t) => t.name)).not.toContain("web_search");
   });

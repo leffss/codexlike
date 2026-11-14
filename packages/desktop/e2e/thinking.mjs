@@ -1,5 +1,5 @@
 // E2E 思考档位（票 02，GLOSSARY「思考档位」）：从输入框胶囊选择贯通 IPC 与 agent-core
-// 到本地 mock provider 的实际请求 JSON，并验证主会话思考折叠展示与正文隔离、
+// 到本地 mock provider 的实际请求 JSON，并验证主任务思考折叠展示与正文隔离、
 // 运行中切档只影响下一条消息。
 // 场景：
 // 1) 五档逐条发送 → 实际 HTTP body 字段符合 spec 契约（auto 无控制字段；
@@ -165,11 +165,11 @@ async function main() {
     app = first.app;
     let window = first.window;
 
-    // 无会话时两个选择器必须保持禁用，不因键盘触发弹出菜单。
+    // 无任务时两个选择器必须保持禁用，不因键盘触发弹出菜单。
     for (const testId of ["approval-mode-select", "thinking-effort-select"]) {
       const trigger = window.getByTestId(testId);
       await trigger.waitFor();
-      assert(await trigger.isDisabled(), `${testId} 无会话时禁用`);
+      assert(await trigger.isDisabled(), `${testId} 无任务时禁用`);
       assert(
         (await trigger.getAttribute("aria-expanded")) === "false",
         "禁用时没有展开菜单"
@@ -183,7 +183,7 @@ async function main() {
       "无 Profile 时保留未配置模型占位与空值"
     );
 
-    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
+    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建任务
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
@@ -688,7 +688,7 @@ async function main() {
     await selectComposerOption(window, "profile-select", mockProfileId);
     assert(seenBodies.length === 0, "模型与思考选择、主题切换不自动发送请求");
     await selectComposerOption(window, "thinking-effort-select", "auto");
-    // 默认自动，无会话时已被禁用、建会话后可用
+    // 默认自动，无任务时已被禁用、建任务后可用
     assert(
       (await effortSelect.getAttribute("data-value")) === "auto",
       "思考档位胶囊默认值不是 auto"
@@ -855,7 +855,7 @@ async function main() {
     );
     console.log("[e2e] 运行中切档：本轮保持 medium 快照，下一条消息采用 off");
 
-    // 删除正式会话已保存的模型，不应悄悄回退到首个可用 Profile。
+    // 删除正式任务已保存的模型，不应悄悄回退到首个可用 Profile。
     await window.getByTestId("composer-send").waitFor();
     await selectComposerOption(window, "profile-select", longProfileId);
     await window.getByTestId("settings-open").click();
@@ -881,7 +881,7 @@ async function main() {
     assert(seenBodies.length === 9, "删除和重选模型不额外发送请求");
 
     await closeApp(app);
-    console.log("[e2e] 思考档位主会话全链路通过 ✅");
+    console.log("[e2e] 思考档位主任务全链路通过 ✅");
   } catch (error) {
     console.error("[e2e] 思考档位场景失败 ❌", error);
     process.exitCode = 1;

@@ -1,5 +1,5 @@
 // 统一用户交互 E2E：真实 Electron + 隔离数据目录 + 本地 OpenAI 兼容 mock。
-// 公开边界：用户界面、sessions IPC、发送给 provider 的真实请求；不读取数据库或组件内部状态。
+// 公开边界：用户界面、tasks IPC、发送给 provider 的真实请求；不读取数据库或组件内部状态。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:interactions（先 build）。
 // 可用 CODEXLIKE_E2E_INTERACTION_CASE=questions|queue|cancel|auto-approve 单独重跑一个场景。
 import { deepStrictEqual } from "node:assert/strict";
@@ -307,8 +307,8 @@ async function questionsScenario() {
     },
     async ({ app, window, seenBodies, launch, close }) => {
       await prepareDraft(window);
-      const sessionA = window
-        .getByTestId("session-item")
+      const taskA = window
+        .getByTestId("task-item")
         .filter({ hasText: "开始四题混合问答" });
       await selectComposerOption(window, "approval-mode-select", "full-access");
       await window.getByTestId("full-access-confirm-ok").click();
@@ -335,7 +335,7 @@ async function questionsScenario() {
         .getByTestId("interaction-panel")
         .getAttribute("data-interaction-id");
       assert(requestId, "面板未暴露交互标识");
-      await sessionA.getByText("等待用户").waitFor();
+      await taskA.getByText("等待用户").waitFor();
       assert(seenBodies.length === 1, "问答未提交前不应继续请求模型");
       assert(
         (await window.getByTestId("composer-input").isVisible()) === false,
@@ -417,28 +417,28 @@ async function questionsScenario() {
         "IME Enter 不应提交整组问答或发送聊天消息"
       );
 
-      // 切到新会话并保留另一份草稿，再进入设置；返回后恢复同一题与回答。
-      await window.getByTestId("new-session").click();
-      const draftB = "普通会话独立草稿 B";
+      // 切到新任务并保留另一份草稿，再进入设置；返回后恢复同一题与回答。
+      await window.getByTestId("new-task").click();
+      const draftB = "普通任务独立草稿 B";
       await window.getByTestId("composer-input").fill(draftB);
       await window.getByTestId("settings-open").click();
       await window.getByTestId("settings-back").click();
       assert(
         (await window.getByTestId("composer-input").inputValue()) === draftB,
-        "设置返回丢失普通会话草稿"
+        "设置返回丢失普通任务草稿"
       );
-      await sessionA.click();
+      await taskA.click();
       await waitQuestion(window, 2);
       assert(
         (await window
           .getByTestId("interaction-panel")
           .getAttribute("data-interaction-id")) === requestId,
-        "切会话恢复了错误的交互"
+        "切任务恢复了错误的交互"
       );
       assert(
         (await custom.inputValue()) === multiText &&
           (await window.getByTestId("question-option-e2e").isChecked()),
-        "切会话丢失多选及自定义草稿"
+        "切任务丢失多选及自定义草稿"
       );
       await window.getByTestId("settings-open").click();
       await window.getByTestId("settings-back").click();
@@ -536,20 +536,20 @@ async function questionsScenario() {
         "问答响应不应伪装成额外用户消息"
       );
       await assertReadOnlyHistory(window);
-      await window.getByTestId("new-session").click();
+      await window.getByTestId("new-task").click();
       assert(
         (await window.getByTestId("composer-input").inputValue()) === draftB,
-        "问答提交覆盖其他会话草稿"
+        "问答提交覆盖其他任务草稿"
       );
-      await sessionA.click();
+      await taskA.click();
 
       // 重启后新轮请求仍包含持久快照，不能仅靠本轮 pending tool messages 假绿。
-      const sessionId = await sessionA.getAttribute("data-session-id");
+      const taskId = await taskA.getAttribute("data-task-id");
       await close();
       const restarted = await launch();
       window = restarted.window;
       await window
-        .getByTestId("session-item")
+        .getByTestId("task-item")
         .filter({ hasText: "开始四题混合问答" })
         .click();
       await window
@@ -595,20 +595,20 @@ async function questionsScenario() {
         );
       }
       const pending = await window.evaluate(
-        (id) => window.codexlike.sessions.pendingInteractions(id),
-        sessionId
+        (id) => window.codexlike.tasks.pendingInteractions(id),
+        taskId
       );
       assert(pending.length === 0, "已提交交互不应在重启后重新排队");
     }
   );
 }
 
-async function pendingCount(window, sessionId, count) {
+async function pendingCount(window, taskId, count) {
   const deadline = Date.now() + 15_000;
   for (;;) {
     const records = await window.evaluate(
-      (id) => window.codexlike.sessions.pendingInteractions(id),
-      sessionId
+      (id) => window.codexlike.tasks.pendingInteractions(id),
+      taskId
     );
     if (records.length === count) return records;
     assert(
@@ -695,28 +695,28 @@ async function queueScenario() {
       ctx.finishWith("tool_calls");
     },
     async ({ window, homeDir, seenBodies }) => {
-      // ADR 0010：先草稿，首次发送才建立会话；目录选择不创建项目。
-      await window.getByTestId("new-session").click();
+      // ADR 0010：先草稿，首次发送才建立任务；目录选择不创建项目。
+      await window.getByTestId("new-task").click();
       await window.getByTestId("draft-select-workspace").click();
       await selectComposerOption(window, "approval-mode-select", "ask");
       await send(window, "同时委派两个子代理，主代理也需要问答");
-      const session = window
-        .getByTestId("session-item")
+      const task = window
+        .getByTestId("task-item")
         .filter({ hasText: "同时委派两个子代理" });
-      await session.waitFor();
-      const sessionId = await session.getAttribute("data-session-id");
+      await task.waitFor();
+      const taskId = await task.getAttribute("data-task-id");
       await waitQuestion(window, 1, 1);
-      const first = await pendingCount(window, sessionId, 1);
+      const first = await pendingCount(window, taskId, 1);
       assert(first[0].request.source.kind === "main", "第一项必须是主代理问答");
       await waitUntil(() => childContexts.size === 2, "两个子代理未并发启动");
       ask(childContexts.get(taskA), "child-question");
-      const second = await pendingCount(window, sessionId, 2);
+      const second = await pendingCount(window, taskId, 2);
       assert(second[1].request.source.task === taskA, "子代理问答来源丢失");
       childContexts.get(taskB).toolCallRound("child-approval", "write_file", {
         path: "queue-approved.txt",
         content: "仅批准后写入",
       });
-      const queued = await pendingCount(window, sessionId, 3);
+      const queued = await pendingCount(window, taskId, 3);
       assert(
         queued[2].request.kind === "approval" &&
           queued[2].request.source.task === taskB,
@@ -731,12 +731,12 @@ async function queueScenario() {
         .filter({ hasText: "3" })
         .waitFor();
       await expectFront(window, queued[0], "主代理");
-      await session.getByText("等待用户").waitFor();
+      await task.getByText("等待用户").waitFor();
       // 后台完整现场包含主/子代理全部请求；切到草稿不会取消任何等待。
-      await window.getByTestId("new-session").click();
-      await session.click();
+      await window.getByTestId("new-task").click();
+      await task.click();
       await expectFront(window, queued[0], "主代理");
-      await pendingCount(window, sessionId, 3);
+      await pendingCount(window, taskId, 3);
       assert(
         (await window.getByTestId("subagent-card").count()) === 2,
         "切回恢复两张子代理卡"
@@ -765,7 +765,7 @@ async function queueScenario() {
 
       await window.getByTestId("question-option-continue").check();
       await window.getByTestId("question-submit").click();
-      await pendingCount(window, sessionId, 2);
+      await pendingCount(window, taskId, 2);
       await expectFront(window, queued[1], taskA);
       await window
         .getByTestId("interaction-count")
@@ -773,7 +773,7 @@ async function queueScenario() {
         .waitFor();
       await window.getByTestId("question-option-adjust").check();
       await window.getByTestId("question-submit").click();
-      await pendingCount(window, sessionId, 1);
+      await pendingCount(window, taskId, 1);
       await expectFront(window, queued[2], taskB);
       const approve = window
         .getByTestId("interaction-panel")
@@ -784,7 +784,7 @@ async function queueScenario() {
       );
       await approve.click();
       await waitText(window, "并发问答审批全部完成");
-      await pendingCount(window, sessionId, 0);
+      await pendingCount(window, taskId, 0);
       assert(
         existsSync(join(homeDir, "workspace", "queue-approved.txt")),
         "批准后子代理文件未真正写入"
@@ -837,10 +837,10 @@ async function cancellationScenario() {
     },
     async ({ window, homeDir, seenBodies, launch, close }) => {
       await prepareDraft(window);
-      const session = window
-        .getByTestId("session-item")
+      const task = window
+        .getByTestId("task-item")
         .filter({ hasText: "停止问答" });
-      let sessionId;
+      let taskId;
       await selectComposerOption(window, "approval-mode-select", "ask");
       const cancelledIds = [];
       for (const [prompt, restart] of [
@@ -853,8 +853,8 @@ async function cancellationScenario() {
         await window
           .getByTestId("interaction-panel")
           .waitFor({ timeout: 20_000 });
-        sessionId ??= await session.getAttribute("data-session-id");
-        const pending = await pendingCount(window, sessionId, 1);
+        taskId ??= await task.getAttribute("data-task-id");
+        const pending = await pendingCount(window, taskId, 1);
         const record = pending[0];
         cancelledIds.push(record.request.id);
         const requestsBefore = seenBodies.length;
@@ -864,7 +864,7 @@ async function cancellationScenario() {
           const next = await launch();
           window = next.window;
           await window
-            .getByTestId("session-item")
+            .getByTestId("task-item")
             .filter({ hasText: "停止问答" })
             .click();
         } else {
@@ -874,7 +874,7 @@ async function cancellationScenario() {
             .click();
         }
         await window.getByTestId("composer-send").waitFor();
-        await pendingCount(window, sessionId, 0);
+        await pendingCount(window, taskId, 0);
         await window
           .getByTestId("interaction-panel")
           .waitFor({ state: "hidden" });
@@ -914,25 +914,24 @@ async function cancellationScenario() {
                 ],
               };
         const accepted = await window.evaluate(
-          ({ sessionId, requestId, response }) =>
-            window.codexlike.sessions.respondInteraction(
-              sessionId,
+          ({ taskId, requestId, response }) =>
+            window.codexlike.tasks.respondInteraction(
+              taskId,
               requestId,
               response
             ),
-          { sessionId, requestId: record.request.id, response }
+          { taskId, requestId: record.request.id, response }
         );
         assert(
           accepted === false,
           "取消/重启后的陈旧响应不能重新授权或唤醒工具"
         );
         const states = await window.evaluate(() =>
-          window.codexlike.sessions.list()
+          window.codexlike.tasks.list()
         );
         assert(
-          states.find((state) => state.id === sessionId).status !==
-            "waiting-user",
-          "取消后会话不应仍显示等待用户"
+          states.find((state) => state.id === taskId).status !== "waiting-user",
+          "取消后任务不应仍显示等待用户"
         );
         assert(
           seenBodies.length === requestsBefore,
@@ -966,7 +965,7 @@ async function autoApproveScenario() {
       }
       // 真实 user content 会追加持久问答快照；仅首行是本 fixture 的命令标识。
       const prompt = String(lastUserText(body)).split("\n")[0];
-      if (prompt === "会话自动批准主子队列") {
+      if (prompt === "任务自动批准主子队列") {
         if (toolResult(body, "auto-follow-write") !== undefined)
           return ctx.textRound("自动批准主子队列完成");
         if (toolResult(body, "auto-main-write") !== undefined)
@@ -1011,48 +1010,46 @@ async function autoApproveScenario() {
     },
     async ({ window, homeDir, seenBodies, launch, close }) => {
       const item = (title) =>
-        window.getByTestId("session-item").filter({ hasText: title });
+        window.getByTestId("task-item").filter({ hasText: title });
       const pendingPanel = () => window.getByTestId("interaction-panel");
-      const active = () => window.getByTestId("session-auto-approve");
+      const active = () => window.getByTestId("task-auto-approve");
       const file = (name) => join(homeDir, "workspace", name);
       async function assertModeUnchanged() {
         assert(
           (await window
             .getByTestId("approval-mode-select")
             .getAttribute("data-value")) === "ask",
-          "会话自动批准不能切换审批档位为 full-access"
+          "任务自动批准不能切换审批档位为 full-access"
         );
       }
       async function assertAutoFlag(id, expected) {
-        const sessions = await window.evaluate(() =>
-          window.codexlike.sessions.list()
+        const tasks = await window.evaluate(() =>
+          window.codexlike.tasks.list()
         );
         assert(
-          sessions.find((session) => session.id === id)?.autoApprove ===
-            expected,
-          "公开会话快照应保存独立的自动批准状态"
+          tasks.find((task) => task.id === id)?.autoApprove === expected,
+          "公开任务快照应保存独立的自动批准状态"
         );
       }
-      // 先让另一会话真实卡在审批，验证批量放行不越过会话边界。
+      // 先让另一任务真实卡在审批，验证批量放行不越过任务边界。
       await prepareDraft(window);
-      await send(window, "隔离会话审批");
+      await send(window, "隔离任务审批");
       await pendingPanel().waitFor();
-      const otherId =
-        await item("隔离会话审批").getAttribute("data-session-id");
+      const otherId = await item("隔离任务审批").getAttribute("data-task-id");
       const [otherPending] = await pendingCount(window, otherId, 1);
       await prepareDraft(window);
-      await send(window, "会话自动批准主子队列");
+      await send(window, "任务自动批准主子队列");
       await pendingPanel().waitFor();
-      const sessionId =
-        await item("会话自动批准主子队列").getAttribute("data-session-id");
+      const taskId =
+        await item("任务自动批准主子队列").getAttribute("data-task-id");
       await waitUntil(() => children.size === 2, "两个子代理没有开始请求");
       children.get(taskWrite).toolCallRound("auto-child-write", "write_file", {
         path: "auto-child.txt",
         content: "子代理",
       });
-      await pendingCount(window, sessionId, 2);
+      await pendingCount(window, taskId, 2);
       ask(children.get(taskQuestion), "auto-child-question");
-      const queued = await pendingCount(window, sessionId, 3);
+      const queued = await pendingCount(window, taskId, 3);
       const approvals = queued.filter(
         (record) => record.request.kind === "approval"
       );
@@ -1067,7 +1064,7 @@ async function autoApproveScenario() {
           !existsSync(file("auto-child.txt")),
         "授权前主子工具不能执行"
       );
-      await pendingPanel().getByTestId("approval-approve-session").click();
+      await pendingPanel().getByTestId("approval-approve-task").click();
       await active().waitFor();
       await waitQuestion(window, 1, 1);
       await waitUntil(
@@ -1076,9 +1073,9 @@ async function autoApproveScenario() {
           seenBodies.some(
             (body) => toolResult(body, "auto-child-write") !== undefined
           ),
-        "会话授权没有同时放行主子审批"
+        "任务授权没有同时放行主子审批"
       );
-      const remaining = await pendingCount(window, sessionId, 1);
+      const remaining = await pendingCount(window, taskId, 1);
       assert(
         remaining[0].request.kind === "questions" &&
           remaining[0].request.source.task === taskQuestion,
@@ -1092,13 +1089,13 @@ async function autoApproveScenario() {
       );
       for (const name of ["auto-main.txt", "auto-child.txt"])
         assert(existsSync(file(name)), `主子审批写入真实完成：${name}`);
-      await assertAutoFlag(sessionId, true);
+      await assertAutoFlag(taskId, true);
       await assertAutoFlag(otherId, false);
       const [stillWaiting] = await pendingCount(window, otherId, 1);
       assert(
         stillWaiting.request.id === otherPending.request.id &&
-          !existsSync(file("隔离会话审批.txt")),
-        "授权不能消费另一个会话的待审批"
+          !existsSync(file("隔离任务审批.txt")),
+        "授权不能消费另一个任务的待审批"
       );
       await window.getByTestId("question-option-continue").check();
       await window.getByTestId("question-submit").click();
@@ -1107,17 +1104,17 @@ async function autoApproveScenario() {
         existsSync(file("auto-follow.txt")),
         "问答完成后的后续工具无需审批"
       );
-      await pendingCount(window, sessionId, 0);
+      await pendingCount(window, taskId, 0);
       await assertModeUnchanged();
       await assertReadOnlyHistory(window);
 
-      await item("隔离会话审批").click();
+      await item("隔离任务审批").click();
       await pendingPanel().waitFor();
-      assert((await active().count()) === 0, "其他会话不能显示自动批准状态");
+      assert((await active().count()) === 0, "其他任务不能显示自动批准状态");
       await pendingPanel().getByTestId("approval-reject").click();
-      await waitText(window, "隔离会话审批完成");
-      assert(!existsSync(file("隔离会话审批.txt")), "既有拒绝仍然阻止写入");
-      await item("会话自动批准主子队列").click();
+      await waitText(window, "隔离任务审批完成");
+      assert(!existsSync(file("隔离任务审批.txt")), "既有拒绝仍然阻止写入");
+      await item("任务自动批准主子队列").click();
       await active().waitFor();
       await send(window, "越界仍拒绝");
       await waitText(window, "越界仍拒绝完成");
@@ -1142,15 +1139,15 @@ async function autoApproveScenario() {
       await close();
       writeFileSync(file("auto-main.txt"), "重启不能覆盖这份外部修改");
       ({ window } = await launch());
-      await item("会话自动批准主子队列").click();
+      await item("任务自动批准主子队列").click();
       await active().waitFor();
       await window.getByTestId("composer-send").waitFor();
-      await pendingCount(window, sessionId, 0);
+      await pendingCount(window, taskId, 0);
       await window
         .getByTestId("interaction-history")
         .filter({ hasText: "已取消" })
         .waitFor();
-      await assertAutoFlag(sessionId, true);
+      await assertAutoFlag(taskId, true);
       await assertAutoFlag(otherId, false);
       await assertModeUnchanged();
       assert(
@@ -1179,9 +1176,9 @@ async function autoApproveScenario() {
         () => futureRequest !== undefined,
         "未进入可控的后续工具请求"
       );
-      await active().getByTestId("session-auto-approve-revoke").click();
+      await active().getByTestId("task-auto-approve-revoke").click();
       await active().waitFor({ state: "detached" });
-      await assertAutoFlag(sessionId, false);
+      await assertAutoFlag(taskId, false);
       futureRequest.toolCallRound("auto-取消立即生效", "write_file", {
         path: "取消立即生效.txt",
         content: "只批准本次",
@@ -1194,21 +1191,21 @@ async function autoApproveScenario() {
       await pendingPanel().getByTestId("approval-approve").click();
       await waitText(window, "取消立即生效完成");
       assert(existsSync(file("取消立即生效.txt")), "批准本次仍可执行当前工具");
-      await assertAutoFlag(sessionId, false);
+      await assertAutoFlag(taskId, false);
       await close();
       ({ window } = await launch());
-      await item("会话自动批准主子队列").click();
+      await item("任务自动批准主子队列").click();
       await window.getByTestId("composer-send").waitFor();
       assert((await active().count()) === 0, "撤销状态跨重启保存");
       await send(window, "撤销后重启审批");
       await pendingPanel().waitFor();
       assert(
         !existsSync(file("撤销后重启审批.txt")),
-        "批准本次不会重新开启会话授权"
+        "批准本次不会重新开启任务授权"
       );
       await pendingPanel().getByTestId("approval-reject").click();
       await waitText(window, "撤销后重启审批完成");
-      await assertAutoFlag(sessionId, false);
+      await assertAutoFlag(taskId, false);
       await assertReadOnlyHistory(window);
     }
   );

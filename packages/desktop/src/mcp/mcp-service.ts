@@ -4,10 +4,10 @@ import {
   type McpManager,
   type McpServerConfig,
   type McpServerStatus,
-} from '@codexlike/agent-core/node';
-import type { ToolDefinition } from '@codexlike/agent-core';
+} from "@codexlike/agent-core/node";
+import type { ToolDefinition } from "@codexlike/agent-core";
 
-import type { McpStore, McpServerInput } from './mcp-store';
+import type { McpStore, McpServerInput } from "./mcp-store";
 
 /** 设置页 server 卡片需要的工具视图（发现结果 + 启停状态） */
 export interface McpToolView extends McpDiscoveredTool {
@@ -31,13 +31,13 @@ export interface McpService {
   removeServer(id: string): Promise<void>;
   /** 手动重连（server 崩溃/启动失败后的显式入口；调用时也会惰性重连） */
   reconnect(id: string): Promise<McpServerView>;
-  /** 工具启停：对后续会话消息即时生效（tools 工厂逐次解析） */
+  /** 工具启停：对后续任务消息即时生效（tools 工厂逐次解析） */
   setToolEnabled(toolName: string, enabled: boolean): Promise<void>;
   /**
-   * 会话工具工厂：内置工具在前（同名优先），MCP 启用工具随后；
-   * 交给 SessionManager 的 tools 选项，每条消息逐次解析。
+   * 任务工具工厂：内置工具在前（同名优先），MCP 启用工具随后；
+   * 交给 TaskManager 的 tools 选项，每条消息逐次解析。
    */
-  sessionTools(builtin?: ToolDefinition[]): ToolDefinition[];
+  taskTools(builtin?: ToolDefinition[]): ToolDefinition[];
   /** 应用启动时连接全部已配置 server（失败不抛，状态可见） */
   startup(): Promise<void>;
   /** 应用退出时断开全部子进程 */
@@ -76,7 +76,7 @@ export function createMcpService(options: {
       .find((candidate) => candidate.serverId === config.id);
     return {
       config,
-      status: state?.status ?? 'disconnected',
+      status: state?.status ?? "disconnected",
       error: state?.error ?? null,
       tools: (state?.tools ?? []).map((tool) => ({
         ...tool,
@@ -120,20 +120,15 @@ export function createMcpService(options: {
       await reload();
     },
 
-    sessionTools(builtin = []) {
+    taskTools(builtin = []) {
       const mcpTools = manager.tools();
       const names = new Set(builtin.map((tool) => tool.name));
-      return [
-        ...builtin,
-        ...mcpTools.filter((tool) => !names.has(tool.name)),
-      ];
+      return [...builtin, ...mcpTools.filter((tool) => !names.has(tool.name))];
     },
 
     async startup() {
       await reload();
-      await Promise.all(
-        configs.map((config) => manager.connect(config.id)),
-      );
+      await Promise.all(configs.map((config) => manager.connect(config.id)));
     },
 
     async shutdown() {

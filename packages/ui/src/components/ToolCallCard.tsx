@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { useCollapseState } from "../lib/collapse-memory";
-import type { ToolCallSegment } from "../lib/session-view";
+import type { ToolCallSegment } from "../lib/task-view";
 import { summarizeToolCall } from "../lib/tool-summary";
 import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 
 import { DisclosureArrow } from "./DisclosureArrow";
 
-/** 截图卡片的图片展示：展开时经主进程按 会话+调用 id 读取文件（dataURL） */
+/** 截图卡片的图片展示：展开时经主进程按 任务+调用 id 读取文件（dataURL） */
 function ScreenshotView(props: { call: ToolCallSegment }) {
   const { call } = props;
   const [image, setImage] = useState<string | null>(null);
@@ -19,8 +19,8 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     setImage(null);
     setFailed(false);
     if (!call.isError) {
-      window.codexlike.sessions
-        .toolImage(call.sessionId, call.id)
+      window.codexlike.tasks
+        .toolImage(call.taskId, call.id)
         .then((dataUrl) => {
           if (alive) {
             if (dataUrl === null) {
@@ -39,7 +39,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
     return () => {
       alive = false;
     };
-  }, [call.id, call.sessionId, call.isError]);
+  }, [call.id, call.taskId, call.isError]);
 
   if (call.isError) {
     return null;
@@ -66,7 +66,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
 /**
  * 工具卡片（票 04 摘要增强）：折叠摘要行 = 类别词 + 动作摘要 + 状态标识 +
  * 耗时（spec 用户故事 26），失败详情在状态位可查（hover 提示 + 展开完整输出，
- * 用户故事 28）；开合为渲染层内存态（滚动、切换会话不丢手动开合）。
+ * 用户故事 28）；开合为渲染层内存态（滚动、切换任务不丢手动开合）。
  */
 export function ToolCallCard(props: { call: ToolCallSegment }) {
   const { call } = props;

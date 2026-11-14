@@ -108,7 +108,7 @@ async function main() {
     app = first.app;
     let window = first.window;
 
-    // 准备：设置页创建 Profile → 新建会话
+    // 准备：设置页创建 Profile → 新建任务
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
@@ -239,7 +239,7 @@ async function main() {
     // ---- 场景 3：中断终态强制展开 ----
     await window.evaluate(() => {
       window.interruptedMessage = null;
-      window.removeInterruptedListener = window.codexlike.onSessionEvent(
+      window.removeInterruptedListener = window.codexlike.onTaskEvent(
         ({ event }) => {
           if (event.type === "assistant-aborted")
             window.interruptedMessage = event.message;

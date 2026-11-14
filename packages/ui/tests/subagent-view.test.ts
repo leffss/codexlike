@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionEvent, ToolCallRecord } from "@codexlike/agent-core";
+import type { TaskEvent, ToolCallRecord } from "@codexlike/agent-core";
 
 import {
-  applySessionEvent,
+  applyTaskEvent,
   initialTranscript,
   type MessageSegment,
-} from "../src/lib/session-view";
+} from "../src/lib/task-view";
 
 /**
  * 子代理段（GLOSSARY「子代理」「消息段」）：主序列成员 + 卡内嵌套进度。
- * Seam：applySessionEvent 纯函数（流式事件 → MessageSegment[]）与
+ * Seam：applyTaskEvent 纯函数（流式事件 → MessageSegment[]）与
  * initialTranscript（重启恢复）。
  */
 function toolCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   return {
     id: "call-1",
-    sessionId: "session-1",
+    taskId: "task-1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "ok",
@@ -30,11 +30,11 @@ function kinds(items: MessageSegment[]): string[] {
   return items.map((item) => item.kind);
 }
 
-describe("session-view 子代理段归并", () => {
+describe("task-view 子代理段归并", () => {
   it("queued → start → 工具进度 → report 全链路：卡状态与字段正确迁移", () => {
     let items: MessageSegment[] = [];
-    const apply = (event: SessionEvent) => {
-      items = applySessionEvent(items, event);
+    const apply = (event: TaskEvent) => {
+      items = applyTaskEvent(items, event);
     };
 
     apply({ type: "subagent-queued", subagentId: "sa-1", task: "调研 vitest" });
@@ -102,22 +102,22 @@ describe("session-view 子代理段归并", () => {
   });
 
   it("子代理卡作为消息段按时序出现在主序列：user → 子代理卡 → 后续正文", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "user-message",
       message: {
         id: "u1",
-        sessionId: "s1",
+        taskId: "s1",
         role: "user",
         content: "委派调研",
         createdAt: "2026-11-11T08:00:00Z",
       },
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-queued",
       subagentId: "sa-1",
       task: "调研 vitest",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-delta",
       messageId: "a1",
       delta: "已派出子代理，先说明计划",
@@ -128,7 +128,7 @@ describe("session-view 子代理段归并", () => {
   });
 
   it("spawn_subagent 的 tool-call 事件不渲染普通工具卡（子代理段代替）", () => {
-    const items = applySessionEvent([], {
+    const items = applyTaskEvent([], {
       type: "tool-call",
       call: toolCall({
         id: "delegate-1",
@@ -140,18 +140,18 @@ describe("session-view 子代理段归并", () => {
   });
 
   it("spawn_subagent 的 tool-result 按 toolCallId 回填子代理段报告（流式路径兜底）", () => {
-    let items = applySessionEvent([], {
+    let items = applyTaskEvent([], {
       type: "subagent-queued",
       subagentId: "sa-1",
       task: "x",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-start",
       subagentId: "sa-1",
       task: "x",
       toolCallId: "delegate-1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "tool-result",
       call: toolCall({
         id: "delegate-1",
@@ -191,11 +191,11 @@ describe("session-view 子代理段归并", () => {
 });
 
 /** 思考档位 03：子代理 reasoning 归并（卡内独立折叠思考，并发不串流） */
-describe("session-view 子代理思考归并（subagent-reasoning）", () => {
+describe("task-view 子代理思考归并（subagent-reasoning）", () => {
   it("reasoning 增量累积到所属子代理卡，与报告分离，不串流到其他子代理", () => {
     let items: MessageSegment[] = [];
-    const apply = (event: SessionEvent) => {
-      items = applySessionEvent(items, event);
+    const apply = (event: TaskEvent) => {
+      items = applyTaskEvent(items, event);
     };
 
     apply({ type: "subagent-queued", subagentId: "sa-1", task: "调研 vitest" });
@@ -253,13 +253,13 @@ describe("session-view 子代理思考归并（subagent-reasoning）", () => {
     });
   });
 
-  it("未知 subagentId 的 reasoning 事件被忽略（会话切换后迟到的事件）", () => {
-    let items = applySessionEvent([], {
+  it("未知 subagentId 的 reasoning 事件被忽略（任务切换后迟到的事件）", () => {
+    let items = applyTaskEvent([], {
       type: "assistant-delta",
       messageId: "a1",
       delta: "正文",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-reasoning",
       subagentId: "sa-gone",
       delta: "迟到的思考",
@@ -271,22 +271,22 @@ describe("session-view 子代理思考归并（subagent-reasoning）", () => {
     expect(card.reasoning).toBeUndefined();
   });
 
-  it("主会话思考进序列 thinking 段、子代理思考进卡内（主/子思考互不串流）", () => {
-    let items = applySessionEvent([], {
+  it("主任务思考进序列 thinking 段、子代理思考进卡内（主/子思考互不串流）", () => {
+    let items = applyTaskEvent([], {
       type: "assistant-start",
       messageId: "a1",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-queued",
       subagentId: "sa-1",
       task: "x",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "assistant-reasoning",
       messageId: "a1",
-      delta: "主会话思考",
+      delta: "主任务思考",
     });
-    items = applySessionEvent(items, {
+    items = applyTaskEvent(items, {
       type: "subagent-reasoning",
       subagentId: "sa-1",
       delta: "子代理思考",
@@ -294,7 +294,7 @@ describe("session-view 子代理思考归并（subagent-reasoning）", () => {
     expect(kinds(items)).toEqual(["subagent", "thinking"]);
     expect(items[1]).toMatchObject({
       kind: "thinking",
-      content: "主会话思考",
+      content: "主任务思考",
       responseId: "a1",
     });
     expect(items[0]).toMatchObject({
