@@ -264,6 +264,85 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     }
   );
 
+  it("宿主工具与 update_plan 重名时发送前拒绝（工作计划工具强制并入，ADR 0016）", async () => {
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord("C:/work/demo");
+    persistence.insertTask(record);
+    const model = scriptedModel([{ kind: "text", deltas: ["不应请求"] }]);
+    const task = createAgentTask({
+      record,
+      persistence,
+      resources: () => fakeResourceSnapshot(),
+      languageModelFor: () => model,
+      tools: [
+        {
+          name: "update_plan",
+          description: "重名工具",
+          parameters: { type: "object", properties: {} },
+          permission: "readonly",
+          async execute() {
+            throw new Error("不应执行");
+          },
+        },
+      ],
+    });
+    await expect(
+      collect(task.sendMessage({ text: "任务", profile }))
+    ).rejects.toThrow("工具名称冲突：update_plan");
+    expect(model.doStreamCalls).toHaveLength(0);
+    persistence.close();
+  });
+
+  it("模型调 update_plan → 免审批执行 → 统计结果回填，调用记录随 transcript 入库（派生式数据通道）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const plan = {
+      steps: [
+        { content: "调研布局代码", status: "completed" },
+        { content: "输出方案", status: "in_progress" },
+        { content: "回归测试", status: "pending" },
+      ],
+    };
+    const model = scriptedModel([
+      {
+        kind: "tool",
+        calls: [{ toolCallId: "plan-1", toolName: "update_plan", input: plan }],
+      },
+      { kind: "text", deltas: ["计划已建立"] },
+    ]);
+    const { task, persistence } = makeTask(model, workspace);
+
+    const events = await collect(
+      task.sendMessage({ text: "列个计划", profile })
+    );
+
+    const result = events.find(
+      (event) => event.type === "tool-result" && event.call.id === "plan-1"
+    );
+    expect(result).toMatchObject({
+      call: {
+        toolName: "update_plan",
+        isError: false,
+        output: "工作计划已更新（共 3 项：1 已完成、1 进行中、1 待办）",
+        // 全量清单进调用记录：UI 从这里派生当前计划（常驻计划条）
+        arguments: JSON.stringify(plan),
+      },
+    });
+    // 落库：任务恢复时 initialTranscript 重建段序列，常驻计划条随之恢复
+    const calls = persistence.listToolCalls("task-1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      id: "plan-1",
+      toolName: "update_plan",
+      isError: false,
+      arguments: JSON.stringify(plan),
+    });
+    // 工具结果回传模型：下一轮请求体含统计摘要
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain(
+      "工作计划已更新"
+    );
+    persistence.close();
+  });
+
   it("模型调工具 → 执行 → 结果回填 → 最终回复；文件真实落盘，调用记录入库", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([

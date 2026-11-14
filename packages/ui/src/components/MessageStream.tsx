@@ -9,6 +9,11 @@ import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
+import {
+  collectPlanSnapshots,
+  isPlanSegment,
+  parsePlanSteps,
+} from "../lib/plan-view";
 import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
 import { useLocalDay } from "../lib/use-local-day";
 import { markdownComponents } from "../lib/markdown";
@@ -45,6 +50,7 @@ import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
+import { PlanMarkerRow, WorkPlanBannerFromSegments } from "./WorkPlanBanner";
 
 /** 登记的用户输入意图有效期：覆盖 scroll 事件滞后一帧的竞争窗口 */
 const INTENT_TTL_MS = 500;
@@ -205,6 +211,15 @@ export function MessageStream(props: {
     lastTurnRunning: props.streaming === true,
   });
 
+  // 工作计划（ADR 0016）：计划段序号（流内标记行「计划更新 N」的 N，
+  // 跨轮累计），一次遍历供各轮标记行共用
+  const planIndexById = new Map(
+    collectPlanSnapshots(props.items).map((snapshot, index) => [
+      snapshot.segmentId,
+      index,
+    ])
+  );
+
   // 底部「运行中」工时：宿主执行态期间每秒跳动；runStartedAt 缺位时
   // 只显示状态不显示数字（WorkspacePage 发送/恢复时成对记账，正常不缺）
   const tickNow = useTickingNow(props.streaming === true);
@@ -286,6 +301,13 @@ export function MessageStream(props: {
         {/* min-h-full 弹性列：空流态（新任务发送瞬间尚无用户段）也能把
             运行指示压到可视区左下角；有消息时紧跟在消息列表之后 */}
         <div className="flex min-h-full flex-col">
+          {/* 工作计划常驻条（GLOSSARY「工作计划」，ADR 0016）：当前计划
+              由段序列派生，sticky 吸附消息流顶部；无计划时渲染 null */}
+          <WorkPlanBannerFromSegments
+            items={props.items}
+            taskId={props.taskId}
+            className={contentWidthClass}
+          />
           {props.items.length === 0 && props.compacting !== true ? (
             <div
               data-testid="message-empty"
@@ -306,6 +328,7 @@ export function MessageStream(props: {
                   now={now}
                   questionDraft={props.questionDraft}
                   taskTitle={props.taskTitle}
+                  planIndexById={planIndexById}
                 />
               ))}
               {props.compacting === true && (
@@ -388,6 +411,8 @@ function TurnGroupItem(props: {
   now: Date;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
   taskTitle?: string | null;
+  /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
+  planIndexById?: Map<string, number>;
 }) {
   const { turn } = props;
   const failed = turn.segments.some((segment) => segment.kind === "error");
@@ -428,6 +453,7 @@ function TurnGroupItem(props: {
             failed={failed}
             questionDraft={props.questionDraft}
             taskTitle={props.taskTitle}
+            planIndexById={props.planIndexById}
           />
         ))}
       </ol>
@@ -449,6 +475,8 @@ function ToolSequenceView(props: {
   failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
   taskTitle?: string | null;
+  /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
+  planIndexById?: Map<string, number>;
 }) {
   const { item } = props;
   if (item.kind === "passthrough") {
@@ -465,6 +493,19 @@ function ToolSequenceView(props: {
     );
   }
   if (item.kind === "single") {
+    // 工作计划更新（ADR 0016）：流内只留极简标记行（当前状态看顶部常驻条），
+    // 不渲染通用工具卡——全量参数 JSON 对用户没有阅读价值
+    if (isPlanSegment(item.segment)) {
+      return (
+        <PlanMarkerRow
+          snapshot={{
+            segmentId: item.segment.id,
+            steps: parsePlanSteps(item.segment.arguments),
+          }}
+          index={props.planIndexById?.get(item.segment.id) ?? 0}
+        />
+      );
+    }
     return <ToolCallCard call={item.segment} />;
   }
   return <ToolGroupView item={item} />;

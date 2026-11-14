@@ -36,6 +36,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../tools/types";
+import { createUpdatePlanTool } from "../tools/update-plan";
 
 import {
   decideApproval,
@@ -382,6 +383,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       source: { kind: "main" },
     })
   );
+  // 工作计划工具（ADR 0016）：无外部依赖——状态即工具调用记录本身
+  const planTool = createUpdatePlanTool();
   let orchestrator: SubagentOrchestrator | null = null;
   if (options.subagents !== undefined) {
     orchestrator = createSubagentOrchestrator(options.subagents, {
@@ -404,9 +407,12 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         : (options.tools ?? []);
     if (resolved.some((tool) => tool.name === questionsTool.name))
       throw new Error(`工具名称冲突：${questionsTool.name}`);
+    if (resolved.some((tool) => tool.name === planTool.name))
+      throw new Error(`工具名称冲突：${planTool.name}`);
     return [
       ...resolved,
       questionsTool,
+      planTool,
       ...(orchestrator === null ? [] : [orchestrator.tool]),
     ];
   }

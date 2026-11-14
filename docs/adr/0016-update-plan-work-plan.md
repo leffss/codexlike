@@ -1,0 +1,20 @@
+---
+status: accepted
+---
+
+# 工作计划：update_plan 工具与常驻计划条呈现
+
+需要让用户随时看到 agent 在多步骤任务中的进度（在做什么、做到第几步）。调研 ZCode 源码（TodoWrite 工具 / todo 渲染器 / plan 投影适配层）后做了三变体 UI 原型（快照卡 / 常驻计划条 / 单卡活动视图，见 `prototype/work-plan` 分支），验收定稿「常驻计划条」方案：当前计划在消息流顶部常驻可见，流内各次更新只留极简标记。术语上「任务清单」不可用——「任务」已指 agent 会话本身（ADR 0014），故定名工作计划（Work Plan）/ 计划项（Plan Step）。
+
+## 关键边界
+
+- 工具契约：`update_plan` 为 readonly 工具（免审批，不碰工作区），与 `ask_user_question` 同样强制并入每个任务的工具表（撞名即拒绝）；全量替换语义——每次调用发送完整清单，工具描述明确「一次只保持一项 in_progress、完成即标 completed」；计划项 1–50 项，内容 ≤200 字符，无 priority/id 字段（无展示消费方，按执行顺序排列即可）；执行输出为中文统计摘要（共 N 项：X 已完成、Y 进行中、Z 待办）。
+- 派生式数据通道：计划状态即工具调用记录本身——`tool-call`/`tool-result` 事件天然携带全量清单并随 transcript 落库，任务恢复时随段序列重建；UI 用纯函数（lib/plan-view）从段序列解析快照，「当前计划」= 最后一次 update_plan 的参数。不新增事件类型、段类型或存储表。
+- 呈现（GLOSSARY「工作计划」）：常驻计划条 sticky 吸附消息流顶部（当前步骤 + N/M 计数 + 完成占比进度条；进行中以静态箭头表达，不用 spinner——计划条会长时间停留，转圈暗示「加载中」语义错位；完成项删除线 + 对勾；全部完成显示「全部完成」）；与消息列共用内容列宽度类；开合默认收起、走 collapse-memory 记忆（key 带任务作用域）。
+- 流内标记行：update_plan 调用在消息流原位渲染为一行小字（「计划更新 N」+ 当时计数 + 当时所在步骤），不渲染通用工具卡——全量参数 JSON 对用户没有阅读价值；连续同类工具分组（ADR 0015）把 update_plan 排除出分组，防止相邻两次更新折叠成组头吞掉单次摘要。
+
+## 取舍
+
+拒绝专用 plan 事件/段类型与独立存储表：工具调用记录已天然持久化、事件化且随恢复重建，加专用通道要动 TaskEvent/task-view/存储三处，收益只是省一次参数解析。拒绝 TodoRead 工具：模型上下文里已含最近一次调用的完整清单与统计输出。拒绝在工具 schema 加 priority：无展示消费方，模型会浪费 token 填写；将来需要时再演进 schema。拒绝侧栏任务行进度徽章：未定稿的候选增强，不随本 ADR 落地。
+
+影响面：agent-core 新增 tools/update-plan（agent-task 强制并入）；ui 新增 lib/plan-view、components/WorkPlanBanner（常驻条 + 标记行），turn-view 分组排除 update_plan，MessageStream 顶部挂载常驻条；GLOSSARY 新增「工作计划」「计划项」两词条；新增 e2e work-plan 场景；dev fixtures 增补 update_plan 样例（常驻条随 dev 预览可见）。

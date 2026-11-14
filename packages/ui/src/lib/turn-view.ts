@@ -1,3 +1,4 @@
+import { PLAN_TOOL_NAME } from "./plan-view";
 import type { MessageSegment, ToolCallSegment, UserSegment } from "./task-view";
 
 /**
@@ -112,6 +113,8 @@ export type ToolSequenceItem =
  * 轮内段序列 → 连续同类工具统计分组（spec 用户故事 29：「Read × 5」）。
  * 只有相邻、同名且已完成的工具卡合并为组（组头计数，展开仍由原卡片渲染）；
  * 运行中的工具卡实时可见，不进组；非工具段原样透传并打断连续性。
+ * 工作计划（update_plan，ADR 0016）排除出分组：相邻两次计划更新各有独立
+ * 标记行语义，折成「update_plan × 2」组头会吞掉单次更新摘要。
  */
 export function groupConsecutiveTools(
   segments: MessageSegment[]
@@ -139,7 +142,11 @@ export function groupConsecutiveTools(
   };
 
   for (const segment of segments) {
-    if (segment.kind === "tool-call" && segment.running !== true) {
+    if (
+      segment.kind === "tool-call" &&
+      segment.running !== true &&
+      segment.toolName !== PLAN_TOOL_NAME
+    ) {
       // 同名相邻的已完成工具卡累计成组；异名先结算前一组
       if (pending[0]?.toolName === segment.toolName) {
         pending.push(segment);
@@ -151,7 +158,7 @@ export function groupConsecutiveTools(
     }
     flush();
     if (segment.kind === "tool-call") {
-      // 运行中的工具卡：实时可见，不参与分组
+      // 运行中或计划更新（各自保持单卡/单行实时可见）：不参与分组
       items.push({ kind: "single", segment });
     } else {
       items.push({ kind: "passthrough", segment });

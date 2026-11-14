@@ -254,7 +254,31 @@ const MAIN_HISTORY = [
       "msg-a1",
       "",
       T1,
-      "用户想压缩纵向空间。盘点现状分区：标题栏 / 任务头行 / workspace-info / 最多 5 条警告条 / composer。逐项决定去向——标题栏承载任务名与路径摘要；workspace-info 缩成标题栏徽章；警告条合并为单条可展开状态条。先读布局代码确认结构再出方案。"
+      "用户想压缩纵向空间。盘点现状分区：标题栏 / 任务头行 / workspace-info / 最多 5 条警告条 / composer。逐项决定去向——标题栏承载任务名与路径摘要；workspace-info 缩成标题栏徽章；警告条合并为单条可展开状态条。先列工作计划，再读布局代码确认结构。"
+    ),
+  },
+  /* 工作计划样例（ADR 0016）：第 1 版建清单，步骤 1 进行中 */
+  {
+    kind: "tool-call" as const,
+    call: toolCall(
+      "tc-plan-1",
+      "update_plan",
+      {
+        steps: [
+          {
+            content: "调研现有布局代码（WorkspacePage/标题栏/警告条）",
+            status: "in_progress",
+          },
+          { content: "梳理分区与警告条现状清单", status: "pending" },
+          { content: "标题栏改任务上下文行方案", status: "pending" },
+          { content: "workspace-info 缩为标题栏徽章", status: "pending" },
+          { content: "警告条合并为单条状态胶囊", status: "pending" },
+          { content: "右栏两面板改 tab 切换", status: "pending" },
+          { content: "布局变体原型与回归测试", status: "pending" },
+        ],
+      },
+      "工作计划已更新（共 7 项：0 已完成、1 进行中、6 待办）",
+      T1
     ),
   },
   {
@@ -274,6 +298,30 @@ const MAIN_HISTORY = [
       "grep",
       { pattern: "workspace-info", path: "packages/ui/src" },
       "WorkspacePage.tsx:1263  WorkspacePage.tsx:1269",
+      T1
+    ),
+  },
+  /* 工作计划样例：第 2 版，调研收官进入方案设计 */
+  {
+    kind: "tool-call" as const,
+    call: toolCall(
+      "tc-plan-2",
+      "update_plan",
+      {
+        steps: [
+          {
+            content: "调研现有布局代码（WorkspacePage/标题栏/警告条）",
+            status: "completed",
+          },
+          { content: "梳理分区与警告条现状清单", status: "completed" },
+          { content: "标题栏改任务上下文行方案", status: "in_progress" },
+          { content: "workspace-info 缩为标题栏徽章", status: "pending" },
+          { content: "警告条合并为单条状态胶囊", status: "pending" },
+          { content: "右栏两面板改 tab 切换", status: "pending" },
+          { content: "布局变体原型与回归测试", status: "pending" },
+        ],
+      },
+      "工作计划已更新（共 7 项：2 已完成、1 进行中、4 待办）",
       T1
     ),
   },
@@ -299,6 +347,30 @@ const MAIN_HISTORY = [
     message: userMessage(
       "msg-u2",
       "右栏两个面板叠着抢高度，改成 tab 切换；改动面板默认收起。",
+      T3
+    ),
+  },
+  /* 工作计划样例：第 3 版（第二轮），前三项收官进入右栏 tab 化 */
+  {
+    kind: "tool-call" as const,
+    call: toolCall(
+      "tc-plan-3",
+      "update_plan",
+      {
+        steps: [
+          {
+            content: "调研现有布局代码（WorkspacePage/标题栏/警告条）",
+            status: "completed",
+          },
+          { content: "梳理分区与警告条现状清单", status: "completed" },
+          { content: "标题栏改任务上下文行方案", status: "completed" },
+          { content: "workspace-info 缩为标题栏徽章", status: "completed" },
+          { content: "警告条合并为单条状态胶囊", status: "completed" },
+          { content: "右栏两面板改 tab 切换", status: "in_progress" },
+          { content: "布局变体原型与回归测试", status: "pending" },
+        ],
+      },
+      "工作计划已更新（共 7 项：5 已完成、1 进行中、1 待办）",
       T3
     ),
   },
