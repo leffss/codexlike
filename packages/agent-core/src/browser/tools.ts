@@ -18,7 +18,10 @@ import type { BrowserTaskManager } from "./manager";
 
 export interface BrowserToolsOptions {
   manager: BrowserTaskManager;
-  /** 截图保存目录（按任务；默认 <系统临时目录>/codexlike-screenshots/<任务>） */
+  /**
+   * 截图保存目录（按任务）。默认 <系统临时目录>/codexlike-screenshots/<任务id>，
+   * 临时目录重启即失；需重启后找回截图的宿主（如 desktop）应注入持久目录
+   */
   screenshotDirFor?: (taskId: string) => string;
 }
 
@@ -69,6 +72,7 @@ export function createBrowserTools(
   options: BrowserToolsOptions
 ): ToolDefinition[] {
   const { manager } = options;
+  // 默认值落在系统临时目录：重启即失，持久化语义由注入方提供（见上方接口注释）
   const screenshotDirFor =
     options.screenshotDirFor ??
     ((taskId: string) => join(tmpdir(), "codexlike-screenshots", taskId));

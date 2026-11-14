@@ -1,7 +1,9 @@
 /**
  * 任务截图的文件路径约定（工单 11；session→task 改名随票 03 换目录）：
- * 截图工具与「读回图片」的 IPC handler 共用。约定式路径让重启后的历史
- * 截图卡片也能按 任务id+调用id 找回文件，无需登记表。
+ * 截图工具与「读回图片」的 IPC handler 共用。「重启后可找回」的前提是
+ * desktop 恒注入 dataDir 下的持久目录（main.ts 的 screenshotDirFor）；
+ * 若截图目录落在临时目录（agent-core 默认值），重启后不保证找回。约定式
+ * 路径本身只保证按 任务id+调用id 定位文件，无需登记表。
  */
 import { join } from "node:path";
 

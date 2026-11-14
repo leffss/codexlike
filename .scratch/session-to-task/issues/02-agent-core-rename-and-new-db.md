@@ -62,3 +62,4 @@
 - `TaskEvent` 变体的 `sessionId` 字段与 `"session-auto-approve-changed"` 事件字面量（desktop `live-sessions.ts` / ui 引用）
 - `StoredMessage` / `ToolCallRecord` / `ApprovalRequest` / `InteractionRequest` 的 `sessionId` 字段（desktop/ui 全量引用，票 03/04 翻转）
 - 票02 截图目录验收项移交票03：唯一实现点 desktop/src/sessions/screenshots.ts 及其字面断言测试受「desktop 测试不改必须绿」expand 约束，归属翻转（2026-11-13，编排确认）
+- 勘误：验收项「14 个模块文件」为发布票时的调查口径；实际 git rename 检测为 src 9 个（session/ 整目录）+ tests 8 个，属计数表述差异，非范围缩减
