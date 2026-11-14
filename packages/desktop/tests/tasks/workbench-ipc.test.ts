@@ -60,7 +60,7 @@ function setup(now?: () => string, beforeResources?: () => void) {
   const home = join(root, "nested", "home");
   const workspace = join(root, "普通项目");
   mkdirSync(workspace);
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanup.push(() => store.close());
   const safeStorage = {
     isEncryptionAvailable: async () => true,
@@ -105,7 +105,7 @@ function setup(now?: () => string, beforeResources?: () => void) {
     },
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };
@@ -531,7 +531,7 @@ it("首条已执行但草稿落盘失败，重启重试补偿消费而不重放�
     text: value.text,
     ...value.preferences,
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       `CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state WHEN OLD.key = '${workbenchKey(target as { kind: "new"; projectId: null })}' BEGIN SELECT RAISE(ABORT, 'injected consume disk failure'); END`
@@ -591,7 +591,7 @@ it("补偿已接受意图不能清空失败后编辑的新文本，而应保存�
     projectId: null,
     text: "首个已接受任务",
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"
@@ -1487,7 +1487,7 @@ it("SQLite移除中途失败整体回滚，历史现场与重试意图不出现�
   );
   const before = invoke("tasks:view", record.id);
   // 仅在临时测试库注入存储故障；断言仍经宿主公开接口，不查询私有表布局。
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_project_removal BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'injected disk failure'); END"
@@ -1638,7 +1638,7 @@ it("首次发送成功后补偿草稿消费仍在等待时移除项目，旧requ
     workspaceMode: "worktree",
     text: "已执行过不能回滚",
   };
-  const fault = new DatabaseSync(join(app.home, "session-workbench.db"));
+  const fault = new DatabaseSync(join(app.home, "task-workbench.db"));
   try {
     fault.exec(
       "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected consume failure'); END"

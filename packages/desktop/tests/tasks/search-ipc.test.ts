@@ -48,7 +48,7 @@ async function setup() {
   const secondPath = join(root, "项目乙");
   mkdirSync(firstPath);
   mkdirSync(secondPath);
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanup.push(() => store.close());
   const profiles = createProfileStore({
     dir: home,
@@ -122,7 +122,7 @@ async function setup() {
     },
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };

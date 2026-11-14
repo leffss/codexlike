@@ -48,7 +48,7 @@ async function setup() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "project");
   mkdirSync(workspace);
-  const dbPath = join(root, "nested", "session-workbench.db");
+  const dbPath = join(root, "nested", "task-workbench.db");
   const persistence = createSqliteTaskStore(dbPath);
   cleanup.push(() => persistence.close());
   // 队列持久化：同一 db 文件的独立连接（生产布局一致，ADR 0013）

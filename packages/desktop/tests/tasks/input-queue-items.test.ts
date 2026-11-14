@@ -35,7 +35,7 @@ function harness(
 ) {
   const root = mkdtempSync(join(tmpdir(), "input-queue-items-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
-  const dbPath = join(root, "nested", "session-workbench.db");
+  const dbPath = join(root, "nested", "task-workbench.db");
   const store: InputQueueStore =
     kind === "sqlite"
       ? createSqliteInputQueueStore(dbPath)

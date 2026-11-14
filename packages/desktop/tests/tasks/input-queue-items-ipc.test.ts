@@ -44,7 +44,7 @@ async function setup() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
-  const dbPath = join(root, "nested", "session-workbench.db");
+  const dbPath = join(root, "nested", "task-workbench.db");
   const persistence = createSqliteTaskStore(dbPath);
   cleanup.push(() => persistence.close());
   const queueStore = createSqliteInputQueueStore(dbPath);

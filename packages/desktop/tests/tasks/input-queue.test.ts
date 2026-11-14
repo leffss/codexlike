@@ -404,7 +404,7 @@ describe("createSqliteInputQueueStore（队列持久化，与任务消息同库�
     const { join } = await import("node:path");
     const root = mkdtempSync(join(tmpdir(), "input-queue-sqlite-"));
     try {
-      const dbPath = join(root, "session-workbench.db");
+      const dbPath = join(root, "task-workbench.db");
       // 同库先由任务存储建表（生产布局：同一 db 文件）
       const { createSqliteInputQueueStore } =
         await import("../../src/tasks/input-queue-store");
@@ -469,7 +469,7 @@ describe("createSqliteInputQueueStore（队列持久化，与任务消息同库�
     try {
       const { createSqliteInputQueueStore } =
         await import("../../src/tasks/input-queue-store");
-      const dbPath = join(root, "session-workbench.db");
+      const dbPath = join(root, "task-workbench.db");
       const store = createSqliteInputQueueStore(dbPath);
       // 未记录的任务默认不暂停
       expect(store.isPaused("task-1")).toBe(false);

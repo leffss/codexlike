@@ -61,7 +61,7 @@ async function setup(hold = false) {
   writeFileSync(join(repo, "tracked.txt"), "来源内容");
   git(repo, "add", "tracked.txt");
   git(repo, "commit", "-m", "fixture");
-  let store = createSqliteTaskStore(join(home, "session-workbench.db"));
+  let store = createSqliteTaskStore(join(home, "task-workbench.db"));
   cleanups.push(() => store.close());
   const profiles = createProfileStore({
     dir: home,
@@ -124,7 +124,7 @@ async function setup(hold = false) {
     manager,
     reopen() {
       store.close();
-      store = createSqliteTaskStore(join(home, "session-workbench.db"));
+      store = createSqliteTaskStore(join(home, "task-workbench.db"));
       register();
     },
   };
