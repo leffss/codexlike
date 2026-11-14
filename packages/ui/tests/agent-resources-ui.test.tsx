@@ -76,13 +76,16 @@ const snapshot: ResourceSnapshotSummary = {
 };
 
 describe("规范与技能只读面板", () => {
-  it("工作区顶栏提供规范与技能只读入口，无任务时禁用", () => {
+  it("面板开关与 workspace-info 行随票01迁出工作台页，不再在页内渲染", () => {
     const html = renderToStaticMarkup(
       createElement(WorkspacePage, { onOpenSettings: () => {} })
     );
-    expect(html).toMatch(
-      /<button[^>]*data-testid="resources-toggle"[^>]*disabled/
-    );
+    // 开关移入标题栏（TitlebarPanelToggles，禁用态见 titlebar-task-context.test），
+    // 任务头行与 workspace-info 行整行取消；无任务时草稿收纳行也不渲染。
+    expect(html).not.toMatch(/data-testid="resources-toggle"/);
+    expect(html).not.toMatch(/data-testid="task-header-content"/);
+    expect(html).not.toMatch(/data-testid="workspace-info"/);
+    expect(html).not.toMatch(/data-testid="draft-workspace-info"/);
   });
   it("区分运行、最近与预览，展示来源/截断/诊断和分执行者加载而不提供编辑或正文", () => {
     const html = renderToStaticMarkup(

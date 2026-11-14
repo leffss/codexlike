@@ -6,6 +6,11 @@ import { subscribeWindowState } from "./lib/window-state";
 import { reportLaunchState } from "./lib/launch-state";
 import { ApplicationExit } from "./components/ApplicationExit";
 import { WindowControls } from "./components/WindowControls";
+import {
+  TitlebarPanelToggles,
+  TitlebarTaskContext,
+  type TitlebarContext,
+} from "./components/TitlebarTaskContext";
 
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -25,8 +30,20 @@ function switchViewWithReport(view: View, setView: (view: View) => void) {
   );
 }
 
-/** 同一行标题栏：品牌空白区拖动，右侧主题 / 设置 / 窗口按钮不可拖动。 */
-function Header(props: { view: View; onSwitch: (view: View) => void }) {
+/**
+ * 同一行标题栏（票01 任务上下文行）：工作台视图左区承载任务上下文
+ * （品牌 › 任务名 + 徽章 + 任务搜索），设置视图左区仅品牌展示。
+ * 拖动区按控件归属划分（审查修复 1）：header 根元素 window-titlebar-drag
+ * 提供整体拖动作用域，左区不再整块免拖——只有真正的交互控件（工作区徽章、
+ * 任务搜索、右侧开关/按钮）各自挂在 window-no-drag 作用域内，任务名文本、
+ * 徽章间空白与品牌回退态区域恢复可拖动。
+ */
+function Header(props: {
+  view: View;
+  /** 工作台视图的标题栏上下文；设置视图不渲染任务上下文 */
+  titlebar: TitlebarContext | null;
+  onSwitch: (view: View) => void;
+}) {
   const { theme, setTheme } = useTheme();
   const api =
     typeof window === "undefined"
@@ -44,15 +61,24 @@ function Header(props: { view: View; onSwitch: (view: View) => void }) {
       data-testid="window-titlebar"
       className={`${api ? "window-titlebar-drag" : ""} flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2`}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-        <span className="shrink-0 text-sm font-semibold tracking-wide text-fg">
-          CodexLike
-        </span>
-        <span className="hidden truncate text-xs text-fg-subtle sm:block">
-          本地 AI coding agent 工作台
-        </span>
-      </div>
+      {props.view === "workspace" && props.titlebar ? (
+        /* 左区交给父级 drag 作用域：任务名/品牌/空白可拖，
+         * 交互控件由 TitlebarTaskContext 内部各自免拖（审查修复 1） */
+        <TitlebarTaskContext context={props.titlebar} />
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+          <span className="shrink-0 text-sm font-semibold tracking-wide text-fg">
+            CodexLike
+          </span>
+          <span className="hidden truncate text-xs text-fg-subtle sm:block">
+            本地 AI coding agent 工作台
+          </span>
+        </div>
+      )}
       <nav className="window-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
+        {props.view === "workspace" && props.titlebar && (
+          <TitlebarPanelToggles panels={props.titlebar.panels} />
+        )}
         <button
           type="button"
           data-testid="theme-toggle"
@@ -121,6 +147,8 @@ function AppShell(props: {
   initialTarget?: WorkbenchTarget | null;
 }) {
   const [view, setView] = useState<View>(props.initialView ?? "workspace");
+  /** 标题栏任务上下文（票01）：由 WorkspacePage 上报，设置视图不渲染 */
+  const [titlebar, setTitlebarContext] = useState<TitlebarContext | null>(null);
   const [workspaceState] = useState(() =>
     createWorkspaceState(window.codexlike.workbench)
   );
@@ -142,6 +170,7 @@ function AppShell(props: {
       <ApplicationExit state={workspaceState}>
         <Header
           view={view}
+          titlebar={view === "workspace" ? titlebar : null}
           onSwitch={(next) => switchViewWithReport(next, setView)}
         />
         <main className="min-h-0 flex-1">
@@ -150,6 +179,7 @@ function AppShell(props: {
               state={workspaceState}
               onOpenSettings={() => switchViewWithReport("settings", setView)}
               initialTarget={props.initialTarget}
+              onTitlebarContext={setTitlebarContext}
             />
           ) : (
             <SettingsPage />

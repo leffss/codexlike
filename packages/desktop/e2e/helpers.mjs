@@ -16,6 +16,31 @@ export function assert(condition, message) {
   }
 }
 
+/**
+ * 票04 窗口底线后的窄窗基线（审查修复 4 归一处，六场景共用）：底线
+ * minWidth=1000 之后，640/900 已缩不到、1000 压在底线上——minWidth 夹紧
+ * 与 DPI 取整下 innerWidth 的精确断言（=== width）与上限断言（<= width）
+ * 不再成立。窄窗用例统一抬到 1100（线外），按场景配合各自的窄窗高度。
+ */
+export const NARROW_WIDTH = 1100;
+
+/**
+ * 标题栏工作区徽章弹层三连（审查修复 3 抽取，票01）：点开徽章，读取弹层
+ * 内的完整工作区路径与来源目录（无来源目录行时 origin 为 null），Escape
+ * 关闭。文本断言（includes / === / 真实存在）由调用方按各自场景完成。
+ */
+export async function workspaceBadgeInfo(window) {
+  await window.getByTestId("workspace-badge").click();
+  const popover = window.getByTestId("workspace-popover");
+  const path = await popover.getByTestId("workspace-path").textContent();
+  const originNode = popover.getByTestId("workspace-origin");
+  const origin = (await originNode.count())
+    ? await originNode.textContent()
+    : null;
+  await window.keyboard.press("Escape");
+  return { path, origin };
+}
+
 /** 真实打开受控选择器并点击 portal 选项，不绕过用户交互或风险确认。 */
 export async function selectComposerOption(window, testId, value) {
   const trigger = window.getByTestId(testId);

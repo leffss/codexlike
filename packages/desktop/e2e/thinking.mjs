@@ -18,6 +18,7 @@ import {
   closeApp,
   expandWorkedHistory,
   launchApp,
+  NARROW_WIDTH,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -538,14 +539,17 @@ async function main() {
       innerWidth,
       innerHeight,
     ]);
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setContentSize(640, 500)
+    // 窄窗基线（1100）的理由与取值归 helpers.mjs 的 NARROW_WIDTH 单点说明
+    await app.evaluate(
+      ({ BrowserWindow }, width) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(width, 640),
+      NARROW_WIDTH
     );
     try {
       await window.waitForFunction(
-        () =>
-          Math.abs(innerWidth - 640) <= 2 && Math.abs(innerHeight - 500) <= 2,
-        null,
+        (width) =>
+          Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - 640) <= 2,
+        NARROW_WIDTH,
         { timeout: 5000 }
       );
     } catch (error) {

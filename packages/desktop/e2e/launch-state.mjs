@@ -5,6 +5,8 @@
 // ④ bounds 与所有现存显示器无交集 → 尺寸保留、位置主屏居中
 // ⑤ maximized=true → 启动即最大化，取消最大化回到现场记录的正常态 bounds
 // ⑥ 现场文件损坏 → 当未配置处理，默认 1280×800
+// ⑦ 票04 窗口底线：存储越界小尺寸现场恢复被夹紧到底线 1000×600（位置保留）；
+//    程序化 setContentSize 缩到线下同样被 BrowserWindow minWidth/minHeight 夹紧
 //
 // 断言单位：渲染层 window.screenX/screenY/outerWidth/outerHeight 在 DPI 缩放与
 // 无框窗口隐形 resize 边框下与主进程 DIP bounds 差一个机器相关的恒定偏移
@@ -30,7 +32,7 @@ const TOLERANCE_POSITION = 3;
 /**
  * 尺寸断言容差：Windows DPI 缩放下构造与 setBounds 两条路径的物理像素
  * 取整不同（125% 实测同宽差 6px），尺寸单位差有波动；±12 仍远小于任何
- * 行为差异（默认 1280 vs 恢复 900、最小收紧 400 vs 900）。
+ * 行为差异（默认 1280 vs 恢复 1000、票04 底线夹紧 1000 vs 400）。
  */
 const TOLERANCE_SIZE = 12;
 
@@ -184,15 +186,17 @@ async function main() {
     },
   });
 
+  // 场景②③④⑤ 的预写尺寸均在窗口底线（票04，1000×600）之上：
+  // 底线以下的恢复值会被夹紧（场景⑦专测），不再用于验证位置恢复语义。
   await scenario("② 预写现场恢复位置与尺寸", {
     fileContent: JSON.stringify({
-      bounds: { x: 100, y: 80, width: 900, height: 640 },
+      bounds: { x: 100, y: 80, width: 1080, height: 640 },
       maximized: false,
     }),
     async verify({ window, delta }) {
       assertRendererBounds(
         await geometry(window),
-        { x: 100, y: 80, width: 900, height: 640 },
+        { x: 100, y: 80, width: 1080, height: 640 },
         delta,
         "预写现场恢复"
       );
@@ -201,13 +205,13 @@ async function main() {
 
   await scenario("③ 负坐标与部分越界照常恢复", {
     fileContent: JSON.stringify({
-      bounds: { x: -200, y: -100, width: 900, height: 640 },
+      bounds: { x: -200, y: -100, width: 1080, height: 640 },
       maximized: false,
     }),
     async verify({ window, delta }) {
       assertRendererBounds(
         await geometry(window),
-        { x: -200, y: -100, width: 900, height: 640 },
+        { x: -200, y: -100, width: 1080, height: 640 },
         delta,
         "负坐标恢复"
       );
@@ -216,14 +220,14 @@ async function main() {
 
   await scenario("④ 无交集：尺寸保留、主屏居中", {
     fileContent: JSON.stringify({
-      bounds: { x: 20000, y: 20000, width: 900, height: 640 },
+      bounds: { x: 20000, y: 20000, width: 1080, height: 640 },
       maximized: false,
     }),
     async verify({ app, window, delta }) {
       const area = await primaryWorkArea(app);
       assertRendererBounds(
         await geometry(window),
-        centeredOn(area, 900, 640),
+        centeredOn(area, 1080, 640),
         delta,
         "无交集回退"
       );
@@ -232,7 +236,7 @@ async function main() {
 
   await scenario("⑤ maximized 启动即最大化且还原回现场 bounds", {
     fileContent: JSON.stringify({
-      bounds: { x: 140, y: 90, width: 960, height: 600 },
+      bounds: { x: 140, y: 90, width: 1024, height: 640 },
       maximized: true,
     }),
     async prepareCalibrate({ app }) {
@@ -248,7 +252,7 @@ async function main() {
       await until(() => maximized(app), "预写 maximized=true 应启动即最大化");
       await unmaximize(app);
       // Windows 还原动画期间几何未稳定：轮询到达现场记录的正常态 bounds
-      const expected = { x: 140, y: 90, width: 960, height: 600 };
+      const expected = { x: 140, y: 90, width: 1024, height: 640 };
       await until(async () => {
         const actual = await geometry(window);
         return (
@@ -277,8 +281,43 @@ async function main() {
     },
   });
 
+  // 票04：存储的越界恢复值（旧版本保存的小窗现场）恢复时被夹紧到窗口底线
+  // 1000×600（resolveLaunchBounds 显式收紧，位置保留）；程序化 setContentSize
+  // 缩到线下同样被 BrowserWindow minWidth/minHeight 运行时夹紧。
+  await scenario("⑦ 存储越界恢复值夹紧到窗口底线", {
+    fileContent: JSON.stringify({
+      bounds: { x: 100, y: 80, width: 400, height: 200 },
+      maximized: false,
+    }),
+    async verify({ app, window, delta }) {
+      // 恢复夹紧：位置保留，尺寸到底线
+      assertRendererBounds(
+        await geometry(window),
+        { x: 100, y: 80, width: 1000, height: 600 },
+        delta,
+        "越界恢复夹紧"
+      );
+      // 运行时夹紧：程序化缩到线下，内容区尺寸不低于 minWidth/minHeight
+      await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(400, 200)
+      );
+      await window.waitForFunction(
+        () => window.innerWidth >= 1000 && window.innerHeight >= 600,
+        null,
+        { timeout: 5000 }
+      );
+      const contentSize = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].getContentSize()
+      );
+      assert(
+        contentSize[0] >= 1000 && contentSize[1] >= 600,
+        `程序化缩窗应被夹紧到窗口底线：实际 ${JSON.stringify(contentSize)}`
+      );
+    },
+  });
+
   console.log(
-    "[e2e] 启动现场恢复：首启默认、bounds/负坐标/无交集/最大化恢复、损坏回退 OK"
+    "[e2e] 启动现场恢复：首启默认、bounds/负坐标/无交集/最大化恢复、损坏回退、越界夹紧 OK"
   );
 }
 

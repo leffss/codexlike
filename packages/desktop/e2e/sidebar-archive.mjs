@@ -15,6 +15,7 @@ import {
   hoverClick,
   hoverFor,
   launchApp,
+  NARROW_WIDTH,
   projectAction,
   taskMenu,
   startMockProvider,
@@ -340,10 +341,16 @@ async function main() {
     const originalSize = await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getSize()
     );
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setSize(1000, 720)
+    // 窄窗基线（1100）的理由与取值归 helpers.mjs 的 NARROW_WIDTH 单点说明
+    await app.evaluate(
+      ({ BrowserWindow }, width) =>
+        BrowserWindow.getAllWindows()[0].setSize(width, 720),
+      NARROW_WIDTH
     );
-    await window.waitForFunction(() => innerWidth <= 1000);
+    await window.waitForFunction(
+      (width) => innerWidth <= width,
+      NARROW_WIDTH
+    );
     await assertSingleLineTitles();
     await window.screenshot({
       path: join(screenshotDir, "sidebar-narrow.png"),

@@ -19,6 +19,7 @@ import {
   taskMenu,
   startMockProvider,
   untilDraft,
+  workspaceBadgeInfo,
 } from "./helpers.mjs";
 
 async function main() {
@@ -75,10 +76,10 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
+    // 项目目录明确展示：路径收进标题栏徽章（票01），弹层读完整路径
+    const projectBadge = await workspaceBadgeInfo(window);
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        workspaceDir
-      ),
+      projectBadge.path.includes(workspaceDir),
       "项目目录明确展示"
     );
     const projectTask = await window
@@ -140,9 +141,8 @@ async function main() {
         .count()) === 1,
       "独立分区不伪造项目"
     );
-    const standalonePath = await window
-      .getByTestId("workspace-path")
-      .getAttribute("title");
+    const standaloneBadge = await workspaceBadgeInfo(window);
+    const standalonePath = standaloneBadge.path;
     assert(existsSync(standalonePath), "专用持久目录真实存在");
     await (
       await taskMenu(
@@ -203,9 +203,9 @@ async function main() {
       .getByTestId("message-user")
       .filter({ hasText: "独立草稿" })
       .waitFor();
+    const reopenedBadge = await workspaceBadgeInfo(window);
     assert(
-      (await window.getByTestId("workspace-path").getAttribute("title")) ===
-        standalonePath,
+      reopenedBadge.path === standalonePath,
       "重启后工作区固定且标题持久"
     );
     assert(model.requestCount() === 3, "重启不自动发送");

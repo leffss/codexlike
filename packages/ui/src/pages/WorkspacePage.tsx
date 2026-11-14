@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -11,11 +12,13 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
-import { TaskAutoApproveStatus } from "../components/TaskAutoApproveStatus";
+import { ToastHost } from "../components/ToastHost";
+import { WorkspaceModeSelector } from "../components/WorkspaceModeSelector";
 import {
-  WorkspaceModeSelector,
-  WorkspaceSharingNotice,
-} from "../components/WorkspaceModeControl";
+  createToastManager,
+  type ToastContent,
+  type ToastManager,
+} from "../lib/toast-state";
 import type {
   QueuedMessage,
   QueueOperationResult,
@@ -44,17 +47,22 @@ import {
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
 import { ChangesPanel } from "../components/ChangesPanel";
+import { PanelsDrawer, type DrawerTab } from "../components/PanelsDrawer";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
+import {
+  type TitlebarContext,
+  type TitlebarTask,
+} from "../components/TitlebarTaskContext";
 import { TaskSidebar } from "../components/TaskSidebar";
-import { TaskSearch } from "../components/TaskSearch";
 import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
+import { useWorkspaceSharing } from "../lib/workspace-sharing";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -65,6 +73,20 @@ import {
   matchProfilesForModelSwitch,
   planSlashCommand,
 } from "../lib/slash-command-actions";
+
+/**
+ * 提示状态同步一元（审查修复 5 抽取）：五类原常驻横条（票02）的
+ * 「状态在 → toast 幂等 upsert；状态消失 → retract 无条件撤除」同构走此入口，
+ * content 为 null 即撤除。dismissed 记录与内容变化语义由 toast-state 承担。
+ */
+function syncToast(
+  toastState: ToastManager,
+  id: string,
+  content: ToastContent | null
+) {
+  if (content) toastState.show(id, content);
+  else toastState.retract(id);
+}
 
 /** 取回编辑任务（票 03）：目标条目 + 载入时原文（CAS）+ 进入编辑前的输入框草稿。 */
 interface QueueEditTask {
@@ -84,6 +106,8 @@ export function WorkspacePage(props: {
   state?: WorkspaceState;
   /** 启动现场的工作台目标（票03）：冷启动恢复的第一优先级；缺省走现有回退链 */
   initialTarget?: WorkbenchTarget | null;
+  /** 标题栏任务上下文上报（票01）：任务/搜索/面板开关交由 App 的 Header 装配 */
+  onTitlebarContext?: (context: TitlebarContext) => void;
 }) {
   const [localState] = useState(() =>
     createWorkspaceState(
@@ -91,6 +115,8 @@ export function WorkspacePage(props: {
     )
   );
   const workspaceState = props.state ?? localState;
+  /** 标题栏上下文上报（票01）：解构以稳定 effect 依赖 */
+  const { onTitlebarContext } = props;
   useSyncExternalStore(
     workspaceState.subscribe,
     workspaceState.version,
@@ -161,8 +187,12 @@ export function WorkspacePage(props: {
       workspaceState.setPreferences(currentId, { thinkingEffort });
   }
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
-  const [changesOpen, setChangesOpen] = useState(false);
-  const [resourcesOpen, setResourcesOpen] = useState(false);
+  /**
+   * 右栏 overlay 抽屉（票03）：两面板收进同一浮层，状态从两个布尔开关
+   * 合并为「当前 tab 或关」；resourcesOpen/changesOpen 语义由派生值保留
+   * （标题栏 aria-expanded 同步），两开关按钮各自仍可打开抽屉到对应 tab。
+   */
+  const [drawer, setDrawer] = useState<DrawerTab | null>(null);
   const [resources, setResources] = useState<TaskResourcesView | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -170,8 +200,17 @@ export function WorkspacePage(props: {
   const taskRequestRef = useRef(0);
   /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
   const [fullAccessPending, setFullAccessPending] = useState(false);
-  /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
-  const [contextWarning, setContextWarning] = useState<string | null>(null);
+  /**
+   * toast 管理器（票02）：渲染层内存态，不持久化。五类原常驻横条
+   * （保存失败 / 模型配置不可用 / 上下文告警 / 工作区共享 / 自动批准状态）
+   * 统一经状态同步 effect 推送到右下角浮层。
+   */
+  const [toastState] = useState<ToastManager>(() => createToastManager());
+  useSyncExternalStore(
+    toastState.subscribe,
+    toastState.version,
+    toastState.version
+  );
   /**
    * 强制回底信号（票 03 滚动跟随）：发送新 prompt 时递增，
    * MessageStream 收到后立即贴底并进入跟随态。
@@ -274,6 +313,30 @@ export function WorkspacePage(props: {
     if (id !== null) void refreshResources(id);
   }, [refreshResources]);
 
+  /**
+   * 抽屉状态动作（票03）：标题栏两开关与抽屉 tab 头共用同一状态源。
+   * 打开/切到「规范与技能」页即刷新资源（与原「开面板即刷新」语义一致；
+   * 「改动」面板挂载时自刷新）；动作经稳定引用上报，读取走 ref 防过期闭包。
+   */
+  const drawerRef = useRef<DrawerTab | null>(null);
+  drawerRef.current = drawer;
+  const openDrawer = useCallback(
+    (tab: DrawerTab) => {
+      if (tab === "resources") refreshCurrentResources();
+      setDrawer(tab);
+    },
+    [refreshCurrentResources]
+  );
+  const toggleResources = useCallback(() => {
+    if (drawerRef.current === "resources") setDrawer(null);
+    else openDrawer("resources");
+  }, [openDrawer]);
+  const toggleChanges = useCallback(() => {
+    if (drawerRef.current === "changes") setDrawer(null);
+    else openDrawer("changes");
+  }, [openDrawer]);
+  const closeDrawer = useCallback(() => setDrawer(null), []);
+
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
     setMessages((prev) =>
@@ -284,27 +347,35 @@ export function WorkspacePage(props: {
   /**
    * 上下文告警刷新（code review 修复 2，spec 验收场景 4）：
    * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）× 80%，
-   * 超阈值在输入区上方常驻中文告警（/compact 后重估自然消失）；查询失败静默不打扰。
+   * 超阈值以 toast 常驻右下角（票02；/compact 后重估自然消失）；查询失败静默不打扰。
    */
-  const refreshContextWarning = useCallback(async (taskId: string) => {
-    const taskRequest = taskRequestRef.current;
-    const isCurrent = () =>
-      currentIdRef.current === taskId && taskRequestRef.current === taskRequest;
-    try {
-      const status = await window.codexlike.tasks.status(taskId);
-      if (!isCurrent()) return;
-      setContextWarning(
-        status === null
-          ? null
-          : (evaluateContextWarning(
-              status.estimatedContextTokens,
-              status.contextWindowTokens ?? undefined
-            )?.message ?? null)
-      );
-    } catch {
-      if (isCurrent()) setContextWarning(null);
-    }
-  }, []);
+  const refreshContextWarning = useCallback(
+    async (taskId: string) => {
+      const taskRequest = taskRequestRef.current;
+      const isCurrent = () =>
+        currentIdRef.current === taskId &&
+        taskRequestRef.current === taskRequest;
+      try {
+        const status = await window.codexlike.tasks.status(taskId);
+        if (!isCurrent()) return;
+        const message =
+          status === null
+            ? null
+            : (evaluateContextWarning(
+                status.estimatedContextTokens,
+                status.contextWindowTokens ?? undefined
+              )?.message ?? null);
+        syncToast(
+          toastState,
+          "context-warning",
+          message ? { kind: "warn", content: message } : null
+        );
+      } catch {
+        if (isCurrent()) toastState.retract("context-warning");
+      }
+    },
+    [toastState]
+  );
 
   const openTask = useCallback(
     async (id: string) => {
@@ -326,7 +397,7 @@ export function WorkspacePage(props: {
       setQueueState(EMPTY_QUEUE_STATE);
       setWorkspaceFiles([]);
       setResources(null);
-      setContextWarning(null);
+      toastState.retract("context-warning");
       setCompacting(false);
       setFullAccessPending(false);
       void refreshResources(id);
@@ -399,8 +470,12 @@ export function WorkspacePage(props: {
       refreshTasks,
       reportWorkbenchTarget,
       workspaceState,
+      toastState,
     ]
   );
+
+  /** 任务搜索迁入标题栏（票01）：切换任务的入口保持同一 openTask 管线 */
+  const selectTask = useCallback((id: string) => void openTask(id), [openTask]);
 
   useEffect(() => {
     let active = true;
@@ -588,7 +663,7 @@ export function WorkspacePage(props: {
     setLoading(false);
     setStreaming(false);
     setCompacting(false);
-    setContextWarning(null);
+    toastState.retract("context-warning");
     setFullAccessPending(false);
   }
 
@@ -899,7 +974,7 @@ export function WorkspacePage(props: {
       setStreaming(false);
       setLoading(false);
       setCompacting(false);
-      setContextWarning(null);
+      toastState.retract("context-warning");
       setFullAccessPending(false);
     }
     const generation = taskRequestRef.current;
@@ -1117,6 +1192,157 @@ export function WorkspacePage(props: {
             ? "新建或选择一个任务后开始对话"
             : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
+  /**
+   * 标题栏任务上下文上报（票01）：任务名、项目·Worktree/本地 徽章数据、
+   * 任务搜索与面板开关交由 App 的 Header 装配；无任务（未选任务/草稿）
+   * 时 task 为 null，标题栏回退品牌展示。上下文按内容记忆，仅在
+   * 数据变化时上报，App 级 setState 不会反向触发本页 effect 重跑。
+   */
+  const hasCurrentTask = current !== null;
+  const titlebarTask = useMemo<TitlebarTask | null>(
+    () =>
+      current
+        ? {
+            taskId: current.id,
+            title: current.title,
+            projectName:
+              current.projectId === null
+                ? null
+                : (projects.find((p) => p.id === current.projectId)?.name ??
+                  null),
+            workspaceMode: current.workspaceMode,
+            workspacePath: current.workspacePath,
+            workspaceOriginPath: current.workspaceOriginPath,
+          }
+        : null,
+    [current, projects]
+  );
+  const titlebarContext = useMemo<TitlebarContext>(
+    () => ({
+      task: titlebarTask,
+      search: { recordsRevision, onSelect: selectTask },
+      panels: {
+        resourcesOpen: drawer === "resources",
+        changesOpen: drawer === "changes",
+        disabled: !hasCurrentTask,
+        onToggleResources: toggleResources,
+        onToggleChanges: toggleChanges,
+      },
+    }),
+    [
+      titlebarTask,
+      recordsRevision,
+      selectTask,
+      drawer,
+      hasCurrentTask,
+      toggleResources,
+      toggleChanges,
+    ]
+  );
+  useEffect(() => {
+    onTitlebarContext?.(titlebarContext);
+  }, [titlebarContext, onTitlebarContext]);
+
+  /** 工作区共享检查（票02）：展示目标为当前草稿或当前任务，toast 同步见下 */
+  const sharingTarget = draft
+    ? {
+        projectId: draft.projectId,
+        workspacePath: draft.workspacePath,
+        workspaceMode: draft.workspaceMode ?? "local",
+      }
+    : current
+      ? { taskId: current.id }
+      : null;
+  const sharing = useWorkspaceSharing(sharingTarget);
+
+  /**
+   * 五类提示的状态同步（票02）：原消息流上方常驻横条迁为右下角 toast。
+   * 约定：状态在 → toast 在（不占布局行、持续可见）；状态消失 → retract
+   * 无条件撤除（状态重现须重新提示）。事件文案相同的手动关闭在状态持续
+   * 期间不复活（toast-state 的 dismissed 记录），内容变化视为新提示。
+   */
+  const persistenceError = workspaceState.persistenceError();
+  useEffect(() => {
+    syncToast(
+      toastState,
+      "workbench-save-error",
+      persistenceError !== null
+        ? {
+            kind: "error",
+            content: `工作现场保存失败：${persistenceError}`,
+          }
+        : null
+    );
+  }, [persistenceError, toastState]);
+
+  const pendingProfileId = draft?.providerProfileId ?? selectedProfileId;
+  const profileUnavailable =
+    Boolean(pendingProfileId) &&
+    !profiles.some((profile) => profile.id === pendingProfileId);
+  useEffect(() => {
+    syncToast(
+      toastState,
+      "unavailable-profile",
+      profileUnavailable
+        ? {
+            kind: "error",
+            content: "已保存的模型配置不可用，请重新选择模型；不会自动替换。",
+          }
+        : null
+    );
+  }, [profileUnavailable, toastState]);
+
+  useEffect(() => {
+    syncToast(
+      toastState,
+      "workspace-sharing-notice",
+      sharing.error !== null
+        ? {
+            kind: "error",
+            content: sharing.error,
+            contentTestId: "workspace-sharing-error",
+          }
+        : sharing.warning !== null
+          ? {
+              kind: "warn",
+              content: sharing.warning,
+              contentTestId: "workspace-sharing-warning",
+            }
+          : null
+    );
+  }, [sharing.warning, sharing.error, toastState]);
+
+  const autoApproveOn = current?.autoApprove ?? false;
+  const autoApproveBusy = current !== null && revoking.has(current.id);
+  const autoApproveError =
+    current === null ? null : (revokeErrors[current.id] ?? null);
+  useEffect(() => {
+    syncToast(
+      toastState,
+      "task-auto-approve",
+      autoApproveOn
+        ? {
+            kind: "warn",
+            content: "本任务已开启自动批准",
+            detail: "取消后恢复基础审批模式的允许策略，不撤回已批准的执行。",
+            action: {
+              testId: "task-auto-approve-revoke",
+              label: autoApproveBusy ? "取消中…" : "取消自动批准",
+              disabled: autoApproveBusy,
+              // 读 ref 不闭包捕获：切换任务后 effect 不重跑也不会撤错任务
+              onAction: () => {
+                const id = currentIdRef.current;
+                if (id !== null) void revokeAutoApprove(id);
+              },
+            },
+            ...(autoApproveError !== null
+              ? { actionError: autoApproveError }
+              : {}),
+          }
+        : null
+    );
+  }, [autoApproveOn, autoApproveBusy, autoApproveError, toastState]);
+
   return (
     <div className="flex h-full">
       {fullAccessPending && (
@@ -1196,9 +1422,9 @@ export function WorkspacePage(props: {
         }}
       />
       {/* 任务容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
-          断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
-          （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
-          不触发断点切换导致内容列跳宽 */}
+          断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应。
+          票03 起「规范与技能 / 改动」为消息流上方 overlay 抽屉（见下方
+          消息流区域容器），开合不改变容器宽度、不触发断点切换。 */}
       <section className="@container/task flex min-w-0 flex-1">
         <div
           className="flex min-w-0 flex-1 flex-col"
@@ -1208,59 +1434,13 @@ export function WorkspacePage(props: {
             } as CSSProperties
           }
         >
-          <header
-            className="shrink-0 border-b border-line px-4 py-2"
-            style={contentPadding}
-          >
-            {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
+          {/* 草稿场景就地收纳（票01）：workspace-info 整行取消后，新建草稿的
+              目录选择与工作区模式入口保留在本列（仅草稿期间渲染，非常驻行）；
+              正式任务的路径/模式/来源目录收进标题栏徽章。内容与消息流、
+              输入区共用同一内容列宽度类，左右缘对齐。 */}
+          {draft && (
             <div
-              data-testid="task-header-content"
-              className={`${contentWidthClass} flex items-center gap-2`}
-            >
-              <span
-                data-testid="task-title"
-                className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
-              >
-                {current?.title ??
-                  (draft
-                    ? draft.projectId === null
-                      ? "新建独立任务"
-                      : `新建项目任务 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
-                    : "未选择任务")}
-              </span>
-              <div className="shrink-0 whitespace-nowrap">
-                <TaskSearch
-                  recordsRevision={recordsRevision}
-                  onSelect={(id) => void openTask(id)}
-                />
-              </div>
-              <button
-                type="button"
-                data-testid="resources-toggle"
-                disabled={currentId === null}
-                aria-expanded={resourcesOpen}
-                onClick={() => {
-                  if (!resourcesOpen) refreshCurrentResources();
-                  setResourcesOpen((prev) => !prev);
-                }}
-                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-              >
-                规范与技能
-              </button>
-              <button
-                type="button"
-                data-testid="changes-toggle"
-                onClick={() => setChangesOpen((prev) => !prev)}
-                disabled={currentId === null}
-                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-              >
-                {changesOpen ? "收起改动" : "改动"}
-              </button>
-            </div>
-          </header>
-          {(current || draft) && (
-            <div
-              data-testid="workspace-info"
+              data-testid="draft-workspace-info"
               className="shrink-0 border-b border-line px-4 py-2 text-xs text-fg-muted"
               style={contentPadding}
             >
@@ -1268,35 +1448,22 @@ export function WorkspacePage(props: {
                 <div
                   data-testid="workspace-path"
                   title={
-                    current?.workspacePath ??
-                    draft?.workspacePath ??
-                    projects.find((p) => p.id === draft?.projectId)
+                    draft.workspacePath ??
+                    projects.find((p) => p.id === draft.projectId)
                       ?.workspacePath
                   }
                   className="flex flex-wrap items-center gap-x-2 gap-y-1"
                 >
                   <span className="min-w-0 break-all">
-                    {draft?.workspaceMode === "worktree"
+                    {draft.workspaceMode === "worktree"
                       ? "来源目录（发送后使用隔离工作区）："
                       : "工作区："}
-                    {current?.workspacePath ??
-                      draft?.workspacePath ??
-                      projects.find((p) => p.id === draft?.projectId)
+                    {draft.workspacePath ??
+                      projects.find((p) => p.id === draft.projectId)
                         ?.workspacePath ??
                       "应用专用持久目录（首次发送时分配）"}
                   </span>
-                  {current && !draft && (
-                    <span
-                      data-testid="workspace-mode"
-                      title="首次执行后工作区固定，调整项目归属不会改变目录、分支和历史；不代表文件只读或权限受限。"
-                      className="shrink-0 rounded border border-line bg-surface px-2 py-0.5"
-                    >
-                      {current.workspaceMode === "worktree"
-                        ? "Worktree"
-                        : "本地"}
-                    </span>
-                  )}
-                  {draft && draft.projectId !== null && (
+                  {draft.projectId !== null && (
                     <WorkspaceModeSelector
                       mode={draft.workspaceMode ?? "local"}
                       busy={creating}
@@ -1310,12 +1477,7 @@ export function WorkspacePage(props: {
                     />
                   )}
                 </div>
-                {current?.workspaceOriginPath && (
-                  <div data-testid="workspace-origin">
-                    来源目录：{current.workspaceOriginPath}
-                  </div>
-                )}
-                {draft?.projectId === null && (
+                {draft.projectId === null && (
                   <button
                     type="button"
                     data-testid="draft-select-workspace"
@@ -1326,7 +1488,7 @@ export function WorkspacePage(props: {
                     选择已有目录
                   </button>
                 )}
-                {draft?.workspacePath && (
+                {draft.workspacePath && (
                   <button
                     type="button"
                     data-testid="draft-managed-workspace"
@@ -1341,7 +1503,7 @@ export function WorkspacePage(props: {
                     使用专用目录
                   </button>
                 )}
-                {draft?.error && (
+                {draft.error && (
                   <p
                     data-testid="draft-error"
                     role="alert"
@@ -1353,92 +1515,76 @@ export function WorkspacePage(props: {
               </div>
             </div>
           )}
-          {workspaceState.persistenceError() && (
-            <p
-              role="alert"
-              data-testid="workbench-save-error"
-              className="px-4 text-danger-fg"
-            >
-              工作现场保存失败：{workspaceState.persistenceError()}
-            </p>
-          )}
-          {(draft?.providerProfileId ?? selectedProfileId) &&
-            !profiles.some(
-              (p) => p.id === (draft?.providerProfileId ?? selectedProfileId)
-            ) && (
-              <p
-                role="alert"
-                data-testid="unavailable-profile"
-                className="px-4 text-danger-fg"
-              >
-                已保存的模型配置不可用，请重新选择模型；不会自动替换。
-              </p>
-            )}
-          <MessageStream
-            key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-            taskId={currentId}
-            questionDraft={(requestId) =>
-              currentId === null
-                ? undefined
-                : workspaceState.draft(currentId, requestId)
-            }
-            loading={loading}
-            onScrollbarGutterChange={setScrollbarGutter}
-            readingPosition={
-              currentId === null
-                ? null
-                : workspaceState.readingPosition(currentId)
-            }
-            onReadingPosition={(position) => {
-              if (currentId !== null)
-                workspaceState.setReadingPosition(currentId, position);
-            }}
-            items={displayMessages}
-            streaming={streaming}
-            compacting={compacting}
-            contentWidthClass={contentWidthClass}
-            followSignal={followSignal}
-            emptyHint={
-              profiles.length === 0 ? (
-                <button
-                  type="button"
-                  className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
-                  onClick={props.onOpenSettings}
-                >
-                  前往设置配置模型
-                </button>
-              ) : undefined
-            }
-          />
-          {contextWarning !== null && (
-            <div
-              data-testid="context-warning"
-              className="border-t border-warn-fg/40 bg-warn-bg px-4 py-2 text-xs text-warn-fg"
-            >
-              {contextWarning}
-            </div>
-          )}
-          {(draft || current) && (
-            <WorkspaceSharingNotice
-              target={
-                draft
-                  ? {
-                      projectId: draft.projectId,
-                      workspacePath: draft.workspacePath,
-                      workspaceMode: draft.workspaceMode ?? "local",
-                    }
-                  : { taskId: current!.id }
+          {/* 消息流区域容器（票03）：overlay 抽屉的定位基准。抽屉浮于消息流
+              上方（absolute），打开时不改变消息流与内容列宽度——原「分栏
+              兄弟节点 max-w-[40%] 挤压」行为取消；面板开合也不再影响
+              @container/task 容器宽度（三档分档行为保持稳定）。
+              票02：原消息流上方的五类常驻横条已迁为右下角 toast，不再占行。 */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <MessageStream
+              key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+              taskId={currentId}
+              questionDraft={(requestId) =>
+                currentId === null
+                  ? undefined
+                  : workspaceState.draft(currentId, requestId)
+              }
+              loading={loading}
+              onScrollbarGutterChange={setScrollbarGutter}
+              readingPosition={
+                currentId === null
+                  ? null
+                  : workspaceState.readingPosition(currentId)
+              }
+              onReadingPosition={(position) => {
+                if (currentId !== null)
+                  workspaceState.setReadingPosition(currentId, position);
+              }}
+              items={displayMessages}
+              streaming={streaming}
+              compacting={compacting}
+              contentWidthClass={contentWidthClass}
+              followSignal={followSignal}
+              emptyHint={
+                profiles.length === 0 ? (
+                  <button
+                    type="button"
+                    className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
+                    onClick={props.onOpenSettings}
+                  >
+                    前往设置配置模型
+                  </button>
+                ) : undefined
               }
             />
-          )}
-          {current && (
-            <TaskAutoApproveStatus
-              autoApprove={current.autoApprove ?? false}
-              busy={revoking.has(current.id)}
-              error={revokeErrors[current.id] ?? null}
-              onRevoke={() => void revokeAutoApprove(current.id)}
-            />
-          )}
+            {currentId !== null && drawer !== null && (
+              <PanelsDrawer
+                tab={drawer}
+                onTabChange={openDrawer}
+                onClose={closeDrawer}
+                resources={
+                  <AgentResourcesPanel
+                    resources={resources}
+                    loading={resourcesLoading}
+                    error={resourcesError}
+                    onRefresh={refreshCurrentResources}
+                    onClose={closeDrawer}
+                  />
+                }
+                changes={
+                  current !== null ? (
+                    <ChangesPanel
+                      key={current.id}
+                      taskId={current.id}
+                      taskTitle={current.title}
+                      selectedProfileId={selectedProfileId}
+                      onClose={closeDrawer}
+                    />
+                  ) : null
+                }
+              />
+            )}
+          </div>
           {interaction ? (
             <InteractionPanel
               key={interaction.request.id}
@@ -1547,33 +1693,12 @@ export function WorkspacePage(props: {
             />
           )}
         </div>
-        {currentId !== null && (resourcesOpen || changesOpen) && (
-          // 面板共享限宽区域：同时打开时纵向排列，至少为主列保留六成宽度。
-          // 在装配层覆盖面板原固定宽高，面板内部仍各自滚动、独立关闭。
-          <div
-            className={`flex min-h-0 max-w-[40%] shrink-0 flex-col [&>aside]:h-auto [&>aside]:min-h-0 [&>aside]:min-w-0 [&>aside]:w-full [&>aside]:flex-1 ${changesOpen ? "w-[30rem]" : "w-96"}`}
-          >
-            {resourcesOpen && (
-              <AgentResourcesPanel
-                resources={resources}
-                loading={resourcesLoading}
-                error={resourcesError}
-                onRefresh={refreshCurrentResources}
-                onClose={() => setResourcesOpen(false)}
-              />
-            )}
-            {changesOpen && current !== null && (
-              <ChangesPanel
-                key={current.id}
-                taskId={current.id}
-                taskTitle={current.title}
-                selectedProfileId={selectedProfileId}
-                onClose={() => setChangesOpen(false)}
-              />
-            )}
-          </div>
-        )}
       </section>
+      {/* 票02：五类提示的右下角浮层，fixed 定位不占布局行 */}
+      <ToastHost
+        toasts={toastState.toasts()}
+        onDismiss={(id) => toastState.dismiss(id)}
+      />
     </div>
   );
 }

@@ -174,15 +174,22 @@ async function main() {
       .getByTestId("interaction-panel")
       .waitFor({ state: "detached" });
     await window.getByTestId("composer-send").waitFor();
+    // 票05：搜索面板随票01 迁入标题栏左区（384px 浮层），打开时覆盖左栏顶部
+    // project-header 右端的悬浮操作区（project-remove 不可命中）——移除项目前
+    // 先收起面板；移除后重开搜索（query 跨开合保留并自动重查）验证结果随项目
+    // 移除消失。结果列表由实时状态派生，产品语义与原「面板开着时结果即时消失」一致。
     await window.getByTestId("task-search-toggle").click();
     await window.getByTestId("task-search-input").fill("当前所属");
     await window.getByTestId("task-search-result").waitFor();
+    await window.getByTestId("task-search-toggle").click();
     await projectAction(window, "project-remove");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
+    await window.getByTestId("task-search-toggle").click();
     await window
-      .getByTestId("task-search-result")
-      .waitFor({ state: "detached" });
+      .getByTestId("task-search-status")
+      .filter({ hasText: "没有匹配的任务" })
+      .waitFor();
     await window.getByTestId("task-search-toggle").click();
     await window
       .getByTestId("message-user")

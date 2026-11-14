@@ -21,6 +21,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  NARROW_WIDTH,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -368,8 +369,11 @@ async function questionsScenario() {
         join(tmpdir(), "codexlike-interaction-screenshots-")
       );
       console.log(`[e2e:interactions] 布局截图目录 ${screenshotDir}`);
-      await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].setContentSize(640, 700)
+      // 窄窗基线（1100）的理由与取值归 helpers.mjs 的 NARROW_WIDTH 单点说明
+      await app.evaluate(
+        ({ BrowserWindow }, width) =>
+          BrowserWindow.getAllWindows()[0].setContentSize(width, 700),
+        NARROW_WIDTH
       );
       for (const theme of ["light", "dark"]) {
         if (

@@ -18,6 +18,7 @@ import {
   launchApp,
   projectAction,
   startMockProvider,
+  workspaceBadgeInfo,
 } from "./helpers.mjs";
 
 function git(cwd, ...args) {
@@ -97,9 +98,9 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
-    const workspaceInfo = window.getByTestId("workspace-info");
-    const workspacePath = workspaceInfo.getByTestId("workspace-path");
-    const draftMode = workspaceInfo.getByTestId("draft-workspace-mode");
+    const draftInfo = window.getByTestId("draft-workspace-info");
+    const workspacePath = draftInfo.getByTestId("workspace-path");
+    const draftMode = draftInfo.getByTestId("draft-workspace-mode");
     await draftMode.waitFor({ timeout: 5000 });
     await workspacePath.waitFor();
     const pathBox = await workspacePath.boundingBox();
@@ -113,7 +114,7 @@ async function main() {
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
-      "无风险项目草稿不渲染底部提示容器"
+      "无风险项目草稿不渲染共享提示 toast"
     );
     assert(
       (await window.getByTestId("draft-workspace-mode").inputValue()) ===
@@ -169,16 +170,18 @@ async function main() {
         `codexlike/${ids[0]}`,
       "独立分支"
     );
+    // 正式任务的路径/模式收进标题栏徽章（票01）：弹层读完整工作区
+    const badge = await workspaceBadgeInfo(window);
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        worktreePath
-      ),
+      badge.path.includes(worktreePath),
       "显示实际工作区"
     );
-    const fixedMode = workspacePath.getByTestId("workspace-mode");
+    const fixedMode = window
+      .getByTestId("workspace-badge")
+      .getByTestId("workspace-mode");
     assert(
       (await fixedMode.textContent()).includes("Worktree"),
-      "正式任务模式标签位于顶部路径行内"
+      "正式任务模式标签位于标题栏徽章内"
     );
     const modeTitle = (await fixedMode.getAttribute("title")) ?? "";
     assert(
@@ -192,7 +195,7 @@ async function main() {
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
-      "无风险正式任务不渲染底部提示容器"
+      "无风险正式任务不渲染共享提示 toast"
     );
     await window.screenshot({
       path: join(screenshots, "existing-task.png"),
@@ -280,12 +283,11 @@ async function main() {
     await sharingWarning.waitFor();
     assert(
       (await sharingWarning.textContent()).includes("共享文件"),
-      "同目录独立任务不遗漏，风险显示在底部提示容器内"
+      "同目录独立任务不遗漏，风险以共享提示 toast 常驻右下角"
     );
     assert(
-      (await workspaceInfo.getByTestId("workspace-sharing-notice").count()) ===
-        0,
-      "顶部工作区信息不包含底部风险提示"
+      (await draftInfo.getByTestId("workspace-sharing-notice").count()) === 0,
+      "草稿收纳行不包含底部风险提示"
     );
     await window.screenshot({ path: join(screenshots, "sharing-warning.png") });
     await draftMode.selectOption("worktree");
@@ -294,7 +296,7 @@ async function main() {
       .waitFor({ state: "detached" });
     assert(
       (await window.getByTestId("workspace-sharing-warning").count()) === 0,
-      "切换 Worktree 后风险与整个底部提示容器一起消失"
+      "切换 Worktree 后风险提示随状态撤除，toast 一起消失"
     );
     await draftMode.selectOption("local");
     await window.getByTestId("workspace-sharing-warning").waitFor();
@@ -322,10 +324,9 @@ async function main() {
       .getByTestId("task-item")
       .filter({ hasText: "隔离写入" })
       .click();
+    const reopened = await workspaceBadgeInfo(window);
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        worktreePath
-      ),
+      reopened.path.includes(worktreePath),
       "重开仍使用原副本"
     );
     await window.getByTestId("add-project").click();

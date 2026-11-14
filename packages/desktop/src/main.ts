@@ -56,7 +56,10 @@ import {
   type LaunchState,
   type LaunchStateStore,
 } from "./launch-state/launch-state-store";
-import { resolveLaunchBounds } from "./launch-state/display-geometry";
+import {
+  MIN_WINDOW_SIZE,
+  resolveLaunchBounds,
+} from "./launch-state/display-geometry";
 import { trackWindowLaunchState } from "./launch-state/window-save";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerTaskHandlers } from "./tasks/task-ipc";
@@ -122,6 +125,10 @@ function createMainWindow(
   const options: Electron.BrowserWindowConstructorOptions = {
     width: 1280,
     height: 800,
+    // 窗口底线（票04）：用户拖拽缩小不低于该尺寸；与启动现场恢复路径
+    // （resolveLaunchBounds 缺省 minSize）同用 MIN_WINDOW_SIZE 单一来源。
+    minWidth: MIN_WINDOW_SIZE.width,
+    minHeight: MIN_WINDOW_SIZE.height,
     title: "CodexLike",
     frame: false,
     backgroundColor: WINDOW_BACKGROUND[theme ?? "light"],
@@ -133,7 +140,8 @@ function createMainWindow(
     },
   };
   // 启动现场（票01）：有窗口 bounds 现场则按恢复 bounds 建窗（显示器校验纯函数
-  // 负责无交集回退与尺寸收紧）；无 bounds（含无现场）维持现有默认 1280×800 居中。
+  // 负责无交集回退与尺寸收紧——票04 起收紧目标即窗口底线 MIN_WINDOW_SIZE，
+  // 存储的越界恢复值建窗前显式夹紧）；无 bounds（含无现场）维持默认 1280×800 居中。
   if (launch?.bounds !== undefined) {
     Object.assign(
       options,

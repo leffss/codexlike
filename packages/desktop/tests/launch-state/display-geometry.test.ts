@@ -135,4 +135,20 @@ describe("resolveLaunchBounds minSize 缺省", () => {
       height: MIN_WINDOW_SIZE.height,
     });
   });
+
+  // 票04：MIN_WINDOW_SIZE 与主进程 BrowserWindow minWidth/minHeight 同源，
+  // 存储的越界恢复值（旧版本保存的小窗现场）恢复时被夹紧到窗口底线，
+  // 期望值用独立字面量（1000×600）而非常量引用，防止常量改值后断言自我失效。
+  it("存储越界小尺寸恢复值夹紧到窗口底线 1000×600（位置保留）", () => {
+    const clamped = resolveLaunchBounds({
+      saved: { x: 100, y: 80, width: 400, height: 200 },
+      workAreas: [PRIMARY],
+      primaryWorkArea: PRIMARY,
+    });
+    expect(clamped).toEqual({ x: 100, y: 80, width: 1000, height: 600 });
+  });
+
+  it("BrowserWindow 窗口底线与 MIN_WINDOW_SIZE 同值（票04 同源约束）", () => {
+    expect(MIN_WINDOW_SIZE).toEqual({ width: 1000, height: 600 });
+  });
 });

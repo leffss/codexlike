@@ -18,6 +18,7 @@ import {
   projectAction,
   taskMenu,
   startMockProvider,
+  workspaceBadgeInfo,
 } from "./helpers.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "codexlike-entry-consistency-"));
@@ -83,9 +84,9 @@ try {
   );
   await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   await send("入口隔离任务");
-  const originalPath = await window
-    .getByTestId("workspace-path")
-    .getAttribute("title");
+  // 工作区路径收进标题栏徽章（票01）：弹层读完整路径
+  const originalBadge = await workspaceBadgeInfo(window);
+  const originalPath = originalBadge.path;
   assert(originalPath, "工作区提供完整路径提示");
   await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
@@ -104,9 +105,9 @@ try {
     "侧栏入口不产生空记录"
   );
   await item("入口隔离任务").click();
+  const reentryBadge = await workspaceBadgeInfo(window);
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    reentryBadge.path === originalPath,
     "新建不改变原执行目录"
   );
   console.log("[e2e] 任务侧栏入口与项目草稿保持显式归属通过");
@@ -251,15 +252,14 @@ try {
     .getByTestId("archived-task-item")
     .filter({ hasText: longTitle })
     .waitFor();
+  // 路径与来源目录收进标题栏徽章（票01）：弹层内一次读完
+  const reopenedBadge = await workspaceBadgeInfo(window);
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    reopenedBadge.path === originalPath,
     "移出及重开不改实际工作区"
   );
   assert(
-    (await window.getByTestId("workspace-origin").textContent()).includes(
-      workspaceDir
-    ),
+    (reopenedBadge.origin ?? "").includes(workspaceDir),
     "重开仍保留来源"
   );
   assert(
@@ -350,9 +350,9 @@ try {
     .filter({ hasText: "移入项目" })
     .waitFor();
   await window.keyboard.press("Escape");
+  const survivorBadge = await workspaceBadgeInfo(window);
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    survivorBadge.path === originalPath,
     "当前成员被移除后安全导航到幸存独立记录"
   );
   assert(
