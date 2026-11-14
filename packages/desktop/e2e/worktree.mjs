@@ -113,7 +113,7 @@ async function main() {
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
-      "无风险项目草稿不渲染底部提示容器"
+      "无风险项目草稿不渲染共享提示 toast"
     );
     assert(
       (await window.getByTestId("draft-workspace-mode").inputValue()) ===
@@ -200,7 +200,7 @@ async function main() {
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
-      "无风险正式任务不渲染底部提示容器"
+      "无风险正式任务不渲染共享提示 toast"
     );
     await window.screenshot({
       path: join(screenshots, "existing-task.png"),
@@ -288,7 +288,7 @@ async function main() {
     await sharingWarning.waitFor();
     assert(
       (await sharingWarning.textContent()).includes("共享文件"),
-      "同目录独立任务不遗漏，风险显示在底部提示容器内"
+      "同目录独立任务不遗漏，风险以共享提示 toast 常驻右下角"
     );
     assert(
       (await draftInfo.getByTestId("workspace-sharing-notice").count()) === 0,
@@ -301,7 +301,7 @@ async function main() {
       .waitFor({ state: "detached" });
     assert(
       (await window.getByTestId("workspace-sharing-warning").count()) === 0,
-      "切换 Worktree 后风险与整个底部提示容器一起消失"
+      "切换 Worktree 后风险提示随状态撤除，toast 一起消失"
     );
     await draftMode.selectOption("local");
     await window.getByTestId("workspace-sharing-warning").waitFor();

@@ -12,11 +12,9 @@ import {
   type WorkspaceState,
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
-import { TaskAutoApproveStatus } from "../components/TaskAutoApproveStatus";
-import {
-  WorkspaceModeSelector,
-  WorkspaceSharingNotice,
-} from "../components/WorkspaceModeControl";
+import { ToastHost } from "../components/ToastHost";
+import { WorkspaceModeSelector } from "../components/WorkspaceModeControl";
+import { createToastManager, type ToastManager } from "../lib/toast-state";
 import type {
   QueuedMessage,
   QueueOperationResult,
@@ -59,6 +57,7 @@ import {
 } from "../components/MembershipDialogs";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
+import { useWorkspaceSharing } from "../lib/workspace-sharing";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -178,8 +177,17 @@ export function WorkspacePage(props: {
   const taskRequestRef = useRef(0);
   /** 切换到「完全访问」的风险确认弹窗打开中（ADR 0004） */
   const [fullAccessPending, setFullAccessPending] = useState(false);
-  /** 上下文告警文案（code review 修复 2）：估算 ≥ 窗口 × 80% 时在输入区上方提示 */
-  const [contextWarning, setContextWarning] = useState<string | null>(null);
+  /**
+   * toast 管理器（票02）：渲染层内存态，不持久化。五类原常驻横条
+   * （保存失败 / 模型配置不可用 / 上下文告警 / 工作区共享 / 自动批准状态）
+   * 统一经状态同步 effect 推送到右下角浮层。
+   */
+  const [toastState] = useState<ToastManager>(() => createToastManager());
+  useSyncExternalStore(
+    toastState.subscribe,
+    toastState.version,
+    toastState.version
+  );
   /**
    * 强制回底信号（票 03 滚动跟随）：发送新 prompt 时递增，
    * MessageStream 收到后立即贴底并进入跟随态。
@@ -301,27 +309,36 @@ export function WorkspacePage(props: {
   /**
    * 上下文告警刷新（code review 修复 2，spec 验收场景 4）：
    * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）× 80%，
-   * 超阈值在输入区上方常驻中文告警（/compact 后重估自然消失）；查询失败静默不打扰。
+   * 超阈值以 toast 常驻右下角（票02；/compact 后重估自然消失）；查询失败静默不打扰。
    */
-  const refreshContextWarning = useCallback(async (taskId: string) => {
-    const taskRequest = taskRequestRef.current;
-    const isCurrent = () =>
-      currentIdRef.current === taskId && taskRequestRef.current === taskRequest;
-    try {
-      const status = await window.codexlike.tasks.status(taskId);
-      if (!isCurrent()) return;
-      setContextWarning(
-        status === null
-          ? null
-          : (evaluateContextWarning(
-              status.estimatedContextTokens,
-              status.contextWindowTokens ?? undefined
-            )?.message ?? null)
-      );
-    } catch {
-      if (isCurrent()) setContextWarning(null);
-    }
-  }, []);
+  const refreshContextWarning = useCallback(
+    async (taskId: string) => {
+      const taskRequest = taskRequestRef.current;
+      const isCurrent = () =>
+        currentIdRef.current === taskId &&
+        taskRequestRef.current === taskRequest;
+      try {
+        const status = await window.codexlike.tasks.status(taskId);
+        if (!isCurrent()) return;
+        const message =
+          status === null
+            ? null
+            : (evaluateContextWarning(
+                status.estimatedContextTokens,
+                status.contextWindowTokens ?? undefined
+              )?.message ?? null);
+        if (message)
+          toastState.show("context-warning", {
+            kind: "warn",
+            content: message,
+          });
+        else toastState.retract("context-warning");
+      } catch {
+        if (isCurrent()) toastState.retract("context-warning");
+      }
+    },
+    [toastState]
+  );
 
   const openTask = useCallback(
     async (id: string) => {
@@ -343,7 +360,7 @@ export function WorkspacePage(props: {
       setQueueState(EMPTY_QUEUE_STATE);
       setWorkspaceFiles([]);
       setResources(null);
-      setContextWarning(null);
+      toastState.retract("context-warning");
       setCompacting(false);
       setFullAccessPending(false);
       void refreshResources(id);
@@ -416,6 +433,7 @@ export function WorkspacePage(props: {
       refreshTasks,
       reportWorkbenchTarget,
       workspaceState,
+      toastState,
     ]
   );
 
@@ -608,7 +626,7 @@ export function WorkspacePage(props: {
     setLoading(false);
     setStreaming(false);
     setCompacting(false);
-    setContextWarning(null);
+    toastState.retract("context-warning");
     setFullAccessPending(false);
   }
 
@@ -919,7 +937,7 @@ export function WorkspacePage(props: {
       setStreaming(false);
       setLoading(false);
       setCompacting(false);
-      setContextWarning(null);
+      toastState.retract("context-warning");
       setFullAccessPending(false);
     }
     const generation = taskRequestRef.current;
@@ -1189,6 +1207,88 @@ export function WorkspacePage(props: {
     onTitlebarContext?.(titlebarContext);
   }, [titlebarContext, onTitlebarContext]);
 
+  /** 工作区共享检查（票02）：展示目标为当前草稿或当前任务，toast 同步见下 */
+  const sharingTarget = draft
+    ? {
+        projectId: draft.projectId,
+        workspacePath: draft.workspacePath,
+        workspaceMode: draft.workspaceMode ?? "local",
+      }
+    : current
+      ? { taskId: current.id }
+      : null;
+  const sharing = useWorkspaceSharing(sharingTarget);
+
+  /**
+   * 五类提示的状态同步（票02）：原消息流上方常驻横条迁为右下角 toast。
+   * 约定：状态在 → toast 在（不占布局行、持续可见）；状态消失 → retract
+   * 无条件撤除（状态重现须重新提示）。事件文案相同的手动关闭在状态持续
+   * 期间不复活（toast-state 的 dismissed 记录），内容变化视为新提示。
+   */
+  const persistenceError = workspaceState.persistenceError();
+  useEffect(() => {
+    if (persistenceError !== null)
+      toastState.show("workbench-save-error", {
+        kind: "error",
+        content: `工作现场保存失败：${persistenceError}`,
+      });
+    else toastState.retract("workbench-save-error");
+  }, [persistenceError, toastState]);
+
+  const pendingProfileId = draft?.providerProfileId ?? selectedProfileId;
+  const profileUnavailable =
+    Boolean(pendingProfileId) &&
+    !profiles.some((profile) => profile.id === pendingProfileId);
+  useEffect(() => {
+    if (profileUnavailable)
+      toastState.show("unavailable-profile", {
+        kind: "error",
+        content: "已保存的模型配置不可用，请重新选择模型；不会自动替换。",
+      });
+    else toastState.retract("unavailable-profile");
+  }, [profileUnavailable, toastState]);
+
+  useEffect(() => {
+    if (sharing.error !== null)
+      toastState.show("workspace-sharing-notice", {
+        kind: "error",
+        content: sharing.error,
+        contentTestId: "workspace-sharing-error",
+      });
+    else if (sharing.warning !== null)
+      toastState.show("workspace-sharing-notice", {
+        kind: "warn",
+        content: sharing.warning,
+        contentTestId: "workspace-sharing-warning",
+      });
+    else toastState.retract("workspace-sharing-notice");
+  }, [sharing.warning, sharing.error, toastState]);
+
+  const autoApproveOn = current?.autoApprove ?? false;
+  const autoApproveBusy = current !== null && revoking.has(current.id);
+  const autoApproveError =
+    current === null ? null : (revokeErrors[current.id] ?? null);
+  useEffect(() => {
+    if (autoApproveOn) {
+      toastState.show("task-auto-approve", {
+        kind: "warn",
+        content: "本任务已开启自动批准",
+        detail: "取消后恢复基础审批模式的允许策略，不撤回已批准的执行。",
+        action: {
+          testId: "task-auto-approve-revoke",
+          label: autoApproveBusy ? "取消中…" : "取消自动批准",
+          disabled: autoApproveBusy,
+          // 读 ref 不闭包捕获：切换任务后 effect 不重跑也不会撤错任务
+          onAction: () => {
+            const id = currentIdRef.current;
+            if (id !== null) void revokeAutoApprove(id);
+          },
+        },
+        ...(autoApproveError !== null ? { actionError: autoApproveError } : {}),
+      });
+    } else toastState.retract("task-auto-approve");
+  }, [autoApproveOn, autoApproveBusy, autoApproveError, toastState]);
+
   return (
     <div className="flex h-full">
       {fullAccessPending && (
@@ -1361,27 +1461,6 @@ export function WorkspacePage(props: {
               </div>
             </div>
           )}
-          {workspaceState.persistenceError() && (
-            <p
-              role="alert"
-              data-testid="workbench-save-error"
-              className="px-4 text-danger-fg"
-            >
-              工作现场保存失败：{workspaceState.persistenceError()}
-            </p>
-          )}
-          {(draft?.providerProfileId ?? selectedProfileId) &&
-            !profiles.some(
-              (p) => p.id === (draft?.providerProfileId ?? selectedProfileId)
-            ) && (
-              <p
-                role="alert"
-                data-testid="unavailable-profile"
-                className="px-4 text-danger-fg"
-              >
-                已保存的模型配置不可用，请重新选择模型；不会自动替换。
-              </p>
-            )}
           <MessageStream
             key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
             taskId={currentId}
@@ -1418,35 +1497,6 @@ export function WorkspacePage(props: {
               ) : undefined
             }
           />
-          {contextWarning !== null && (
-            <div
-              data-testid="context-warning"
-              className="border-t border-warn-fg/40 bg-warn-bg px-4 py-2 text-xs text-warn-fg"
-            >
-              {contextWarning}
-            </div>
-          )}
-          {(draft || current) && (
-            <WorkspaceSharingNotice
-              target={
-                draft
-                  ? {
-                      projectId: draft.projectId,
-                      workspacePath: draft.workspacePath,
-                      workspaceMode: draft.workspaceMode ?? "local",
-                    }
-                  : { taskId: current!.id }
-              }
-            />
-          )}
-          {current && (
-            <TaskAutoApproveStatus
-              autoApprove={current.autoApprove ?? false}
-              busy={revoking.has(current.id)}
-              error={revokeErrors[current.id] ?? null}
-              onRevoke={() => void revokeAutoApprove(current.id)}
-            />
-          )}
           {interaction ? (
             <InteractionPanel
               key={interaction.request.id}
@@ -1582,6 +1632,11 @@ export function WorkspacePage(props: {
           </div>
         )}
       </section>
+      {/* 票02：五类提示的右下角浮层，fixed 定位不占布局行 */}
+      <ToastHost
+        toasts={toastState.toasts()}
+        onDismiss={(id) => toastState.dismiss(id)}
+      />
     </div>
   );
 }
