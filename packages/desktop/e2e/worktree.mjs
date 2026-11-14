@@ -18,6 +18,7 @@ import {
   launchApp,
   projectAction,
   startMockProvider,
+  workspaceBadgeInfo,
 } from "./helpers.mjs";
 
 function git(cwd, ...args) {
@@ -169,18 +170,12 @@ async function main() {
         `codexlike/${ids[0]}`,
       "独立分支"
     );
-    // 正式任务的路径/模式收进标题栏徽章（票01）：点击徽章弹层读完整工作区
-    await window.getByTestId("workspace-badge").click();
+    // 正式任务的路径/模式收进标题栏徽章（票01）：弹层读完整工作区
+    const badge = await workspaceBadgeInfo(window);
     assert(
-      (
-        await window
-          .getByTestId("workspace-popover")
-          .getByTestId("workspace-path")
-          .textContent()
-      ).includes(worktreePath),
+      badge.path.includes(worktreePath),
       "显示实际工作区"
     );
-    await window.keyboard.press("Escape");
     const fixedMode = window
       .getByTestId("workspace-badge")
       .getByTestId("workspace-mode");
@@ -329,17 +324,11 @@ async function main() {
       .getByTestId("task-item")
       .filter({ hasText: "隔离写入" })
       .click();
-    await window.getByTestId("workspace-badge").click();
+    const reopened = await workspaceBadgeInfo(window);
     assert(
-      (
-        await window
-          .getByTestId("workspace-popover")
-          .getByTestId("workspace-path")
-          .textContent()
-      ).includes(worktreePath),
+      reopened.path.includes(worktreePath),
       "重开仍使用原副本"
     );
-    await window.keyboard.press("Escape");
     await window.getByTestId("add-project").click();
     await projectAction(
       window,

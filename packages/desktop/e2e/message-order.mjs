@@ -15,6 +15,7 @@ import {
   closeApp,
   expandWorkedHistory,
   launchApp,
+  NARROW_WIDTH,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -286,12 +287,16 @@ async function main() {
       height: window.innerHeight,
     }));
     try {
-      // 票04 窗口底线：窄窗基线从 900×720 提到 1100×720（minWidth 夹紧后 900
-      // 已缩不到；1000 压 minWidth 线上 innerWidth 精确断言不稳，再抬到线外）
-      await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].setContentSize(1100, 720)
+      // 窄窗基线（1100）的理由与取值归 helpers.mjs 的 NARROW_WIDTH 单点说明
+      await app.evaluate(
+        ({ BrowserWindow }, width) =>
+          BrowserWindow.getAllWindows()[0].setContentSize(width, 720),
+        NARROW_WIDTH
       );
-      await window.waitForFunction(() => window.innerWidth === 1100);
+      await window.waitForFunction(
+        (width) => window.innerWidth === width,
+        NARROW_WIDTH
+      );
       for (const theme of ["light", "dark"]) {
         if (
           (await window.evaluate(

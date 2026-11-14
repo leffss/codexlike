@@ -2,7 +2,13 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assert, closeApp, launchApp, startMockProvider } from "./helpers.mjs";
+import {
+  assert,
+  closeApp,
+  launchApp,
+  NARROW_WIDTH,
+  startMockProvider,
+} from "./helpers.mjs";
 
 async function assertSearchLayout(window) {
   const layout = await window
@@ -67,9 +73,8 @@ async function main() {
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     window.setDefaultTimeout(8000);
     await window.getByTestId("task-search-toggle").click();
-    // 票04 窗口底线：窄窗基线从 1000 提到 1100——1000 压 minWidth 线，
-    // 夹紧 + DPI 取整下 innerWidth 精确断言（=== width）不再成立
-    for (const width of [1280, 1100]) {
+    // 窄窗基线（NARROW_WIDTH）的理由与取值归 helpers.mjs 单点说明
+    for (const width of [1280, NARROW_WIDTH]) {
       await app.evaluate(
         ({ BrowserWindow }, width) =>
           BrowserWindow.getAllWindows()[0].setContentSize(width, 800),

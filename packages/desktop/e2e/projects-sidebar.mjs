@@ -19,6 +19,7 @@ import {
   taskMenu,
   startMockProvider,
   untilDraft,
+  workspaceBadgeInfo,
 } from "./helpers.mjs";
 
 async function main() {
@@ -76,17 +77,11 @@ async function main() {
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
     // 项目目录明确展示：路径收进标题栏徽章（票01），弹层读完整路径
-    await window.getByTestId("workspace-badge").click();
+    const projectBadge = await workspaceBadgeInfo(window);
     assert(
-      (
-        await window
-          .getByTestId("workspace-popover")
-          .getByTestId("workspace-path")
-          .textContent()
-      ).includes(workspaceDir),
+      projectBadge.path.includes(workspaceDir),
       "项目目录明确展示"
     );
-    await window.keyboard.press("Escape");
     const projectTask = await window
       .getByTestId("task-item")
       .getAttribute("data-task-id");
@@ -146,12 +141,8 @@ async function main() {
         .count()) === 1,
       "独立分区不伪造项目"
     );
-    await window.getByTestId("workspace-badge").click();
-    const standalonePath = await window
-      .getByTestId("workspace-popover")
-      .getByTestId("workspace-path")
-      .textContent();
-    await window.keyboard.press("Escape");
+    const standaloneBadge = await workspaceBadgeInfo(window);
+    const standalonePath = standaloneBadge.path;
     assert(existsSync(standalonePath), "专用持久目录真实存在");
     await (
       await taskMenu(
@@ -212,15 +203,11 @@ async function main() {
       .getByTestId("message-user")
       .filter({ hasText: "独立草稿" })
       .waitFor();
-    await window.getByTestId("workspace-badge").click();
+    const reopenedBadge = await workspaceBadgeInfo(window);
     assert(
-      (await window
-        .getByTestId("workspace-popover")
-        .getByTestId("workspace-path")
-        .textContent()) === standalonePath,
+      reopenedBadge.path === standalonePath,
       "重启后工作区固定且标题持久"
     );
-    await window.keyboard.press("Escape");
     assert(model.requestCount() === 3, "重启不自动发送");
     assert(
       readFileSync(join(homeDir, "codexlike.db"), "utf8") ===
