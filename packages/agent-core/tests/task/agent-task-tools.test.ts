@@ -372,6 +372,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       expect(
         JSON.stringify(request.prompt).match(/## 工作计划策略/g)
       ).toHaveLength(1);
+      // 通用风格条款殿后注入：统摄各策略段的表达方式，防「按规范…」话术
+      expect(
+        JSON.stringify(request.prompt).match(/## 工具使用风格/g)
+      ).toHaveLength(1);
     }
     // 策略是逐轮组装的提示层，不随 transcript 落库
     expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(

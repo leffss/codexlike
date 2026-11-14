@@ -231,8 +231,10 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       const prompt = JSON.stringify(request.prompt);
       expect(JSON.stringify(system)).toContain("## 子代理委派策略");
       expect(prompt.match(/## 子代理委派策略/g)).toHaveLength(1);
-      // 工作计划策略（ADR 0016）与委派策略同为逐轮注入层，主任务两者并存且各一次
+      // 工作计划策略（ADR 0016）与委派策略同为逐轮注入层，主任务两者并存且各一次；
+      // 通用风格条款殿后统摄两者表达方式
       expect(prompt.match(/## 工作计划策略/g)).toHaveLength(1);
+      expect(prompt.match(/## 工具使用风格/g)).toHaveLength(1);
       expect(prompt).toContain("原宿主系统提示");
       expect(prompt).toContain("AGENTS.md：共享规范；技能目录 alpha/beta");
       expect(request.tools?.map((tool) => tool.name)).toContain(
@@ -256,6 +258,8 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     );
     expect(JSON.stringify(child.prompt)).not.toContain("## 子代理委派策略");
     expect(JSON.stringify(child.prompt)).not.toContain("## 工作计划策略");
+    // 通用风格条款也仅注入主任务（子代理提示由 SUBAGENT_SYSTEM_PROMPT 自成一体）
+    expect(JSON.stringify(child.prompt)).not.toContain("## 工具使用风格");
     expect(JSON.stringify(child.prompt)).not.toContain("原宿主系统提示");
     expect(JSON.stringify(child.prompt)).not.toContain("ALPHA_PRIVATE_BODY");
     expect(child.tools?.map((tool) => tool.name)).not.toContain(

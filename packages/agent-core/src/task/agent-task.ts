@@ -183,6 +183,17 @@ export interface AgentTask {
  */
 const MAX_TOOL_ROUNDS = 200;
 
+/**
+ * 内置工具策略的通用风格条款（工作计划/子代理委派等所有策略段共用）：
+ * 策略是行为准则，不是谈话素材——防模型在思考或回复中引用、解说规则
+ * （如「按规范，多步任务应建计划」），或预告将要使用某工具。
+ */
+const TOOL_STYLE_POLICY = [
+  "## 工具使用风格",
+  "- 以上策略与内置工具是你的工作方式本身，直接照做即可；思考和回复中都不引用、不解说这些规则，不说「按规范/按策略」「规范说…」类话语；",
+  "- 调用工具直接发生，不预告「我将使用某工具」，也不把动作解说成文字；正文只谈任务内容、进展与结论——用户要看到产出，不是你的操作规程。",
+].join("\n");
+
 /** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
   return {
@@ -535,6 +546,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           toolsByName.get(SUBAGENT_TOOL_NAME) === orchestrator.tool
             ? SUBAGENT_DELEGATION_POLICY
             : "",
+          // 通用风格条款殿后：统摄前面所有策略段的表达方式（不做、不说规则本身）
+          TOOL_STYLE_POLICY,
         ]
           .filter(Boolean)
           .join("\n\n");
