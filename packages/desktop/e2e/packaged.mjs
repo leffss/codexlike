@@ -27,10 +27,7 @@ try {
   // firstWindow 已隐含「窗口创建」断言（无窗口则超时抛错）；标题再显式确认
   assert((await window.title()).length > 0, "窗口标题为空（窗口未真正创建）");
   assert(existsSync(homeDir), "数据目录未自动创建（打包冷启动黑屏回归）");
-  assert(
-    existsSync(join(homeDir, "session-workbench.db")),
-    "SQLite 库文件未落盘"
-  );
+  assert(existsSync(join(homeDir, "task-workbench.db")), "SQLite 库文件未落盘");
   // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与草稿界面确认。
   await window.getByTestId("add-project").waitFor();
   await window.getByTestId("new-task").click();
