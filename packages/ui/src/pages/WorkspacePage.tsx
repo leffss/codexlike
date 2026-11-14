@@ -43,6 +43,7 @@ import {
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
 import { ChangesPanel } from "../components/ChangesPanel";
+import { PanelsDrawer, type DrawerTab } from "../components/PanelsDrawer";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -168,8 +169,12 @@ export function WorkspacePage(props: {
       workspaceState.setPreferences(currentId, { thinkingEffort });
   }
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
-  const [changesOpen, setChangesOpen] = useState(false);
-  const [resourcesOpen, setResourcesOpen] = useState(false);
+  /**
+   * 右栏 overlay 抽屉（票03）：两面板收进同一浮层，状态从两个布尔开关
+   * 合并为「当前 tab 或关」；resourcesOpen/changesOpen 语义由派生值保留
+   * （标题栏 aria-expanded 同步），两开关按钮各自仍可打开抽屉到对应 tab。
+   */
+  const [drawer, setDrawer] = useState<DrawerTab | null>(null);
   const [resources, setResources] = useState<TaskResourcesView | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -290,14 +295,29 @@ export function WorkspacePage(props: {
     if (id !== null) void refreshResources(id);
   }, [refreshResources]);
 
-  /** 面板开关迁入标题栏（票01）：动作经稳定引用上报，读取走 ref 防过期闭包 */
-  const resourcesOpenRef = useRef(false);
-  resourcesOpenRef.current = resourcesOpen;
+  /**
+   * 抽屉状态动作（票03）：标题栏两开关与抽屉 tab 头共用同一状态源。
+   * 打开/切到「规范与技能」页即刷新资源（与原「开面板即刷新」语义一致；
+   * 「改动」面板挂载时自刷新）；动作经稳定引用上报，读取走 ref 防过期闭包。
+   */
+  const drawerRef = useRef<DrawerTab | null>(null);
+  drawerRef.current = drawer;
+  const openDrawer = useCallback(
+    (tab: DrawerTab) => {
+      if (tab === "resources") refreshCurrentResources();
+      setDrawer(tab);
+    },
+    [refreshCurrentResources]
+  );
   const toggleResources = useCallback(() => {
-    if (!resourcesOpenRef.current) refreshCurrentResources();
-    setResourcesOpen((prev) => !prev);
-  }, [refreshCurrentResources]);
-  const toggleChanges = useCallback(() => setChangesOpen((prev) => !prev), []);
+    if (drawerRef.current === "resources") setDrawer(null);
+    else openDrawer("resources");
+  }, [openDrawer]);
+  const toggleChanges = useCallback(() => {
+    if (drawerRef.current === "changes") setDrawer(null);
+    else openDrawer("changes");
+  }, [openDrawer]);
+  const closeDrawer = useCallback(() => setDrawer(null), []);
 
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
@@ -1185,8 +1205,8 @@ export function WorkspacePage(props: {
       task: titlebarTask,
       search: { recordsRevision, onSelect: selectTask },
       panels: {
-        resourcesOpen,
-        changesOpen,
+        resourcesOpen: drawer === "resources",
+        changesOpen: drawer === "changes",
         disabled: !hasCurrentTask,
         onToggleResources: toggleResources,
         onToggleChanges: toggleChanges,
@@ -1196,8 +1216,7 @@ export function WorkspacePage(props: {
       titlebarTask,
       recordsRevision,
       selectTask,
-      resourcesOpen,
-      changesOpen,
+      drawer,
       hasCurrentTask,
       toggleResources,
       toggleChanges,
@@ -1368,9 +1387,9 @@ export function WorkspacePage(props: {
         }}
       />
       {/* 任务容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
-          断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应，右侧
-          （规范与技能 / 改动）面板是本容器内的兄弟节点，开合不改变容器宽度、
-          不触发断点切换导致内容列跳宽 */}
+          断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应。
+          票03 起「规范与技能 / 改动」为消息流上方 overlay 抽屉（见下方
+          消息流区域容器），开合不改变容器宽度、不触发断点切换。 */}
       <section className="@container/task flex min-w-0 flex-1">
         <div
           className="flex min-w-0 flex-1 flex-col"
@@ -1461,42 +1480,76 @@ export function WorkspacePage(props: {
               </div>
             </div>
           )}
-          <MessageStream
-            key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-            taskId={currentId}
-            questionDraft={(requestId) =>
-              currentId === null
-                ? undefined
-                : workspaceState.draft(currentId, requestId)
-            }
-            loading={loading}
-            onScrollbarGutterChange={setScrollbarGutter}
-            readingPosition={
-              currentId === null
-                ? null
-                : workspaceState.readingPosition(currentId)
-            }
-            onReadingPosition={(position) => {
-              if (currentId !== null)
-                workspaceState.setReadingPosition(currentId, position);
-            }}
-            items={displayMessages}
-            streaming={streaming}
-            compacting={compacting}
-            contentWidthClass={contentWidthClass}
-            followSignal={followSignal}
-            emptyHint={
-              profiles.length === 0 ? (
-                <button
-                  type="button"
-                  className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
-                  onClick={props.onOpenSettings}
-                >
-                  前往设置配置模型
-                </button>
-              ) : undefined
-            }
-          />
+          {/* 消息流区域容器（票03）：overlay 抽屉的定位基准。抽屉浮于消息流
+              上方（absolute），打开时不改变消息流与内容列宽度——原「分栏
+              兄弟节点 max-w-[40%] 挤压」行为取消；面板开合也不再影响
+              @container/task 容器宽度（三档分档行为保持稳定）。
+              票02：原消息流上方的五类常驻横条已迁为右下角 toast，不再占行。 */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <MessageStream
+              key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+              taskId={currentId}
+              questionDraft={(requestId) =>
+                currentId === null
+                  ? undefined
+                  : workspaceState.draft(currentId, requestId)
+              }
+              loading={loading}
+              onScrollbarGutterChange={setScrollbarGutter}
+              readingPosition={
+                currentId === null
+                  ? null
+                  : workspaceState.readingPosition(currentId)
+              }
+              onReadingPosition={(position) => {
+                if (currentId !== null)
+                  workspaceState.setReadingPosition(currentId, position);
+              }}
+              items={displayMessages}
+              streaming={streaming}
+              compacting={compacting}
+              contentWidthClass={contentWidthClass}
+              followSignal={followSignal}
+              emptyHint={
+                profiles.length === 0 ? (
+                  <button
+                    type="button"
+                    className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
+                    onClick={props.onOpenSettings}
+                  >
+                    前往设置配置模型
+                  </button>
+                ) : undefined
+              }
+            />
+            {currentId !== null && drawer !== null && (
+              <PanelsDrawer
+                tab={drawer}
+                onTabChange={openDrawer}
+                onClose={closeDrawer}
+                resources={
+                  <AgentResourcesPanel
+                    resources={resources}
+                    loading={resourcesLoading}
+                    error={resourcesError}
+                    onRefresh={refreshCurrentResources}
+                    onClose={closeDrawer}
+                  />
+                }
+                changes={
+                  current !== null ? (
+                    <ChangesPanel
+                      key={current.id}
+                      taskId={current.id}
+                      taskTitle={current.title}
+                      selectedProfileId={selectedProfileId}
+                      onClose={closeDrawer}
+                    />
+                  ) : null
+                }
+              />
+            )}
+          </div>
           {interaction ? (
             <InteractionPanel
               key={interaction.request.id}
@@ -1605,32 +1658,6 @@ export function WorkspacePage(props: {
             />
           )}
         </div>
-        {currentId !== null && (resourcesOpen || changesOpen) && (
-          // 面板共享限宽区域：同时打开时纵向排列，至少为主列保留六成宽度。
-          // 在装配层覆盖面板原固定宽高，面板内部仍各自滚动、独立关闭。
-          <div
-            className={`flex min-h-0 max-w-[40%] shrink-0 flex-col [&>aside]:h-auto [&>aside]:min-h-0 [&>aside]:min-w-0 [&>aside]:w-full [&>aside]:flex-1 ${changesOpen ? "w-[30rem]" : "w-96"}`}
-          >
-            {resourcesOpen && (
-              <AgentResourcesPanel
-                resources={resources}
-                loading={resourcesLoading}
-                error={resourcesError}
-                onRefresh={refreshCurrentResources}
-                onClose={() => setResourcesOpen(false)}
-              />
-            )}
-            {changesOpen && current !== null && (
-              <ChangesPanel
-                key={current.id}
-                taskId={current.id}
-                taskTitle={current.title}
-                selectedProfileId={selectedProfileId}
-                onClose={() => setChangesOpen(false)}
-              />
-            )}
-          </div>
-        )}
       </section>
       {/* 票02：五类提示的右下角浮层，fixed 定位不占布局行 */}
       <ToastHost

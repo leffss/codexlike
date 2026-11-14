@@ -121,7 +121,6 @@ it("面板开关保留定位器并同步 aria 状态，无任务时禁用", () =
     /data-testid="resources-toggle"[^>]*aria-expanded="true"/
   );
   expect(html).toMatch(/data-testid="changes-toggle"[^>]*aria-expanded="true"/);
-  expect(html).toContain("收起改动");
   const collapsed = renderToStaticMarkup(
     createElement(TitlebarPanelToggles, {
       panels: {
@@ -136,7 +135,6 @@ it("面板开关保留定位器并同步 aria 状态，无任务时禁用", () =
   expect(collapsed).toMatch(
     /data-testid="changes-toggle"[^>]*aria-expanded="false"/
   );
-  expect(collapsed).toContain("改动");
   const disabled = renderToStaticMarkup(
     createElement(TitlebarPanelToggles, {
       panels: {
@@ -149,6 +147,34 @@ it("面板开关保留定位器并同步 aria 状态，无任务时禁用", () =
     })
   );
   expect(disabled).toMatch(/data-testid="resources-toggle"[^>]*disabled/);
+});
+
+it("抽屉所在 tab 的开关按钮高亮（accent），另一开关不高亮（票03）", () => {
+  const html = renderToStaticMarkup(
+    createElement(TitlebarPanelToggles, {
+      panels: {
+        resourcesOpen: true,
+        changesOpen: false,
+        disabled: false,
+        onToggleResources: () => {},
+        onToggleChanges: () => {},
+      },
+    })
+  );
+  // 属性顺序无关：先截完整按钮（开标签 + 文案）再断言；持久高亮 = 非前缀的
+  // `border-accent text-accent`（与 hover:border-accent 等 hover 类区分）
+  const resourcesToggle = html.match(
+    /<button[^>]*data-testid="resources-toggle"[^>]*>[\s\S]*?<\/button>/
+  )?.[0];
+  const changesToggle = html.match(
+    /<button[^>]*data-testid="changes-toggle"[^>]*>[\s\S]*?<\/button>/
+  )?.[0];
+  expect(resourcesToggle).toContain("border-accent text-accent");
+  expect(changesToggle).not.toContain("border-accent text-accent");
+  // 两开关文案恒定，开合状态由 aria-expanded 与高亮承载（票03 tab 化）
+  expect(resourcesToggle).toContain("规范与技能");
+  expect(changesToggle).toContain("改动");
+  expect(html).not.toContain("收起改动");
 });
 
 it("面板开关动作透传给宿主（先例：window-controls-ui 直接调用 props）", () => {
