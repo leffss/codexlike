@@ -141,7 +141,7 @@ function gatedFirstDeltaStream(
   });
 }
 
-describe("AgentTask.sendMessage（会话流式循环）", () => {
+describe("AgentTask.sendMessage（任务流式循环）", () => {
   it("单轮问答：事件序列为 user-message → assistant-start → delta×2 → assistant-done，消息与状态落库", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
@@ -236,7 +236,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     expect(thirdPrompt).toContain("重启后的第三问");
   });
 
-  it("流式中断（abort）：部分文本保留为助手消息，会话可继续发消息", async () => {
+  it("流式中断（abort）：部分文本保留为助手消息，任务可继续发消息", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
     persistence.insertTask(record);
@@ -301,7 +301,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     }
   });
 
-  it("模型 API 出错：error 事件带中文提示并落库，error 不进上下文，会话可继续使用", async () => {
+  it("模型 API 出错：error 事件带中文提示并落库，error 不进上下文，任务可继续使用", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
     persistence.insertTask(record);
@@ -361,7 +361,7 @@ describe("AgentTask.sendMessage（会话流式循环）", () => {
     expect(secondPrompt).not.toContain("模型请求失败");
   });
 
-  it("同一会话流式进行中拒绝并发发送", async () => {
+  it("同一任务流式进行中拒绝并发发送", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();
     persistence.insertTask(record);

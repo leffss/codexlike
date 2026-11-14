@@ -233,7 +233,7 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
     expect(factoryCalls[0]?.options?.thinkingEffort).toBe("auto");
   });
 
-  it("两次发送可各用不同档位：会话不记忆，第二次未传回到 auto", async () => {
+  it("两次发送可各用不同档位：任务不记忆，第二次未传回到 auto", async () => {
     const factoryCalls: {
       profile: ProviderProfile;
       options: CreateLanguageModelOptions | undefined;
@@ -279,7 +279,7 @@ describe("sendMessage 思考档位快照（GLOSSARY「思考档位」）", () =>
   });
 });
 
-describe("主会话 reasoning 流（fullStream → 独立会话事件）", () => {
+describe("主任务 reasoning 流（fullStream → 独立任务事件）", () => {
   it("reasoning-delta 转为 assistant-reasoning 事件：消息关联正确、增量有序、与正文分离", async () => {
     const model = scriptedModel([
       {
@@ -397,7 +397,7 @@ describe("主会话 reasoning 流（fullStream → 独立会话事件）", () =>
   });
 });
 
-describe("主会话 reasoning 终态（完成 / 中断 / 错误收敛）", () => {
+describe("主任务 reasoning 终态（完成 / 中断 / 错误收敛）", () => {
   it("仅思考无正文被中断：reasoning 事件已流出部分保留，assistant-aborted 收敛不残留进行中", async () => {
     let openGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -514,7 +514,7 @@ describe("主会话 reasoning 终态（完成 / 中断 / 错误收敛）", () =>
   });
 });
 
-describe("主会话入口 → 真实 provider 工厂（fetch 替身全链路）", () => {
+describe("主任务入口 → 真实 provider 工厂（fetch 替身全链路）", () => {
   /** OpenAI 兼容端点最小成功响应（非流式路径备用） */
   it("reasoning SSE 经真实工厂：assistant-reasoning 事件流出，且第二轮请求 body 不回传思考", async () => {
     const seenBodies: string[] = [];

@@ -9,7 +9,7 @@ import type { TaskStatusInfo } from "@codexlike/desktop/ipc";
 /**
  * 斜杠命令 → UI 动作的纯函数分发。
  * 命令与等效 UI 操作最终走同一 IPC 通道（/rename ↔ 侧栏重命名、/archive ↔ 侧栏归档、
- * /model ↔ 模型选择器、/new ↔ 新建会话、/status ↔ status 查询），这里只做编排决策。
+ * /model ↔ 模型选择器、/new ↔ 新建任务、/status ↔ status 查询），这里只做编排决策。
  */
 
 export type SlashCommandAction =
@@ -22,7 +22,7 @@ export type SlashCommandAction =
   | { type: "status" }
   | { type: "needs-task" };
 
-/** /new 可在草稿页使用；其余命令需要正式会话。归属由入口上下文决定。 */
+/** /new 可在草稿页使用；其余命令需要正式任务。归属由入口上下文决定。 */
 export function planSlashCommand(
   command: { name: SlashCommandName; argument: string },
   hasTask: boolean
@@ -97,7 +97,7 @@ export function formatTaskStatus(status: TaskStatusInfo): string {
       ? "未压缩"
       : `已压缩（${status.compacted.at.replace("T", " ").slice(0, 19)}，压缩了 ${status.compacted.messagesCompacted} 条历史消息）`;
   return [
-    "会话状态（/status）",
+    "任务状态（/status）",
     `模型：${model}`,
     `上下文用量（估算）：约 ${status.estimatedContextTokens} tokens（${status.messageCount} 条消息 + 系统提示）`,
     `压缩状态：${compacted}`,

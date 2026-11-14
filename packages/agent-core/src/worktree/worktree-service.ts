@@ -71,7 +71,7 @@ export function createWorktreeService(options: {
   return {
     async createForTask({ taskId, workspacePath }) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId))
-        throw new Error("会话 id 不能包含路径或特殊字符");
+        throw new Error("任务 id 不能包含路径或特殊字符");
       const git = simpleGit({ baseDir: workspacePath });
       if (!(await git.checkIsRepo())) {
         throw new Error(
@@ -81,7 +81,7 @@ export function createWorktreeService(options: {
       const worktreePath = join(worktreesDir, taskId);
       if (existsSync(worktreePath)) {
         throw new Error(
-          `worktree 目录已存在：${worktreePath}（会话 id 冲突，请重试新建会话）`
+          `worktree 目录已存在：${worktreePath}（任务 id 冲突，请重试新建任务）`
         );
       }
       // 在创建前验证来源路径；目录以排他 mkdir 认领，失败不递归清理未知内容。

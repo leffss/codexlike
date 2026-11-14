@@ -63,7 +63,7 @@ afterEach(() => {
   }
 });
 
-describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
+describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
   it("项目默认未置顶，管理器切换置顶但保留创建顺序和折叠状态", () => {
     const directory = mkdtempSync(join(tmpdir(), "project-pin-"));
     tempDirs.push(directory);
@@ -128,7 +128,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
 
-  it("create 支持 worktree 模式与外部生成的会话 id（宿主先建 worktree 再落库）", () => {
+  it("create 支持 worktree 模式与外部生成的任务 id（宿主先建 worktree 再落库）", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({
       persistence,
@@ -152,7 +152,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
 
-  it("get 惰性恢复既有会话：历史完整接续（等价应用重启后继续对话）", async () => {
+  it("get 惰性恢复既有任务：历史完整接续（等价应用重启后继续对话）", async () => {
     const dbPath = join(
       (() => {
         const dir = mkdtempSync(join(tmpdir(), "codexlike-mgr-"));
@@ -277,7 +277,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
 
-  it("get 不存在的会话返回 null；create 后 get 返回同一实例（缓存）", () => {
+  it("get 不存在的任务返回 null；create 后 get 返回同一实例（缓存）", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({
       persistence,
@@ -313,7 +313,7 @@ describe("createTaskManager（会话创建 / 列表 / 恢复）", () => {
     persistence.close();
   });
 
-  it("setApprovalMode 对未实例化会话只落库：get 恢复时读到新档位", () => {
+  it("setApprovalMode 对未实例化任务只落库：get 恢复时读到新档位", () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({
       persistence,

@@ -137,7 +137,7 @@ async function main() {
     app = first.app;
     let window = first.window;
 
-    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建会话
+    // 准备：设置页创建 Profile（baseURL 指向本地 mock）→ 新建任务
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");
@@ -214,8 +214,9 @@ async function main() {
         .getAttribute("class")) === "sr-only",
       "成功状态只向屏幕阅读器播报"
     );
-    const firstCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    // Windows 上 Chromium 写剪贴板会把 \n 规范化为 \r\n，读出后还原再比对内容。
+    const firstCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     // 使用渲染器时钟精确验证两秒边界，避免额外真实等待。
     await window.clock.runFor(1999);
@@ -265,8 +266,8 @@ async function main() {
       .filter({ hasText: "已复制" })
       .waitFor({ state: "attached" });
     await assertCopyState(window, "已复制");
-    const retriedCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    const retriedCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     await window.clock.runFor(2000);
     await assertCopyState(window, "复制");
@@ -485,7 +486,7 @@ async function main() {
     await card.getByText("时序 e2e 预置内容").waitFor({ timeout: 10_000 });
     console.log("[e2e] 思考折叠块与工具卡的折叠交互保持不变");
 
-    // 异步复制尚未完成时离开会话；旧请求完成不得污染重新挂载的反馈。
+    // 异步复制尚未完成时离开任务；旧请求完成不得污染重新挂载的反馈。
     await window.evaluate(() => {
       const clipboard = navigator.clipboard;
       const original = clipboard.writeText.bind(clipboard);
@@ -503,12 +504,12 @@ async function main() {
       await window.getByTestId("assistant-copy").isDisabled(),
       "复制进行中应禁止重复请求"
     );
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window
       .getByTestId("assistant-actions")
       .waitFor({ state: "detached" });
     await window.evaluate(() => window.finishPendingCopy());
-    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("task-item").first().click();
     await window.getByTestId("assistant-copy").waitFor();
     assert(
       (await window.getByTestId("assistant-copy-feedback").textContent()) ===
@@ -521,11 +522,8 @@ async function main() {
     const secondLaunch = await launchApp({ homeDir });
     app = secondLaunch.app;
     window = secondLaunch.window;
-    await window
-      .getByTestId("session-item")
-      .first()
-      .waitFor({ timeout: 15_000 });
-    await window.getByTestId("session-item").first().click();
+    await window.getByTestId("task-item").first().waitFor({ timeout: 15_000 });
+    await window.getByTestId("task-item").first().click();
     await window
       .getByTestId("message-user")
       .first()
@@ -596,8 +594,8 @@ async function main() {
       .getByTestId("assistant-copy-feedback")
       .filter({ hasText: "已复制" })
       .waitFor({ state: "attached" });
-    const restoredCopied = await app.evaluate(({ clipboard }) =>
-      clipboard.readText()
+    const restoredCopied = await app.evaluate(async ({ clipboard }) =>
+      (await clipboard.readText()).replace(/\r\n/g, "\n")
     );
     console.log(
       "[e2e] 主题截图、失败重试反馈、卸载隔离、重启消息段与完成时刻验证通过"

@@ -60,7 +60,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     ]);
   });
 
-  it("navigate→type→click→read→screenshot 全链（同一会话共享页面状态）", async () => {
+  it("navigate→type→click→read→screenshot 全链（同一任务共享页面状态）", async () => {
     const navigate = byName().get("browser_navigate")!;
     const type = byName().get("browser_type")!;
     const click = byName().get("browser_click")!;
@@ -123,7 +123,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     expect(content.output.length).toBeLessThan(40000);
   }, 60_000);
 
-  it("navigate 到无法连接的地址返回明确错误，会话不崩（后续调用正常）", async () => {
+  it("navigate 到无法连接的地址返回明确错误，任务不崩（后续调用正常）", async () => {
     const navigate = byName().get("browser_navigate")!;
     // 探测一个确定未监听的端口（连接拒绝而非被 Chromium 屏蔽的端口）；
     // 分配到 bad port 会被 Chromium 报 ERR_UNSAFE_PORT，必须换安全端口。
@@ -175,7 +175,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     expect(typed.output).toContain("找不到");
   }, 60_000);
 
-  it("read/screenshot 在未导航的会话上返回引导性错误", async () => {
+  it("read/screenshot 在未导航的任务上返回引导性错误", async () => {
     const fresh = createBrowserTools({
       manager,
       screenshotDirFor: () => screenshotDir,
@@ -198,7 +198,7 @@ describe("浏览器工具组（真实 Chromium + 本地 fixture）", () => {
     await manager.closeTask("never-navigated");
   }, 60_000);
 
-  it("不同会话的当前页互不干扰", async () => {
+  it("不同任务的当前页互不干扰", async () => {
     const navigate = byName().get("browser_navigate")!;
     const read = byName().get("browser_read")!;
     await navigate.execute(

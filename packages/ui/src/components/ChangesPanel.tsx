@@ -28,7 +28,7 @@ const CHANGE_KIND_CLASSES: Record<GitChangeKind, string> = {
 
 /**
  * 改动面板（spec「结果检视与 git」）：工作区 git status 的变更文件列表 +
- * Monaco diff 检视 + 一键创建分支（codexlike/<会话名>）与一键提交。
+ * Monaco diff 检视 + 一键创建分支（codexlike/<任务名>）与一键提交。
  * 非 git 工作区显示降级提示，不报错。
  */
 export function ChangesPanel(props: {
@@ -117,7 +117,7 @@ export function ChangesPanel(props: {
     }
   }
 
-  /** 模型按会话内容生成提交消息草稿（一次不发工具的请求；可编辑、失败可手写） */
+  /** 模型按任务内容生成提交消息草稿（一次不发工具的请求；可编辑、失败可手写） */
   async function generateMessage() {
     setCommitBusy("generate");
     setCommitFeedback(null);
@@ -232,7 +232,7 @@ export function ChangesPanel(props: {
           data-testid="changes-not-git"
           className="m-3 rounded border border-line bg-surface-muted p-3 text-sm text-fg-muted"
         >
-          非 git 工作区：当前会话绑定的目录不受 git 管理，无法查看改动或提交。
+          非 git 工作区：当前任务绑定的目录不受 git 管理，无法查看改动或提交。
         </div>
       ) : selected !== null ? (
         <div className="flex min-h-0 flex-1 flex-col">

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { TaskSearchResult } from "@codexlike/agent-core";
 
-/** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的会话历史。 */
+/** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的任务历史。 */
 export function TaskSearch(props: {
   onSelect: (id: string) => void;
   recordsRevision?: number;
@@ -45,16 +45,16 @@ export function TaskSearch(props: {
     <div className="relative">
       <button
         type="button"
-        data-testid="session-search-toggle"
+        data-testid="task-search-toggle"
         aria-expanded={open}
         className="rounded border border-line px-3 py-1 text-xs text-fg-muted hover:text-accent"
         onClick={() => setOpen((value) => !value)}
       >
-        {open ? "关闭搜索" : "搜索会话"}
+        {open ? "关闭搜索" : "搜索任务"}
       </button>
       {open && (
         <section
-          aria-label="跨项目会话搜索"
+          aria-label="跨项目任务搜索"
           className="absolute right-0 top-full z-20 mt-2 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
@@ -67,11 +67,11 @@ export function TaskSearch(props: {
             }}
           >
             <label className="block text-xs text-fg-muted">
-              搜索所有项目与独立会话
+              搜索所有项目与独立任务
               <input
                 autoFocus
                 type="search"
-                data-testid="session-search-input"
+                data-testid="task-search-input"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="输入标题或消息正文"
@@ -82,7 +82,7 @@ export function TaskSearch(props: {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  data-testid="session-search-archived"
+                  data-testid="task-search-archived"
                   checked={includeArchived}
                   onChange={(event) => setIncludeArchived(event.target.checked)}
                 />
@@ -91,7 +91,7 @@ export function TaskSearch(props: {
               <button
                 type="submit"
                 className="text-accent"
-                data-testid="session-search-refresh"
+                data-testid="task-search-refresh"
               >
                 重新查询
               </button>
@@ -100,7 +100,7 @@ export function TaskSearch(props: {
           <p
             role="status"
             aria-live="polite"
-            data-testid="session-search-status"
+            data-testid="task-search-status"
             className="my-2 text-xs text-fg-subtle"
           >
             {!query.trim()
@@ -109,16 +109,16 @@ export function TaskSearch(props: {
                 ? "正在搜索…"
                 : (error ??
                   (results.length
-                    ? `找到 ${results.length} 个会话`
-                    : "没有匹配的会话"))}
+                    ? `找到 ${results.length} 个任务`
+                    : "没有匹配的任务"))}
           </p>
           <ul className="max-h-80 space-y-1 overflow-y-auto">
             {results.map((result) => (
               <li key={result.id}>
                 <button
                   type="button"
-                  data-testid="session-search-result"
-                  data-session-id={result.id}
+                  data-testid="task-search-result"
+                  data-task-id={result.id}
                   className="w-full rounded px-2 py-2 text-left hover:bg-hover focus:bg-hover"
                   onClick={() => {
                     setOpen(false);
@@ -133,7 +133,7 @@ export function TaskSearch(props: {
                   </span>
                   <span className="block truncate text-xs text-fg-muted">
                     {result.projectId === null
-                      ? "独立会话"
+                      ? "独立任务"
                       : `项目 · ${result.projectName ?? "未知项目"}`}
                     {result.archivedAt !== null && " · 已归档"}
                   </span>

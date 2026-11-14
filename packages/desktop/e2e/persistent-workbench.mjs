@@ -89,7 +89,7 @@ async function main() {
     await window.getByTestId("add-project").click();
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await selectComposerOption(window, "thinking-effort-select", "high");
     await projectAction(window);
@@ -103,10 +103,10 @@ async function main() {
         "项目新建草稿"
     );
     assert(
-      (await window.getByTestId("session-item").count()) === 0,
+      (await window.getByTestId("task-item").count()) === 0,
       "草稿不是正式历史"
     );
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.waitForFunction(
       () =>
         document.querySelector('[data-testid="composer-input"]')?.value ===
@@ -128,7 +128,7 @@ async function main() {
         .getAttribute("data-value")) === secondProfileId,
       "鼠标切换模型提交 Profile ID"
     );
-    await window.getByTestId("composer-input").fill("正式会话未发送输入");
+    await window.getByTestId("composer-input").fill("正式任务未发送输入");
     await selectComposerOption(window, "thinking-effort-select", "off");
     await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
@@ -144,10 +144,10 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    await window.getByTestId("composer-input").fill("项目会话独立输入");
+    await window.getByTestId("composer-input").fill("项目任务独立输入");
     await selectComposerOption(window, "thinking-effort-select", "low");
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立新建草稿" })
       .click();
     await window.getByTestId("message-assistant").waitFor();
@@ -161,14 +161,14 @@ async function main() {
     );
     assert(
       (await window.getByTestId("composer-input").inputValue()) ===
-        "正式会话未发送输入",
+        "正式任务未发送输入",
       "正式草稿隔离"
     );
     assert(
       (await window
         .getByTestId("thinking-effort-select")
         .getAttribute("data-value")) === "off",
-      "会话思考隔离"
+      "任务思考隔离"
     );
     assert(
       (await window
@@ -180,7 +180,7 @@ async function main() {
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "独立新建草稿" })
       .click();
     await window.getByTestId("message-assistant").waitFor();
@@ -194,7 +194,7 @@ async function main() {
     );
     assert(
       (await window.getByTestId("composer-input").inputValue()) ===
-        "正式会话未发送输入",
+        "正式任务未发送输入",
       "正式草稿真实重启恢复"
     );
     assert(
@@ -228,12 +228,12 @@ async function main() {
         .getAttribute("data-value")) === "full-access",
       "权限真实重启恢复"
     );
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")
         .getAttribute("data-value")) === "ask",
-      "新会话不能继承完全访问"
+      "新任务不能继承完全访问"
     );
     await window.waitForFunction(
       (id) =>
@@ -246,19 +246,19 @@ async function main() {
       (await window.getByTestId("profile-select").textContent()).includes(
         "Persistent Mock · persistent-model"
       ),
-      "新会话采用应用默认而非上一个会话模型"
+      "新任务采用应用默认而非上一个任务模型"
     );
     assert(model.requestCount() === 2, "切换与重启不自动发送");
     await window.getByTestId("composer-input").fill("提问草稿验收");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("question-custom").fill("尚未提交的问答文本");
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "项目新建草稿" })
       .click();
     await window.getByTestId("message-assistant").waitFor();
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "提问草稿验收" })
       .click();
     await window.getByTestId("question-custom").waitFor();
@@ -273,7 +273,7 @@ async function main() {
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "提问草稿验收" })
       .click();
     await window.getByTestId("saved-question-draft").waitFor();
@@ -350,7 +350,7 @@ async function main() {
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: "提问草稿验收" })
       .click();
     await window.getByTestId("saved-question-draft").waitFor();

@@ -124,13 +124,13 @@ export function backToLatestVisible(
   return mode === "detached" && segmentCount > 0;
 }
 
-/** 阅读位置记忆（按会话保存）：像素位置 + 离开时是否贴底跟随 */
+/** 阅读位置记忆（按任务保存）：像素位置 + 离开时是否贴底跟随 */
 export interface SavedReadingSpot {
   scrollTop: number;
   atBottom?: boolean;
 }
 
-/** 离开会话/组件卸载前记录阅读位置：跟随态按贴底记忆 */
+/** 离开任务/组件卸载前记录阅读位置：跟随态按贴底记忆 */
 export function readingSpotOnLeave(input: {
   mode: FollowMode;
   geometry: ScrollGeometry;
@@ -148,7 +148,7 @@ function clampedScrollTop(value: number, geometry: ScrollGeometry): number {
 
 /**
  * 阅读位置恢复计算（spec 用户故事 10-12）：
- * - 无记忆（新会话）→ 定位当前最新并跟随；
+ * - 无记忆（新任务）→ 定位当前最新并跟随；
  * - 贴底记忆 → 恢复到当前最新并跟随（旧的像素位置作废）；
  * - 非贴底记忆 → 恢复像素位置并按当前高度夹紧；夹紧后恰好贴底
  *   （含旧数据无贴底标记的场景）按贴底恢复跟随。

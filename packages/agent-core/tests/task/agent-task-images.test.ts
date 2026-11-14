@@ -29,7 +29,7 @@ const PNG_BASE64 =
 function taskRecord(workspacePath: string): TaskRecord {
   return {
     id: "session-shot",
-    title: "截图会话",
+    title: "截图任务",
     workspacePath,
     providerProfileId: null,
     model: null,
@@ -190,7 +190,7 @@ async function runSession(
 }
 
 describe("工具结果附图（截图回填模型：多模态附图 / 纯文本降级）", () => {
-  it("默认：截图工具收到会话标识，图片作为 content 块回填模型", async () => {
+  it("默认：截图工具收到任务标识，图片作为 content 块回填模型", async () => {
     const captured: ToolExecutionContext[] = [];
     const { events, model } = await runSession({}, captured);
 

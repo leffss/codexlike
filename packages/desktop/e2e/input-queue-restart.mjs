@@ -1,8 +1,8 @@
 // E2E（票 04）：重启自动继续与后台消费——真实 Electron 正常退出后重开。
-// 路径：设置页建 Profile（本地 mock SSE）→ 三个会话各自排队
-// ① 会话 A/B 回复进行中入队（非暂停）→ 确认退出（A/B 中断，队列持久保留）
+// 路径：设置页建 Profile（本地 mock SSE）→ 三个任务各自排队
+// ① 任务 A/B 回复进行中入队（非暂停）→ 确认退出（A/B 中断，队列持久保留）
 // ② 重启后未打开的 A/B 队列由主进程后台自动逐条消费（模型请求顺序证明）
-// ③ 会话 C 停止置暂停 → 重启后保持暂停、队列条内容与顺序与重启前一致，
+// ③ 任务 C 停止置暂停 → 重启后保持暂停、队列条内容与顺序与重启前一致，
 //    恢复入口可用；手动「恢复」后从队首继续消费完毕。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:input-queue-restart（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -22,7 +22,7 @@ import {
 /** 首轮回复一律「一段后挂起」：提供稳定入队窗口，由退出确认/停止负责中断。 */
 const HELD_FIRST_ROUND = new Set([
   "重启自动继续首轮",
-  "后台会话首轮",
+  "后台任务首轮",
   "暂停保留首轮",
 ]);
 const REPLIES = new Map([
@@ -66,7 +66,7 @@ async function enqueue(window, text) {
 }
 
 async function select(window, title) {
-  await window.getByTestId("session-item").filter({ hasText: title }).click();
+  await window.getByTestId("task-item").filter({ hasText: title }).click();
 }
 
 async function main() {
@@ -89,7 +89,7 @@ async function main() {
 
   let app;
   try {
-    // ── 第一次启动：三个会话各自留下队列，然后正常确认退出 ──
+    // ── 第一次启动：三个任务各自留下队列，然后正常确认退出 ──
     const first = await launchApp({ homeDir });
     app = first.app;
     let window = first.window;
@@ -107,7 +107,7 @@ async function main() {
     await window.getByText("Mock").first().waitFor();
     await window.getByTestId("settings-back").click();
 
-    // 会话 A：回复进行中入队两条（非暂停，留给重启自动继续）
+    // 任务 A：回复进行中入队两条（非暂停，留给重启自动继续）
     await prepareDraft(window);
     await window.getByTestId("composer-input").fill("重启自动继续首轮");
     await window.getByTestId("composer-send").click();
@@ -121,21 +121,21 @@ async function main() {
       .getByTestId("queue-count")
       .getByText("待发 2 条")
       .waitFor({ timeout: 10_000 });
-    console.log("[e2e] 会话 A 忙时入队两条（非暂停）");
+    console.log("[e2e] 任务 A 忙时入队两条（非暂停）");
 
-    // 会话 B：切走不中断，同样留下一条排队
+    // 任务 B：切走不中断，同样留下一条排队
     await prepareDraft(window);
-    await window.getByTestId("composer-input").fill("后台会话首轮");
+    await window.getByTestId("composer-input").fill("后台任务首轮");
     await window.getByTestId("composer-send").click();
     await window
       .getByTestId("message-assistant")
-      .getByText("后台会话首轮流式进行中")
+      .getByText("后台任务首轮流式进行中")
       .waitFor({ timeout: 15_000 });
     await enqueue(window, "后台排队消息");
     await window.getByTestId("queue-bar").waitFor({ timeout: 10_000 });
-    console.log("[e2e] 会话 B 后台执行中入队一条");
+    console.log("[e2e] 任务 B 后台执行中入队一条");
 
-    // 会话 C：入队两条后点停止 → 队列暂停（用户意图，重启不得推翻）
+    // 任务 C：入队两条后点停止 → 队列暂停（用户意图，重启不得推翻）
     await prepareDraft(window);
     await window.getByTestId("composer-input").fill("暂停保留首轮");
     await window.getByTestId("composer-send").click();
@@ -151,7 +151,7 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     await window.getByTestId("composer-stop").click();
     await window.getByTestId("queue-paused").waitFor({ timeout: 10_000 });
-    console.log("[e2e] 会话 C 停止置暂停：队列原样保留");
+    console.log("[e2e] 任务 C 停止置暂停：队列原样保留");
 
     // A/B 仍在执行 → 走退出确认；确认后保存屏障完成、A/B 被中断、进程正常退出
     const done = exited(app);
@@ -171,11 +171,11 @@ async function main() {
     );
     console.log("[e2e] 确认退出：A/B 中断、队列持久保留、进程正常退出");
 
-    // ── 第二次启动：同一数据目录，队列随会话恢复 ──
+    // ── 第二次启动：同一数据目录，队列随任务恢复 ──
     const second = await launchApp({ homeDir });
     app = second.app;
     window = second.window;
-    await window.getByTestId("new-session").waitFor();
+    await window.getByTestId("new-task").waitFor();
 
     // C：重启后仍暂停，队列条内容与顺序与重启前一致；恢复入口可用
     await select(window, "暂停保留首轮");
@@ -199,7 +199,7 @@ async function main() {
     // A/B：从未切换查看，队列由主进程后台自动逐条消费（甲完成在乙之前）
     await until(
       () => bodies().includes("重启排队甲") && bodies().includes("重启排队乙"),
-      "后台会话的队列没有被自动消费"
+      "后台任务的队列没有被自动消费"
     );
     const orderA = bodies();
     assert(
@@ -208,11 +208,11 @@ async function main() {
     );
     await until(
       () => bodies().includes("后台排队消息"),
-      "B 会话队列未后台消费"
+      "B 任务队列未后台消费"
     );
-    console.log("[e2e] 未查看的 A/B 会话队列在后台自动逐条消费");
+    console.log("[e2e] 未查看的 A/B 任务队列在后台自动逐条消费");
 
-    // A：打开会话看到两条排队消息都已发出并完成，队列条消失
+    // A：打开任务看到两条排队消息都已发出并完成，队列条消失
     await select(window, "重启自动继续首轮");
     await window
       .getByText("甲的重启后答复。")
@@ -229,10 +229,10 @@ async function main() {
     // B：从未打开，其后台轮次已完成（执行状态空闲）
     const bIdle = await window.evaluate(async () => {
       const list = await window.codexlike.sessions.list();
-      const record = list.find((session) => session.title === "后台会话首轮");
+      const record = list.find((session) => session.title === "后台任务首轮");
       return record ? record.activity.running === false : false;
     });
-    assert(bIdle, "后台会话消费完成后应回到空闲");
+    assert(bIdle, "后台任务消费完成后应回到空闲");
     console.log("[e2e] 打开 A 看到自动消费完毕；B 未打开也已完成");
 
     // C：手动「恢复」→ 从队首继续消费完毕，队列条消失
@@ -254,7 +254,7 @@ async function main() {
       requestCount() === 8,
       `重启后恰好五轮模型请求：A2+B1+C2（实际 ${requestCount()}）`
     );
-    console.log("[e2e] 暂停会话手动恢复后消费完毕，模型请求次数精确");
+    console.log("[e2e] 暂停任务手动恢复后消费完毕，模型请求次数精确");
 
     await closeApp(app);
     app = null;

@@ -1,5 +1,5 @@
 // E2E（工单 08）：/compact 手动压缩的真实应用冒烟。
-// 路径：建 Profile（本地 mock，stream 分流：对话走 SSE、压缩走 JSON）→ 建会话
+// 路径：建 Profile（本地 mock，stream 分流：对话走 SSE、压缩走 JSON）→ 建任务
 // → 4 轮对话 → /compact → 断言摘要卡片折叠可见、消息流只剩摘要 + 最近 3 轮、
 // /status 显示已压缩 → 继续对话断言真实请求体含摘要与最近 3 轮（不含被压缩轮次）
 // → 重启应用断言摘要卡片仍可见（持久化恢复）。
@@ -90,7 +90,7 @@ async function main() {
       .click();
     await window.getByText("Mock").first().waitFor();
 
-    // 2) 建会话 + 4 轮对话（压缩需超过 3 轮）
+    // 2) 建任务 + 4 轮对话（压缩需超过 3 轮）
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
     const composer = window.getByTestId("composer-input");
@@ -99,15 +99,12 @@ async function main() {
     }
 
     // 挂起Compact后A→B→A：停止入口恢复，停止不改历史；再后台完成同样更新。
-    await window.getByTestId("new-session").click();
-    await sendAndAwait(window, composer, "会话B", 1);
+    await window.getByTestId("new-task").click();
+    await sendAndAwait(window, composer, "任务B", 1);
     const chooseA = () =>
-      window
-        .getByTestId("session-item")
-        .filter({ hasText: "第1轮问题" })
-        .click();
+      window.getByTestId("task-item").filter({ hasText: "第1轮问题" }).click();
     const chooseB = () =>
-      window.getByTestId("session-item").filter({ hasText: "会话B" }).click();
+      window.getByTestId("task-item").filter({ hasText: "任务B" }).click();
     await chooseA();
     await composer.fill("/compact");
     await composer.press("Enter");

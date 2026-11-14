@@ -76,7 +76,7 @@ const snapshot: ResourceSnapshotSummary = {
 };
 
 describe("规范与技能只读面板", () => {
-  it("工作区顶栏提供规范与技能只读入口，无会话时禁用", () => {
+  it("工作区顶栏提供规范与技能只读入口，无任务时禁用", () => {
     const html = renderToStaticMarkup(
       createElement(WorkspacePage, { onOpenSettings: () => {} })
     );
@@ -189,7 +189,7 @@ describe("技能输入入口", () => {
     }
     expect(new Set(icons).size).toBe(3);
   });
-  it("普通输入从会话草稿恢复，即使禁用发送仍保留输入内容与停止按钮", () => {
+  it("普通输入从任务草稿恢复，即使禁用发送仍保留输入内容与停止按钮", () => {
     const html = renderToStaticMarkup(
       createElement(MessageComposer, {
         profiles: [],
@@ -203,12 +203,12 @@ describe("技能输入入口", () => {
         onSelectApprovalMode: () => {},
         thinkingEffort: "auto",
         onSelectThinkingEffort: () => {},
-        draftValue: "切会话前的输入",
+        draftValue: "切任务前的输入",
         onDraftChange: () => {},
         streaming: true,
       })
     );
-    expect(html).toContain("切会话前的输入");
+    expect(html).toContain("切任务前的输入");
     expect(html).toContain("flex flex-wrap items-center justify-between");
     expect(html).toContain("composer-stop");
     expect(html).not.toContain("composer-send");

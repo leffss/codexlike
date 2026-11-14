@@ -79,7 +79,7 @@ export function createBrowserTools(
     const page = await manager.pageFor(context.sessionId);
     if (page.url() === "about:blank") {
       throw new Error(
-        "当前会话尚未打开任何页面，请先使用 browser_navigate 打开一个网址"
+        "当前任务尚未打开任何页面，请先使用 browser_navigate 打开一个网址"
       );
     }
     return page;
@@ -88,7 +88,7 @@ export function createBrowserTools(
   const navigate: ToolDefinition = {
     name: "browser_navigate",
     description:
-      "在会话浏览器中打开一个网页（http/https）。同一会话内共享页面与 Cookie；" +
+      "在任务浏览器中打开一个网页（http/https）。同一任务内共享页面与 Cookie；" +
       "返回页面标题与地址。首次使用会自动下载 Chromium（可能较慢）。",
     parameters: {
       type: "object",

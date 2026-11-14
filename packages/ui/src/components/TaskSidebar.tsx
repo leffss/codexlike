@@ -48,7 +48,7 @@ function FolderIcon(props: { open: boolean }) {
   );
 }
 
-/** 独立会话分区的气泡图标（不属于任何项目的会话，与项目文件夹图标区分） */
+/** 独立任务分区的气泡图标（不属于任何项目的任务，与项目文件夹图标区分） */
 function StandaloneIcon() {
   return (
     <svg
@@ -69,10 +69,10 @@ function StandaloneIcon() {
 }
 
 /**
- * 左栏：独立会话分区与显式项目列表（ADR 0010）。
- * 项目组头不依赖会话存在；归属只看 projectId，绝不按目录自动聚合。
- * 组内活跃会话在上、「已归档」子折叠在下。
- * 会话标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
+ * 左栏：独立任务分区与显式项目列表（ADR 0010）。
+ * 项目组头不依赖任务存在；归属只看 projectId，绝不按目录自动聚合。
+ * 组内活跃任务在上、「已归档」子折叠在下。
+ * 任务标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
  * 整理操作收进右键菜单，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
  */
@@ -112,18 +112,16 @@ export function TaskSidebar(props: {
         const active = document.activeElement;
         const activeMenu =
           active instanceof HTMLElement
-            ? active.closest<HTMLElement>(
-                "[data-testid='session-context-menu']"
-              )
+            ? active.closest<HTMLElement>("[data-testid='task-context-menu']")
             : null;
         if (
           (active === document.body ||
-            activeMenu?.dataset.sessionId === menu.taskId) &&
+            activeMenu?.dataset.taskId === menu.taskId) &&
           !document.querySelector("[role='dialog'][aria-modal='true']")
         ) {
           const taskTarget = Array.from(
-            document.querySelectorAll<HTMLElement>("[data-session-select]")
-          ).find((element) => element.dataset.sessionId === menu.taskId);
+            document.querySelectorAll<HTMLElement>("[data-task-select]")
+          ).find((element) => element.dataset.taskId === menu.taskId);
           const groupTarget = Array.from(
             document.querySelectorAll<HTMLElement>(
               "[data-testid='project-header']"
@@ -141,9 +139,7 @@ export function TaskSidebar(props: {
             ? menu.anchor.target
             : (taskTarget ??
               fallback ??
-              document.querySelector<HTMLElement>(
-                "[data-testid='new-session']"
-              ));
+              document.querySelector<HTMLElement>("[data-testid='new-task']"));
           target?.focus({ preventScroll: true });
         }
       }
@@ -201,8 +197,8 @@ export function TaskSidebar(props: {
     return (
       <li
         key={task.id}
-        data-testid="session-row"
-        data-session-id={task.id}
+        data-testid="task-row"
+        data-task-id={task.id}
         className={`group/task relative mt-0.5 flex items-center rounded-md ${
           task.id === props.currentId
             ? "bg-selected text-fg"
@@ -211,9 +207,10 @@ export function TaskSidebar(props: {
         onContextMenu={(event) => {
           if (editingId === task.id) return;
           event.preventDefault();
-          const target = event.currentTarget.querySelector<HTMLButtonElement>(
-            "[data-session-select]"
-          );
+          const target =
+            event.currentTarget.querySelector<HTMLButtonElement>(
+              "[data-task-select]"
+            );
           if (!target) return;
           setMenu({
             taskId: task.id,
@@ -246,7 +243,7 @@ export function TaskSidebar(props: {
         {editingId === task.id ? (
           <input
             data-testid="rename-input"
-            aria-label="会话名称"
+            aria-label="任务名称"
             value={editingTitle}
             autoFocus
             onChange={(event) => setEditingTitle(event.target.value)}
@@ -258,9 +255,9 @@ export function TaskSidebar(props: {
           <>
             <button
               type="button"
-              data-testid={archived ? "archived-session-item" : "session-item"}
-              data-session-id={task.id}
-              data-session-select="true"
+              data-testid={archived ? "archived-task-item" : "task-item"}
+              data-task-id={task.id}
+              data-task-select="true"
               aria-current={task.id === props.currentId ? "page" : undefined}
               aria-haspopup="menu"
               aria-expanded={menu?.taskId === task.id}
@@ -268,7 +265,7 @@ export function TaskSidebar(props: {
               onClick={() => props.onSelect(task.id)}
             >
               <span
-                data-testid="session-label"
+                data-testid="task-label"
                 className="min-w-0 flex-1 truncate"
                 title={`${task.title}\n${relative} · ${absoluteTime}\n${task.workspacePath}`}
               >
@@ -304,8 +301,8 @@ export function TaskSidebar(props: {
               type="button"
               data-testid="pin-button"
               aria-pressed={task.pinned ?? false}
-              aria-label={task.pinned ? "取消置顶" : "置顶会话"}
-              title={task.pinned ? "取消置顶" : "置顶会话"}
+              aria-label={task.pinned ? "取消置顶" : "置顶任务"}
+              title={task.pinned ? "取消置顶" : "置顶任务"}
               className={`mr-1 flex h-6 w-5 shrink-0 items-center justify-center rounded hover:text-accent ${
                 task.pinned
                   ? "text-accent"
@@ -395,7 +392,7 @@ export function TaskSidebar(props: {
           </button>
           <span className="mr-1 grid shrink-0 items-center">
             <span
-              data-testid="project-session-count"
+              data-testid="project-task-count"
               className={`col-start-1 row-start-1 px-1 text-right text-[10px] text-fg-subtle ${
                 group.projectId !== null
                   ? "group-hover/header:invisible group-focus-within/header:invisible"
@@ -422,9 +419,9 @@ export function TaskSidebar(props: {
                 </button>
                 <button
                   type="button"
-                  data-testid="project-new-session"
-                  title="在此项目新建会话"
-                  aria-label="在此项目新建会话"
+                  data-testid="project-new-task"
+                  title="在此项目新建任务"
+                  aria-label="在此项目新建任务"
                   disabled={props.creating}
                   className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover disabled:opacity-50"
                   onClick={() => props.onCreateInProject(group.projectId!)}
@@ -447,9 +444,9 @@ export function TaskSidebar(props: {
             )}
           </span>
         </div>
-        {/* 无竖线缩进导轨：会话标题起点对齐原竖线位置（ml-7 + 行内 pl-2），为标题让出宽度 */}
+        {/* 无竖线缩进导轨：任务标题起点对齐原竖线位置（ml-7 + 行内 pl-2），为标题让出宽度 */}
         {expanded && (
-          <div data-testid="group-sessions" className="ml-7">
+          <div data-testid="group-tasks" className="ml-7">
             <ul>{group.active.map((task) => renderTaskItem(task))}</ul>
             {group.archived.length > 0 && (
               <div>
@@ -486,7 +483,7 @@ export function TaskSidebar(props: {
           onClose={closeMenu}
           items={[
             {
-              testId: "session-membership",
+              testId: "task-membership",
               label: menuTask.projectId === null ? "移入项目" : "移出项目",
               onSelect: () => props.onMembership(menuTask.id),
             },
@@ -511,16 +508,16 @@ export function TaskSidebar(props: {
         />
       )}
       <div className="flex items-center justify-between px-3 py-3">
-        <h2 className="text-sm font-medium text-fg">会话</h2>
+        <h2 className="text-sm font-medium text-fg">任务</h2>
         <button
           type="button"
-          data-testid="new-session"
+          data-testid="new-task"
           disabled={props.creating}
-          title="新建独立会话草稿"
+          title="新建独立任务草稿"
           className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={props.onCreate}
         >
-          {props.creating ? "创建中…" : "+ 新建独立会话"}
+          {props.creating ? "创建中…" : "+ 新建独立任务"}
         </button>
       </div>
 
@@ -535,15 +532,15 @@ export function TaskSidebar(props: {
       {groups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4">
           <p className="text-center text-xs text-fg-subtle">
-            暂无会话
+            暂无任务
             <br />
-            点击「+ 新建独立会话」准备输入，首次发送才建立工作区
+            点击「+ 新建独立任务」准备输入，首次发送才建立工作区
           </p>
         </div>
       ) : (
         <ul
           className="flex-1 overflow-y-auto px-2 pb-2"
-          data-testid="session-list"
+          data-testid="task-list"
         >
           {groups.map((group) => renderGroup(group))}
         </ul>

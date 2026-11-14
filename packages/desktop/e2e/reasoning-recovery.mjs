@@ -1,15 +1,15 @@
 // E2E reasoning 落库与恢复（票 02，GLOSSARY「思考档位」，ADR 0011）：
-// 思考随终态消息/委派记录落 SQLite，重启后主会话与子代理的思考段可展开回看；
-// 运行期切走再切回（内存事件重放）思考不重复、不丢失；旧会话（无思考数据）
+// 思考随终态消息/委派记录落 SQLite，重启后主任务与子代理的思考段可展开回看；
+// 运行期切走再切回（内存事件重放）思考不重复、不丢失；旧任务（无思考数据）
 // 正常打开、不产生空思考块。
 // 场景：
-// 1) 会话 A：reasoning + 正文 → 会话 A 再发委派消息 → spawn_subagent（子代理
-//    模型回自己的 reasoning + 报告）→ 主会话收尾。
-// 2) 会话 B：纯正文（无 reasoning_content）→ 等价旧数据形状。
-// 3) 运行中切走再切回：慢速 reasoning 流式期间切到新会话再切回，
+// 1) 任务 A：reasoning + 正文 → 任务 A 再发委派消息 → spawn_subagent（子代理
+//    模型回自己的 reasoning + 报告）→ 主任务收尾。
+// 2) 任务 B：纯正文（无 reasoning_content）→ 等价旧数据形状。
+// 3) 运行中切走再切回：慢速 reasoning 流式期间切到新任务再切回，
 //    思考段唯一且内容完整（不重复、不丢失），随后收尾。
-// 4) closeApp → 重启（同 homeDir）→ 打开会话 A：thinking-block 可展开回看、
-//    子代理卡内 subagent-thinking-block 不空白；打开会话 B：无空思考块。
+// 4) closeApp → 重启（同 homeDir）→ 打开任务 A：thinking-block 可展开回看、
+//    子代理卡内 subagent-thinking-block 不空白；打开任务 B：无空思考块。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,12 +24,12 @@ import {
   startMockProvider,
 } from "./helpers.mjs";
 
-/** 会话 A 第一条消息（reasoning + 正文轮） */
+/** 任务 A 第一条消息（reasoning + 正文轮） */
 const A_QUESTION = "带思考的问题";
-/** 会话 A 第二条消息（触发子代理委派） */
+/** 任务 A 第二条消息（触发子代理委派） */
 const A_DELEGATE = "委派调研任务";
-/** 会话 B 消息（无 reasoning，旧数据形状） */
-const B_QUESTION = "旧式会话消息";
+/** 任务 B 消息（无 reasoning，旧数据形状） */
+const B_QUESTION = "旧式任务消息";
 /** 慢速思考消息（运行中切换场景） */
 const A_SLOW = "慢速思考问题";
 
@@ -54,11 +54,11 @@ async function main() {
       messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
     if (text.includes(A_QUESTION)) {
       ctx.send({
-        delta: { reasoning_content: "重启前主会话思考" },
+        delta: { reasoning_content: "重启前主任务思考" },
         finish_reason: null,
       });
       setTimeout(() => {
-        ctx.send({ delta: { content: "主会话最终回答" }, finish_reason: null });
+        ctx.send({ delta: { content: "主任务最终回答" }, finish_reason: null });
         setTimeout(() => ctx.finishWith("stop"), 30);
       }, 100);
       return;
@@ -92,11 +92,11 @@ async function main() {
       }, 700);
       return;
     }
-    // 会话 B：纯正文（无 reasoning_content）
+    // 任务 B：纯正文（无 reasoning_content）
     ctx.textRound("旧式正文回答");
   });
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-reasoning-rec-"));
-  /** 票 04：展开会话内全部「已工作折叠区」（完成后过程段默认收起） */
+  /** 票 04：展开任务内全部「已工作折叠区」（完成后过程段默认收起） */
   const expandAllHistories = async (window) => {
     const toggles = window.getByTestId("worked-history-toggle");
     const total = await toggles.count();
@@ -113,7 +113,7 @@ async function main() {
     app = first.app;
     let window = first.window;
 
-    // 准备：Profile（mock 端点）→ 会话 A
+    // 准备：Profile（mock 端点）→ 任务 A
     await window.evaluate(async (port) => {
       await window.codexlike.providerProfiles.create({
         name: "Reasoning Mock",
@@ -124,17 +124,17 @@ async function main() {
     }, model.port);
     await prepareDraft(window);
 
-    // ---- 场景 1a：会话 A 主会话 reasoning + 正文 ----
+    // ---- 场景 1a：任务 A 主任务 reasoning + 正文 ----
     await window.getByTestId("composer-input").fill(A_QUESTION);
     await window.getByTestId("composer-send").click();
     const thinkingLive = window.getByTestId("thinking-block").first();
     await thinkingLive.waitFor({ timeout: 20_000 });
     await window
       .getByTestId("message-assistant")
-      .filter({ hasText: "主会话最终回答" })
+      .filter({ hasText: "主任务最终回答" })
       .waitFor({ timeout: 20_000 });
 
-    // ---- 场景 1b：同会话委派子代理（子代理思考 + 报告）----
+    // ---- 场景 1b：同任务委派子代理（子代理思考 + 报告）----
     await window.getByTestId("composer-input").fill(A_DELEGATE);
     await window.getByTestId("composer-send").click();
     await window.getByTestId("subagent-card").waitFor({ timeout: 20_000 });
@@ -142,10 +142,10 @@ async function main() {
       .getByTestId("message-assistant")
       .filter({ hasText: "委派已收尾" })
       .waitFor({ timeout: 20_000 });
-    console.log("[e2e] 运行期：主会话与子代理思考均已流式呈现");
+    console.log("[e2e] 运行期：主任务与子代理思考均已流式呈现");
 
-    // ---- 场景 2：会话 B 纯正文（旧数据形状）----
-    await window.getByTestId("new-session").click();
+    // ---- 场景 2：任务 B 纯正文（旧数据形状）----
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill(B_QUESTION);
     await window.getByTestId("composer-send").click();
@@ -156,7 +156,7 @@ async function main() {
 
     // ---- 场景 3：运行中切走再切回，思考不重复、不丢失 ----
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: A_QUESTION })
       .first()
       .click();
@@ -166,16 +166,16 @@ async function main() {
       .waitFor({ timeout: 20_000 });
     await window.getByTestId("composer-input").fill(A_SLOW);
     await window.getByTestId("composer-send").click();
-    // 第一段思考渲染后立刻切走（新建草稿会话），流仍在后台进行
+    // 第一段思考渲染后立刻切走（新建草稿任务），流仍在后台进行
     await thinkingLive.waitFor({ timeout: 20_000 });
-    await window.getByTestId("new-session").click();
+    await window.getByTestId("new-task").click();
     await window.getByTestId("draft-select-workspace").click();
-    // 等第二段与正文都已流出（后台执行），再切回运行中会话
+    // 等第二段与正文都已流出（后台执行），再切回运行中任务
     for (let i = 0; i < 100 && model.requestCount() < 5; i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: A_QUESTION })
       .first()
       .click();
@@ -207,21 +207,21 @@ async function main() {
     );
     console.log("[e2e] 运行中切走再切回：思考不重复、不丢失");
 
-    // ---- 场景 4：重启 → 会话 A 主会话与子代理思考可回看 ----
+    // ---- 场景 4：重启 → 任务 A 主任务与子代理思考可回看 ----
     await closeApp(app);
     const second = await launchApp({ homeDir, workspaceDir });
     app = second.app;
     window = second.window;
 
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: A_QUESTION })
       .first()
       .click();
     await window.getByTestId("message-stream").waitFor({ timeout: 20_000 });
     // 票 04：重启恢复后正常完成的轮默认收起折叠区，展开后回看历史思考段
     await expandAllHistories(window);
-    // 主会话历史思考段：重启恢复，默认收起、可展开回看
+    // 主任务历史思考段：重启恢复，默认收起、可展开回看
     const restoredThinking = window.getByTestId("thinking-block").first();
     await restoredThinking.waitFor({ timeout: 20_000 });
     const restoredContent = restoredThinking.getByTestId("thinking-content");
@@ -230,8 +230,8 @@ async function main() {
     await restoredContent.waitFor({ timeout: 10_000 });
     const restoredText = await restoredContent.textContent();
     assert(
-      restoredText !== null && restoredText.includes("重启前主会话思考"),
-      `重启后主会话思考不可回看：${restoredText ?? "(空)"}`
+      restoredText !== null && restoredText.includes("重启前主任务思考"),
+      `重启后主任务思考不可回看：${restoredText ?? "(空)"}`
     );
     assert(
       (await window.getByTestId("thinking-block").count()) === 2,
@@ -258,11 +258,11 @@ async function main() {
       reportText !== null && reportText.includes("子代理最终报告"),
       "重启后子代理报告缺失（思考恢复未破坏报告）"
     );
-    console.log("[e2e] 重启后：主会话与子代理思考均可展开回看");
+    console.log("[e2e] 重启后：主任务与子代理思考均可展开回看");
 
-    // ---- 场景 5：旧会话（无思考数据）打开不报错、不产生空块 ----
+    // ---- 场景 5：旧任务（无思考数据）打开不报错、不产生空块 ----
     await window
-      .getByTestId("session-item")
+      .getByTestId("task-item")
       .filter({ hasText: B_QUESTION })
       .first()
       .click();
@@ -272,14 +272,14 @@ async function main() {
       .waitFor({ timeout: 20_000 });
     assert(
       (await window.getByTestId("thinking-block").count()) === 0,
-      "旧会话不应产生思考块"
+      "旧任务不应产生思考块"
     );
     assert(
       (await window.getByTestId("subagent-card").count()) === 0 &&
         (await window.getByTestId("subagent-thinking-block").count()) === 0,
-      "旧会话不应产生子代理思考块"
+      "旧任务不应产生子代理思考块"
     );
-    console.log("[e2e] 旧会话（无思考数据）正常打开，无空思考块");
+    console.log("[e2e] 旧任务（无思考数据）正常打开，无空思考块");
 
     await closeApp(app);
     console.log("[e2e] reasoning 落库与恢复全链路通过 ✅");

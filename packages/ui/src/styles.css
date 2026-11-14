@@ -45,7 +45,7 @@
   --info-fg: #0969da;
   --info-bg: #ddf4ff;
 
-  /* worktree 徽标（需与普通会话区分的辅助色，GLOSSARY「Worktree」） */
+  /* worktree 徽标（需与普通任务区分的辅助色，GLOSSARY「Worktree」） */
   --worktree-fg: #8250df;
   --worktree-bg: #ebe8ff;
 

@@ -329,7 +329,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
     }
   });
 
-  it("回退主模型路径（子代理 Profile = null）：子代理沿用主会话 Profile 且继承档位", async () => {
+  it("回退主模型路径（子代理 Profile = null）：子代理沿用主任务 Profile 且继承档位", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
     const { session } = makeSubagentThinkingSession(
@@ -412,7 +412,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
     ).toBe(true);
   });
 
-  it("未传档位：子代理与主会话一样按 auto 处理（既有调用方不受影响）", async () => {
+  it("未传档位：子代理与主任务一样按 auto 处理（既有调用方不受影响）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const factoryCalls: FactoryCall[] = [];
     const { session } = makeSubagentThinkingSession(
@@ -434,14 +434,14 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
 });
 
 describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）", () => {
-  it("子代理思考转为 subagent-reasoning 事件：带 subagentId、与主会话 reasoning 及正文分离", async () => {
+  it("子代理思考转为 subagent-reasoning 事件：带 subagentId、与主任务 reasoning 及正文分离", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { session } = makeSubagentThinkingSession({
       workspacePath: workspace,
       main: [
         {
           kind: "reasoning-tool",
-          reasoning: ["主会话自己的思考"],
+          reasoning: ["主任务自己的思考"],
           calls: [
             {
               toolCallId: "delegate-1",
@@ -485,7 +485,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
       (event) => event.type === "assistant-reasoning"
     );
     expect(mainReasoning.map((event) => event.delta)).toEqual([
-      "主会话自己的思考",
+      "主任务自己的思考",
     ]);
 
     // 报告正文不含思考；子代理报告回流正常
@@ -595,7 +595,7 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     expect(messagesJson).not.toContain("子代理的思考全文");
   });
 
-  it("主会话中断联动取消：只有思考尚无正文的子代理也能终止，已流出 reasoning 保留且收敛", async () => {
+  it("主任务中断联动取消：只有思考尚无正文的子代理也能终止，已流出 reasoning 保留且收敛", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     // 挂起子模型：先流出一段思考，随后挂起；abort 到达时以 AbortError 终止
     let releaseGate: () => void = () => {};

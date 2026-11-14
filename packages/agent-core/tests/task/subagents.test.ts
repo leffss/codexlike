@@ -567,7 +567,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     persistence.close();
   });
 
-  it("委派调研任务：子代理独立完成并以文本报告回流主会话上下文", async () => {
+  it("委派调研任务：子代理独立完成并以文本报告回流主任务上下文", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { session, persistence, mainModel, subModel } = makeSubagentSession({
       workspacePath: workspace,
@@ -1046,7 +1046,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     }
   );
 
-  it("子代理模型失败：失败原因回流为 isError 结果，主会话不崩并继续到最终回复", async () => {
+  it("子代理模型失败：失败原因回流为 isError 结果，主任务不崩并继续到最终回复", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     // 子模型直接抛 401（不可重试类错误）
     const subModel = new MockLanguageModelV4({
@@ -1205,7 +1205,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("主会话中断：运行中的子代理随 AbortSignal 一并中止，主会话以中断态收尾", async () => {
+  it("主任务中断：运行中的子代理随 AbortSignal 一并中止，主任务以中断态收尾", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     // 子模型先独立加载技能，再挂起；中断时须释放本轮资源与审批状态。
     // （模拟真实 provider 流对 abortSignal 的响应——MockLanguageModelV4 不会自动做）

@@ -108,7 +108,7 @@ async function main() {
     app = first.app;
     let window = first.window;
 
-    // 准备：设置页创建 Profile → 新建会话
+    // 准备：设置页创建 Profile → 新建任务
     await window.getByTestId("settings-open").click();
     await window.getByTestId("profile-create").click();
     const profileForm = window.locator("form");

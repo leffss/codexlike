@@ -20,8 +20,8 @@ export function MembershipDialog(props: {
     const previous = document.activeElement;
     const taskTarget = () =>
       Array.from(
-        document.querySelectorAll<HTMLElement>("[data-session-select]")
-      ).find((element) => element.dataset.sessionId === taskId);
+        document.querySelectorAll<HTMLElement>("[data-task-select]")
+      ).find((element) => element.dataset.taskId === taskId);
     const returnTarget =
       previous instanceof HTMLElement &&
       previous !== document.body &&
@@ -48,7 +48,7 @@ export function MembershipDialog(props: {
         const target = returnTarget?.isConnected
           ? returnTarget
           : (taskTarget() ??
-            document.querySelector<HTMLElement>("[data-testid='new-session']"));
+            document.querySelector<HTMLElement>("[data-testid='new-task']"));
         target?.focus({ preventScroll: true });
       });
     };
@@ -118,7 +118,7 @@ export function MembershipDialog(props: {
         onKeyDown={onKeyDown}
         role="dialog"
         aria-modal="true"
-        aria-label="调整会话归属"
+        aria-label="调整任务归属"
         data-testid="membership-dialog"
         className="w-[440px] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl"
       >
@@ -126,13 +126,13 @@ export function MembershipDialog(props: {
           {movingOut ? "移出项目" : "移入项目"} · {props.task.title}
         </h2>
         <p className="mb-3 text-sm text-fg-muted">
-          只调整项目归属，不改变工作区、分支、历史或会话设置。
+          只调整项目归属，不改变工作区、分支、历史或任务设置。
         </p>
         {!movingOut && (
           <>
             <p className="mb-2 text-xs text-fg-muted">
               {props.task.workspaceMode === "worktree"
-                ? "Worktree 会话只能移回来源项目。"
+                ? "Worktree 任务只能移回来源项目。"
                 : "只能移入与实际工作区相同目录的项目。"}
             </p>
             <select
@@ -180,7 +180,7 @@ export function MembershipDialog(props: {
             className={button}
             onClick={() => void confirm()}
           >
-            {busy ? "处理中…" : movingOut ? "移出为独立会话" : "确认移入"}
+            {busy ? "处理中…" : movingOut ? "移出为独立任务" : "确认移入"}
           </button>
         </div>
       </section>
@@ -226,14 +226,14 @@ export function ProjectRemovalDialog(props: {
         <h2 className="mb-3 font-medium">移除项目「{props.project.name}」？</h2>
         <p className="mb-2 text-sm">
           将移除项目及其全部 {props.memberCount}{" "}
-          个所属会话记录（包含归档历史），并清理相关草稿。此操作不可撤销。
+          个所属任务记录（包含归档历史），并清理相关草稿。此操作不可撤销。
         </p>
         <p className="mb-2 text-sm text-fg-muted">
-          项目目录、Worktree 和全部磁盘文件均保留。同目录的独立会话及已移出的
-          Worktree 会话不会被移除。
+          项目目录、Worktree 和全部磁盘文件均保留。同目录的独立任务及已移出的
+          Worktree 任务不会被移除。
         </p>
         <p className="text-xs text-fg-muted">
-          如果所属会话正在执行或等待回应，请先明确停止再整理。
+          如果所属任务正在执行或等待回应，请先明确停止再整理。
         </p>
         {error && (
           <p

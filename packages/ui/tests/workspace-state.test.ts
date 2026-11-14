@@ -28,7 +28,7 @@ function pending(
 }
 
 describe("工作台页面之上的状态", () => {
-  it("项目移除清理03缓存及迟到响应，不复活删除草稿且不阻塞幸存会话保存", async () => {
+  it("项目移除清理03缓存及迟到响应，不复活删除草稿且不阻塞幸存任务保存", async () => {
     const entry = {
       revision: 0,
       value: {
@@ -67,7 +67,7 @@ describe("工作台页面之上的状态", () => {
     const loading = state.loadTask("loading");
     state.removeProject("p", ["loading", "writing"]);
     release(entry);
-    rejectWrite(new Error("会话不存在"));
+    rejectWrite(new Error("任务不存在"));
     await loading;
     state.observe(pending("late", "loading"));
     state.setComposer("kept", "幸存独立输入");
@@ -118,7 +118,7 @@ describe("工作台页面之上的状态", () => {
     state.setComposer("s1", "旧输入");
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     state.setComposer("s1", "最新输入");
-    state.setComposer("s2", "另一个会话");
+    state.setComposer("s2", "另一个任务");
     state.setPreferences("s1", {
       thinkingEffort: "high",
       approvalMode: "full-access",
@@ -136,12 +136,12 @@ describe("工作台页面之上的状态", () => {
     await restored.loadTask("s1");
     await restored.loadTask("s2");
     expect(restored.composer("s1")).toBe("最新输入");
-    expect(restored.composer("s2")).toBe("另一个会话");
+    expect(restored.composer("s2")).toBe("另一个任务");
     expect(restored.preferences("s1").thinkingEffort).toBe("high");
     expect(restored.readingPosition("s1")).toEqual({ scrollTop: 321 });
     expect(restored.pending("s1")).toEqual([]);
   });
-  it("慢速恢复不能覆盖加载期间的新输入，快速切换不会串会话", async () => {
+  it("慢速恢复不能覆盖加载期间的新输入，快速切换不会串任务", async () => {
     let release!: (value: any) => void;
     const state = createWorkspaceState({
       read: () =>
@@ -280,7 +280,7 @@ describe("工作台页面之上的状态", () => {
       error: null,
     });
   });
-  it("提交锁同步生效；错误保留草稿，重试成功转终态，迟到失败不污染别的会话", async () => {
+  it("提交锁同步生效；错误保留草稿，重试成功转终态，迟到失败不污染别的任务", async () => {
     const store = createWorkspaceState();
     const record: InteractionRecord = {
       ...pending("q"),
@@ -348,7 +348,7 @@ describe("工作台页面之上的状态", () => {
     store.observe(pending("r"));
     expect(store.pending("s1")).toEqual([]);
   });
-  it("请求草稿与普通输入按会话隔离，切页不丢且新 App 实例不恢复", () => {
+  it("请求草稿与普通输入按任务隔离，切页不丢且新 App 实例不恢复", () => {
     const store = createWorkspaceState();
     const record: InteractionRecord = {
       ...pending("q"),
@@ -385,7 +385,7 @@ describe("工作台页面之上的状态", () => {
     expect(createWorkspaceState().draft("s1", "q")).toBeUndefined();
     expect(createWorkspaceState().composer("s1")).toBe("");
   });
-  it("pending FIFO；实时终态优先于迟到快照且不同会话隔离", () => {
+  it("pending FIFO；实时终态优先于迟到快照且不同任务隔离", () => {
     const store = createWorkspaceState();
     const first = pending("first");
     const second = pending("second", "s1", "2026-11-11T08:00:01Z");

@@ -430,7 +430,7 @@ export function registerTaskHandlers(options: {
           throw new Error("工作区路径不合法");
         workspacePath = canonicalWorkspacePath(workspacePath);
       } else {
-        workspacePath = join(dataDir, "sessions", id, "workspace");
+        workspacePath = join(dataDir, "tasks", id, "workspace");
         try {
           mkdirSync(workspacePath, { recursive: true });
         } catch {
@@ -504,7 +504,7 @@ export function registerTaskHandlers(options: {
             // 非递归 rmdir：只撤销本次分配且仍为空的目录，有任何成果就保留。
             try {
               rmdirSync(workspacePath);
-              rmdirSync(join(dataDir, "sessions", id));
+              rmdirSync(join(dataDir, "tasks", id));
             } catch {
               /* 非空或不可访问时保留。 */
             }

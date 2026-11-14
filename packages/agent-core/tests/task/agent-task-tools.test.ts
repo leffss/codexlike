@@ -385,7 +385,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     ).toEqual(["read_file", "apply_patch"]);
   });
 
-  it("工具失败（如文件不存在）：isError 结果回填模型，会话继续到最终回复", async () => {
+  it("工具失败（如文件不存在）：isError 结果回填模型，任务继续到最终回复", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {
@@ -422,7 +422,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(persistence.listToolCalls("session-1")[0]?.isError).toBe(true);
   });
 
-  it("模型调用未注册的工具名：返回可读错误结果而不是中断会话", async () => {
+  it("模型调用未注册的工具名：返回可读错误结果而不是中断任务", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {
@@ -446,7 +446,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("不带 tools 的会话保持 02 的纯对话行为（向后兼容）", async () => {
+  it("不带 tools 的任务保持 02 的纯对话行为（向后兼容）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord(workspace);
@@ -530,7 +530,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
-  it("web_search 未配置搜索源：工具返回中文错误回填模型，会话继续不崩（工单 10）", async () => {
+  it("web_search 未配置搜索源：工具返回中文错误回填模型，任务继续不崩（工单 10）", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([
       {

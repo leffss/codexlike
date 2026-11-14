@@ -327,7 +327,7 @@ describe("initialTranscript（历史恢复 → 消息段时序序列）", () => 
       "compact-summary",
       "assistant",
     ]);
-    // 稳定序号：会话内单调递增
+    // 稳定序号：任务内单调递增
     expect(view.map((item) => item.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     // 轮次标签：user 段开新轮，之后段归该轮
     expect(seg(view, 0).turnId).toBe("u1");
@@ -417,7 +417,7 @@ describe("initialTranscript（历史恢复 → 消息段时序序列）", () => 
     expect(view.map((item) => item.seq)).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it("旧会话（无思考列数据）打开不产生空思考段：assistant 消息恢复为单正文段", () => {
+  it("旧任务（无思考列数据）打开不产生空思考段：assistant 消息恢复为单正文段", () => {
     const view = initialTranscript([
       { kind: "message", message: stored({ id: "u1", role: "user" }) },
       {
@@ -813,11 +813,11 @@ describe("终态收敛与事件兜底", () => {
     });
     items = appendLocalSegment(items, {
       kind: "status",
-      content: "会话已重命名",
+      content: "任务已重命名",
     });
     expect(items.at(-1)).toMatchObject({
       kind: "status",
-      content: "会话已重命名",
+      content: "任务已重命名",
       turnId: "u1",
     });
     const empty = appendLocalSegment([], {

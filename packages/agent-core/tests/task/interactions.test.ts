@@ -102,7 +102,7 @@ async function collect(iterable: AsyncIterable<TaskEvent>) {
 }
 
 describe("用户交互公开 seam", () => {
-  it("会话授权与全部当前审批同事务落库，失败回滚且不处理问答或其他会话", () => {
+  it("任务授权与全部当前审批同事务落库，失败回滚且不处理问答或其他任务", () => {
     const directory = mkdtempSync(join(tmpdir(), "approval-atomic-"));
     const path = join(directory, "session.db");
     const store = createSqliteTaskStore(path);
@@ -258,7 +258,7 @@ describe("用户交互公开 seam", () => {
     expect((await q).status).toBe("cancelled");
     store.close();
   });
-  it("有效审批开启会话授权：当前轮后续与后轮自动批准，撤销即时恢复询问且不改变工具路径模式", async () => {
+  it("有效审批开启任务授权：当前轮后续与后轮自动批准，撤销即时恢复询问且不改变工具路径模式", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const modes: unknown[] = [];
     const tool: ToolDefinition = {
@@ -530,7 +530,7 @@ describe("用户交互公开 seam", () => {
     expect(session.record.autoApprove).toBe(false);
     store.close();
   });
-  it("批量授权事务已保存会话等待状态，不在提交后额外写库导致部分放行", async () => {
+  it("批量授权事务已保存任务等待状态，不在提交后额外写库导致部分放行", async () => {
     const store = createSqliteTaskStore(":memory:");
     let committed = false;
     let executed = false;
@@ -882,13 +882,13 @@ describe("用户交互公开 seam", () => {
     expect(session.pendingInteractions).toEqual([]);
     persistence.close();
   });
-  it("旧库迁移后重启即取消所有 pending（含 idle 会话），历史读取不依赖 get", () => {
+  it("旧库迁移后重启即取消所有 pending（含 idle 任务），历史读取不依赖 get", () => {
     const directory = mkdtempSync(join(tmpdir(), "interaction-store-"));
     const path = join(directory, "session.db");
     const raw = new DatabaseSync(path);
     raw.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
-      INSERT INTO tasks VALUES ('legacy', '旧会话', 'C:/work', NULL, NULL, 'waiting-approval', '2026-01-01', '2026-01-01');
+      INSERT INTO tasks VALUES ('legacy', '旧任务', 'C:/work', NULL, NULL, 'waiting-approval', '2026-01-01', '2026-01-01');
       INSERT INTO messages VALUES ('turn', 'legacy', 'user', '旧问题', '2026-01-01');`);
     raw.close();
     const first = createSqliteTaskStore(path);

@@ -101,9 +101,9 @@ export function InteractionPanel(props: {
               </button>
               <button
                 type="button"
-                data-testid="approval-approve-session"
+                data-testid="approval-approve-task"
                 disabled={disabled}
-                aria-describedby="session-approval-warning"
+                aria-describedby="task-approval-warning"
                 className={`${actionClass} bg-warn-bg text-warn-fg`}
                 onClick={() =>
                   props.onRespond({
@@ -113,7 +113,7 @@ export function InteractionPanel(props: {
                   })
                 }
               >
-                批准本会话后续所有请求
+                批准本任务后续所有请求
               </button>
               <button
                 type="button"
@@ -127,11 +127,8 @@ export function InteractionPanel(props: {
                 拒绝
               </button>
             </div>
-            <p
-              id="session-approval-warning"
-              className="mt-2 text-xs text-warn-fg"
-            >
-              将批量批准本会话主代理与子代理当前排队及后续执行审批，危险命令也会自动执行。重启后保留，直到手动取消；不代答问答、不影响其他会话，不切换完全访问或放宽文件工具边界。
+            <p id="task-approval-warning" className="mt-2 text-xs text-warn-fg">
+              将批量批准本任务主代理与子代理当前排队及后续执行审批，危险命令也会自动执行。重启后保留，直到手动取消；不代答问答、不影响其他任务，不切换完全访问或放宽文件工具边界。
             </p>
           </>
         )}

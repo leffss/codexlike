@@ -29,7 +29,7 @@ export function groupTasksByProject(
     {
       key: "standalone",
       projectId: null,
-      name: "独立会话",
+      name: "独立任务",
       path: "",
       createdAt: "",
       active: [],

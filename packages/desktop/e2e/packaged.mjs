@@ -27,13 +27,10 @@ try {
   // firstWindow 已隐含「窗口创建」断言（无窗口则超时抛错）；标题再显式确认
   assert((await window.title()).length > 0, "窗口标题为空（窗口未真正创建）");
   assert(existsSync(homeDir), "数据目录未自动创建（打包冷启动黑屏回归）");
-  assert(
-    existsSync(join(homeDir, "session-workbench.db")),
-    "SQLite 库文件未落盘"
-  );
+  assert(existsSync(join(homeDir, "task-workbench.db")), "SQLite 库文件未落盘");
   // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与草稿界面确认。
   await window.getByTestId("add-project").waitFor();
-  await window.getByTestId("new-session").click();
+  await window.getByTestId("new-task").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await window.getByTestId("workspace-path").textContent()).includes(
@@ -42,16 +39,16 @@ try {
     "产物独立草稿未显示默认工作区"
   );
   assert(
-    (await window.getByTestId("session-item").count()) === 0,
+    (await window.getByTestId("task-item").count()) === 0,
     "冷启动新建不能产生空历史"
   );
   assert(
     (await window
       .getByTestId("approval-mode-select")
       .getAttribute("data-value")) === "ask",
-    "产物新会话默认必须为 ask"
+    "产物新任务默认必须为 ask"
   );
-  assert(!existsSync(join(homeDir, "sessions")), "未发送不得创建专用工作区");
+  assert(!existsSync(join(homeDir, "tasks")), "未发送不得创建专用工作区");
   assert(!existsSync(join(homeDir, "codexlike.db")), "新应用不能创建旧库");
   console.log(
     "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏与独立草稿/权限默认正常"

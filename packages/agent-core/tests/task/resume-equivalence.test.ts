@@ -169,7 +169,7 @@ async function collect(
   return events;
 }
 
-describe("会话快照恢复等价性", () => {
+describe("任务快照恢复等价性", () => {
   it("含工具轮次、@引用与被中断回复的历史：重启恢复后续跑的模型上下文与不重启续跑完全一致", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-resume-"));
     const persistence = createSqliteTaskStore(":memory:");
