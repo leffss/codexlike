@@ -248,13 +248,8 @@ function SubagentThinking(props: {
         className="flex cursor-pointer select-none items-center gap-2"
       >
         <DisclosureArrow open={open} />
-        {streaming === true && (
-          <span
-            data-testid="subagent-thinking-indicator"
-            className="generating-spinner shrink-0"
-            aria-label="思考中"
-          />
-        )}
+        {/* 运行提示统一收敛到消息流底部运行行：卡内不内联转圈（与主任务
+            思考卡同构），思考进行中靠「思考中」文案表达 */}
         <span
           data-testid="subagent-thinking-summary"
           className="min-w-0 flex-1 truncate"

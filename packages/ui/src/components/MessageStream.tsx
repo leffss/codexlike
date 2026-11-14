@@ -314,12 +314,13 @@ export function MessageStream(props: {
             </ol>
           )}
           {/* 运行指示（消息流最底部左下角）：输入已发出即显示，模型尚无输出
-              的间隙也持续可见；与正文列同宽对齐，工时实时跳动。
+              的间隙也持续可见；与正文列同宽对齐，工时实时跳动；与上一条
+              消息的间距对齐正文与复制按钮行（AssistantActions mt-2）。
               /compact 压缩期间由 compacting-indicator 表达进行中，不重复显示 */}
           {props.streaming === true && props.compacting !== true && (
             <div
               data-testid="running-indicator"
-              className={`${contentWidthClass} flex items-center gap-2 text-xs text-fg-muted`}
+              className={`${contentWidthClass} mt-2 flex items-center gap-2 text-xs text-fg-muted`}
             >
               <span
                 className="generating-spinner shrink-0"
@@ -656,13 +657,8 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
           className="flex cursor-pointer select-none items-center gap-2"
         >
           <DisclosureArrow open={open} />
-          {streaming && (
-            <span
-              data-testid="thinking-indicator"
-              className="generating-spinner shrink-0"
-              aria-label="思考中"
-            />
-          )}
+          {/* 运行提示统一收敛到消息流底部运行行：正文（含思考卡）不再内联转圈，
+              思考进行中靠「思考中」文案与橙色工时跳动表达 */}
           <span
             data-testid="thinking-summary"
             className="min-w-0 flex-1 truncate"
