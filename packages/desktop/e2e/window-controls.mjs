@@ -214,10 +214,7 @@ async function main() {
     // 验证不了拖动行为；这里补系统级真实输入的两个方向：
     // ① 拖动区（品牌回退态文本，跟随标题栏 drag 作用域）→ 窗口应移动；
     // ② 免拖控件（主题按钮）同样手势 → 窗口不得移动。
-    assert(
-      !(await nativeState(app)).maximized,
-      "真实拖拽断言需要还原态窗口"
-    );
+    assert(!(await nativeState(app)).maximized, "真实拖拽断言需要还原态窗口");
     {
       // 窄窗（压 minWidth 线外，与窄窗基线无关的隔离尺寸）放到工作区左上
       // 安全位：拖动终点留在屏内（1366 级小屏也不溢出），结束复原位置。
@@ -248,15 +245,12 @@ async function main() {
       // 期望六成判定（no-drag 回退下位移恒为 0，同样能揭红）。
       const minDx = Math.round((dragPx.x / dragFrom.scale) * 0.6);
       const minDy = Math.round((dragPx.y / dragFrom.scale) * 0.6);
-      await until(
-        async () => {
-          const bounds = await app.evaluate(({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows()[0].getContentBounds()
-          );
-          return bounds.x - home.x >= minDx && bounds.y - home.y >= minDy;
-        },
-        "拖动区真实拖拽应移动窗口"
-      );
+      await until(async () => {
+        const bounds = await app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0].getContentBounds()
+        );
+        return bounds.x - home.x >= minDx && bounds.y - home.y >= minDy;
+      }, "拖动区真实拖拽应移动窗口");
       // ② 免拖控件：同样手势不得移动窗口；按下-移出-释放不落在按钮上，
       // 也不误触主题切换（②有①作对照，SendInput 通道已被证明有效）
       const toggleBefore = await app.evaluate(({ BrowserWindow }) =>
@@ -336,6 +330,7 @@ async function main() {
     await checkTitlebar(window);
     await window.getByTestId("settings-back").click();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("自绘关闭按钮保留的草稿");
     await window.keyboard.press("Alt");
     assert(!(await nativeState(app)).menuVisible, "Alt 不得唤回通用菜单");
@@ -363,6 +358,7 @@ async function main() {
 
     ({ app, window } = await launchApp({ homeDir }));
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await untilDraft(
       window,
       "自绘关闭按钮保留的草稿",

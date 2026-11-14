@@ -68,8 +68,49 @@ function StandaloneIcon() {
   );
 }
 
+/** 顶栏「添加项目」入口的文件夹加号图标（内联 SVG——UI 不引入图标库） */
+function FolderPlusIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z" />
+      <path d="M8 6.5v4M6 8.5h4" />
+    </svg>
+  );
+}
+
+/** 顶栏「新建任务」入口的加号图标 */
+function PlusIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  );
+}
+
 /**
- * 左栏：独立任务分区与显式项目列表（ADR 0010）。
+ * 左栏：任务列表（ADR 0010）。
+ * 顶栏两枚图标按钮（原型 prototype/sidebar-buttons 变体 A 定稿）：
+ * 统一新建入口「+」点开菜单可选独立任务或各项目任务，添加项目为 ghost 图标；
+ * 整行按钮取消，列表起始位上移。项目组头与独立任务组头悬停均出就近「+」。
  * 项目组头不依赖任务存在；归属只看 projectId，绝不按目录自动聚合。
  * 组内活跃任务在上、「已归档」子折叠在下。
  * 任务标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
@@ -105,6 +146,8 @@ export function TaskSidebar(props: {
     archivedAt: TaskListItem["archivedAt"];
     anchor: TaskMenuAnchor;
   } | null>(null);
+  // 统一新建菜单（顶栏「+」）：独立任务 / 各项目任务
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const menuTask = props.tasks.find((task) => task.id === menu?.taskId);
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
@@ -166,6 +209,27 @@ export function TaskSidebar(props: {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // 统一新建菜单外点 / Escape 关闭：命中菜单容器内（按钮 + 菜单）不关闭，
+  // 按钮自身由 onClick 切换，避免「外点误判」与「切换竞态」。
+  useEffect(() => {
+    if (!newMenuOpen) return;
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-testid='new-task-menu']") === null) {
+        setNewMenuOpen(false);
+      }
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setNewMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [newMenuOpen]);
 
   const groups = groupTasksByProject(props.tasks, props.projects);
 
@@ -393,11 +457,7 @@ export function TaskSidebar(props: {
           <span className="mr-1 grid shrink-0 items-center">
             <span
               data-testid="project-task-count"
-              className={`col-start-1 row-start-1 px-1 text-right text-[10px] text-fg-subtle ${
-                group.projectId !== null
-                  ? "group-hover/header:invisible group-focus-within/header:invisible"
-                  : ""
-              }`}
+              className="col-start-1 row-start-1 px-1 text-right text-[10px] text-fg-subtle group-hover/header:invisible group-focus-within/header:invisible"
             >
               {group.active.length}
               {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
@@ -440,6 +500,21 @@ export function TaskSidebar(props: {
                     ×
                   </button>
                 )}
+              </span>
+            )}
+            {group.projectId === null && (
+              <span className="pointer-events-none col-start-1 row-start-1 flex justify-end opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
+                <button
+                  type="button"
+                  data-testid="standalone-new-task"
+                  title="新建独立任务"
+                  aria-label="新建独立任务"
+                  disabled={props.creating}
+                  className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover disabled:opacity-50"
+                  onClick={() => props.onCreate()}
+                >
+                  +
+                </button>
               </span>
             )}
           </span>
@@ -507,34 +582,79 @@ export function TaskSidebar(props: {
           ]}
         />
       )}
-      <div className="flex items-center justify-between px-3 py-3">
-        <h2 className="text-sm font-medium text-fg">任务</h2>
-        <button
-          type="button"
-          data-testid="new-task"
-          disabled={props.creating}
-          title="新建独立任务草稿"
-          className="rounded-md bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={props.onCreate}
-        >
-          {props.creating ? "创建中…" : "+ 新建独立任务"}
-        </button>
+      <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
+        <h2 className="text-sm font-medium text-fg">任务列表</h2>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            data-testid="add-project"
+            title="添加项目"
+            aria-label="添加项目"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
+            onClick={props.onAddProject}
+          >
+            <FolderPlusIcon />
+          </button>
+          <div className="relative" data-testid="new-task-menu">
+            <button
+              type="button"
+              data-testid="new-task"
+              disabled={props.creating}
+              title="新建任务（独立 / 项目）"
+              aria-label="新建任务"
+              aria-haspopup="menu"
+              aria-expanded={newMenuOpen}
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setNewMenuOpen((prev) => !prev)}
+            >
+              <PlusIcon />
+            </button>
+            {newMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-20 mt-1 w-52 rounded-md border border-line bg-surface p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="new-standalone-task-item"
+                  disabled={props.creating}
+                  className="w-full rounded px-2 py-1.5 text-left text-xs text-fg hover:bg-hover disabled:opacity-50"
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    props.onCreate();
+                  }}
+                >
+                  新建独立任务
+                </button>
+                {props.projects.map((project) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={project.id}
+                    data-testid="new-project-task-item"
+                    data-project-id={project.id}
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-fg hover:bg-hover"
+                    onClick={() => {
+                      setNewMenuOpen(false);
+                      props.onCreateInProject(project.id);
+                    }}
+                  >
+                    在 {project.name} 新建任务
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      <button
-        type="button"
-        data-testid="add-project"
-        className="mx-3 rounded border border-line px-2 py-1 text-xs text-fg-muted hover:text-accent"
-        onClick={props.onAddProject}
-      >
-        添加项目
-      </button>
       {groups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4">
           <p className="text-center text-xs text-fg-subtle">
             暂无任务
             <br />
-            点击「+ 新建独立任务」准备输入，首次发送才建立工作区
+            点右上角 + 新建任务（独立 / 项目），首次发送才建立工作区
           </p>
         </div>
       ) : (

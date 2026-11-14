@@ -90,6 +90,7 @@ async function main() {
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await selectComposerOption(window, "thinking-effort-select", "high");
     await projectAction(window);
@@ -107,6 +108,7 @@ async function main() {
       "草稿不是正式历史"
     );
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.waitForFunction(
       () =>
         document.querySelector('[data-testid="composer-input"]')?.value ===
@@ -229,6 +231,7 @@ async function main() {
       "权限真实重启恢复"
     );
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")

@@ -134,6 +134,56 @@ it("项目置顶入口是独立键盘按钮，置顶标识与空项目均保留"
   );
 });
 
+it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任务组头保留悬停加号", () => {
+  const html = renderToStaticMarkup(
+    createElement(TaskSidebar, {
+      projects: [
+        {
+          id: "p1",
+          name: "演示项目",
+          workspacePath: "/work",
+          createdAt: "2026-11-12",
+        },
+      ],
+      tasks: [],
+      currentId: null,
+      creating: false,
+      onAddProject() {},
+      onCreateInProject() {},
+      onSelect() {},
+      onCreate() {},
+      onMembership() {},
+      onRename() {},
+      onArchive() {},
+      onPin() {},
+      onPinProject() {},
+      onCollapseProject() {},
+    })
+  );
+  // 标题文案与整行按钮移除（原型 prototype/sidebar-buttons 变体 A 定稿）
+  expect(html).toContain("任务列表");
+  expect(html).not.toContain("+ 新建独立任务");
+  // 统一新建入口：图标按钮 + menu 语义，SSR 初始态闭合
+  expect(html).toMatch(
+    /<button[^>]*data-testid="new-task"[^>]*aria-haspopup="menu"/
+  );
+  expect(html).toMatch(
+    /<button[^>]*data-testid="new-task"[^>]*aria-expanded="false"/
+  );
+  expect(html).not.toContain('role="menu"');
+  // 添加项目为图标按钮（aria-label 承担可访问名称）
+  expect(html).toMatch(
+    /<button[^>]*data-testid="add-project"[^>]*aria-label="添加项目"/
+  );
+  // 独立任务组头悬停「+」与项目组头同模式
+  expect(html).toMatch(
+    /<button[^>]*data-testid="standalone-new-task"[^>]*aria-label="新建独立任务"/
+  );
+  // 两种组头的计数在悬停时都让位隐藏
+  expect(
+    (html.match(/group-hover\/header:invisible/g) ?? []).length
+  ).toBeGreaterThanOrEqual(2);
+});
 it.each([
   {
     name: "最近使用时间",

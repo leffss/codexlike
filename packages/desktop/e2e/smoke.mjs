@@ -135,6 +135,7 @@ async function main() {
     // 2) 返回工作台 → 新建任务（目录选择器经 CODEXLIKE_TEST_WORKSPACE 钩子固定）
     await window.getByTestId("settings-back").click();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await selectComposerOption(window, "approval-mode-select", "assist");
     assert(

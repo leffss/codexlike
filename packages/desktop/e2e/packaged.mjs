@@ -34,6 +34,7 @@ try {
   // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与草稿界面确认。
   await window.getByTestId("add-project").waitFor();
   await window.getByTestId("new-task").click();
+  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").waitFor();
 
   // 票01 标题栏任务上下文：草稿无任务回退品牌展示（任务名/徽章不渲染），

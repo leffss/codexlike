@@ -154,6 +154,7 @@ async function main() {
     );
 
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await send(window, "独立问答");
     await window.getByTestId("question-custom").fill("尚未提交的退出问答草稿");
     const pending = await window.evaluate(async () => {
@@ -168,6 +169,7 @@ async function main() {
       };
     });
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await send(window, "后台审批");
     await window.getByTestId("approval-approve").waitFor();
     const approval = await window.evaluate(async () => {
@@ -182,10 +184,12 @@ async function main() {
       };
     });
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await send(window, "子代理任务");
     await until(() => held.has("child"), "子代理模型未启动");
     await window.getByTestId("subagent-card").waitFor();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await send(window, "长历史");
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
@@ -202,6 +206,7 @@ async function main() {
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await window.getByTestId("project-group").click();
     await window.getByTestId("task-search-toggle").click();
@@ -350,6 +355,7 @@ async function main() {
     await projectAction(window);
     await untilDraft(window, "项目新建草稿", "项目草稿恢复");
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await untilDraft(window, "独立新建草稿", "独立草稿恢复");
     await select(window, "独立问答");
     await window

@@ -146,6 +146,7 @@ async function createProfile(window, port) {
 /** 独立新建草稿发送首条消息建立任务（标题=首条消息） */
 async function createTask(window, title) {
   await window.getByTestId("new-task").click();
+  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").click();
   await window.getByTestId("composer-input").fill(title);
   await window.getByTestId("composer-send").click();

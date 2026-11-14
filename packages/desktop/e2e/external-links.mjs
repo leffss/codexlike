@@ -336,6 +336,7 @@ async function main() {
     await window.getByTestId("settings-open").click();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill(PROMPT);
     await window.getByTestId("composer-send").click();
     const assistant = window.getByTestId("message-assistant");

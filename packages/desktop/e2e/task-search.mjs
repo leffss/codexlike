@@ -118,7 +118,11 @@ async function main() {
       await window
         .getByTestId(project ? "project-new-task" : "new-task")
         .click();
-      if (!project) await window.getByTestId("draft-select-workspace").click();
+      if (!project) {
+        // 统一新建入口（顶栏「+」）：菜单选中「新建独立任务」才开草稿
+        await window.getByTestId("new-standalone-task-item").click();
+        await window.getByTestId("draft-select-workspace").click();
+      }
       await window.getByTestId("composer-input").fill(title);
       await window.getByTestId("composer-send").click();
       await window.getByTestId("message-assistant").waitFor();

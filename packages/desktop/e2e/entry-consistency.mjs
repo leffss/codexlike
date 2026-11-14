@@ -53,7 +53,10 @@ try {
   ({ app, window } = await launchApp({ homeDir, workspaceDir }));
   await window.getByTestId("new-task").waitFor();
   assert(
-    (await window.getByTestId("new-task").textContent()).includes("独立"),
+    // 图标化后入口文案收进 title（「新建任务（独立 / 项目）」）
+    (
+      (await window.getByTestId("new-task").getAttribute("title")) ?? ""
+    ).includes("独立"),
     "全局入口文案必须明确独立任务，不能与项目新建混淆"
   );
   await window.getByTestId("settings-open").click();
@@ -106,10 +109,7 @@ try {
   );
   await item("入口隔离任务").click();
   const reentryBadge = await workspaceBadgeInfo(window);
-  assert(
-    reentryBadge.path === originalPath,
-    "新建不改变原执行目录"
-  );
+  assert(reentryBadge.path === originalPath, "新建不改变原执行目录");
   console.log("[e2e] 任务侧栏入口与项目草稿保持显式归属通过");
   await window.getByTestId("task-search-toggle").click();
   await window.getByTestId("task-search-input").fill("入口隔离任务");
@@ -207,6 +207,7 @@ try {
   await input().fill("项目入口保留草稿");
   await item(longTitle).click();
   await window.getByTestId("new-task").click();
+  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",
@@ -226,6 +227,7 @@ try {
   app = null;
   ({ app, window } = await launchApp({ homeDir, workspaceDir }));
   await window.getByTestId("new-task").click();
+  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",
@@ -254,14 +256,8 @@ try {
     .waitFor();
   // 路径与来源目录收进标题栏徽章（票01）：弹层内一次读完
   const reopenedBadge = await workspaceBadgeInfo(window);
-  assert(
-    reopenedBadge.path === originalPath,
-    "移出及重开不改实际工作区"
-  );
-  assert(
-    (reopenedBadge.origin ?? "").includes(workspaceDir),
-    "重开仍保留来源"
-  );
+  assert(reopenedBadge.path === originalPath, "移出及重开不改实际工作区");
+  assert((reopenedBadge.origin ?? "").includes(workspaceDir), "重开仍保留来源");
   assert(
     (await window
       .getByTestId("approval-mode-select")

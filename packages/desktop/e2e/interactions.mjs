@@ -423,6 +423,7 @@ async function questionsScenario() {
 
       // 切到新任务并保留另一份草稿，再进入设置；返回后恢复同一题与回答。
       await window.getByTestId("new-task").click();
+      await window.getByTestId("new-standalone-task-item").click();
       const draftB = "普通任务独立草稿 B";
       await window.getByTestId("composer-input").fill(draftB);
       await window.getByTestId("settings-open").click();
@@ -541,6 +542,7 @@ async function questionsScenario() {
       );
       await assertReadOnlyHistory(window);
       await window.getByTestId("new-task").click();
+      await window.getByTestId("new-standalone-task-item").click();
       assert(
         (await window.getByTestId("composer-input").inputValue()) === draftB,
         "问答提交覆盖其他任务草稿"
@@ -701,6 +703,7 @@ async function queueScenario() {
     async ({ window, homeDir, seenBodies }) => {
       // ADR 0010：先草稿，首次发送才建立任务；目录选择不创建项目。
       await window.getByTestId("new-task").click();
+      await window.getByTestId("new-standalone-task-item").click();
       await window.getByTestId("draft-select-workspace").click();
       await selectComposerOption(window, "approval-mode-select", "ask");
       await send(window, "同时委派两个子代理，主代理也需要问答");
@@ -738,6 +741,7 @@ async function queueScenario() {
       await task.getByText("等待用户").waitFor();
       // 后台完整现场包含主/子代理全部请求；切到草稿不会取消任何等待。
       await window.getByTestId("new-task").click();
+      await window.getByTestId("new-standalone-task-item").click();
       await task.click();
       await expectFront(window, queued[0], "主代理");
       await pendingCount(window, taskId, 3);

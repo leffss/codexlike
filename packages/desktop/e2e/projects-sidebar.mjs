@@ -69,6 +69,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("项目草稿");
     assert((await window.getByTestId("task-item").count()) === 0, "新建仅草稿");
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立草稿");
     assert(!existsSync(join(homeDir, "tasks")), "首次发送前不分配专用目录");
     await projectAction(window);
@@ -78,16 +79,14 @@ async function main() {
     await window.getByTestId("composer-send").waitFor();
     // 项目目录明确展示：路径收进标题栏徽章（票01），弹层读完整路径
     const projectBadge = await workspaceBadgeInfo(window);
-    assert(
-      projectBadge.path.includes(workspaceDir),
-      "项目目录明确展示"
-    );
+    assert(projectBadge.path.includes(workspaceDir), "项目目录明确展示");
     const projectTask = await window
       .getByTestId("task-item")
       .getAttribute("data-task-id");
     await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")
@@ -159,6 +158,7 @@ async function main() {
       .filter({ hasText: "独立新标题" })
       .waitFor();
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("同目录但独立");
     await window.getByTestId("composer-send").click();
@@ -204,10 +204,7 @@ async function main() {
       .filter({ hasText: "独立草稿" })
       .waitFor();
     const reopenedBadge = await workspaceBadgeInfo(window);
-    assert(
-      reopenedBadge.path === standalonePath,
-      "重启后工作区固定且标题持久"
-    );
+    assert(reopenedBadge.path === standalonePath, "重启后工作区固定且标题持久");
     assert(model.requestCount() === 3, "重启不自动发送");
     assert(
       readFileSync(join(homeDir, "codexlike.db"), "utf8") ===

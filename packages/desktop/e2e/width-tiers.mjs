@@ -512,6 +512,7 @@ async function main() {
         `${width} 已有`
       );
       await window.getByTestId("new-task").click();
+      await window.getByTestId("new-standalone-task-item").click();
       await window.getByTestId("draft-select-workspace").waitFor();
       const draft = await assertAligned(
         window,

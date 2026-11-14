@@ -46,6 +46,7 @@ async function main() {
     await window.getByTestId("settings-back").click();
 
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("导出冒烟任务");
     await window.getByTestId("composer-send").click();

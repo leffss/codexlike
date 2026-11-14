@@ -63,7 +63,10 @@ async function main() {
     const project = () => window.getByTestId("project-header").locator("..");
     async function create(title, inProject = false) {
       if (inProject) await projectAction(window);
-      else await window.getByTestId("new-task").click();
+      else {
+        await window.getByTestId("new-task").click();
+        await window.getByTestId("new-standalone-task-item").click();
+      }
       if (!inProject)
         await window.getByTestId("draft-select-workspace").click();
       await window.getByTestId("composer-input").fill(title);

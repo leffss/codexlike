@@ -172,10 +172,7 @@ async function main() {
     );
     // 正式任务的路径/模式收进标题栏徽章（票01）：弹层读完整工作区
     const badge = await workspaceBadgeInfo(window);
-    assert(
-      badge.path.includes(worktreePath),
-      "显示实际工作区"
-    );
+    assert(badge.path.includes(worktreePath), "显示实际工作区");
     const fixedMode = window
       .getByTestId("workspace-badge")
       .getByTestId("workspace-mode");
@@ -202,6 +199,7 @@ async function main() {
     });
 
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").waitFor();
     assert(
       (await window.getByTestId("draft-workspace-mode").count()) === 0,
@@ -272,6 +270,7 @@ async function main() {
 
     // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("共享等待");
     await window.getByTestId("composer-send").click();
@@ -325,10 +324,7 @@ async function main() {
       .filter({ hasText: "隔离写入" })
       .click();
     const reopened = await workspaceBadgeInfo(window);
-    assert(
-      reopened.path.includes(worktreePath),
-      "重开仍使用原副本"
-    );
+    assert(reopened.path.includes(worktreePath), "重开仍使用原副本");
     await window.getByTestId("add-project").click();
     await projectAction(
       window,

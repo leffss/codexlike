@@ -137,6 +137,7 @@ async function main() {
 
     // ---- 场景 2：任务 B 纯正文（旧数据形状）----
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill(B_QUESTION);
     await window.getByTestId("composer-send").click();
@@ -160,6 +161,7 @@ async function main() {
     // 第一段思考渲染后立刻切走（新建草稿任务），流仍在后台进行
     await thinkingLive.waitFor({ timeout: 20_000 });
     await window.getByTestId("new-task").click();
+    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     // 等第二段与正文都已流出（后台执行），再切回运行中任务
     for (let i = 0; i < 100 && model.requestCount() < 5; i++) {
