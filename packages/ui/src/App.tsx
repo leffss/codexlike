@@ -32,8 +32,11 @@ function switchViewWithReport(view: View, setView: (view: View) => void) {
 
 /**
  * 同一行标题栏（票01 任务上下文行）：工作台视图左区承载任务上下文
- * （品牌 › 任务名 + 徽章 + 任务搜索，可交互故免拖），其余空白区拖动；
- * 设置视图左区仅品牌展示，可拖动。右侧主题 / 设置 / 窗口按钮不可拖动。
+ * （品牌 › 任务名 + 徽章 + 任务搜索），设置视图左区仅品牌展示。
+ * 拖动区按控件归属划分（审查修复 1）：header 根元素 window-titlebar-drag
+ * 提供整体拖动作用域，左区不再整块免拖——只有真正的交互控件（工作区徽章、
+ * 任务搜索、右侧开关/按钮）各自挂在 window-no-drag 作用域内，任务名文本、
+ * 徽章间空白与品牌回退态区域恢复可拖动。
  */
 function Header(props: {
   view: View;
@@ -59,9 +62,9 @@ function Header(props: {
       className={`${api ? "window-titlebar-drag" : ""} flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2`}
     >
       {props.view === "workspace" && props.titlebar ? (
-        <div className="window-no-drag flex min-w-0 flex-1 items-center">
-          <TitlebarTaskContext context={props.titlebar} />
-        </div>
+        /* 左区交给父级 drag 作用域：任务名/品牌/空白可拖，
+         * 交互控件由 TitlebarTaskContext 内部各自免拖（审查修复 1） */
+        <TitlebarTaskContext context={props.titlebar} />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <span className="shrink-0 text-sm font-semibold tracking-wide text-fg">

@@ -177,6 +177,22 @@ it("抽屉所在 tab 的开关按钮高亮（accent），另一开关不高亮�
   expect(html).not.toContain("收起改动");
 });
 
+it("拖动区按控件归属划分（审查修复 1）：徽章与搜索免拖，任务名可拖", () => {
+  const html = renderToStaticMarkup(
+    createElement(TitlebarTaskContext, { context: context() })
+  );
+  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）与
+  // 任务搜索容器（含搜索面板）各一个；真实拖拽行为由 window-controls
+  // 场景以系统级输入验证（品牌回退态），任务态划分以此静态断言兜底。
+  expect(html.match(/<div class="window-no-drag/g)).toHaveLength(2);
+  // 任务名与品牌是纯展示文本：不落入免拖作用域，跟随父级标题栏拖动
+  const titleTag =
+    html.match(/<span[^>]*data-testid="task-title"[^>]*>/)?.[0] ?? "";
+  expect(titleTag).not.toContain("window-no-drag");
+  const brandTag = html.match(/<span[^>]*>CodexLike<\/span>/)?.[0] ?? "";
+  expect(brandTag).not.toContain("window-no-drag");
+});
+
 it("面板开关动作透传给宿主（先例：window-controls-ui 直接调用 props）", () => {
   // renderToStaticMarkup 不执行事件；动作透传经组件 props 直接调用验证。
   const onToggleResources = vi.fn();

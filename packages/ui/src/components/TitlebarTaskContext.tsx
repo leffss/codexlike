@@ -85,13 +85,9 @@ function WorkspaceBadge(props: {
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
-    // 点击外部关闭（先例：ComposerSelect / TaskContextMenu 的 pointerdown 捕获）
+    // 点击外部关闭（先例：ComposerSelect / TaskContextMenu 的 pointerdown
+    // 捕获）与焦点移出（focusin）判定完全相同，共用一个处理器。
     function outside(event: Event) {
-      const root = rootRef.current;
-      if (event.target instanceof Node && root && !root.contains(event.target))
-        onToggle();
-    }
-    function focusOutside(event: Event) {
       const root = rootRef.current;
       if (event.target instanceof Node && root && !root.contains(event.target))
         onToggle();
@@ -100,11 +96,11 @@ function WorkspaceBadge(props: {
       if (event.key === "Escape") onToggle();
     }
     document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("focusin", focusOutside);
+    document.addEventListener("focusin", outside);
     document.addEventListener("keydown", keyClose);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("focusin", focusOutside);
+      document.removeEventListener("focusin", outside);
       document.removeEventListener("keydown", keyClose);
     };
   }, [open, onToggle]);
@@ -113,7 +109,9 @@ function WorkspaceBadge(props: {
     task.workspaceOriginPath ? `\n来源目录：${task.workspaceOriginPath}` : ""
   }`;
   return (
-    <div className="relative shrink-0" ref={rootRef}>
+    /* 免拖作用域（审查修复 1）：徽章是交互控件，弹层内路径文本需可选中，
+     * 整个容器（含弹层）挂在 window-no-drag 内，其余左区保持可拖。 */
+    <div className="window-no-drag relative shrink-0" ref={rootRef}>
       <button
         type="button"
         data-testid="workspace-badge"
@@ -148,6 +146,9 @@ export function TitlebarTaskContext(props: { context: TitlebarContext }) {
   const { task, search } = props.context;
   const [badgeOpen, setBadgeOpen] = useState(false);
   return (
+    /* 拖动区划分（审查修复 1）：根容器不设 no-drag，跟随父级
+     * window-titlebar-drag 作用域——品牌、任务名与控件间空白可拖；
+     * 交互控件（徽章、任务搜索）各自挂在 window-no-drag 作用域内。 */
     <div className="flex min-w-0 flex-1 items-center gap-2">
       {task ? (
         <>
@@ -180,7 +181,7 @@ export function TitlebarTaskContext(props: { context: TitlebarContext }) {
           </span>
         </>
       )}
-      <div className="shrink-0 whitespace-nowrap">
+      <div className="window-no-drag shrink-0 whitespace-nowrap">
         <TaskSearch
           recordsRevision={search.recordsRevision}
           onSelect={search.onSelect}
