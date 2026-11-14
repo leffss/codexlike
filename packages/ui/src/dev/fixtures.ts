@@ -74,6 +74,8 @@ export const TASKS: TaskListItem[] = [
     providerProfileId: "prof-1",
     model: "glm-4.7",
     approvalMode: "assist",
+    // 主任务展示「已开启自动批准」提示卡（正文与输入区之间）的样例状态
+    autoApprove: true,
     status: "idle",
     archivedAt: null,
     createdAt: T0,
@@ -337,7 +339,7 @@ export function taskView(taskId: string): TaskView | null {
     taskId === MAIN_TASK_ID ? MAIN_HISTORY : simpleHistory(task.title);
   return {
     taskId,
-    autoApprove: false,
+    autoApprove: taskId === MAIN_TASK_ID,
     executionId: "exec-1",
     sequence: 24,
     history,

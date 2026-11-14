@@ -1551,54 +1551,13 @@ export function WorkspacePage(props: {
               票02：原消息流上方的五类常驻横条已迁为右下角 toast，不再占行。 */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             {/* 消息流顶部行（同宽对齐正文列）：改动摘要胶囊恒驻右上角
-             * （无任务禁用；抽屉打开期间不渲染，关闭与切 tab 走抽屉控件）；
-             * 「已开启自动批准」提示卡原为右下角 toast，改为与正文同宽的
-             * 常驻卡片——状态在则卡片在，与胶囊同行互不遮挡。左右 padding
-             * 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），contentWidthClass
-             * 的居中基准与消息列完全一致。 */}
+             * （无任务禁用；抽屉打开期间不渲染，关闭与切 tab 走抽屉控件）。
+             * 「已开启自动批准」提示卡已迁至消息流下方、输入区上方——
+             * 靠近审批动作的发生点，宽度对齐正文列。 */}
             <div className="shrink-0 pt-3 pl-4" style={contentPadding}>
               <div
                 className={`${contentWidthClass} flex items-start justify-end gap-2`}
               >
-                {current !== null && autoApproveOn && (
-                  <div
-                    data-testid="task-auto-approve"
-                    role="status"
-                    className="flex min-w-0 flex-1 items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
-                  >
-                    <span
-                      className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
-                      aria-hidden="true"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p
-                        data-testid="task-auto-approve-content"
-                        className="break-words"
-                      >
-                        本任务已开启自动批准
-                      </p>
-                      <p className="break-words opacity-80">
-                        取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
-                      </p>
-                      {autoApproveError !== null && (
-                        <p role="alert">{autoApproveError}</p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      data-testid="task-auto-approve-revoke"
-                      disabled={autoApproveBusy}
-                      // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
-                      onClick={() => {
-                        const id = currentIdRef.current;
-                        if (id !== null) void revokeAutoApprove(id);
-                      }}
-                      className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
-                    >
-                      {autoApproveBusy ? "取消中…" : "取消自动批准"}
-                    </button>
-                  </div>
-                )}
                 {drawer === null && (
                   <ChangesChip
                     taskId={currentId}
@@ -1674,6 +1633,53 @@ export function WorkspacePage(props: {
               />
             )}
           </div>
+          {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
+           *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
+           *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），
+           *  contentWidthClass 的居中基准与消息列、输入区完全一致。 */}
+          {current !== null && autoApproveOn && (
+            <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
+              <div className={contentWidthClass}>
+                <div
+                  data-testid="task-auto-approve"
+                  role="status"
+                  className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
+                >
+                  <span
+                    className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      data-testid="task-auto-approve-content"
+                      className="break-words"
+                    >
+                      本任务已开启自动批准
+                    </p>
+                    <p className="break-words opacity-80">
+                      取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
+                    </p>
+                    {autoApproveError !== null && (
+                      <p role="alert">{autoApproveError}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="task-auto-approve-revoke"
+                    disabled={autoApproveBusy}
+                    // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
+                    onClick={() => {
+                      const id = currentIdRef.current;
+                      if (id !== null) void revokeAutoApprove(id);
+                    }}
+                    className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                  >
+                    {autoApproveBusy ? "取消中…" : "取消自动批准"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {interaction ? (
             <InteractionPanel
               key={interaction.request.id}
