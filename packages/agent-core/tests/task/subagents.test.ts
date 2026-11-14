@@ -231,6 +231,8 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       const prompt = JSON.stringify(request.prompt);
       expect(JSON.stringify(system)).toContain("## 子代理委派策略");
       expect(prompt.match(/## 子代理委派策略/g)).toHaveLength(1);
+      // 工作计划策略（ADR 0016）与委派策略同为逐轮注入层，主任务两者并存且各一次
+      expect(prompt.match(/## 工作计划策略/g)).toHaveLength(1);
       expect(prompt).toContain("原宿主系统提示");
       expect(prompt).toContain("AGENTS.md：共享规范；技能目录 alpha/beta");
       expect(request.tools?.map((tool) => tool.name)).toContain(
@@ -253,11 +255,14 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       "AGENTS.md：共享规范；技能目录 alpha/beta"
     );
     expect(JSON.stringify(child.prompt)).not.toContain("## 子代理委派策略");
+    expect(JSON.stringify(child.prompt)).not.toContain("## 工作计划策略");
     expect(JSON.stringify(child.prompt)).not.toContain("原宿主系统提示");
     expect(JSON.stringify(child.prompt)).not.toContain("ALPHA_PRIVATE_BODY");
     expect(child.tools?.map((tool) => tool.name)).not.toContain(
       "spawn_subagent"
     );
+    // 计划是任务级状态由主任务独占维护：子代理工具表不含 update_plan
+    expect(child.tools?.map((tool) => tool.name)).not.toContain("update_plan");
     expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
       "## 子代理委派策略"
     );
@@ -291,9 +296,12 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       });
       await collect(task.sendMessage({ text: "你好", profile }));
       const request = model.doStreamCalls[0]!;
+      // 工作计划策略常驻主任务（ADR 0016），但未配置编排器时 system 层不得出现委派策略
       expect(
-        request.prompt.filter((message) => message.role === "system")
-      ).toEqual([]);
+        JSON.stringify(
+          request.prompt.filter((message) => message.role === "system")
+        )
+      ).not.toContain("## 子代理委派策略");
       expect(JSON.stringify(request.prompt)).not.toContain("## 子代理委派策略");
       expect(
         request.tools?.some((tool) => tool.name === "spawn_subagent")

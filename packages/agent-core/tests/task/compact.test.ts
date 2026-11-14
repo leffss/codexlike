@@ -342,9 +342,10 @@ describe("AgentTask.compact（手动压缩）", () => {
     const lastCall = model.doStreamCalls.at(-1)!;
     expect(model.doStreamCalls.length).toBe(streamCallsBefore + 1);
     // 结构断言（避免 JSON.stringify 转义问题）：
-    // [摘要 user, 第2轮 u/a, 第3轮 u/a, 第4轮 u/a, 新消息 user]
-    expect(lastCall.prompt).toHaveLength(8);
+    // [system(内置策略), 摘要 user, 第2轮 u/a, 第3轮 u/a, 第4轮 u/a, 新消息 user]
+    expect(lastCall.prompt).toHaveLength(9);
     expect(lastCall.prompt.map((m) => m.role)).toEqual([
+      "system",
       "user",
       "user",
       "assistant",
@@ -354,11 +355,11 @@ describe("AgentTask.compact（手动压缩）", () => {
       "assistant",
       "user",
     ]);
-    expect(textOf(lastCall.prompt[0]!.content)).toContain("<compact-summary>");
-    expect(textOf(lastCall.prompt[0]!.content)).toContain(
+    expect(textOf(lastCall.prompt[1]!.content)).toContain("<compact-summary>");
+    expect(textOf(lastCall.prompt[1]!.content)).toContain(
       "压缩摘要：调通了安装流程。"
     );
-    expect(lastCall.prompt.slice(1, 7).map((m) => textOf(m.content))).toEqual([
+    expect(lastCall.prompt.slice(2, 8).map((m) => textOf(m.content))).toEqual([
       "第2轮问题",
       "第2轮回复",
       "第3轮问题",
@@ -366,7 +367,7 @@ describe("AgentTask.compact（手动压缩）", () => {
       "第4轮问题",
       "第4轮回复",
     ]);
-    expect(textOf(lastCall.prompt[7]!.content)).toBe("继续");
+    expect(textOf(lastCall.prompt[8]!.content)).toBe("继续");
   });
 
   it("压缩请求失败：原历史与上下文不受损，可重试且成功", async () => {
@@ -588,7 +589,7 @@ describe("AgentTask.compact（手动压缩）", () => {
       expect(event.type).not.toBe("error");
     }
     const immediateCall = model.doStreamCalls.at(-1)!;
-    expect(textOf(immediateCall.prompt[5]!.content)).toContain(
+    expect(textOf(immediateCall.prompt[6]!.content)).toContain(
       "被引用的文件内容"
     );
 
@@ -612,11 +613,12 @@ describe("AgentTask.compact（手动压缩）", () => {
       expect(event.type).not.toBe("error");
     }
     const lastCall = model.doStreamCalls.at(-1)!;
-    // 恢复后的上下文 = 摘要 + 3 轮原文 + 新消息。工单 06 起 @引用 随消息持久化：
+    // 恢复后的上下文 = 摘要 + 3 轮原文 + 新消息（首条为 system 内置策略层）。
+    // 工单 06 起 @引用 随消息持久化：
     // 保留轮次里的第 4 轮恢复后重组附加内容（与压缩后立即发送的内存上下文一致，快照等价）
-    expect(textOf(lastCall.prompt[0]!.content)).toContain("<compact-summary>");
-    expect(textOf(lastCall.prompt[0]!.content)).toContain(summary);
-    expect(lastCall.prompt.slice(1, 7).map((m) => textOf(m.content))).toEqual([
+    expect(textOf(lastCall.prompt[1]!.content)).toContain("<compact-summary>");
+    expect(textOf(lastCall.prompt[1]!.content)).toContain(summary);
+    expect(lastCall.prompt.slice(2, 8).map((m) => textOf(m.content))).toEqual([
       "第2轮问题",
       "第2轮回复",
       "第3轮问题",
@@ -624,7 +626,7 @@ describe("AgentTask.compact（手动压缩）", () => {
       '第4轮问题\n\n以下为该消息 @引用 的工作区文件内容：\n\n<attached-file path="docs/说明.md">\n被引用的文件内容\n</attached-file>',
       "第4轮回复",
     ]);
-    expect(textOf(lastCall.prompt[9]!.content)).toBe("重启后继续");
+    expect(textOf(lastCall.prompt[10]!.content)).toBe("重启后继续");
   });
 });
 

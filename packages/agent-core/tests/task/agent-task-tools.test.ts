@@ -343,6 +343,43 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     persistence.close();
   });
 
+  it("工作计划策略随主任务每轮系统提示注入一次，不入库（ADR 0016）", async () => {
+    const model = scriptedModel([
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "policy-plan",
+            toolName: "update_plan",
+            input: {
+              steps: [{ content: "第一步", status: "in_progress" }],
+            },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["开工"] },
+    ]);
+    const { task, persistence } = makeTask(model, "C:/work/demo");
+
+    await collect(task.sendMessage({ text: "列个计划", profile }));
+
+    expect(model.doStreamCalls).toHaveLength(2);
+    for (const request of model.doStreamCalls) {
+      const system = request.prompt.filter(
+        (message) => message.role === "system"
+      );
+      expect(JSON.stringify(system)).toContain("## 工作计划策略");
+      expect(
+        JSON.stringify(request.prompt).match(/## 工作计划策略/g)
+      ).toHaveLength(1);
+    }
+    // 策略是逐轮组装的提示层，不随 transcript 落库
+    expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
+      "## 工作计划策略"
+    );
+    persistence.close();
+  });
+
   it("模型调工具 → 执行 → 结果回填 → 最终回复；文件真实落盘，调用记录入库", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const model = scriptedModel([

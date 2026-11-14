@@ -163,10 +163,9 @@ describe("TaskManager 系统提示注入（systemPromptFor）", () => {
       role: string;
       content: string;
     }[];
-    expect(firstPrompt?.[0]).toMatchObject({
-      role: "system",
-      content: "规范：C:\\work\\demo",
-    });
+    expect(firstPrompt?.[0]?.role).toBe("system");
+    // 宿主提示位于 system 层首位（后接 agent-core 内置策略段，如工作计划策略）
+    expect(firstPrompt?.[0]?.content).toContain("规范：C:\\work\\demo");
 
     // 等价重启：恢复的任务同样注入系统提示
     const persistence2 = createSqliteTaskStore(dbPath);
@@ -187,10 +186,8 @@ describe("TaskManager 系统提示注入（systemPromptFor）", () => {
       role: string;
       content: string;
     }[];
-    expect(secondPrompt?.[0]).toMatchObject({
-      role: "system",
-      content: "规范：C:\\work\\demo",
-    });
+    expect(secondPrompt?.[0]?.role).toBe("system");
+    expect(secondPrompt?.[0]?.content).toContain("规范：C:\\work\\demo");
     persistence1.close();
     persistence2.close();
   });

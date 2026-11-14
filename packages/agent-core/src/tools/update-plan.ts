@@ -61,6 +61,18 @@ export function parsePlanSteps(input: unknown): PlanStepInput[] {
 }
 
 /**
+ * 仅供拥有内置工作计划工具的主模型使用，不写入共享资源快照或子代理角色指令
+ * （与 SUBAGENT_DELEGATION_POLICY 同构：工具描述只讲契约，「何时用」由
+ * agent-task 随每轮系统提示注入；子代理工具表本就不含 update_plan）。
+ */
+export const PLAN_USAGE_POLICY = [
+  "## 工作计划策略",
+  "- 预计多于一步的任务开工时，先用 update_plan 建立完整工作计划，让用户随时看到进度；",
+  "- 每完成一步或计划变化时重发全量清单（整体替换上一次）；一次只保持一项 in_progress，完成立即标 completed；",
+  "- 一句话可答或单步即完的小任务不建计划，避免噪音。",
+].join("\n");
+
+/**
  * 工作计划工具（GLOSSARY「工作计划」，ADR 0016）：建立/更新任务的多步工作
  * 计划，清单同时呈现给用户（消息流顶部常驻计划条 + 流内标记行）。
  * 全量替换语义——每次发送完整清单；状态即工具调用记录本身（随 transcript

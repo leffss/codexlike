@@ -36,7 +36,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../tools/types";
-import { createUpdatePlanTool } from "../tools/update-plan";
+import { createUpdatePlanTool, PLAN_USAGE_POLICY } from "../tools/update-plan";
 
 import {
   decideApproval,
@@ -522,6 +522,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           systemPrompt,
           snapshot?.systemPrompt ?? "",
           explicitBody,
+          // 工作计划策略（ADR 0016）：update_plan 无条件并入工具表，
+          // 策略随之常驻主任务每轮提示（子代理不注入，见 PLAN_USAGE_POLICY 注释）
+          PLAN_USAGE_POLICY,
           orchestrator !== null &&
           toolsByName.get(SUBAGENT_TOOL_NAME) === orchestrator.tool
             ? SUBAGENT_DELEGATION_POLICY
