@@ -161,51 +161,59 @@ export function InteractionPanel(props: {
             <fieldset
               disabled={disabled}
               aria-labelledby="interaction-question-title"
-              className="min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overscroll-contain"
+              className="contents"
             >
-              {question.options.map((option, index) => (
-                <label
-                  key={option.id}
-                  className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${answer.selectedOptionIds.includes(option.id) ? "border-accent bg-selected" : "border-line hover:bg-hover"}`}
-                >
-                  <input
-                    data-testid={`question-option-${option.id}`}
-                    type={question.multiSelect ? "checkbox" : "radio"}
-                    name={`question-${request.id}-${question.id}`}
-                    checked={answer.selectedOptionIds.includes(option.id)}
-                    aria-describedby={
-                      option.description
-                        ? `question-description-${index}`
-                        : undefined
-                    }
-                    onChange={() =>
-                      props.onChange({ type: "option", optionId: option.id })
-                    }
-                    onKeyDown={(event) => optionKey(event, option.id)}
-                    className="mt-0.5 shrink-0 accent-accent focus-visible:outline-2 focus-visible:outline-accent"
-                  />
-                  <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                    <span className="block">{option.label}</span>
-                    {option.description && (
-                      <span
-                        id={`question-description-${index}`}
-                        className="mt-1 block text-xs text-fg-muted"
-                      >
-                        {option.description}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-            <div className="shrink-0">
-              <label className="mt-2 block text-xs text-fg-muted">
+              {/* 滚动容器必须是纯 div：Chromium 对 fieldset 盒模型有渲染怪癖，
+                  flex item 的尺寸约束与 overflow 滚动不生效（选项会溢出面板、
+                  与下方固定区重叠）；fieldset 仅承载禁用语义（display:contents
+                  不生成盒），布局由穿透后的 div 直接参与外层 flex 列。 */}
+              <div
+                data-testid="question-options"
+                role="group"
+                aria-labelledby="interaction-question-title"
+                className="min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overscroll-contain"
+              >
+                {question.options.map((option, index) => (
+                  <label
+                    key={option.id}
+                    className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${answer.selectedOptionIds.includes(option.id) ? "border-accent bg-selected" : "border-line hover:bg-hover"}`}
+                  >
+                    <input
+                      data-testid={`question-option-${option.id}`}
+                      type={question.multiSelect ? "checkbox" : "radio"}
+                      name={`question-${request.id}-${question.id}`}
+                      checked={answer.selectedOptionIds.includes(option.id)}
+                      aria-describedby={
+                        option.description
+                          ? `question-description-${index}`
+                          : undefined
+                      }
+                      onChange={() =>
+                        props.onChange({ type: "option", optionId: option.id })
+                      }
+                      onKeyDown={(event) => optionKey(event, option.id)}
+                      className="mt-0.5 shrink-0 accent-accent focus-visible:outline-2 focus-visible:outline-accent"
+                    />
+                    <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                      <span className="block">{option.label}</span>
+                      {option.description && (
+                        <span
+                          id={`question-description-${index}`}
+                          className="mt-1 block text-xs text-fg-muted"
+                        >
+                          {option.description}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <label className="mt-2 block shrink-0 text-xs text-fg-muted">
                 自定义回答
                 <textarea
                   data-testid="question-custom"
                   value={answer.text}
                   rows={2}
-                  disabled={disabled}
                   onChange={(event) =>
                     props.onChange({ type: "custom", text: event.target.value })
                   }
@@ -213,7 +221,7 @@ export function InteractionPanel(props: {
                   className="mt-1 block max-h-40 w-full resize-y rounded border border-line bg-surface-muted p-2 text-sm text-fg focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </label>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex shrink-0 flex-wrap gap-2">
                 <button
                   type="button"
                   data-testid="question-prev"
@@ -262,7 +270,7 @@ export function InteractionPanel(props: {
                   </button>
                 )}
               </div>
-            </div>
+            </fieldset>
           </>
         )}
         {props.error && (

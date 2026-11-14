@@ -241,19 +241,24 @@ describe("唯一底部 InteractionPanel", () => {
         draft: createQuestionDraft(request),
       })
     );
-    // 滚动容器是选项 fieldset 自身：带 min-h-0 + overflow-y-auto
+    // 滚动容器是选项 div（fieldset 仅承载禁用语义，display:contents 不生成盒——
+    // Chromium 对 fieldset 盒模型的 flex/overflow 约束不生效）：带 min-h-0 + overflow-y-auto
     const fieldset = html.match(/<fieldset[^>]*>/)?.[0] ?? "";
-    expect(fieldset).toContain("overflow-y-auto");
-    expect(fieldset).toContain("min-h-0");
+    expect(fieldset).toContain("contents");
+    expect(fieldset).not.toContain("overflow-y-auto");
+    const scroller =
+      html.match(/<div[^>]*data-testid="question-options"[^>]*>/)?.[0] ?? "";
+    expect(scroller).toContain("overflow-y-auto");
+    expect(scroller).toContain("min-h-0");
     // 顺序保真：问题说明在滚动区之前，自定义回答与提交按钮在滚动区之后
     const titleAt = html.indexOf('data-testid="question-title"');
-    const fieldsetAt = html.indexOf("<fieldset");
+    const scrollerAt = html.indexOf('data-testid="question-options"');
     const customAt = html.indexOf('data-testid="question-custom"');
     const submitAt = html.indexOf('data-testid="question-submit"');
     expect(titleAt).toBeGreaterThanOrEqual(0);
-    expect(customAt).toBeGreaterThan(fieldsetAt);
-    expect(submitAt).toBeGreaterThan(fieldsetAt);
-    expect(titleAt).toBeLessThan(fieldsetAt);
+    expect(scrollerAt).toBeGreaterThan(titleAt);
+    expect(customAt).toBeGreaterThan(scrollerAt);
+    expect(submitAt).toBeGreaterThan(scrollerAt);
   });
   it("最后一题提交按钮 hover 用 accent-hover 保持文字可见，文案为「提交」（反馈5）", () => {
     const request = {
