@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -47,8 +48,11 @@ import { ChangesPanel } from "../components/ChangesPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
+import {
+  type TitlebarContext,
+  type TitlebarTask,
+} from "../components/TitlebarTaskContext";
 import { TaskSidebar } from "../components/TaskSidebar";
-import { TaskSearch } from "../components/TaskSearch";
 import {
   MembershipDialog,
   ProjectRemovalDialog,
@@ -84,6 +88,8 @@ export function WorkspacePage(props: {
   state?: WorkspaceState;
   /** 启动现场的工作台目标（票03）：冷启动恢复的第一优先级；缺省走现有回退链 */
   initialTarget?: WorkbenchTarget | null;
+  /** 标题栏任务上下文上报（票01）：任务/搜索/面板开关交由 App 的 Header 装配 */
+  onTitlebarContext?: (context: TitlebarContext) => void;
 }) {
   const [localState] = useState(() =>
     createWorkspaceState(
@@ -91,6 +97,8 @@ export function WorkspacePage(props: {
     )
   );
   const workspaceState = props.state ?? localState;
+  /** 标题栏上下文上报（票01）：解构以稳定 effect 依赖 */
+  const { onTitlebarContext } = props;
   useSyncExternalStore(
     workspaceState.subscribe,
     workspaceState.version,
@@ -274,6 +282,15 @@ export function WorkspacePage(props: {
     if (id !== null) void refreshResources(id);
   }, [refreshResources]);
 
+  /** 面板开关迁入标题栏（票01）：动作经稳定引用上报，读取走 ref 防过期闭包 */
+  const resourcesOpenRef = useRef(false);
+  resourcesOpenRef.current = resourcesOpen;
+  const toggleResources = useCallback(() => {
+    if (!resourcesOpenRef.current) refreshCurrentResources();
+    setResourcesOpen((prev) => !prev);
+  }, [refreshCurrentResources]);
+  const toggleChanges = useCallback(() => setChangesOpen((prev) => !prev), []);
+
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
     setMessages((prev) =>
@@ -401,6 +418,9 @@ export function WorkspacePage(props: {
       workspaceState,
     ]
   );
+
+  /** 任务搜索迁入标题栏（票01）：切换任务的入口保持同一 openTask 管线 */
+  const selectTask = useCallback((id: string) => void openTask(id), [openTask]);
 
   useEffect(() => {
     let active = true;
@@ -1117,6 +1137,58 @@ export function WorkspacePage(props: {
             ? "新建或选择一个任务后开始对话"
             : "输入消息，Enter 发送（Shift+Enter 换行）；/ 命令、@ 文件引用、$ 技能";
 
+  /**
+   * 标题栏任务上下文上报（票01）：任务名、项目·Worktree/本地 徽章数据、
+   * 任务搜索与面板开关交由 App 的 Header 装配；无任务（未选任务/草稿）
+   * 时 task 为 null，标题栏回退品牌展示。上下文按内容记忆，仅在
+   * 数据变化时上报，App 级 setState 不会反向触发本页 effect 重跑。
+   */
+  const hasCurrentTask = current !== null;
+  const titlebarTask = useMemo<TitlebarTask | null>(
+    () =>
+      current
+        ? {
+            taskId: current.id,
+            title: current.title,
+            projectName:
+              current.projectId === null
+                ? null
+                : (projects.find((p) => p.id === current.projectId)?.name ??
+                  null),
+            workspaceMode: current.workspaceMode,
+            workspacePath: current.workspacePath,
+            workspaceOriginPath: current.workspaceOriginPath,
+          }
+        : null,
+    [current, projects]
+  );
+  const titlebarContext = useMemo<TitlebarContext>(
+    () => ({
+      task: titlebarTask,
+      search: { recordsRevision, onSelect: selectTask },
+      panels: {
+        resourcesOpen,
+        changesOpen,
+        disabled: !hasCurrentTask,
+        onToggleResources: toggleResources,
+        onToggleChanges: toggleChanges,
+      },
+    }),
+    [
+      titlebarTask,
+      recordsRevision,
+      selectTask,
+      resourcesOpen,
+      changesOpen,
+      hasCurrentTask,
+      toggleResources,
+      toggleChanges,
+    ]
+  );
+  useEffect(() => {
+    onTitlebarContext?.(titlebarContext);
+  }, [titlebarContext, onTitlebarContext]);
+
   return (
     <div className="flex h-full">
       {fullAccessPending && (
@@ -1208,59 +1280,13 @@ export function WorkspacePage(props: {
             } as CSSProperties
           }
         >
-          <header
-            className="shrink-0 border-b border-line px-4 py-2"
-            style={contentPadding}
-          >
-            {/* 头部内容与消息流、输入区共用同一内容列宽度类，左右缘对齐 */}
+          {/* 草稿场景就地收纳（票01）：workspace-info 整行取消后，新建草稿的
+              目录选择与工作区模式入口保留在本列（仅草稿期间渲染，非常驻行）；
+              正式任务的路径/模式/来源目录收进标题栏徽章。内容与消息流、
+              输入区共用同一内容列宽度类，左右缘对齐。 */}
+          {draft && (
             <div
-              data-testid="task-header-content"
-              className={`${contentWidthClass} flex items-center gap-2`}
-            >
-              <span
-                data-testid="task-title"
-                className="min-w-0 flex-1 truncate text-sm font-semibold text-fg"
-              >
-                {current?.title ??
-                  (draft
-                    ? draft.projectId === null
-                      ? "新建独立任务"
-                      : `新建项目任务 · ${projects.find((p) => p.id === draft.projectId)?.name ?? "项目"}`
-                    : "未选择任务")}
-              </span>
-              <div className="shrink-0 whitespace-nowrap">
-                <TaskSearch
-                  recordsRevision={recordsRevision}
-                  onSelect={(id) => void openTask(id)}
-                />
-              </div>
-              <button
-                type="button"
-                data-testid="resources-toggle"
-                disabled={currentId === null}
-                aria-expanded={resourcesOpen}
-                onClick={() => {
-                  if (!resourcesOpen) refreshCurrentResources();
-                  setResourcesOpen((prev) => !prev);
-                }}
-                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-              >
-                规范与技能
-              </button>
-              <button
-                type="button"
-                data-testid="changes-toggle"
-                onClick={() => setChangesOpen((prev) => !prev)}
-                disabled={currentId === null}
-                className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-              >
-                {changesOpen ? "收起改动" : "改动"}
-              </button>
-            </div>
-          </header>
-          {(current || draft) && (
-            <div
-              data-testid="workspace-info"
+              data-testid="draft-workspace-info"
               className="shrink-0 border-b border-line px-4 py-2 text-xs text-fg-muted"
               style={contentPadding}
             >
@@ -1268,35 +1294,22 @@ export function WorkspacePage(props: {
                 <div
                   data-testid="workspace-path"
                   title={
-                    current?.workspacePath ??
-                    draft?.workspacePath ??
-                    projects.find((p) => p.id === draft?.projectId)
+                    draft.workspacePath ??
+                    projects.find((p) => p.id === draft.projectId)
                       ?.workspacePath
                   }
                   className="flex flex-wrap items-center gap-x-2 gap-y-1"
                 >
                   <span className="min-w-0 break-all">
-                    {draft?.workspaceMode === "worktree"
+                    {draft.workspaceMode === "worktree"
                       ? "来源目录（发送后使用隔离工作区）："
                       : "工作区："}
-                    {current?.workspacePath ??
-                      draft?.workspacePath ??
-                      projects.find((p) => p.id === draft?.projectId)
+                    {draft.workspacePath ??
+                      projects.find((p) => p.id === draft.projectId)
                         ?.workspacePath ??
                       "应用专用持久目录（首次发送时分配）"}
                   </span>
-                  {current && !draft && (
-                    <span
-                      data-testid="workspace-mode"
-                      title="首次执行后工作区固定，调整项目归属不会改变目录、分支和历史；不代表文件只读或权限受限。"
-                      className="shrink-0 rounded border border-line bg-surface px-2 py-0.5"
-                    >
-                      {current.workspaceMode === "worktree"
-                        ? "Worktree"
-                        : "本地"}
-                    </span>
-                  )}
-                  {draft && draft.projectId !== null && (
+                  {draft.projectId !== null && (
                     <WorkspaceModeSelector
                       mode={draft.workspaceMode ?? "local"}
                       busy={creating}
@@ -1310,12 +1323,7 @@ export function WorkspacePage(props: {
                     />
                   )}
                 </div>
-                {current?.workspaceOriginPath && (
-                  <div data-testid="workspace-origin">
-                    来源目录：{current.workspaceOriginPath}
-                  </div>
-                )}
-                {draft?.projectId === null && (
+                {draft.projectId === null && (
                   <button
                     type="button"
                     data-testid="draft-select-workspace"
@@ -1326,7 +1334,7 @@ export function WorkspacePage(props: {
                     选择已有目录
                   </button>
                 )}
-                {draft?.workspacePath && (
+                {draft.workspacePath && (
                   <button
                     type="button"
                     data-testid="draft-managed-workspace"
@@ -1341,7 +1349,7 @@ export function WorkspacePage(props: {
                     使用专用目录
                   </button>
                 )}
-                {draft?.error && (
+                {draft.error && (
                   <p
                     data-testid="draft-error"
                     role="alert"

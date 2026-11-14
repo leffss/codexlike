@@ -83,9 +83,13 @@ try {
   );
   await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   await send("入口隔离任务");
+  // 工作区路径收进标题栏徽章（票01）：点击徽章从弹层读完整路径
+  await window.getByTestId("workspace-badge").click();
   const originalPath = await window
+    .getByTestId("workspace-popover")
     .getByTestId("workspace-path")
-    .getAttribute("title");
+    .textContent();
+  await window.keyboard.press("Escape");
   assert(originalPath, "工作区提供完整路径提示");
   await projectAction(window);
   await window.getByTestId("draft-workspace-mode").waitFor();
@@ -104,11 +108,15 @@ try {
     "侧栏入口不产生空记录"
   );
   await item("入口隔离任务").click();
+  await window.getByTestId("workspace-badge").click();
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    (await window
+      .getByTestId("workspace-popover")
+      .getByTestId("workspace-path")
+      .textContent()) === originalPath,
     "新建不改变原执行目录"
   );
+  await window.keyboard.press("Escape");
   console.log("[e2e] 任务侧栏入口与项目草稿保持显式归属通过");
   await window.getByTestId("task-search-toggle").click();
   await window.getByTestId("task-search-input").fill("入口隔离任务");
@@ -251,17 +259,25 @@ try {
     .getByTestId("archived-task-item")
     .filter({ hasText: longTitle })
     .waitFor();
+  // 路径与来源目录收进标题栏徽章（票01）：弹层内一次读完
+  await window.getByTestId("workspace-badge").click();
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    (await window
+      .getByTestId("workspace-popover")
+      .getByTestId("workspace-path")
+      .textContent()) === originalPath,
     "移出及重开不改实际工作区"
   );
   assert(
-    (await window.getByTestId("workspace-origin").textContent()).includes(
-      workspaceDir
-    ),
+    (
+      await window
+        .getByTestId("workspace-popover")
+        .getByTestId("workspace-origin")
+        .textContent()
+    ).includes(workspaceDir),
     "重开仍保留来源"
   );
+  await window.keyboard.press("Escape");
   assert(
     (await window
       .getByTestId("approval-mode-select")
@@ -350,11 +366,15 @@ try {
     .filter({ hasText: "移入项目" })
     .waitFor();
   await window.keyboard.press("Escape");
+  await window.getByTestId("workspace-badge").click();
   assert(
-    (await window.getByTestId("workspace-path").getAttribute("title")) ===
-      originalPath,
+    (await window
+      .getByTestId("workspace-popover")
+      .getByTestId("workspace-path")
+      .textContent()) === originalPath,
     "当前成员被移除后安全导航到幸存独立记录"
   );
+  await window.keyboard.press("Escape");
   assert(
     readFileSync(join(workspaceDir, "keep.txt"), "utf8") === "保留来源文件",
     "移除来源项目不删除来源文件"

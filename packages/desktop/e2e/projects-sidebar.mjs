@@ -75,12 +75,18 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
+    // 项目目录明确展示：路径收进标题栏徽章（票01），弹层读完整路径
+    await window.getByTestId("workspace-badge").click();
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        workspaceDir
-      ),
+      (
+        await window
+          .getByTestId("workspace-popover")
+          .getByTestId("workspace-path")
+          .textContent()
+      ).includes(workspaceDir),
       "项目目录明确展示"
     );
+    await window.keyboard.press("Escape");
     const projectTask = await window
       .getByTestId("task-item")
       .getAttribute("data-task-id");
@@ -140,9 +146,12 @@ async function main() {
         .count()) === 1,
       "独立分区不伪造项目"
     );
+    await window.getByTestId("workspace-badge").click();
     const standalonePath = await window
+      .getByTestId("workspace-popover")
       .getByTestId("workspace-path")
-      .getAttribute("title");
+      .textContent();
+    await window.keyboard.press("Escape");
     assert(existsSync(standalonePath), "专用持久目录真实存在");
     await (
       await taskMenu(
@@ -203,11 +212,15 @@ async function main() {
       .getByTestId("message-user")
       .filter({ hasText: "独立草稿" })
       .waitFor();
+    await window.getByTestId("workspace-badge").click();
     assert(
-      (await window.getByTestId("workspace-path").getAttribute("title")) ===
-        standalonePath,
+      (await window
+        .getByTestId("workspace-popover")
+        .getByTestId("workspace-path")
+        .textContent()) === standalonePath,
       "重启后工作区固定且标题持久"
     );
+    await window.keyboard.press("Escape");
     assert(model.requestCount() === 3, "重启不自动发送");
     assert(
       readFileSync(join(homeDir, "codexlike.db"), "utf8") ===

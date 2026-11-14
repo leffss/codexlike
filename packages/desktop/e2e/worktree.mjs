@@ -97,9 +97,9 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
-    const workspaceInfo = window.getByTestId("workspace-info");
-    const workspacePath = workspaceInfo.getByTestId("workspace-path");
-    const draftMode = workspaceInfo.getByTestId("draft-workspace-mode");
+    const draftInfo = window.getByTestId("draft-workspace-info");
+    const workspacePath = draftInfo.getByTestId("workspace-path");
+    const draftMode = draftInfo.getByTestId("draft-workspace-mode");
     await draftMode.waitFor({ timeout: 5000 });
     await workspacePath.waitFor();
     const pathBox = await workspacePath.boundingBox();
@@ -169,16 +169,24 @@ async function main() {
         `codexlike/${ids[0]}`,
       "独立分支"
     );
+    // 正式任务的路径/模式收进标题栏徽章（票01）：点击徽章弹层读完整工作区
+    await window.getByTestId("workspace-badge").click();
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        worktreePath
-      ),
+      (
+        await window
+          .getByTestId("workspace-popover")
+          .getByTestId("workspace-path")
+          .textContent()
+      ).includes(worktreePath),
       "显示实际工作区"
     );
-    const fixedMode = workspacePath.getByTestId("workspace-mode");
+    await window.keyboard.press("Escape");
+    const fixedMode = window
+      .getByTestId("workspace-badge")
+      .getByTestId("workspace-mode");
     assert(
       (await fixedMode.textContent()).includes("Worktree"),
-      "正式任务模式标签位于顶部路径行内"
+      "正式任务模式标签位于标题栏徽章内"
     );
     const modeTitle = (await fixedMode.getAttribute("title")) ?? "";
     assert(
@@ -283,9 +291,8 @@ async function main() {
       "同目录独立任务不遗漏，风险显示在底部提示容器内"
     );
     assert(
-      (await workspaceInfo.getByTestId("workspace-sharing-notice").count()) ===
-        0,
-      "顶部工作区信息不包含底部风险提示"
+      (await draftInfo.getByTestId("workspace-sharing-notice").count()) === 0,
+      "草稿收纳行不包含底部风险提示"
     );
     await window.screenshot({ path: join(screenshots, "sharing-warning.png") });
     await draftMode.selectOption("worktree");
@@ -322,12 +329,17 @@ async function main() {
       .getByTestId("task-item")
       .filter({ hasText: "隔离写入" })
       .click();
+    await window.getByTestId("workspace-badge").click();
     assert(
-      (await window.getByTestId("workspace-path").textContent()).includes(
-        worktreePath
-      ),
+      (
+        await window
+          .getByTestId("workspace-popover")
+          .getByTestId("workspace-path")
+          .textContent()
+      ).includes(worktreePath),
       "重开仍使用原副本"
     );
+    await window.keyboard.press("Escape");
     await window.getByTestId("add-project").click();
     await projectAction(
       window,

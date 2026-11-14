@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TaskSearchResult } from "@codexlike/agent-core";
 
 /** 独立搜索入口：不依赖侧栏分组、折叠或当前加载的任务历史。 */
@@ -13,6 +13,9 @@ export function TaskSearch(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  /** 面板水平偏移（迁入标题栏，票01）：开关贴近窗口边缘时把面板收口回视口 */
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [panelOffset, setPanelOffset] = useState(0);
 
   useEffect(() => {
     setResults([]);
@@ -41,8 +44,25 @@ export function TaskSearch(props: {
     };
   }, [open, query, includeArchived, revision, props.recordsRevision]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    function place() {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const anchor = wrap.getBoundingClientRect();
+      const width = Math.min(384, window.innerWidth * 0.8);
+      const margin = 8;
+      const maxLeft = Math.max(margin, window.innerWidth - margin - width);
+      const desired = Math.min(Math.max(anchor.left, margin), maxLeft);
+      setPanelOffset(desired - anchor.left);
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div className="relative" ref={wrapRef}>
       <button
         type="button"
         data-testid="task-search-toggle"
@@ -55,7 +75,8 @@ export function TaskSearch(props: {
       {open && (
         <section
           aria-label="跨项目任务搜索"
-          className="absolute right-0 top-full z-20 mt-2 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
+          className="absolute top-full z-20 mt-2 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
+          style={{ left: panelOffset }}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
           }}

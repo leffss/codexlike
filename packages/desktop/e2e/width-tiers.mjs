@@ -3,7 +3,8 @@
 // 头部 / 消息流共用同一内容列，输入卡片左右各外扩 8px，
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
-// 1) 新建、已有与加载中使用同一三档内容列，工作区信息也与消息流对齐。
+// 1) 新建、已有与加载中使用同一三档内容列；草稿场景的就地收纳行（票01）
+//    与消息流对齐，正式任务无页内工作区行（路径在标题栏徽章内）。
 // 2) 窗口内容区 1280px（任务容器 992px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
 // 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
@@ -120,13 +121,15 @@ async function assertAligned(window, contentTestId, label) {
   await assertViewportLayout(window, label);
   const content = await window.getByTestId(contentTestId).boundingBox();
   assert(content !== null, `${label}：内容列必须可见`);
-  for (const testId of ["task-header-content", "workspace-path"]) {
-    const box = await window.getByTestId(testId).boundingBox();
-    assert(box !== null, `${label}：${testId} 必须可见`);
+  // 票01：任务头行与 workspace-info 行取消；草稿场景的就地收纳行仍须与
+  // 消息列对齐。正式任务的路径收进标题栏徽章，无此行。
+  if ((await window.getByTestId("workspace-path").count()) > 0) {
+    const box = await window.getByTestId("workspace-path").boundingBox();
+    assert(box !== null, `${label}：workspace-path 必须可见`);
     assert(
       Math.abs(box.x - content.x) <= 1 &&
         Math.abs(box.width - content.width) <= 1,
-      `${label}：${testId} 与消息列左右缘一致，实际 ${JSON.stringify({ box, content })}`
+      `${label}：workspace-path 与消息列左右缘一致，实际 ${JSON.stringify({ box, content })}`
     );
   }
   const composer = await window.getByTestId("composer-card").boundingBox();
@@ -328,9 +331,6 @@ async function main() {
     // 独立面板是整个主列的兄弟，外层分档不因面板打开而降档。
     await resizeWindow(app, 1600, 900);
     const closed = await assertAligned(window, "message-list", "面板关闭");
-    const headerHeight = (
-      await window.getByTestId("task-header-content").boundingBox()
-    ).height;
     for (const [toggle, panel] of [
       ["resources-toggle", "resources-panel"],
       ["changes-toggle", "changes-panel"],
@@ -341,13 +341,8 @@ async function main() {
       assert(opened.width < closed.width, `${panel} 应占据主列旁边空间`);
       const panelBox = await window.getByTestId(panel).boundingBox();
       assert(opened.x + opened.width <= panelBox.x, `${panel} 不能覆盖主列`);
-      const header = await window
-        .getByTestId("task-header-content")
-        .boundingBox();
-      assert(
-        Math.abs(header.height - headerHeight) <= 1,
-        "面板打开后标题操作行不能换行变高"
-      );
+      // 票01：标题操作行迁入标题栏，面板开合不再有页内头部可换行；
+      // 标题栏自身高度稳定性由断言视口布局覆盖（titlebar rect 不越界）。
       // 外层仍为 >=1280 档；若错误改用收窄后主列分档，实际宽度会多 96px。
       const streamWidth = await window
         .getByTestId("message-stream")
@@ -369,7 +364,8 @@ async function main() {
       );
     }
 
-    // 默认与窄窗口同时打开两个面板，标题仍可见、操作不侵入面板。
+    // 默认与窄窗口同时打开两个面板：标题栏控件仍可见、不越出窗口
+    // （票01 后任务名 / 徽章 / 搜索 / 面板开关都在标题栏，面板不再与之争宽）。
     for (const width of [1280, 1000]) {
       await resizeWindow(app, width, 800);
       await window.getByTestId("resources-toggle").click();
@@ -386,16 +382,19 @@ async function main() {
         title.width >= 40,
         `${width} 双面板标题不能被压成零宽：${title.width}`
       );
+      const viewportWidth = await window.evaluate(() => window.innerWidth);
       for (const testId of [
+        "workspace-badge",
         "task-search-toggle",
         "resources-toggle",
         "changes-toggle",
       ]) {
         const button = await window.getByTestId(testId).boundingBox();
         assert(
-          button.x >= content.x - 1 &&
-            button.x + button.width <= content.x + content.width + 1,
-          `${width} 双面板 ${testId} 不得溢出主列：${JSON.stringify({ button, content })}`
+          button !== null &&
+            button.x >= 0 &&
+            button.x + button.width <= viewportWidth,
+          `${width} 双面板 ${testId} 应在标题栏内可见且不越出窗口：${JSON.stringify({ button, viewportWidth })}`
         );
       }
       for (const testId of ["resources-panel", "changes-panel"]) {
