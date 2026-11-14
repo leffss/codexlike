@@ -13,7 +13,7 @@ import { summarizeToolCall } from "../src/lib/tool-summary";
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
   return {
     id: "m1",
-    sessionId: "s1",
+    taskId: "s1",
     role: "user",
     content: "你好",
     createdAt: "2026-11-10T08:00:00.000Z",
@@ -24,7 +24,7 @@ function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
 function call(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
   return {
     id: "c1",
-    sessionId: "s1",
+    taskId: "s1",
     toolName: "read_file",
     arguments: '{"path":"a.txt"}',
     output: "1\taaa",

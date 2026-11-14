@@ -32,8 +32,8 @@ afterEach(async () => {
   handlers.clear();
 });
 function invoke(name: string, ...args: unknown[]): any {
-  const handler = handlers.get(`sessions:${name}`);
-  if (!handler) throw new Error(`未注册通道 sessions:${name}`);
+  const handler = handlers.get(`tasks:${name}`);
+  if (!handler) throw new Error(`未注册通道 tasks:${name}`);
   return handler({}, ...args);
 }
 // vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
@@ -44,9 +44,7 @@ async function setup() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "project");
   mkdirSync(workspace);
-  const persistence = createSqliteTaskStore(
-    join(root, "nested", "sessions.db")
-  );
+  const persistence = createSqliteTaskStore(join(root, "nested", "tasks.db"));
   cleanup.push(() => persistence.close());
   const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
     createAgentResourceSnapshot({
@@ -120,12 +118,10 @@ async function setup() {
     resourcesFor,
   });
   cleanup.push(async () => {
-    for (const session of manager.list()) invoke("interrupt", session.id);
+    for (const task of manager.list()) invoke("interrupt", task.id);
     await waitFor(() =>
       expect(
-        manager
-          .list()
-          .every((session) => !invoke("execution", session.id).running)
+        manager.list().every((task) => !invoke("execution", task.id).running)
       ).toBe(true)
     );
   });

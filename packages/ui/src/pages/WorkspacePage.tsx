@@ -1445,23 +1445,23 @@ export function WorkspacePage(props: {
               record={interaction}
               count={pending.length}
               draft={workspaceState.draft(
-                interaction.request.sessionId,
+                interaction.request.taskId,
                 interaction.request.id
               )}
               {...workspaceState.submission(
-                interaction.request.sessionId,
+                interaction.request.taskId,
                 interaction.request.id
               )}
               onChange={(action) =>
                 workspaceState.edit(
-                  interaction.request.sessionId,
+                  interaction.request.taskId,
                   interaction.request.id,
                   action
                 )
               }
               onRespond={(response) =>
                 void workspaceState.submit(
-                  interaction.request.sessionId,
+                  interaction.request.taskId,
                   interaction.request.id,
                   response,
                   (taskId, requestId, payload) =>

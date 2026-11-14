@@ -90,8 +90,8 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     for (const listener of listeners) listener();
   }
   function observe(record: InteractionRecord) {
-    if (removedTasks.has(record.request.sessionId)) return;
-    const id = key(record.request.sessionId, record.request.id);
+    if (removedTasks.has(record.request.taskId)) return;
+    const id = key(record.request.taskId, record.request.id);
     const previous = records.get(id);
     // 终态是墓碑，旧 pending 快照/请求事件永远不能把它复活。
     if (previous?.status !== undefined && previous.status !== "pending") return;
@@ -99,7 +99,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     observedAt.set(id, revision + 1);
     if (record.status === "resolved") {
       drafts.delete(id);
-      persisted.patch(taskTarget(record.request.sessionId), (value) => {
+      persisted.patch(taskTarget(record.request.taskId), (value) => {
         const questionDrafts = { ...value.questionDrafts };
         delete questionDrafts[record.request.id];
         return { ...value, questionDrafts };
@@ -215,7 +215,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
         loaded.delete(taskId);
       }
       for (const [id, record] of records) {
-        if (!removed.has(record.request.sessionId)) continue;
+        if (!removed.has(record.request.taskId)) continue;
         records.delete(id);
         drafts.delete(id);
         submissions.delete(id);
@@ -257,7 +257,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       );
       for (const [id, record] of records) {
         if (
-          record.request.sessionId === taskId &&
+          record.request.taskId === taskId &&
           record.status !== "pending" &&
           !visible.has(id) &&
           (observedAt.get(id) ?? 0) <= since
@@ -265,7 +265,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
           hidden.add(id);
       }
       for (const record of snapshot) {
-        if (record.request.sessionId !== taskId) continue;
+        if (record.request.taskId !== taskId) continue;
         hidden.delete(key(taskId, record.request.id));
         observe(record);
       }
@@ -351,7 +351,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
     records(taskId: string) {
       return [...records.values()].filter(
         (record) =>
-          record.request.sessionId === taskId &&
+          record.request.taskId === taskId &&
           !hidden.has(key(taskId, record.request.id))
       );
     },
@@ -359,7 +359,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       return [...records.values()]
         .filter(
           (record) =>
-            record.request.sessionId === taskId && record.status === "pending"
+            record.request.taskId === taskId && record.status === "pending"
         )
         .sort((a, b) => a.request.createdAt.localeCompare(b.request.createdAt));
     },

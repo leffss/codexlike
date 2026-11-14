@@ -52,7 +52,7 @@ function setup() {
       findGitRoot: () => null,
     });
   const manager = createTaskManager({ persistence, resourcesFor });
-  const session = manager.create({ workspacePath: workspace });
+  const task = manager.create({ workspacePath: workspace });
   const profiles = createProfileStore({
     dir: join(root, "profiles"),
     safeStorage: {
@@ -71,7 +71,7 @@ function setup() {
     }),
     resourcesFor,
   });
-  return { session, workspace };
+  return { task, workspace };
 }
 
 function invoke(name: string, ...args: unknown[]) {
@@ -82,8 +82,8 @@ function invoke(name: string, ...args: unknown[]) {
 
 describe("规范与技能 IPC", () => {
   it("只返回元数据，首次预览不实例化加载正文，外部编辑后预览刷新", async () => {
-    const { session, workspace } = setup();
-    const first = invoke(IPC.sessions.resources, session.id);
+    const { task, workspace } = setup();
+    const first = invoke(IPC.sessions.resources, task.id);
     expect(first).toMatchObject({
       active: null,
       last: null,
@@ -92,20 +92,20 @@ describe("规范与技能 IPC", () => {
     expect(JSON.stringify(first)).toContain("审查改动");
     expect(JSON.stringify(first)).not.toContain("SECRET_SKILL_BODY");
     writeFileSync(join(workspace, "AGENTS.md"), "变更后的新规范内容");
-    const status = await invoke(IPC.sessions.status, session.id);
+    const status = await invoke(IPC.sessions.status, task.id);
     expect(status).toMatchObject({
       resourcePhase: "preview",
       agentsMd: { sources: [join(workspace, "AGENTS.md")] },
     });
-    expect(invoke(IPC.sessions.resources, session.id)).toMatchObject({
+    expect(invoke(IPC.sessions.resources, task.id)).toMatchObject({
       active: null,
       last: null,
     });
   });
 
   it("运行中的快照不会被磁盘预览替换，结束后只留下加载摘要", async () => {
-    const { session, workspace } = setup();
-    const iterator = session
+    const { task, workspace } = setup();
+    const iterator = task
       .sendMessage({
         text: "$review 审查这次改动",
         profile: {
@@ -119,27 +119,27 @@ describe("规范与技能 IPC", () => {
       [Symbol.asyncIterator]();
     // 暂停在 user-message，不进入网络请求即可观察本轮快照。
     await iterator.next();
-    const before = session.resourceState.active;
+    const before = task.resourceState.active;
     expect(before?.loaded).toHaveLength(1);
     writeFileSync(
       join(workspace, "AGENTS.md"),
       "新的规范比原来的更长并且应该只影响下一条消息"
     );
-    const overview = invoke(IPC.sessions.resources, session.id);
+    const overview = invoke(IPC.sessions.resources, task.id);
     expect(overview).toMatchObject({
       active: before,
       last: null,
       preview: { loaded: [] },
     });
-    const status = await invoke(IPC.sessions.status, session.id);
+    const status = await invoke(IPC.sessions.status, task.id);
     expect(status).toMatchObject({
       resourcePhase: "active",
       resources: before,
     });
     expect(JSON.stringify(overview)).not.toContain("SECRET_SKILL_BODY");
     await iterator.return?.();
-    expect(session.resourceState).toEqual({ active: null, last: before });
-    expect(await invoke(IPC.sessions.status, session.id)).toMatchObject({
+    expect(task.resourceState).toEqual({ active: null, last: before });
+    expect(await invoke(IPC.sessions.status, task.id)).toMatchObject({
       resourcePhase: "preview",
     });
   });

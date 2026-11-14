@@ -80,31 +80,31 @@ async function waitForView(homeDir, view, message) {
 }
 
 /** 当前打开的任务 id（侧栏选中行）；无打开任务返回 null（evaluateAll 不等待元素） */
-async function currentSessionId(window) {
+async function currentTaskId(window) {
   return window
     .getByTestId("task-row")
     .locator('[aria-current="page"]')
     .evaluateAll((nodes) => nodes[0]?.getAttribute("data-task-id") ?? null);
 }
 
-async function assertCurrentSession(window, sessionId, message) {
+async function assertCurrentTask(window, taskId, message) {
   await until(
-    async () => (await currentSessionId(window)) === sessionId,
-    `${message}：应打开任务 ${sessionId}（实际 ${await currentSessionId(window)}）`
+    async () => (await currentTaskId(window)) === taskId,
+    `${message}：应打开任务 ${taskId}（实际 ${await currentTaskId(window)}）`
   );
 }
 
 /** 无打开任务（草稿态或新建入口），composer 输入框在场 */
-async function assertNoOpenSession(window, message) {
-  await until(async () => (await currentSessionId(window)) === null, message);
+async function assertNoOpenTask(window, message) {
+  await until(async () => (await currentTaskId(window)) === null, message);
   await window.getByTestId("composer-input").waitFor();
 }
 
 /** 「无可打开任务」的现有冷启动终态：不自动打开任务，停在新建草稿入口 */
-async function assertIdleNewSessionEntry(window, message) {
+async function assertIdleNewTaskEntry(window, message) {
   await until(
     async () =>
-      (await currentSessionId(window)) === null &&
+      (await currentTaskId(window)) === null &&
       (await window
         .getByTestId("composer-input")
         .getAttribute("placeholder")) === "新建或选择一个任务后开始对话",
@@ -113,17 +113,17 @@ async function assertIdleNewSessionEntry(window, message) {
 }
 
 /** 排序最前的未归档任务（现有冷启动回退链的打开目标） */
-async function firstActiveSessionId(window) {
+async function firstActiveTaskId(window) {
   return window.evaluate(async () => {
     const list = await window.codexlike.sessions.list();
-    return list.find((session) => session.archivedAt === null)?.id ?? null;
+    return list.find((task) => task.archivedAt === null)?.id ?? null;
   });
 }
 
-async function sessionIdByTitle(window, title) {
+async function taskIdByTitle(window, title) {
   const id = await window.evaluate(async (title) => {
     const list = await window.codexlike.sessions.list();
-    return list.find((session) => session.title === title)?.id ?? null;
+    return list.find((task) => task.title === title)?.id ?? null;
   }, title);
   assert(id !== null, `找不到标题为「${title}」的任务`);
   return id;
@@ -144,7 +144,7 @@ async function createProfile(window, port) {
 }
 
 /** 独立新建草稿发送首条消息建立任务（标题=首条消息） */
-async function createSession(window, title) {
+async function createTask(window, title) {
   await window.getByTestId("new-task").click();
   await window.getByTestId("draft-select-workspace").click();
   await window.getByTestId("composer-input").fill(title);
@@ -156,7 +156,7 @@ async function createSession(window, title) {
   await window.getByTestId("composer-send").waitFor();
 }
 
-async function selectSession(window, title) {
+async function selectTask(window, title) {
   await window.getByTestId("task-item").filter({ hasText: title }).click();
 }
 
@@ -244,12 +244,12 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "甲较早任务");
-    await createSession(window, "乙最新任务");
-    const remembered = await sessionIdByTitle(window, "甲较早任务");
-    const front = await sessionIdByTitle(window, "乙最新任务");
-    await selectSession(window, "甲较早任务");
-    await assertCurrentSession(window, remembered, "退出前应查看甲任务");
+    await createTask(window, "甲较早任务");
+    await createTask(window, "乙最新任务");
+    const remembered = await taskIdByTitle(window, "甲较早任务");
+    const front = await taskIdByTitle(window, "乙最新任务");
+    await selectTask(window, "甲较早任务");
+    await assertCurrentTask(window, remembered, "退出前应查看甲任务");
     await waitForTarget(
       homeDir,
       { kind: "task", taskId: remembered },
@@ -258,14 +258,14 @@ async function runScenarios(port) {
     await ctl.quit();
 
     const second = await ctl.relaunch();
-    await assertCurrentSession(
+    await assertCurrentTask(
       second.window,
       remembered,
       "重开应回到退出前查看的甲任务"
     );
     // 侧栏顺序证明打开来源是启动现场：排序最前的未归档是乙，不是被打开的甲
     assert(
-      (await firstActiveSessionId(second.window)) === front,
+      (await firstActiveTaskId(second.window)) === front,
       "排序最前的未归档应是乙（对照组），否则无法证明恢复走启动现场"
     );
   });
@@ -274,9 +274,9 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "归档目标任务");
-    await createSession(window, "未归档搭档任务");
-    const archived = await sessionIdByTitle(window, "归档目标任务");
+    await createTask(window, "归档目标任务");
+    await createTask(window, "未归档搭档任务");
+    const archived = await taskIdByTitle(window, "归档目标任务");
     const menu = await taskMenu(
       window,
       window.getByTestId("task-item").filter({ hasText: "归档目标任务" })
@@ -294,7 +294,7 @@ async function runScenarios(port) {
       .getByTestId("archived-task-item")
       .filter({ hasText: "归档目标任务" })
       .click();
-    await assertCurrentSession(window, archived, "退出前应查看归档任务");
+    await assertCurrentTask(window, archived, "退出前应查看归档任务");
     await waitForTarget(
       homeDir,
       { kind: "task", taskId: archived },
@@ -303,11 +303,7 @@ async function runScenarios(port) {
     await ctl.quit();
 
     const second = await ctl.relaunch();
-    await assertCurrentSession(
-      second.window,
-      archived,
-      "重开应照常回到归档任务"
-    );
+    await assertCurrentTask(second.window, archived, "重开应照常回到归档任务");
   });
 
   await scenario(
@@ -325,16 +321,13 @@ async function runScenarios(port) {
       )[0].id;
       await projectAction(window);
       await window.getByTestId("composer-input").fill("项目草稿待恢复文本");
-      await assertNoOpenSession(window, "草稿态不应打开任何任务");
+      await assertNoOpenTask(window, "草稿态不应打开任何任务");
       await waitForTarget(homeDir, { kind: "new", projectId }, "草稿目标上报");
       await ctl.quit();
 
       const second = await ctl.relaunch();
       await second.window.getByTestId("project-group").waitFor();
-      await assertNoOpenSession(
-        second.window,
-        "重开应停在项目草稿（无打开任务）"
-      );
+      await assertNoOpenTask(second.window, "重开应停在项目草稿（无打开任务）");
       await untilDraft(
         second.window,
         "项目草稿待恢复文本",
@@ -353,13 +346,13 @@ async function runScenarios(port) {
       const { window } = await ctl.launch();
       await window.evaluate(() => localStorage.clear());
       await createProfile(window, port);
-      await createSession(window, "设置页下的任务");
-      const sessionId = await sessionIdByTitle(window, "设置页下的任务");
+      await createTask(window, "设置页下的任务");
+      const taskId = await taskIdByTitle(window, "设置页下的任务");
       await window.getByTestId("settings-open").click();
       await waitForView(homeDir, "settings", "切到设置页上报视图");
       await waitForTarget(
         homeDir,
-        { kind: "task", taskId: sessionId },
+        { kind: "task", taskId: taskId },
         "设置页下目标保持"
       );
       await ctl.quit();
@@ -369,9 +362,9 @@ async function runScenarios(port) {
         .getByTestId("settings-back")
         .waitFor({ timeout: 10_000 });
       await second.window.getByTestId("settings-back").click();
-      await assertCurrentSession(
+      await assertCurrentTask(
         second.window,
-        sessionId,
+        taskId,
         "从设置页返回工作区仍显示最后打开的任务"
       );
     }
@@ -383,9 +376,9 @@ async function runScenarios(port) {
       const { window } = await ctl.launch();
       await window.evaluate(() => localStorage.clear());
       await createProfile(window, port);
-      await createSession(window, "回退见证任务");
-      await createSession(window, "将被删目标任务");
-      const fallback = await sessionIdByTitle(window, "回退见证任务");
+      await createTask(window, "回退见证任务");
+      await createTask(window, "将被删目标任务");
+      const fallback = await taskIdByTitle(window, "回退见证任务");
       // 归档「将被删目标任务」：它不再是回退候选（回退链只找未归档），
       // 唯一未归档剩「回退见证任务」——与记住目标有真实区分度
       const menu = await taskMenu(
@@ -406,8 +399,8 @@ async function runScenarios(port) {
         .getByTestId("archived-task-item")
         .filter({ hasText: "将被删目标任务" })
         .click();
-      const gone = await sessionIdByTitle(window, "将被删目标任务");
-      await assertCurrentSession(window, gone, "退出前查看归档目标");
+      const gone = await taskIdByTitle(window, "将被删目标任务");
+      await assertCurrentTask(window, gone, "退出前查看归档目标");
       await waitForTarget(homeDir, { kind: "task", taskId: gone }, "目标上报");
       await ctl.quit();
 
@@ -421,7 +414,7 @@ async function runScenarios(port) {
       );
 
       const second = await ctl.relaunch();
-      await assertCurrentSession(
+      await assertCurrentTask(
         second.window,
         fallback,
         "记住的任务失效应回退到排序最前的未归档任务（回退见证）"
@@ -433,8 +426,8 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "独苗任务");
-    const only = await sessionIdByTitle(window, "独苗任务");
+    await createTask(window, "独苗任务");
+    const only = await taskIdByTitle(window, "独苗任务");
     const menu = await taskMenu(
       window,
       window.getByTestId("task-item").filter({ hasText: "独苗任务" })
@@ -452,7 +445,7 @@ async function runScenarios(port) {
       .getByTestId("archived-task-item")
       .filter({ hasText: "独苗任务" })
       .click();
-    await assertCurrentSession(window, only, "退出前查看归档独苗");
+    await assertCurrentTask(window, only, "退出前查看归档独苗");
     await waitForTarget(homeDir, { kind: "task", taskId: only }, "目标上报");
     await ctl.quit();
 
@@ -466,7 +459,7 @@ async function runScenarios(port) {
     );
 
     const second = await ctl.relaunch();
-    await assertIdleNewSessionEntry(
+    await assertIdleNewTaskEntry(
       second.window,
       "无可打开任务时应停在新建草稿入口"
     );
@@ -476,11 +469,11 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "强杀前任务");
-    await createSession(window, "强杀后最新任务");
-    const remembered = await sessionIdByTitle(window, "强杀前任务");
-    await selectSession(window, "强杀前任务");
-    await assertCurrentSession(window, remembered, "强杀前查看目标任务");
+    await createTask(window, "强杀前任务");
+    await createTask(window, "强杀后最新任务");
+    const remembered = await taskIdByTitle(window, "强杀前任务");
+    await selectTask(window, "强杀前任务");
+    await assertCurrentTask(window, remembered, "强杀前查看目标任务");
     await waitForTarget(
       homeDir,
       { kind: "task", taskId: remembered },
@@ -490,7 +483,7 @@ async function runScenarios(port) {
     await ctl.kill();
 
     const second = await ctl.relaunch();
-    await assertCurrentSession(
+    await assertCurrentTask(
       second.window,
       remembered,
       "kill 后重开应照样回到强杀前查看的任务"
@@ -501,13 +494,13 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "较早任务");
-    await createSession(window, "最新任务");
-    const front = await sessionIdByTitle(window, "最新任务");
-    await selectSession(window, "较早任务");
-    await assertCurrentSession(
+    await createTask(window, "较早任务");
+    await createTask(window, "最新任务");
+    const front = await taskIdByTitle(window, "最新任务");
+    await selectTask(window, "较早任务");
+    await assertCurrentTask(
       window,
-      await sessionIdByTitle(window, "较早任务"),
+      await taskIdByTitle(window, "较早任务"),
       "退出前查看较早任务"
     );
     await ctl.quit();
@@ -517,13 +510,13 @@ async function runScenarios(port) {
     rmSync(join(homeDir, STATE_FILE));
 
     const second = await ctl.relaunch();
-    await assertCurrentSession(
+    await assertCurrentTask(
       second.window,
       front,
       "无现场文件应打开排序最前的未归档任务（现有冷启动行为）"
     );
     assert(
-      (await firstActiveSessionId(second.window)) === front,
+      (await firstActiveTaskId(second.window)) === front,
       "对照组：排序最前的未归档任务应与打开的一致"
     );
   });
@@ -532,12 +525,12 @@ async function runScenarios(port) {
     const { window } = await ctl.launch();
     await window.evaluate(() => localStorage.clear());
     await createProfile(window, port);
-    await createSession(window, "往返甲任务");
-    await createSession(window, "往返乙任务");
-    const remembered = await sessionIdByTitle(window, "往返甲任务");
-    const switched = await sessionIdByTitle(window, "往返乙任务");
-    await selectSession(window, "往返甲任务");
-    await assertCurrentSession(window, remembered, "退出前应查看甲任务");
+    await createTask(window, "往返甲任务");
+    await createTask(window, "往返乙任务");
+    const remembered = await taskIdByTitle(window, "往返甲任务");
+    const switched = await taskIdByTitle(window, "往返乙任务");
+    await selectTask(window, "往返甲任务");
+    await assertCurrentTask(window, remembered, "退出前应查看甲任务");
     await waitForTarget(
       homeDir,
       { kind: "task", taskId: remembered },
@@ -546,13 +539,13 @@ async function runScenarios(port) {
     await ctl.quit();
 
     const second = await ctl.relaunch();
-    await assertCurrentSession(
+    await assertCurrentTask(
       second.window,
       remembered,
       "冷启动应恢复到启动目标甲"
     );
-    await selectSession(second.window, "往返乙任务");
-    await assertCurrentSession(second.window, switched, "运行中切到乙");
+    await selectTask(second.window, "往返乙任务");
+    await assertCurrentTask(second.window, switched, "运行中切到乙");
     await waitForTarget(
       homeDir,
       { kind: "task", taskId: switched },
@@ -565,13 +558,13 @@ async function runScenarios(port) {
     await second.window.getByTestId("settings-open").click();
     await second.window.getByTestId("settings-back").click();
     await until(
-      async () => (await currentSessionId(second.window)) !== null,
+      async () => (await currentTaskId(second.window)) !== null,
       "设置页返回后应恢复显示某个任务"
     );
     await delay(2000);
     assert(
-      (await currentSessionId(second.window)) === switched,
-      `设置页返回后应仍显示乙（不被拉回启动目标甲，实际 ${await currentSessionId(second.window)}）`
+      (await currentTaskId(second.window)) === switched,
+      `设置页返回后应仍显示乙（不被拉回启动目标甲，实际 ${await currentTaskId(second.window)}）`
     );
     const state = readState(homeDir);
     assert(
@@ -582,7 +575,7 @@ async function runScenarios(port) {
 
     await ctl.quit();
     const third = await ctl.relaunch();
-    await assertCurrentSession(
+    await assertCurrentTask(
       third.window,
       switched,
       "再重启仍回乙（现场未被启动目标覆盖）"

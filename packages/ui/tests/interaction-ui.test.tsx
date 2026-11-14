@@ -12,7 +12,7 @@ import { createQuestionDraft } from "../src/lib/interaction-draft";
 const approval: InteractionRecord = {
   request: {
     id: "approval-1",
-    sessionId: "s1",
+    taskId: "s1",
     turnId: "t1",
     toolCallId: "c1",
     kind: "approval",
@@ -38,7 +38,7 @@ const props = {
 
 describe("唯一底部 InteractionPanel", () => {
   it("历史明确区分任务授权批量通过与旧无 scope 单次批准", () => {
-    for (const scope of [undefined, "once", "session"] as const) {
+    for (const scope of [undefined, "once", "task"] as const) {
       const html = renderToStaticMarkup(
         createElement(InteractionHistory, {
           record: {
@@ -53,7 +53,7 @@ describe("唯一底部 InteractionPanel", () => {
         })
       );
       expect(html).toContain(
-        scope === "session" ? "任务授权批量通过" : "已批准（本次）"
+        scope === "task" ? "任务授权批量通过" : "已批准（本次）"
       );
       expect(html).not.toContain("<button");
     }

@@ -33,8 +33,8 @@ afterEach(async () => {
   handlers.clear();
 });
 function invoke(name: string, ...args: unknown[]): any {
-  const handler = handlers.get(`sessions:${name}`);
-  if (!handler) throw new Error(`未注册通道 sessions:${name}`);
+  const handler = handlers.get(`tasks:${name}`);
+  if (!handler) throw new Error(`未注册通道 tasks:${name}`);
   return handler({}, ...args);
 }
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 8000 });

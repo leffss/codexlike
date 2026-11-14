@@ -37,8 +37,8 @@ afterEach(async () => {
   handlers.clear();
 });
 function invoke(name: string, ...args: unknown[]): any {
-  const handler = handlers.get(`sessions:${name}`);
-  if (!handler) throw new Error(`未注册通道 sessions:${name}`);
+  const handler = handlers.get(`tasks:${name}`);
+  if (!handler) throw new Error(`未注册通道 tasks:${name}`);
   return handler({}, ...args);
 }
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 8000 });
@@ -166,12 +166,10 @@ async function setup() {
     resourcesFor,
   });
   cleanup.push(async () => {
-    for (const session of manager.list()) invoke("interrupt", session.id);
+    for (const task of manager.list()) invoke("interrupt", task.id);
     await waitFor(() =>
       expect(
-        manager
-          .list()
-          .every((session) => !invoke("execution", session.id).running)
+        manager.list().every((task) => !invoke("execution", task.id).running)
       ).toBe(true)
     );
   });
@@ -216,7 +214,7 @@ async function setup() {
 
 it("忙时 send 不报错而入队：事件信封推送队列快照，view 携带队列", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-enqueue",
     projectId: null,
     text: "首轮任务",
@@ -225,13 +223,13 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   await app.reply("首轮任务", "首轮进行中", null);
 
   // 忙时 send 两条：不再抛「任务正在执行」，而是入队（主进程单一真相）
-  await invoke("send", session.id, "排队一", app.profile.id);
-  await invoke("send", session.id, "排队二", app.profile.id);
+  await invoke("send", task.id, "排队一", app.profile.id);
+  await invoke("send", task.id, "排队二", app.profile.id);
 
   // 队列变更作为任务事件信封推送（复用 taskId/sequence/executionId）
   const queued = app.delivered.filter(
     (envelope) =>
-      envelope.taskId === session.id &&
+      envelope.taskId === task.id &&
       (envelope.event as any).type === "queue-changed"
   );
   expect(queued.length).toBeGreaterThanOrEqual(2);
@@ -248,7 +246,7 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
     approvalMode: "ask",
   });
   // view 快照：切回任务时队列原样可见
-  const view = invoke("view", session.id);
+  const view = invoke("view", task.id);
   expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
     "排队一",
     "排队二",
@@ -259,13 +257,11 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
   await app.reply("排队一");
   await app.reply("排队二");
   await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
-  await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   // 消费按入队顺序进入任务消息历史
-  const userTexts = invoke("messages", session.id)
+  const userTexts = invoke("messages", task.id)
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
   expect(userTexts).toEqual(["首轮任务", "排队一", "排队二"]);
@@ -273,14 +269,14 @@ it("忙时 send 不报错而入队：事件信封推送队列快照，view 携�
 
 it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随轮次推送", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-sequence",
     projectId: null,
     text: "首轮",
   });
   await app.reply("首轮", "进行中", null);
-  await invoke("send", session.id, "甲", app.profile.id);
-  await invoke("send", session.id, "乙", app.profile.id);
+  await invoke("send", task.id, "甲", app.profile.id);
+  await invoke("send", task.id, "乙", app.profile.id);
 
   // 首轮结束 → 自动取队首「甲」；「甲」的回复保持进行中
   await app.finish("首轮");
@@ -291,7 +287,7 @@ it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随�
   // 出队事件已推送（「甲」被取出发送）
   const dequeued = app.delivered.filter(
     (envelope) =>
-      envelope.taskId === session.id &&
+      envelope.taskId === task.id &&
       (envelope.event as any).type === "queue-changed" &&
       (envelope.event as any).reason === "dequeue"
   );
@@ -305,27 +301,25 @@ it("逐条消费：第一条回复完成前不发下一条，dequeue 事件随�
   // 「甲」完成 → 「乙」随后自动发出
   await app.finish("甲");
   await app.reply("乙");
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
-  await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
 }, 30_000);
 
 it("排队存在时点停止：当前回复中断、队列原样保留并进入暂停（事件与 view 可见）", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-pause-on-stop",
     projectId: null,
     text: "首轮任务",
   });
   await app.reply("首轮任务", "首轮进行中", null);
-  await invoke("send", session.id, "排队一", app.profile.id);
+  await invoke("send", task.id, "排队一", app.profile.id);
 
   // 排队存在时点停止：中断当前回复，队列保留并进入暂停
-  expect(invoke("interrupt", session.id)).toBe(true);
-  const view = invoke("view", session.id);
+  expect(invoke("interrupt", task.id)).toBe(true);
+  const view = invoke("view", task.id);
   expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
     "排队一",
   ]);
@@ -334,7 +328,7 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   // 置暂停推送 queue-changed(pause) 事件信封（携带暂停后快照）
   const pauseEvents = app.delivered.filter(
     (envelope) =>
-      envelope.taskId === session.id &&
+      envelope.taskId === task.id &&
       (envelope.event as any).type === "queue-changed" &&
       (envelope.event as any).reason === "pause"
   );
@@ -345,57 +339,49 @@ it("排队存在时点停止：当前回复中断、队列原样保留并进入�
   expect((pauseEvents.at(-1)!.event as any).paused).toBe(true);
 
   // 中断落定（空闲）后暂停保持：队列不被消费
-  await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(app.hasRequest("排队一")).toBe(false);
-  expect(invoke("view", session.id).queueState.paused).toBe(true);
+  expect(invoke("view", task.id).queueState.paused).toBe(true);
 
   // 收尾：手动恢复并让排队消息完成
-  invoke("queue-resume", session.id);
+  invoke("queue-resume", task.id);
   await app.reply("排队一");
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
-  await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
 }, 30_000);
 
 it("暂停期间插话直发：插话回复结束后自动恢复队列消费", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-pause-interject",
     projectId: null,
     text: "首轮任务",
   });
   await app.reply("首轮任务", "首轮进行中", null);
-  await invoke("send", session.id, "排队一", app.profile.id);
-  invoke("interrupt", session.id);
-  await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
+  await invoke("send", task.id, "排队一", app.profile.id);
+  invoke("interrupt", task.id);
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
 
   // 暂停期间直接发新消息：任务空闲走直发（不排队、无需先解除暂停）
-  await invoke("send", session.id, "插话", app.profile.id);
+  await invoke("send", task.id, "插话", app.profile.id);
   await waitFor(() => expect(app.hasRequest("插话")).toBe(true));
   expect(
-    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
+    invoke("view", task.id).queueState.queue.map((item: any) => item.text)
   ).toEqual(["排队一"]);
 
   // 插话的回复结束 → 暂停自动解除、队列继续消费
   await app.reply("插话");
   await app.reply("排队一");
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
-  await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
-  );
-  expect(invoke("view", session.id).queueState.paused).toBe(false);
+  expect(invoke("view", task.id).queueState.paused).toBe(false);
   // 顺序：首轮（中断）→ 插话 → 排队一
-  const userTexts = invoke("messages", session.id)
+  const userTexts = invoke("messages", task.id)
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
   expect(userTexts).toEqual(["首轮任务", "插话", "排队一"]);
@@ -403,50 +389,44 @@ it("暂停期间插话直发：插话回复结束后自动恢复队列消费", a
 
 it("手动恢复（queue-resume）：清暂停标志并立即从队首继续消费", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-manual-resume",
     projectId: null,
     text: "首轮任务",
   });
   await app.reply("首轮任务", "首轮进行中", null);
-  await invoke("send", session.id, "排队一", app.profile.id);
-  invoke("interrupt", session.id);
-  await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
+  await invoke("send", task.id, "排队一", app.profile.id);
+  invoke("interrupt", task.id);
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
 
-  const result = invoke("queue-resume", session.id);
+  const result = invoke("queue-resume", task.id);
   expect(result.paused).toBe(false);
   expect(result.queue.map((item: any) => item.text)).toEqual(["排队一"]);
   // 恢复立即触发消费：队首发出
   await app.reply("排队一");
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
-  await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
 }, 30_000);
 
 it("清空（queue-clear）：全部作废删除、队列消失、无消费", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-clear",
     projectId: null,
     text: "首轮任务",
   });
   await app.reply("首轮任务", "首轮进行中", null);
-  await invoke("send", session.id, "排队一", app.profile.id);
-  await invoke("send", session.id, "排队二", app.profile.id);
-  invoke("interrupt", session.id);
-  await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
+  await invoke("send", task.id, "排队一", app.profile.id);
+  await invoke("send", task.id, "排队二", app.profile.id);
+  invoke("interrupt", task.id);
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
 
-  const result = invoke("queue-clear", session.id);
+  const result = invoke("queue-clear", task.id);
   expect(result.queue).toEqual([]);
   expect(result.paused).toBe(false);
-  const view = invoke("view", session.id);
+  const view = invoke("view", task.id);
   expect(view.queueState.queue).toEqual([]);
   expect(view.queueState.paused).toBe(false);
 
@@ -458,44 +438,44 @@ it("清空（queue-clear）：全部作废删除、队列消失、无消费", as
 
 it("等待用户交互（审批/问答）期间直调 send：明确中文报错、不入队、队列不消费（spec 用户故事 17）", async () => {
   const app = await setup();
-  const session = await invoke("start", {
+  const task = await invoke("start", {
     requestId: "queue-pending-reject",
     projectId: null,
     text: "首轮任务",
   });
   await app.reply("首轮任务", "首轮进行中", null);
-  await invoke("send", session.id, "排队甲", app.profile.id);
-  await invoke("send", session.id, app.askMarker, app.profile.id);
-  await invoke("send", session.id, "排队丙", app.profile.id);
+  await invoke("send", task.id, "排队甲", app.profile.id);
+  await invoke("send", task.id, app.askMarker, app.profile.id);
+  await invoke("send", task.id, "排队丙", app.profile.id);
 
   // 首轮完成 → 消费「排队甲」→ 甲完成 → 消费问答触发条 → 回复挂起等待用户回答
   await app.finish("首轮任务");
   await app.reply("排队甲");
   await waitFor(() =>
-    expect(invoke("execution", session.id).waitingForUser).toBe(true)
+    expect(invoke("execution", task.id).waitingForUser).toBe(true)
   );
   // 队列快照：问答触发条已取出发送（inflight 置顶），仍剩「排队丙」待发
   expect(
-    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
+    invoke("view", task.id).queueState.queue.map((item: any) => item.text)
   ).toEqual([app.askMarker, "排队丙"]);
 
   // UI 已禁用，此处直调 send 模拟绕过 UI 的路径：不得静默入队，明确中文报错
-  await expect(
-    invoke("send", session.id, "插话", app.profile.id)
-  ).rejects.toThrow("任务正在等待审批或问答");
+  await expect(invoke("send", task.id, "插话", app.profile.id)).rejects.toThrow(
+    "任务正在等待审批或问答"
+  );
   // 不入队：快照没有新条目，也没有新的 enqueue 事件
   expect(
-    invoke("view", session.id).queueState.queue.map((item: any) => item.text)
+    invoke("view", task.id).queueState.queue.map((item: any) => item.text)
   ).toEqual([app.askMarker, "排队丙"]);
   // 队列不消费：「排队丙」未被发出
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(app.hasRequest("排队丙")).toBe(false);
 
   // 收尾：回答问题 → 本轮完成 → 队列自动恢复消费「排队丙」
-  const pending = invoke("pending-interactions", session.id);
+  const pending = invoke("pending-interactions", task.id);
   expect(pending).toHaveLength(1);
   expect(
-    invoke("respond-interaction", session.id, pending[0].request.id, {
+    invoke("respond-interaction", task.id, pending[0].request.id, {
       kind: "questions",
       answers: [
         {
@@ -508,10 +488,8 @@ it("等待用户交互（审批/问答）期间直调 send：明确中文报错�
     })
   ).toBe(true);
   await app.reply("排队丙");
+  await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
   await waitFor(() =>
-    expect(invoke("execution", session.id).running).toBe(false)
-  );
-  await waitFor(() =>
-    expect(invoke("view", session.id).queueState.queue).toEqual([])
+    expect(invoke("view", task.id).queueState.queue).toEqual([])
   );
 }, 30_000);

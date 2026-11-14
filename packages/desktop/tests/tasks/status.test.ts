@@ -31,17 +31,17 @@ const emptyDiscovery: AgentsMdDiscovery = {
 };
 
 const messages: StoredMessage[] = [
-  { id: "m1", sessionId: "s1", role: "user", content: "你好", createdAt: "t" },
+  { id: "m1", taskId: "s1", role: "user", content: "你好", createdAt: "t" },
   {
     id: "m2",
-    sessionId: "s1",
+    taskId: "s1",
     role: "assistant",
     content: "你好，有什么可以帮你？",
     createdAt: "t",
   },
   {
     id: "m3",
-    sessionId: "s1",
+    taskId: "s1",
     role: "error",
     content: "模型请求失败（HTTP 500）：x",
     createdAt: "t",
@@ -240,14 +240,14 @@ describe("buildTaskStatus 已压缩标记（工单 08）", () => {
     const compactedMessages: StoredMessage[] = [
       {
         id: "s1",
-        sessionId: "s1",
+        taskId: "s1",
         role: "compact-summary",
         content: "摘要内容",
         createdAt: "t",
       },
       {
         id: "m4",
-        sessionId: "s1",
+        taskId: "s1",
         role: "user",
         content: "继续",
         createdAt: "t",
@@ -260,7 +260,7 @@ describe("buildTaskStatus 已压缩标记（工单 08）", () => {
       providerProfileName: null,
       latestCompact: {
         id: "c1",
-        sessionId: "s1",
+        taskId: "s1",
         summary: "摘要内容",
         messagesCompacted: 8,
         createdAt: "2026-11-11T09:00:00.000Z",

@@ -109,7 +109,7 @@ export function InteractionPanel(props: {
                   props.onRespond({
                     kind: "approval",
                     decision: "approve",
-                    scope: "session",
+                    scope: "task",
                   })
                 }
               >

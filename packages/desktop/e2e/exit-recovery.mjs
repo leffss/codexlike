@@ -161,7 +161,7 @@ async function main() {
         (s) => s.title === "独立问答"
       );
       return {
-        session: record,
+        task: record,
         request: (
           await window.codexlike.sessions.pendingInteractions(record.id)
         )[0].request,
@@ -175,7 +175,7 @@ async function main() {
         (s) => s.title === "后台审批"
       );
       return {
-        session: record,
+        task: record,
         request: (
           await window.codexlike.sessions.pendingInteractions(record.id)
         )[0].request,
@@ -322,7 +322,7 @@ async function main() {
     app = null;
     await until(() => childDisconnected, "退出未中断子代理模型连接");
     assert(
-      !existsSync(join(approval.session.workspacePath, "must-not-write.txt")),
+      !existsSync(join(approval.task.workspacePath, "must-not-write.txt")),
       "旧审批未执行"
     );
     assert(model.requestCount() === count, "确认退出未触发额外模型请求");
@@ -363,12 +363,12 @@ async function main() {
     const responses = await window.evaluate(
       async ({ pending, approval }) => [
         await window.codexlike.sessions.respondInteraction(
-          pending.session.id,
+          pending.task.id,
           pending.request.id,
           { kind: "questions", answers: [] }
         ),
         await window.codexlike.sessions.respondApproval(
-          approval.session.id,
+          approval.task.id,
           approval.request.id,
           "always"
         ),
@@ -400,7 +400,7 @@ async function main() {
     await send(window, "后台审批");
     await window.getByTestId("approval-approve").waitFor();
     assert(
-      !existsSync(join(approval.session.workspacePath, "must-not-write.txt")),
+      !existsSync(join(approval.task.workspacePath, "must-not-write.txt")),
       "下一轮仍需新的显式授权"
     );
     await window.getByTestId("composer-stop").click();

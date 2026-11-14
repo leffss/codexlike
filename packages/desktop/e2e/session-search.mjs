@@ -165,9 +165,7 @@ async function main() {
     const beforeOpen = await window.evaluate(() =>
       window.codexlike.sessions.list()
     );
-    const projectBeforeOpen = beforeOpen.find(
-      (session) => session.id === projectId
-    );
+    const projectBeforeOpen = beforeOpen.find((task) => task.id === projectId);
     await results().filter({ hasText: "项目任务" }).click();
     await window
       .getByTestId("message-assistant")
@@ -175,13 +173,13 @@ async function main() {
       .waitFor();
     const list = await window.evaluate(() => window.codexlike.sessions.list());
     assert(
-      list.find((session) => session.id === projectId).lastUsedAt ===
+      list.find((task) => task.id === projectId).lastUsedAt ===
         projectBeforeOpen.lastUsedAt,
       "搜索打开不得更新 lastUsedAt"
     );
     assert(
-      JSON.stringify(list.map((session) => session.id)) ===
-        JSON.stringify(beforeOpen.map((session) => session.id)),
+      JSON.stringify(list.map((task) => task.id)) ===
+        JSON.stringify(beforeOpen.map((task) => task.id)),
       "搜索打开不得改变最近使用顺序"
     );
     await search("星河");

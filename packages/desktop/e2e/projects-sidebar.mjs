@@ -81,7 +81,7 @@ async function main() {
       ),
       "项目目录明确展示"
     );
-    const projectSession = await window
+    const projectTask = await window
       .getByTestId("task-item")
       .getAttribute("data-task-id");
     await selectComposerOption(window, "approval-mode-select", "full-access");
@@ -184,7 +184,7 @@ async function main() {
       (await window
         .getByTestId("task-item")
         .filter({ hasText: "项目草稿" })
-        .getAttribute("data-task-id")) === projectSession,
+        .getAttribute("data-task-id")) === projectTask,
       "任务标识稳定"
     );
     await window

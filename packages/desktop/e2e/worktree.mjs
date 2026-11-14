@@ -195,7 +195,7 @@ async function main() {
       "无风险正式任务不渲染底部提示容器"
     );
     await window.screenshot({
-      path: join(screenshots, "existing-session.png"),
+      path: join(screenshots, "existing-task.png"),
     });
 
     await window.getByTestId("new-task").click();

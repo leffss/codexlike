@@ -322,7 +322,7 @@ async function main() {
       "出现纵向滚动时内容列不能跳宽"
     );
     await window.screenshot({
-      path: join(screenshots, "existing-session.png"),
+      path: join(screenshots, "existing-task.png"),
     });
 
     // 独立面板是整个主列的兄弟，外层分档不因面板打开而降档。
@@ -429,7 +429,7 @@ async function main() {
     }
 
     // 同一真实任务通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
-    const session = window.getByTestId("task-item").first();
+    const task = window.getByTestId("task-item").first();
     for (const [width, height, min, max] of [
       [1000, 800, expectedFull - 2, expectedFull + 2],
       [1280, 800, 769, 896],
@@ -466,7 +466,7 @@ async function main() {
           return result;
         });
       });
-      await session.click();
+      await task.click();
       await window
         .getByTestId("draft-select-workspace")
         .waitFor({ state: "hidden" });

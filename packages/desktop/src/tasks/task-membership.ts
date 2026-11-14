@@ -19,8 +19,8 @@ export function createTaskMembership(
       return { projectId, taskIds: manager.removeProject(projectId) };
     },
     setProject(taskId: string, projectId: string | null) {
-      const session = manager.list().find((item) => item.id === taskId);
-      if (!session) throw new Error("任务不存在或已移除");
+      const task = manager.list().find((item) => item.id === taskId);
+      if (!task) throw new Error("任务不存在或已移除");
       management.assertInactive(taskId);
       if (projectId !== null) {
         const project = manager
@@ -28,12 +28,12 @@ export function createTaskMembership(
           .find((item) => item.id === projectId);
         if (!project) throw new Error("项目不存在或已移除");
         const source =
-          session.workspaceMode === "worktree"
-            ? session.workspaceOriginPath
-            : session.workspacePath;
+          task.workspaceMode === "worktree"
+            ? task.workspaceOriginPath
+            : task.workspacePath;
         if (!source || !sameWorkspaceDirectory(source, project.workspacePath))
           throw new Error(
-            session.workspaceMode === "worktree"
+            task.workspaceMode === "worktree"
               ? "Worktree 任务只能移回来源项目"
               : "任务工作区与目标项目目录不匹配"
           );
