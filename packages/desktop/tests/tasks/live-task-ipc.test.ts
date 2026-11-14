@@ -94,16 +94,12 @@ async function setup() {
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
   const delivered: TaskEventEnvelope[] = [];
-  // 任务→任务改名（票 03）：事件流双发 task:events 与 session:events，两侧序列必须一致。
-  const deliveredOnTaskChannel: TaskEventEnvelope[] = [];
   const window = {
     isDestroyed: () => false,
     webContents: {
       send: (channel: string, envelope: TaskEventEnvelope) => {
-        if (channel === "session:events")
+        if (channel === "task:events")
           delivered.push(structuredClone(envelope));
-        else if (channel === "task:events")
-          deliveredOnTaskChannel.push(structuredClone(envelope));
       },
     },
   } as unknown as BrowserWindow;
@@ -138,7 +134,7 @@ async function setup() {
     );
     if (finish) res.end("data: [DONE]\n\n");
   }
-  return { profile, project, frame, delivered, deliveredOnTaskChannel };
+  return { profile, project, frame, delivered };
 }
 
 it("运行期思考随现场恢复但不扩大历史持久化范围，等待工具可从统一现场取得", async () => {
@@ -217,8 +213,6 @@ it("运行期思考随现场恢复但不扩大历史持久化范围，等待工�
   )?.message;
   expect(interrupted?.reasoning).toBe("只存在运行期的思考");
   expect(interrupted?.content).not.toContain("只存在运行期的思考");
-  // 事件流双发（票 03）：task:events 与 session:events 收到完全一致的信封序列
-  expect(app.deliveredOnTaskChannel).toEqual(app.delivered);
 });
 
 it("启动前失败不覆盖上一轮现场与水位，重试仍沿原序号递增", async () => {

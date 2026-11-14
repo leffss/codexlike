@@ -157,13 +157,13 @@ async function main() {
     await send(window, "独立问答");
     await window.getByTestId("question-custom").fill("尚未提交的退出问答草稿");
     const pending = await window.evaluate(async () => {
-      const record = (await window.codexlike.sessions.list()).find(
+      const record = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "独立问答"
       );
       return {
         task: record,
         request: (
-          await window.codexlike.sessions.pendingInteractions(record.id)
+          await window.codexlike.tasks.pendingInteractions(record.id)
         )[0].request,
       };
     });
@@ -171,13 +171,13 @@ async function main() {
     await send(window, "后台审批");
     await window.getByTestId("approval-approve").waitFor();
     const approval = await window.evaluate(async () => {
-      const record = (await window.codexlike.sessions.list()).find(
+      const record = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "后台审批"
       );
       return {
         task: record,
         request: (
-          await window.codexlike.sessions.pendingInteractions(record.id)
+          await window.codexlike.tasks.pendingInteractions(record.id)
         )[0].request,
       };
     });
@@ -362,12 +362,12 @@ async function main() {
     );
     const responses = await window.evaluate(
       async ({ pending, approval }) => [
-        await window.codexlike.sessions.respondInteraction(
+        await window.codexlike.tasks.respondInteraction(
           pending.task.id,
           pending.request.id,
           { kind: "questions", answers: [] }
         ),
-        await window.codexlike.sessions.respondApproval(
+        await window.codexlike.tasks.respondApproval(
           approval.task.id,
           approval.request.id,
           "always"

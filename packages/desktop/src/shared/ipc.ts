@@ -43,7 +43,7 @@ export type WindowState = { maximized: boolean };
 export type { LaunchState, LaunchView };
 
 // ui 侧经 `@codexlike/desktop/ipc` 引用 /status 数据形状
-export type { TaskStatusInfo, TaskStatusInfo as SessionStatusInfo };
+export type { TaskStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
 export type { TerminalShell };
@@ -55,7 +55,7 @@ export type { QueuedMessage, QueueChangeReason };
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
  * preload（contextBridge）暴露 `window.codexlike`，UI 通过 `@codexlike/desktop/ipc` 引用类型。
- * 主→渲染：任务事件流（`session:events` channel，按任务 ID 多路复用）。
+ * 主→渲染：任务事件流（`task:events` channel，按任务 ID 多路复用）。
  */
 export const IPC = {
   windowControls: {
@@ -85,10 +85,6 @@ export const IPC = {
     update: "provider-profiles:update",
     remove: "provider-profiles:remove",
   },
-  /**
-   * 任务→任务改名（票 03）：`tasks:*` 为正式 channel，主进程与旧 `sessions:*`
-   * 双注册同一 handler（expand 兼容，UI 与 e2e 不改仍绿，票 06 删除旧名）。
-   */
   tasks: {
     /** 全部任务（含已归档；置顶优先、最近使用倒序，侧栏按归属分区）。 */
     list: "tasks:list",
@@ -146,64 +142,6 @@ export const IPC = {
     /** 响应一个待处理交互；类型与内容由 Core 对照请求校验。 */
     respondInteraction: "tasks:respond-interaction",
   },
-  /** expand 兼容（票 03）：旧 sessions:* channel，与 tasks:* 双注册同一 handler；票 06 删除。 */
-  sessions: {
-    /** 全部任务（含已归档；置顶优先、最近使用倒序，侧栏按归属分区）。 */
-    list: "sessions:list",
-    search: "sessions:search",
-    /** 首次发送：幂等创建正式任务并启动正常发送。 */
-    start: "sessions:start",
-    execution: "sessions:execution",
-    /** 执行起点历史与截至 sequence 的完整运行现场；先订阅再读取。 */
-    view: "sessions:view",
-    markViewed: "sessions:mark-viewed",
-    setPinned: "sessions:set-pinned",
-    markUsed: "sessions:mark-used",
-    workspaceSharing: "sessions:workspace-sharing",
-    setProject: "sessions:set-project",
-    /** 打开原生目录选择器；取消返回 null */
-    selectWorkspace: "sessions:select-workspace",
-    /** 指定任务的消息历史 */
-    messages: "sessions:messages",
-    /** 发送消息；流式事件经 sessionEvents 推送 */
-    send: "sessions:send",
-    /** 停止按钮：打断指定任务运行中的本轮（流式输出或工具执行）；空闲返回 false */
-    interrupt: "sessions:interrupt",
-    /** 输入队列（票 02）：手动恢复——清暂停标志并立即从队首继续逐条消费 */
-    queueResume: "sessions:queue-resume",
-    /** 输入队列（票 02）：清空——作废全部排队消息并清暂停标志 */
-    queueClear: "sessions:queue-clear",
-    queueRemove: "sessions:queue-remove",
-    queueUpdate: "sessions:queue-update",
-    queueReorder: "sessions:queue-reorder",
-    /** /rename 与侧栏重命名共用（同一 IPC 通道） */
-    rename: "sessions:rename",
-    /** /archive 与侧栏归档共用；archived=false 取消归档 */
-    archive: "sessions:archive",
-    /** /status：上下文用量估算 + 模型 + 审批模式 */
-    status: "sessions:status",
-    /** 规范与技能：当前/最近运行摘要及下条消息的磁盘预览。 */
-    resources: "sessions:resources",
-    /** /compact：手动压缩历史为摘要（保留最近 3 轮）；成功返回压缩概要 */
-    compact: "sessions:compact",
-    /** @引用 菜单候选：工作区文件相对路径列表 */
-    workspaceFiles: "sessions:workspace-files",
-    /** 工具截图数据（dataURL）；文件不存在（如已清理）返回 null */
-    toolImage: "sessions:tool-image",
-    /** 审批模式切换（三档）：落库并只对下一次发送生效 */
-    setApprovalMode: "sessions:set-approval-mode",
-    revokeAutoApprove: "sessions:revoke-auto-approve",
-    /** 旧审批响应兼容入口，转发统一交互；always 仅批准本次。 */
-    respondApproval: "sessions:respond-approval",
-    /** 当前等待审批的请求（切回任务时恢复审批卡片）；无等待返回 null */
-    pendingApproval: "sessions:pending-approval",
-    /** 全部等待审批的请求（工单 13：主任务与子代理可能并行等待）；按到达顺序 */
-    pendingApprovals: "sessions:pending-approvals",
-    /** 当前任务全部待处理交互（审批和问答），按创建顺序返回。 */
-    pendingInteractions: "sessions:pending-interactions",
-    /** 响应一个待处理交互；类型与内容由 Core 对照请求校验。 */
-    respondInteraction: "sessions:respond-interaction",
-  },
   /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
   searchSettings: {
     get: "search-settings:get",
@@ -238,10 +176,8 @@ export const IPC = {
     reconnect: "mcp:reconnect",
     setToolEnabled: "mcp:set-tool-enabled",
   },
-  /** 主→渲染：任务事件流（TaskEventEnvelope）；与 sessionEvents 双发（票 03 expand，票 06 删旧）。 */
+  /** 主→渲染：任务事件流（TaskEventEnvelope，按任务 ID 多路复用）。 */
   taskEvents: "task:events",
-  /** 主→渲染：旧任务事件流 channel（expand 兼容，与 taskEvents 双发同一信封） */
-  sessionEvents: "session:events",
   /** 改动面板 + git 集成（工单 05）：status/diff/分支/提交消息生成/提交 */
   git: {
     /** 工作区 git 状态（非 git 工作区返回 isGitRepo=false，不报错） */
@@ -256,18 +192,6 @@ export const IPC = {
     commit: "git:commit",
   },
 } as const;
-
-/**
- * 会话→任务改名（票 03）expand 兼容：以下旧类型名是渲染层曾 import 的
- * 反向别名，指向更名后的正式类型；字段级命名（taskId、taskIds、
- * runningTasks、kind: "task" 等）已随票 04 定稿，别名本身待票 06 清零。
- */
-export type SessionEventEnvelope = TaskEventEnvelope;
-export type SessionActivity = TaskActivity;
-export type SessionListItem = TaskListItem;
-export type SessionView = TaskView;
-export type StartSessionInput = StartTaskInput;
-export type SessionExecutionState = TaskExecutionState;
 
 /** 事件流信封：按任务 ID 多路复用 */
 export interface TaskEventEnvelope {
@@ -436,11 +360,9 @@ export interface CodexLikeApi {
     remove(id: string): Promise<boolean>;
   };
   tasks: TaskApi;
-  /** expand 兼容（票 03）：旧 sessions 命名空间与 tasks 同一形状（TaskApi），走旧 sessions:* channel；票 06 删除。 */
-  sessions: TaskApi;
 }
 
-/** 任务域 API：tasks 与旧 sessions 命名空间共用的形状（票 03 自 CodexLikeApi 抽出）。 */
+/** 任务域 API：`window.codexlike.tasks` 的形状。 */
 export interface TaskApi {
   start(input: StartTaskInput): Promise<TaskRecord>;
   /** 仅调整归属；null 移出项目，移入由宿主校验实际目录及活动状态。 */
@@ -468,7 +390,7 @@ export interface TaskApi {
   /** 指定任务的时间线：消息与工具卡片按发生顺序合并（含 error 消息） */
   messages(taskId: string): Promise<TranscriptItem[]>;
   /**
-   * 发送消息：成功即启动流式回复（事件经 onSessionEvent 推送）。
+   * 发送消息：成功即启动流式回复（事件经 onTaskEvent 推送）。
    * mentionPaths 为消息中 @引用 的工作区相对路径，内容由主进程读取附加进模型上下文。
    * thinkingEffort 为本条消息的思考档位快照（GLOSSARY「思考档位」）：
    * 缺省按 auto 处理；主进程只接受五档枚举，非法值以中文异常抛回。
@@ -623,10 +545,6 @@ export interface CodexLikeApi {
   };
   /** 订阅任务事件流（task:events channel）；返回取消订阅函数 */
   onTaskEvent(listener: (envelope: TaskEventEnvelope) => void): () => void;
-  /** expand 兼容（票 03）：订阅旧 session:events channel；票 06 删除。 */
-  onSessionEvent(
-    listener: (envelope: SessionEventEnvelope) => void
-  ): () => void;
   /** 改动面板 + git 集成（工单 05） */
   git: {
     /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */

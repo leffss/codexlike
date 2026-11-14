@@ -83,7 +83,7 @@ function invoke(name: string, ...args: unknown[]) {
 describe("规范与技能 IPC", () => {
   it("只返回元数据，首次预览不实例化加载正文，外部编辑后预览刷新", async () => {
     const { task, workspace } = setup();
-    const first = invoke(IPC.sessions.resources, task.id);
+    const first = invoke(IPC.tasks.resources, task.id);
     expect(first).toMatchObject({
       active: null,
       last: null,
@@ -92,12 +92,12 @@ describe("规范与技能 IPC", () => {
     expect(JSON.stringify(first)).toContain("审查改动");
     expect(JSON.stringify(first)).not.toContain("SECRET_SKILL_BODY");
     writeFileSync(join(workspace, "AGENTS.md"), "变更后的新规范内容");
-    const status = await invoke(IPC.sessions.status, task.id);
+    const status = await invoke(IPC.tasks.status, task.id);
     expect(status).toMatchObject({
       resourcePhase: "preview",
       agentsMd: { sources: [join(workspace, "AGENTS.md")] },
     });
-    expect(invoke(IPC.sessions.resources, task.id)).toMatchObject({
+    expect(invoke(IPC.tasks.resources, task.id)).toMatchObject({
       active: null,
       last: null,
     });
@@ -125,13 +125,13 @@ describe("规范与技能 IPC", () => {
       join(workspace, "AGENTS.md"),
       "新的规范比原来的更长并且应该只影响下一条消息"
     );
-    const overview = invoke(IPC.sessions.resources, task.id);
+    const overview = invoke(IPC.tasks.resources, task.id);
     expect(overview).toMatchObject({
       active: before,
       last: null,
       preview: { loaded: [] },
     });
-    const status = await invoke(IPC.sessions.status, task.id);
+    const status = await invoke(IPC.tasks.status, task.id);
     expect(status).toMatchObject({
       resourcePhase: "active",
       resources: before,
@@ -139,7 +139,7 @@ describe("规范与技能 IPC", () => {
     expect(JSON.stringify(overview)).not.toContain("SECRET_SKILL_BODY");
     await iterator.return?.();
     expect(task.resourceState).toEqual({ active: null, last: before });
-    expect(await invoke(IPC.sessions.status, task.id)).toMatchObject({
+    expect(await invoke(IPC.tasks.status, task.id)).toMatchObject({
       resourcePhase: "preview",
     });
   });
@@ -147,8 +147,8 @@ describe("规范与技能 IPC", () => {
   it("拒绝伪造 taskId 参数，不允许以任意文件路径作为读取入口", () => {
     setup();
     expect(() =>
-      invoke(IPC.sessions.resources, { path: "C:/private/SKILL.md" })
+      invoke(IPC.tasks.resources, { path: "C:/private/SKILL.md" })
     ).toThrow("taskId 必须是字符串");
-    expect(invoke(IPC.sessions.resources, "C:/private/SKILL.md")).toBeNull();
+    expect(invoke(IPC.tasks.resources, "C:/private/SKILL.md")).toBeNull();
   });
 });

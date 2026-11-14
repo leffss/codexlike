@@ -239,7 +239,7 @@ async function main() {
     // ---- 场景 3：中断终态强制展开 ----
     await window.evaluate(() => {
       window.interruptedMessage = null;
-      window.removeInterruptedListener = window.codexlike.onSessionEvent(
+      window.removeInterruptedListener = window.codexlike.onTaskEvent(
         ({ event }) => {
           if (event.type === "assistant-aborted")
             window.interruptedMessage = event.message;

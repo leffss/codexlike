@@ -30,11 +30,11 @@ vi.mock("electron", () => ({
 }));
 
 /**
- * 任务→任务改名（票 03）expand 兼容：preload 按新名暴露 tasks 命名空间与
- * onTaskEvent；旧名 sessions / onSessionEvent 保留且必须仍走旧 channel
- * （e2e 对 sessions:* 的 handler 劫持依赖旧 channel 上的真实流量）。
+ * 会话→任务改名（票 06 contract）：preload 只暴露 tasks 命名空间与
+ * onTaskEvent——旧名 sessions / onSessionEvent 必须不存在（旧名不存在，
+ * 防止兼容层悄悄回流）。
  */
-it("tasks 走新 channel，sessions/onSessionEvent 保留走旧 channel", async () => {
+it("preload 暴露 tasks 走新 channel，旧 sessions/onSessionEvent 不存在", async () => {
   await import("../../src/preload");
   const api = bridge.api!;
 
@@ -47,23 +47,14 @@ it("tasks 走新 channel，sessions/onSessionEvent 保留走旧 channel", async 
     3
   );
 
-  await api.sessions.list();
-  expect(bridge.invoke).toHaveBeenLastCalledWith("sessions:list");
-  await api.sessions.markViewed("task-1", 3);
-  expect(bridge.invoke).toHaveBeenLastCalledWith(
-    "sessions:mark-viewed",
-    "task-1",
-    3
-  );
+  // 旧命名空间与旧事件订阅入口已删除。
+  expect("sessions" in api).toBe(false);
+  expect("onSessionEvent" in api).toBe(false);
 
-  // 事件订阅：新旧 API 各自订阅对应事件流 channel，互不串扰。
-  const releaseTask = api.onTaskEvent(() => {});
+  // 事件订阅：onTaskEvent 订阅唯一的事件流 channel。
+  const release = api.onTaskEvent(() => {});
   expect(bridge.subscriptions.has("task:events")).toBe(true);
-  releaseTask();
+  release();
   expect(bridge.subscriptions.has("task:events")).toBe(false);
-
-  const releaseSession = api.onSessionEvent(() => {});
-  expect(bridge.subscriptions.has("session:events")).toBe(true);
-  releaseSession();
-  expect(bridge.subscriptions.has("session:events")).toBe(false);
+  expect([...bridge.subscriptions.keys()]).toEqual([]);
 });

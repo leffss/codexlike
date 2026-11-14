@@ -190,7 +190,7 @@ export async function prepareDraft(
 ) {
   // 冷启动侧栏列表尚在异步加载，使用公开宿主列表计数避免把恢复记录误判成新建。
   const before = await window.evaluate(
-    async () => (await window.codexlike.sessions.list()).length
+    async () => (await window.codexlike.tasks.list()).length
   );
   if (project) {
     if ((await window.getByTestId("project-group").count()) === 0) {
@@ -206,7 +206,7 @@ export async function prepareDraft(
     await window.getByTestId("draft-workspace-mode").selectOption("worktree");
   assert(
     (await window.evaluate(
-      async () => (await window.codexlike.sessions.list()).length
+      async () => (await window.codexlike.tasks.list()).length
     )) === before,
     "首次发送前不能增加空历史"
   );

@@ -292,10 +292,10 @@ async function main() {
       await window.getByTestId("composer-input").fill(`问答后继续${round}`);
       await window.getByTestId("composer-send").click();
       await window.waitForFunction(async (text) => {
-        const tasks = await window.codexlike.sessions.list();
+        const tasks = await window.codexlike.tasks.list();
         const task = tasks.find((s) => s.title === "提问草稿验收");
-        const view = await window.codexlike.sessions.view(task.id);
-        const history = await window.codexlike.sessions.messages(task.id);
+        const view = await window.codexlike.tasks.view(task.id);
+        const history = await window.codexlike.tasks.messages(task.id);
         return (
           !view.activity.running &&
           history.some(
@@ -316,7 +316,7 @@ async function main() {
     );
     await window.getByTestId("composer-input").fill("Compact后保存并退出");
     await window.waitForFunction(async () => {
-      const task = (await window.codexlike.sessions.list()).find(
+      const task = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "提问草稿验收"
       );
       return (
@@ -361,12 +361,12 @@ async function main() {
     );
     await window.getByTestId("composer-send").click();
     await window.waitForFunction(async () => {
-      const task = (await window.codexlike.sessions.list()).find(
+      const task = (await window.codexlike.tasks.list()).find(
         (s) => s.title === "提问草稿验收"
       );
       return (
-        !(await window.codexlike.sessions.execution(task.id)).running &&
-        (await window.codexlike.sessions.messages(task.id)).some(
+        !(await window.codexlike.tasks.execution(task.id)).running &&
+        (await window.codexlike.tasks.messages(task.id)).some(
           (item) =>
             item.kind === "message" &&
             item.message.content === "Compact后保存并退出"

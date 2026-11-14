@@ -595,7 +595,7 @@ async function questionsScenario() {
         );
       }
       const pending = await window.evaluate(
-        (id) => window.codexlike.sessions.pendingInteractions(id),
+        (id) => window.codexlike.tasks.pendingInteractions(id),
         taskId
       );
       assert(pending.length === 0, "已提交交互不应在重启后重新排队");
@@ -607,7 +607,7 @@ async function pendingCount(window, taskId, count) {
   const deadline = Date.now() + 15_000;
   for (;;) {
     const records = await window.evaluate(
-      (id) => window.codexlike.sessions.pendingInteractions(id),
+      (id) => window.codexlike.tasks.pendingInteractions(id),
       taskId
     );
     if (records.length === count) return records;
@@ -915,7 +915,7 @@ async function cancellationScenario() {
               };
         const accepted = await window.evaluate(
           ({ taskId, requestId, response }) =>
-            window.codexlike.sessions.respondInteraction(
+            window.codexlike.tasks.respondInteraction(
               taskId,
               requestId,
               response
@@ -927,7 +927,7 @@ async function cancellationScenario() {
           "取消/重启后的陈旧响应不能重新授权或唤醒工具"
         );
         const states = await window.evaluate(() =>
-          window.codexlike.sessions.list()
+          window.codexlike.tasks.list()
         );
         assert(
           states.find((state) => state.id === taskId).status !== "waiting-user",
@@ -1024,7 +1024,7 @@ async function autoApproveScenario() {
       }
       async function assertAutoFlag(id, expected) {
         const tasks = await window.evaluate(() =>
-          window.codexlike.sessions.list()
+          window.codexlike.tasks.list()
         );
         assert(
           tasks.find((task) => task.id === id)?.autoApprove === expected,

@@ -127,7 +127,7 @@ async function main() {
     const bId = await b.getAttribute("data-task-id");
     const wrong = await window.evaluate(
       async ({ id, requestId }) =>
-        window.codexlike.sessions.respondInteraction(id, requestId, {
+        window.codexlike.tasks.respondInteraction(id, requestId, {
           kind: "approval",
           decision: "approve",
         }),
@@ -208,7 +208,7 @@ async function main() {
       .waitFor();
     await until(() => gates.get("A-final").res.destroyed, "显式停止关闭模型流");
     const stopped = await window.evaluate(
-      (id) => window.codexlike.sessions.view(id),
+      (id) => window.codexlike.tasks.view(id),
       aId
     );
     assert(stopped.activity.outcome === "interrupted", "停止终态由宿主保存");

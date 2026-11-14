@@ -115,14 +115,14 @@ async function assertIdleNewTaskEntry(window, message) {
 /** 排序最前的未归档任务（现有冷启动回退链的打开目标） */
 async function firstActiveTaskId(window) {
   return window.evaluate(async () => {
-    const list = await window.codexlike.sessions.list();
+    const list = await window.codexlike.tasks.list();
     return list.find((task) => task.archivedAt === null)?.id ?? null;
   });
 }
 
 async function taskIdByTitle(window, title) {
   const id = await window.evaluate(async (title) => {
-    const list = await window.codexlike.sessions.list();
+    const list = await window.codexlike.tasks.list();
     return list.find((task) => task.title === title)?.id ?? null;
   }, title);
   assert(id !== null, `找不到标题为「${title}」的任务`);

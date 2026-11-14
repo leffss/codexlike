@@ -5,10 +5,7 @@ import { IPC, type CodexLikeApi, type TaskApi } from "./shared/ipc";
 // contextBridge 暴露类型化 API；渲染进程经 `window.codexlike` 访问，
 // 无 nodeIntegration、无裸 ipcRenderer（安全基线）。
 
-/**
- * 任务域命名空间工厂（票 03）：tasks 与旧 sessions 共用 TaskApi 形状，
- * 分别走新 tasks:* 与旧 sessions:* channel（主进程双注册同一 handler）。
- */
+/** 任务域命名空间工厂：转发到 tasks:* channel。 */
 function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
   return {
     start: (input) => ipcRenderer.invoke(channels.start, input),
@@ -152,8 +149,6 @@ const api: CodexLikeApi = {
     remove: (id) => ipcRenderer.invoke(IPC.providerProfiles.remove, id),
   },
   tasks: taskApi(IPC.tasks),
-  /** expand 兼容（票 03）：旧 sessions 命名空间仍走旧 sessions:* channel；票 06 删除。 */
-  sessions: taskApi(IPC.sessions),
   searchSettings: {
     get: () => ipcRenderer.invoke(IPC.searchSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.searchSettings.set, input),
@@ -192,17 +187,6 @@ const api: CodexLikeApi = {
     ipcRenderer.on(IPC.taskEvents, handler);
     return () => {
       ipcRenderer.removeListener(IPC.taskEvents, handler);
-    };
-  },
-  /** expand 兼容（票 03）：订阅旧 session:events channel（与 task:events 双发同一信封）；票 06 删除。 */
-  onSessionEvent: (listener) => {
-    const handler: (
-      _event: Electron.IpcRendererEvent,
-      envelope: Parameters<typeof listener>[0]
-    ) => void = (_event, envelope) => listener(envelope);
-    ipcRenderer.on(IPC.sessionEvents, handler);
-    return () => {
-      ipcRenderer.removeListener(IPC.sessionEvents, handler);
     };
   },
   git: {
