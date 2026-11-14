@@ -25,7 +25,11 @@ import {
   type ScrollGeometry,
   type VerticalIntent,
 } from "../lib/scroll-follow";
-import type { MessageSegment, ThinkingSegment } from "../lib/task-view";
+import type {
+  AssistantSegment,
+  MessageSegment,
+  ThinkingSegment,
+} from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import {
   formatDurationCn,
@@ -48,12 +52,11 @@ const INTENT_TTL_MS = 500;
 const SCRIPTED_SCROLL_TTL_MS = 500;
 
 /**
- * 中栏上部：消息流（GLOSSARY「消息流」「消息段」「轮次」「已工作折叠区」「跟随」）。
- * 渲染三层（ADR 0011 呈现分层）：单段视图按类型分派 → 轮次聚合呈现
- * （细分隔线 + 轮间距，不加 agent 名头/头像）→ 轮内以最终正文为界切分，
- * 之前的过程段在轮完成后收进「已工作 N 秒」折叠区，之后的段跟随显示；
- * 运行中的轮与中断、失败终态的轮强制展开过程（切分规则见 turn-view 纯函数，
- * 开合是渲染层内存态，见 collapse-memory）。
+ * 中栏上部：消息流（GLOSSARY「消息流」「消息段」「轮次」「过程段」「跟随」）。
+ * 渲染三层（ADR 0011 呈现分层、ADR 0015 逐段呈现）：单段视图按类型分派 →
+ * 轮次聚合呈现（细分隔线 + 轮间距，不加 agent 名头/头像）→ 轮内消息段
+ * 按事件原序平铺：过程段逐段自带工时，活动段默认展开、完成后自动收起
+ * （聚合规则见 turn-view 纯函数，开合是渲染层内存态，见 collapse-memory）。
  *
  * 滚动跟随（票 03）：FOLLOWING/DETACHED 显式状态机（裁决计算见
  * lib/scroll-follow 纯函数模块）——贴近底部自动跟随最新内容，用户上翻
@@ -62,7 +65,7 @@ const SCRIPTED_SCROLL_TTL_MS = 500;
  */
 export function MessageStream(props: {
   items: MessageSegment[];
-  /** 宿主执行态：最后一轮在执行期间保持强制展开（工具间隙不闪收，票 04） */
+  /** 宿主执行态：最后一轮在执行期间视为运行中（操作栏不提前出现，工具间隙不闪断） */
   streaming?: boolean;
   /**
    * 当前运行的起始时刻（epoch ms，WorkspacePage 在进入执行态时记账）：
@@ -196,8 +199,8 @@ export function MessageStream(props: {
       );
   }
 
-  // 轮次聚合与轮内切分（票 04）：宿主执行态补上工具间隙无 running 段的
-  // 缺口——最后一轮在宿主仍执行期间保持强制展开，不闪收
+  // 轮次聚合（票 04）：宿主执行态补上工具间隙无 running 段的缺口——
+  // 最后一轮在宿主仍执行期间保持运行态，操作栏不提前出现
   const turns = groupTurns(props.items, {
     lastTurnRunning: props.streaming === true,
   });
@@ -377,8 +380,8 @@ export function MessageStream(props: {
 
 /**
  * 轮次分组呈现单位（GLOSSARY「轮次」）：细分隔线 + 轮间距，
- * 不加 agent 名头/头像（票 04）；轮内依次为用户消息段、
- * 已工作折叠区（有过程段时）、跟随区。
+ * 不加 agent 名头/头像（票 04）；轮内依次为用户消息段与全部消息段
+ * （过程段逐段平铺，ADR 0015）。
  */
 function TurnGroupItem(props: {
   turn: TurnView;
@@ -387,6 +390,7 @@ function TurnGroupItem(props: {
   taskTitle?: string | null;
 }) {
   const { turn } = props;
+  const failed = turn.segments.some((segment) => segment.kind === "error");
   return (
     <li
       data-testid="message-turn"
@@ -402,95 +406,31 @@ function TurnGroupItem(props: {
             questionDraft={props.questionDraft}
           />
         )}
-        {turn.history.length > 0 && (
-          <WorkedHistory turn={turn} questionDraft={props.questionDraft} />
-        )}
-        {turn.following.map((segment) => (
-          <SegmentView
-            key={segment.id}
-            segment={segment}
-            showActions={!turn.running}
+        {groupConsecutiveTools(turn.segments).map((item) => (
+          <ToolSequenceView
+            key={
+              item.kind === "group"
+                ? `group-${item.segments[0]?.id}`
+                : `single-${item.segment.id}`
+            }
+            item={item}
+            showActions={
+              !turn.running &&
+              item.kind !== "group" &&
+              item.segment.id === turn.finalAssistantId
+            }
+            processAssistant={
+              item.kind === "passthrough" &&
+              item.segment.kind === "assistant" &&
+              item.segment.id !== turn.finalAssistantId
+            }
             now={props.now}
-            failed={turn.following.some((item) => item.kind === "error")}
+            failed={failed}
             questionDraft={props.questionDraft}
             taskTitle={props.taskTitle}
           />
         ))}
       </ol>
-    </li>
-  );
-}
-
-/**
- * 已工作折叠区（GLOSSARY「已工作折叠区」）：轮内最终正文之前的过程段
- * （思考、工具卡、中间正文）在轮完成后默认收起，摘要行显示工时；
- * 运行中与中断、失败终态由默认值强制展开；用户手动开合按键记忆
- * （默认值变化不覆盖已记忆的键——轮完成自动收起只作用于未操作过的折叠区）。
- */
-function WorkedHistory(props: {
-  turn: TurnView;
-  questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
-}) {
-  const { turn } = props;
-  const { open, toggle } = useCollapseState(
-    `history-${turn.turnId}`,
-    turn.historyDefaultOpen
-  );
-  // 运行中工时实时跳动（段极差到当前时刻）；完成轮定格值由段极差直接得出
-  const liveNow = useTickingNow(turn.running && turn.startedAtMs !== null);
-  const workMs =
-    turn.running && turn.startedAtMs !== null
-      ? Math.max(turn.durationMs ?? 0, liveNow - turn.startedAtMs)
-      : turn.durationMs;
-  return (
-    <li
-      data-testid="worked-history"
-      data-turn-id={turn.turnId}
-      data-open={open ? "true" : "false"}
-      data-duration-ms={turn.durationMs ?? ""}
-    >
-      <button
-        type="button"
-        data-testid="worked-history-toggle"
-        aria-expanded={open}
-        onClick={toggle}
-        className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs text-fg-muted hover:bg-hover"
-      >
-        <DisclosureArrow open={open} />
-        {turn.running && (
-          <span
-            data-testid="worked-history-indicator"
-            className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
-            aria-label="工作中"
-          />
-        )}
-        <span data-testid="worked-history-summary">
-          {turn.running ? "工作中" : "已工作"}
-          {workMs !== null && ` ${formatWorkDuration(workMs)}`}
-          {" · "}
-          {turn.history.length} 个过程段
-        </span>
-      </button>
-      {open && (
-        <ol
-          data-testid="worked-history-items"
-          // 过程段与正文列左对齐（左右都贴齐内容列边界）：不加容器缩进，
-          // 流式跟随区与折叠区的过程段位置一致，不随轮完成左右跳变
-          className="mt-3 flex flex-col gap-3"
-        >
-          {groupConsecutiveTools(turn.history).map((item) => (
-            <ToolSequenceView
-              key={
-                item.kind === "group"
-                  ? `group-${item.segments[0]?.id}`
-                  : `single-${item.segment.id}`
-              }
-              item={item}
-              questionDraft={props.questionDraft}
-            />
-          ))}
-        </ol>
-      )}
     </li>
   );
 }
@@ -503,12 +443,25 @@ function WorkedHistory(props: {
  */
 function ToolSequenceView(props: {
   item: ToolSequenceItem;
+  showActions?: boolean;
+  processAssistant?: boolean;
+  now?: Date;
+  failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
+  taskTitle?: string | null;
 }) {
   const { item } = props;
   if (item.kind === "passthrough") {
     return (
-      <SegmentView segment={item.segment} questionDraft={props.questionDraft} />
+      <SegmentView
+        segment={item.segment}
+        showActions={props.showActions}
+        processAssistant={props.processAssistant}
+        now={props.now}
+        failed={props.failed}
+        questionDraft={props.questionDraft}
+        taskTitle={props.taskTitle}
+      />
     );
   }
   if (item.kind === "single") {
@@ -572,7 +525,7 @@ function ToolGroupView(props: {
       {open && (
         <ol
           data-testid="tool-call-group-items"
-          // 成员卡与组头左对齐：与已工作折叠区同一对齐规则（过程段贴齐内容列）
+          // 成员卡与组头左对齐：与过程段同一对齐规则（贴齐内容列边界）
           className="mt-2 flex flex-col gap-2"
         >
           {item.segments.map((call) => (
@@ -588,6 +541,8 @@ function ToolGroupView(props: {
 function SegmentView(props: {
   segment: MessageSegment;
   showActions?: boolean;
+  /** 正文段是过程段（非轮内最终正文）：以折叠卡呈现（ADR 0015） */
+  processAssistant?: boolean;
   now?: Date;
   failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
@@ -610,6 +565,9 @@ function SegmentView(props: {
   }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;
+  }
+  if (segment.kind === "assistant" && props.processAssistant === true) {
+    return <ProcessTextBlock segment={segment} />;
   }
   return (
     <MessageBubble
@@ -687,6 +645,72 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
           className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
         >
           {segment.content}
+        </div>
+      </details>
+    </li>
+  );
+}
+
+/**
+ * 中间正文段折叠卡（GLOSSARY「过程段」，ADR 0015）：被工具卡等隔断的正文
+ * 各自成段，以过程段呈现。流式正文只追加到序列末尾（隔断前它就是轮内
+ * 最后一段正文，仍以气泡实时可见），被隔断即失活并打点 endedAt——因此
+ * 过程卡默认收起，以首行摘要 + 段耗时回看，展开可读全文；恢复的历史段
+ * 缺打点则省略耗时。与思考块同构的受控 <details>：内容在收起态仍留在
+ * DOM，onToggle 只在事件事实与渲染值不一致时写记忆。
+ */
+function ProcessTextBlock(props: { segment: AssistantSegment }) {
+  const { segment } = props;
+  const { open, setOpen } = useCollapseState(segment.id, false);
+  // 段耗时：隔断收敛时定格（endedAt）；恢复的历史段缺打点则省略
+  const textMs =
+    segment.at !== undefined && segment.endedAt !== undefined
+      ? segment.endedAt - segment.at
+      : null;
+  const summary = thinkingSummary(segment.content);
+  return (
+    <li>
+      <details
+        data-testid="process-text-block"
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== open) {
+            setOpen(event.currentTarget.open);
+          }
+        }}
+        className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+      >
+        <summary
+          data-testid="process-text-toggle"
+          className="flex cursor-pointer select-none items-center gap-2"
+        >
+          <DisclosureArrow open={open} />
+          <span
+            data-testid="process-text-summary"
+            className="min-w-0 flex-1 truncate"
+          >
+            {summary !== "" ? summary : "（空正文）"}
+          </span>
+          {textMs !== null && (
+            <span
+              data-testid="process-text-duration"
+              className="shrink-0 font-mono text-fg-subtle"
+            >
+              {formatDurationCn(textMs)}
+            </span>
+          )}
+        </summary>
+        <div
+          data-testid="process-text-content"
+          className="markdown mt-2 border-t border-line pt-2 pl-4 text-sm text-fg"
+        >
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={markdownComponents}
+          >
+            {segment.content}
+          </ReactMarkdown>
         </div>
       </details>
     </li>
@@ -788,19 +812,6 @@ function MessageBubble(props: {
           </p>
         )}
       </div>
-      {/* 中间正文段（过程段，无 completedAt）的耗时：收敛时刻定格；最终正文与恢复的历史段不显示 */}
-      {segment.kind === "assistant" &&
-        segment.streaming !== true &&
-        segment.completedAt === undefined &&
-        segment.endedAt !== undefined &&
-        segment.at !== undefined && (
-          <p
-            data-testid="assistant-segment-duration"
-            className="mt-1 text-right font-mono text-xs text-fg-subtle"
-          >
-            {formatDurationCn(segment.endedAt - segment.at)}
-          </p>
-        )}
       {props.showActions && props.now !== undefined && (
         <AssistantActions
           key={segment.content}

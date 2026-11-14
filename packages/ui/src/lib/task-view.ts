@@ -30,9 +30,9 @@ interface SegmentBase {
   /** 共享响应 id：同一模型响应产生的思考/正文段共享此 id，关联不靠嵌套 */
   responseId: string | null;
   /**
-   * 段建立时刻（epoch ms）：呈现层「已工作 N 秒」工时的数据来源。
-   * 历史恢复取自落库 createdAt，运行期由 reducer 尾部追加时记录；
-   * 整段替换保持原值（封闭集：时间不是更新维度）。
+   * 段建立时刻（epoch ms）：呈现层各段卡耗时（活动段实时跳动、完成定格）
+   * 的数据来源。历史恢复取自落库 createdAt，运行期由 reducer 尾部追加时
+   * 记录；整段替换保持原值（封闭集：时间不是更新维度）。
    */
   at?: number;
 }

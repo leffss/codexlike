@@ -14,7 +14,6 @@ import process from "node:process";
 import {
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -141,15 +140,14 @@ async function main() {
     await composer.press("Enter");
 
     // 4) 嵌套卡片：委派后子代理建卡（运行中窗口短，attach 即证明建卡）→
-    //    主轮收尾后过程段收进已工作折叠区、子代理卡完成自动收起一次（票 04）：
-    //    等主轮最终正文再展开折叠区回看完成态卡与报告
+    //    子代理卡完成自动收起一次（票 04 语义不变）；过程段平铺常驻（ADR 0015），
+    //    等主轮最终正文后直接回看完成态卡与报告
     const subagentCard = window.getByTestId("subagent-card");
     await subagentCard.waitFor({ timeout: 20_000 });
     await window
       .getByTestId("message-assistant")
       .getByText("子代理的报告已汇总。")
       .waitFor({ timeout: 20_000 });
-    await expandWorkedHistory(window, 0);
     await window
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
       .waitFor({ timeout: 20_000 });
@@ -274,7 +272,6 @@ async function main() {
       .getByTestId("message-user")
       .first()
       .waitFor({ timeout: 10_000 });
-    await expandWorkedHistory(relaunchedWindow, 0);
     await relaunchedWindow
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
       .waitFor({ timeout: 15_000 });

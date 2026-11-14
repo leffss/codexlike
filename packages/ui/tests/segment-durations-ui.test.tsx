@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
-import { setRememberedOpen } from "../src/lib/collapse-memory";
 import type {
   AssistantSegment,
   MessageSegment,
@@ -15,7 +14,8 @@ import type {
 
 /**
  * 过程段耗时呈现（spec 用户故事 26「实时跳动 + 最终定格」）：
- * 工具卡 / 子代理卡 / 思考块 / 中间正文段 / 工具组组头的耗时标记。
+ * 工具卡 / 子代理卡 / 思考块 / 中间正文卡 / 工具组组头的耗时标记，
+ * 以及活动段默认展开、完成自动收起的开合默认值（ADR 0015）。
  * Seam：renderToStaticMarkup（定格值与标记存在性；跳动节拍由
  * useTickingNow 的 interval 驱动，静态渲染只断言首帧）。
  */
@@ -115,7 +115,6 @@ function streamOf(items: MessageSegment[]): string {
 
 describe("工具卡耗时：运行中跳动、完成定格、无打点省略", () => {
   it("完成态显示定格耗时（endedAt - startedAt）", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([
       userSeg(),
       toolSeg("c1", { startedAt: 2_000, endedAt: 14_000 }),
@@ -134,7 +133,6 @@ describe("工具卡耗时：运行中跳动、完成定格、无打点省略", (
   });
 
   it("恢复的历史卡无 endedAt 打点：不显示耗时", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([userSeg(), toolSeg("c1", { startedAt: 2_000 })]);
     expect(html).not.toContain('data-testid="tool-call-duration"');
   });
@@ -142,27 +140,69 @@ describe("工具卡耗时：运行中跳动、完成定格、无打点省略", (
 
 describe("思考块与中间正文段耗时：收敛定格", () => {
   it("思考收敛后摘要行显示定格耗时", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([userSeg(), thinkingSeg({ endedAt: 4_500 })]);
     expect(html).toContain('data-testid="thinking-duration"');
     expect(html).toContain("3 秒");
   });
 
-  it("中间正文段（无 completedAt）气泡下显示定格耗时，最终正文不显示", () => {
-    setRememberedOpen("history-u1", true);
+  it("中间正文卡（过程段）摘要行显示定格耗时，最终正文不显示", () => {
     const html = streamOf([
       userSeg(),
       textSeg("text-m1-1", { endedAt: 6_000 }),
       textSeg("text-m1-2", { completedAt: 9_000 }),
     ]);
-    expect(html).toContain('data-testid="assistant-segment-duration"');
-    expect(html.match(/assistant-segment-duration/g)?.length).toBe(1);
+    expect(html).toContain('data-testid="process-text-duration"');
+    expect(html.match(/process-text-duration/g)?.length).toBe(1);
+    expect(html).toContain("3 秒");
+  });
+});
+
+describe("工具卡与中间正文卡：活动段默认展开、完成自动收起（ADR 0015）", () => {
+  it("运行中的工具卡默认展开（参数与输出区直接渲染）", () => {
+    const html = streamOf([
+      userSeg(),
+      toolSeg("c1", { running: true, startedAt: Date.now() - 1_000 }),
+    ]);
+    expect(html).toContain('data-testid="tool-call-output"');
+  });
+
+  it("完成的工具卡默认收起（输出区不在 HTML 中）", () => {
+    const html = streamOf([
+      userSeg(),
+      toolSeg("c1", { startedAt: 2_000, endedAt: 3_000 }),
+    ]);
+    expect(html).not.toContain('data-testid="tool-call-output"');
+  });
+
+  it("被隔断的中间正文以折叠卡呈现：默认收起，摘要行带定格耗时", () => {
+    const html = streamOf([
+      userSeg(),
+      textSeg("text-m1-1", { endedAt: 6_000 }),
+      toolSeg("c1", { startedAt: 7_000, endedAt: 9_000 }),
+      textSeg("text-m1-2", { completedAt: 12_000 }),
+    ]);
+    const block = html.match(
+      /<details[^>]*data-testid="process-text-block"[^>]*>/
+    )?.[0];
+    expect(block).toBeDefined();
+    expect(block).not.toContain('open=""');
+    expect(html).toContain('data-testid="process-text-summary"');
+    expect(html).toContain('data-testid="process-text-duration"');
+    expect(html).toContain("正文 text-m1-1");
+  });
+
+  it("流式中的正文仍是气泡（隔断前它是轮内最后一段正文），不渲染过程卡", () => {
+    const html = streamOf([
+      userSeg(),
+      textSeg("text-m1-1", { streaming: true }),
+    ]);
+    expect(html).not.toContain('data-testid="process-text-block"');
+    expect(html).toContain('data-testid="assistant-content"');
   });
 });
 
 describe("工具组与子代理卡耗时", () => {
   it("同名连续工具组组头显示跨度汇总（首段开始 → 末段结束）", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([
       userSeg(),
       toolSeg("c1", { startedAt: 2_000, endedAt: 5_000 }),
@@ -174,14 +214,12 @@ describe("工具组与子代理卡耗时", () => {
   });
 
   it("子代理卡完成态显示定格总耗时（startedAt → endedAt）", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([userSeg(), subagentSeg()]);
     expect(html).toContain('data-testid="subagent-elapsed"');
     expect(html).toContain("00:30");
   });
 
   it("恢复的完成态子代理卡无起止对：不显示耗时", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([
       userSeg(),
       subagentSeg({ startedAt: null, endedAt: null }),
@@ -192,7 +230,6 @@ describe("工具组与子代理卡耗时", () => {
 
 describe("流式指示唯一性（多转圈回归的呈现侧）", () => {
   it("已收敛的思考/正文段不再渲染 spinner，流式段不再内联转圈（统一到底部运行行）", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([
       userSeg(),
       thinkingSeg({ endedAt: 2_500 }),

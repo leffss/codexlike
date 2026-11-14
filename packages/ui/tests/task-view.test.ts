@@ -1052,7 +1052,7 @@ describe("交互记录段（mergeInteractions）", () => {
   });
 });
 
-describe("段时刻打点（已工作折叠区工时与工具耗时的数据来源）", () => {
+describe("段时刻打点（各段卡耗时与工具耗时的数据来源）", () => {
   it("运行期尾部追加的段都带 at（epoch ms）", () => {
     const before = Date.now();
     const state = applyTaskEvent(

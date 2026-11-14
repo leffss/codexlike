@@ -16,7 +16,6 @@ import {
   selectComposerOption,
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -197,10 +196,9 @@ async function main() {
     );
 
     // 6) SubagentCard 思考折叠块：完成态下默认收起 → 展开 → 与报告互不混入。
-    // 票 04：主轮完成后过程段（含子代理卡）收进已工作折叠区、子代理卡完成
-    // 自动收起一次——先展开折叠区与卡片，折叠交互断言本身不变
+    // 子代理卡完成自动收起一次（票 04 语义不变）；过程段平铺常驻（ADR 0015），
+    // 主轮完成后子代理卡直接可交互，折叠交互断言本身不变
     await window.getByTestId("composer-send").waitFor({ timeout: 20_000 });
-    await expandWorkedHistory(window, 0);
     await window
       .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
       .waitFor({ timeout: 20_000 });

@@ -18,7 +18,6 @@ import process from "node:process";
 import {
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -96,14 +95,6 @@ async function main() {
     ctx.textRound("旧式正文回答");
   });
   const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-reasoning-rec-"));
-  /** 票 04：展开任务内全部「已工作折叠区」（完成后过程段默认收起） */
-  const expandAllHistories = async (window) => {
-    const toggles = window.getByTestId("worked-history-toggle");
-    const total = await toggles.count();
-    for (let i = 0; i < total; i++) {
-      await expandWorkedHistory(window, i);
-    }
-  };
   const workspaceDir = join(homeDir, "workspace");
   mkdirSync(workspaceDir);
 
@@ -184,8 +175,7 @@ async function main() {
       .getByTestId("message-assistant")
       .filter({ hasText: "慢速正文收尾" })
       .waitFor({ timeout: 20_000 });
-    // 票 04：完成后过程段收进各轮「已工作折叠区」，展开后再交互/计数
-    await expandAllHistories(window);
+    // 过程段平铺常驻（ADR 0015），思考块直接可交互/计数
     // 展开最后一个思考块（慢速轮）：内容含两段、不含重复
     const lastThinking = window.getByTestId("thinking-block").last();
     await lastThinking.waitFor({ timeout: 10_000 });
@@ -219,8 +209,7 @@ async function main() {
       .first()
       .click();
     await window.getByTestId("message-stream").waitFor({ timeout: 20_000 });
-    // 票 04：重启恢复后正常完成的轮默认收起折叠区，展开后回看历史思考段
-    await expandAllHistories(window);
+    // 过程段平铺常驻（ADR 0015）：重启恢复后历史思考段直接回看
     // 主任务历史思考段：重启恢复，默认收起、可展开回看
     const restoredThinking = window.getByTestId("thinking-block").first();
     await restoredThinking.waitFor({ timeout: 20_000 });

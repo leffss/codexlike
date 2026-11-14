@@ -64,13 +64,18 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
 }
 
 /**
- * 工具卡片（票 04 摘要增强）：折叠摘要行 = 类别词 + 动作摘要 + 状态标识 +
- * 耗时（spec 用户故事 26），失败详情在状态位可查（hover 提示 + 展开完整输出，
- * 用户故事 28）；开合为渲染层内存态（滚动、切换任务不丢手动开合）。
+ * 工具卡片（票 04 摘要增强、ADR 0015 逐段呈现）：折叠摘要行 = 类别词 +
+ * 动作摘要 + 状态标识 + 耗时（spec 用户故事 26），失败详情在状态位可查
+ * （hover 提示 + 展开完整输出，用户故事 28）；运行中默认展开（参数与输出
+ * 实时可见），完成自动收起——默认值随事实翻转（运行中→完成）对未手动
+ * 操作过的键立即生效；开合为渲染层内存态（滚动、切换任务不丢手动开合）。
  */
 export function ToolCallCard(props: { call: ToolCallSegment }) {
   const { call } = props;
-  const { open: expanded, toggle } = useCollapseState(`tool-${call.id}`, false);
+  const { open: expanded, toggle } = useCollapseState(
+    `tool-${call.id}`,
+    call.running === true
+  );
   // 运行中耗时实时跳动（每秒）；定格值由 endedAt 计算，不依赖跳动源
   const liveNow = useTickingNow(
     call.running === true && call.startedAt !== undefined

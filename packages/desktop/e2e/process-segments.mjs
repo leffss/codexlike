@@ -1,11 +1,12 @@
-// E2E 已工作折叠区与轮次分组（消息流重构票 04，GLOSSARY「轮次」「已工作
-// 折叠区」）：
-// 1) 轮次完成后最终正文之前的过程段（思考/中间正文/连续工具调用）整体
-//    收进「已工作折叠区」：收起后历史只剩最终正文，摘要行显示工时；
-// 2) 展开回看：过程段完整，连续同类工具呈统计分组（组头计数、含失败
-//    标记），展开组仍由原卡片渲染，工具卡摘要行带耗时；
-// 3) 中断终态的轮强制展开过程（部分正文保留，思考过程可见）。
-// 运行：pnpm --filter @codexlike/desktop run test:e2e:worked-history（先 pnpm build）。
+// E2E 过程段逐段呈现（ADR 0015，GLOSSARY「轮次」「过程段」；取代原
+// worked-history.mjs 的已工作折叠区场景）：
+// 1) 轮完成后过程段平铺常驻：思考/中间正文卡/工具组各自显示段耗时，
+//    被隔断的中间正文以过程卡（默认收起、摘要行回看）呈现；
+// 2) 运行中的工具卡默认展开（参数与输出实时可见），完成后自动收起；
+// 3) 连续同类工具呈统计分组（组头计数、含失败标记），展开组仍由原卡片
+//    渲染，工具卡摘要行带耗时，失败详情在状态位可查；
+// 4) 中断终态保留部分正文（可复制），错误终态正文不伪装成功。
+// 运行：pnpm test:e2e:process-segments（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,6 @@ import process from "node:process";
 import {
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -56,6 +56,13 @@ async function main() {
         return;
       }
       if (index === 4) {
+        // 慢速命令（约 2 秒）：给「运行中工具卡默认展开」留出观察窗口
+        ctx.toolCallRound("worked-c4", "run_terminal_command", {
+          command: "node slow.js",
+        });
+        return;
+      }
+      if (index === 5) {
         // 第 1 轮收尾：再思考 → 最终正文
         ctx.send({
           delta: { reasoning_content: "读完了，做个结论" },
@@ -64,7 +71,7 @@ async function main() {
         ctx.textRound("调研完成：文件都看过了");
         return;
       }
-      if (index === 5) {
+      if (index === 6) {
         // 第 2 条消息：思考 + 慢速长文（供中途停止）
         ctx.send({
           delta: { reasoning_content: "开始写长文" },
@@ -76,7 +83,7 @@ async function main() {
         );
         return;
       }
-      if (index === 6) {
+      if (index === 7) {
         ctx.send({
           delta: { content: "失败前保留的正文" },
           finish_reason: null,
@@ -84,7 +91,7 @@ async function main() {
         ctx.toolCallRound("failed-c1", "read_file", { path: "note.txt" });
         return;
       }
-      if (index === 7) {
+      if (index === 8) {
         ctx.res.writeHead(401, { "content-type": "application/json" });
         ctx.res.end(
           JSON.stringify({
@@ -96,11 +103,13 @@ async function main() {
       ctx.textRound("收到");
     }
   );
-  const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-worked-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "codexlike-e2e-process-"));
   const workspaceDir = join(homeDir, "workspace");
   mkdirSync(workspaceDir);
   writeFileSync(join(workspaceDir, "note.txt"), "第一个文件内容");
   writeFileSync(join(workspaceDir, "note2.txt"), "第二个文件内容");
+  // 慢速脚本：空转 2 秒后退出（node <脚本> 在 assist 档自动放行）
+  writeFileSync(join(workspaceDir, "slow.js"), "setTimeout(() => {}, 2000);\n");
 
   let app;
   try {
@@ -124,65 +133,82 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
-    // ---- 场景 1：完成后收起（历史只剩最终正文 + 工时摘要行）----
+    // ---- 场景 0：运行中的工具卡默认展开（ADR 0015）----
     await window.getByTestId("composer-input").fill("调研这些文件");
     await window.getByTestId("composer-send").click();
+    const termCard = window.locator(
+      '[data-testid="tool-call-card"][data-tool-name="run_terminal_command"]'
+    );
+    await termCard.waitFor({ timeout: 30_000 });
+    // 不点击卡头，输出区直接可见 = 运行中默认展开
+    await termCard.getByTestId("tool-call-output").waitFor({ timeout: 10_000 });
+    console.log("[e2e] 运行中的工具卡默认展开（参数与输出实时可见）");
+
+    // ---- 场景 1：轮完成后过程段平铺常驻，各段自带工时 ----
     await window
       .getByTestId("message-assistant")
       .getByText("调研完成：文件都看过了")
       .waitFor({ timeout: 30_000 });
-    for (let tick = 0; tick < 100 && seenBodies.length < 4; tick++) {
+    for (let tick = 0; tick < 100 && seenBodies.length < 5; tick++) {
       await new Promise((r) => setTimeout(r, 100));
     }
-    assert(seenBodies.length === 4, `预期 4 个请求，实际 ${seenBodies.length}`);
+    assert(seenBodies.length === 5, `预期 5 个请求，实际 ${seenBodies.length}`);
     await new Promise((r) => setTimeout(r, 300));
 
-    const collapsedOrder = await segmentOrder(window);
+    // 完成后的工具卡自动收起：运行卡输出区移出 DOM（无需手动操作）
+    await termCard
+      .getByTestId("tool-call-output")
+      .waitFor({ state: "detached", timeout: 30_000 });
+    console.log("[e2e] 工具卡完成自动收起（输出区移出 DOM）");
+
+    const order = await segmentOrder(window);
     assert(
-      JSON.stringify(collapsedOrder) ===
+      JSON.stringify(order) ===
         JSON.stringify([
           "message-turn",
           "message-user",
-          "worked-history",
+          "thinking-block",
+          "process-text-block",
+          "tool-call-group",
+          "tool-call-card",
+          "thinking-block",
           "message-assistant",
         ]),
-      `完成后应只剩用户消息 + 收起的折叠区 + 最终正文：${JSON.stringify(collapsedOrder)}`
+      `轮完成后过程段应平铺常驻（思考/中间正文卡/工具组/单卡/思考/最终正文）：${JSON.stringify(order)}`
     );
-    const summary = await window
-      .getByTestId("worked-history-summary")
+
+    // 各段自带耗时：思考卡、中间正文卡、单张工具卡摘要行、组头跨度
+    assert(
+      (await window.getByTestId("thinking-duration").count()) === 2,
+      "两个思考卡摘要行应显示段耗时"
+    );
+    assert(
+      (await window.getByTestId("process-text-duration").count()) === 1,
+      "中间正文卡摘要行应显示段耗时"
+    );
+    const processSummary = await window
+      .getByTestId("process-text-summary")
       .textContent();
     assert(
-      summary !== null && summary.includes("已工作"),
-      `折叠区摘要行应显示工时：${summary ?? "(空)"}`
+      processSummary !== null && processSummary.includes("先读文件，"),
+      `中间正文卡摘要行应显示首行：${processSummary ?? "(空)"}`
     );
-    const durationAttr = await window
-      .getByTestId("worked-history")
-      .getAttribute("data-duration-ms");
     assert(
-      durationAttr !== null && durationAttr !== "" && Number(durationAttr) >= 0,
-      "折叠区应携带工时数据（data-duration-ms）"
+      (await window
+        .locator(
+          '[data-testid="tool-call-card"][data-tool-name="run_terminal_command"]'
+        )
+        .getByTestId("tool-call-duration")
+        .count()) === 1,
+      "单张工具卡摘要行应显示耗时"
     );
-    console.log("[e2e] 轮次完成后过程段收进「已工作」折叠区，摘要行带工时");
-
-    // ---- 场景 2：展开回看（过程完整 + 连续同类统计分组）----
-    await expandWorkedHistory(window, 0);
-    const expandedOrder = await segmentOrder(window);
     assert(
-      JSON.stringify(expandedOrder) ===
-        JSON.stringify([
-          "message-turn",
-          "message-user",
-          "worked-history",
-          "thinking-block",
-          "message-assistant",
-          "tool-call-group",
-          "thinking-block",
-          "message-assistant",
-        ]),
-      `展开后过程段应完整（思考/中间正文/连续同类工具组/思考/最终正文）：${JSON.stringify(expandedOrder)}`
+      (await window.getByTestId("tool-call-group-duration").count()) === 1,
+      "工具组组头应显示跨度汇总"
     );
+    console.log("[e2e] 过程段平铺常驻：思考/中间正文卡/工具卡逐段自带耗时");
 
-    // 连续 3 个 read_file → 统计组头（计数 + 含失败标记），原卡不渲染
+    // ---- 场景 2：连续同类工具统计分组 + 失败详情 ----
     const group = window.getByTestId("tool-call-group");
     assert((await group.count()) === 1, "应有一个连续同类工具统计组");
     assert(
@@ -195,16 +221,15 @@ async function main() {
       "组内含失败卡时组头应有「含失败」标记"
     );
     assert(
-      (await window.getByTestId("tool-call-card").count()) === 0,
-      "组收起时不应渲染原卡片"
+      (await window.getByTestId("tool-call-card").count()) === 1,
+      "组收起时除组外单卡外不应渲染组内原卡片"
     );
 
-    // 展开组：3 张原卡，可展开看输出；运行期工具卡摘要行带耗时；
-    // 失败卡状态位悬停可查错误详情
+    // 展开组：3 张原卡，可展开看输出；失败卡状态位悬停可查错误详情
     await group.getByTestId("tool-call-group-toggle").click();
     await window.getByTestId("tool-call-group-items").waitFor();
     const cards = window.getByTestId("tool-call-card");
-    assert((await cards.count()) === 3, "展开组应渲染 3 张原卡片");
+    assert((await cards.count()) === 4, "展开组后应有 4 张原卡片（3+1）");
     const firstCard = cards.nth(0);
     await firstCard.getByTestId("tool-call-toggle").click();
     await firstCard.getByText("第一个文件内容").waitFor({ timeout: 10_000 });
@@ -226,17 +251,9 @@ async function main() {
       failedDetail !== null && failedDetail.length > 0,
       "失败详情应在状态位可查（悬停提示）"
     );
-    console.log("[e2e] 展开回看：连续同类统计分组 + 原卡渲染 + 耗时/失败详情");
+    console.log("[e2e] 连续同类统计分组 + 原卡渲染 + 耗时/失败详情");
 
-    // 收起折叠区 → 过程段再次整体隐藏（开合交互）
-    await window.getByTestId("worked-history-toggle").click();
-    await window.getByTestId("tool-call-card").first().waitFor({
-      state: "detached",
-      timeout: 10_000,
-    });
-    console.log("[e2e] 折叠区可再次收起（过程段整体隐藏）");
-
-    // ---- 场景 3：中断终态强制展开 ----
+    // ---- 场景 3：中断终态保留部分正文（可复制），思考卡收起 ----
     await window.evaluate(() => {
       window.interruptedMessage = null;
       window.removeInterruptedListener = window.codexlike.onTaskEvent(
@@ -263,17 +280,14 @@ async function main() {
       .first()
       .waitFor({ timeout: 10_000 });
 
-    const interruptToggles = window.getByTestId("worked-history-toggle");
-    const lastToggle = interruptToggles.last();
-    await lastToggle.waitFor({ timeout: 10_000 });
-    assert(
-      (await lastToggle.getAttribute("aria-expanded")) === "true",
-      "中断终态的轮应强制展开已工作折叠区"
-    );
     const interruptedThinking = window.getByTestId("thinking-block").last();
     assert(
-      await interruptedThinking.isVisible(),
-      "强制展开的折叠区内思考过程应可见"
+      await interruptedThinking.getByTestId("thinking-toggle").isVisible(),
+      "中断轮的思考卡摘要行应可见（过程段平铺常驻）"
+    );
+    assert(
+      !(await interruptedThinking.getByTestId("thinking-content").isVisible()),
+      "中断轮的思考卡应自动收起（内容不可见）"
     );
     await interruptedTurn.getByTestId("assistant-copy").waitFor();
     assert(
@@ -310,7 +324,7 @@ async function main() {
       copiedContent === terminalContent,
       `中断正文应复制当前段原文且不含中断提示：${JSON.stringify({ expected: terminalContent, actual: copiedContent })}`
     );
-    console.log("[e2e] 中断终态保留过程与可复制正文，不显示成功时间");
+    console.log("[e2e] 中断终态保留可复制正文，思考卡自动收起");
 
     // ---- 场景 4：错误终态保留的正文可复制，不伪装成功 ----
     await window.getByTestId("composer-input").fill("执行到一半失败");
@@ -334,9 +348,9 @@ async function main() {
     );
 
     await closeApp(app);
-    console.log("[e2e] 已工作折叠区与轮次分组场景通过 ✅");
+    console.log("[e2e] 过程段逐段呈现场景通过 ✅");
   } catch (error) {
-    console.error("[e2e] 已工作折叠区场景失败 ❌", error);
+    console.error("[e2e] 过程段逐段呈现场景失败 ❌", error);
     process.exitCode = 1;
     try {
       await closeApp(app);

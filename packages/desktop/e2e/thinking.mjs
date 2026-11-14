@@ -16,7 +16,6 @@ import {
   selectComposerOption,
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   NARROW_WIDTH,
   prepareDraft,
@@ -752,10 +751,8 @@ async function main() {
     }
     assert(seenBodies.length === 6, `预期 6 个请求，实际 ${seenBodies.length}`);
 
-    // 票 04：轮完成后思考段收进该轮「已工作折叠区」（默认收起），
-    // 先展开折叠区再交互；thinking 折叠块自身的默认收起/展开断言不变
-    await window.getByTestId("worked-history-toggle").click();
-    await window.getByTestId("worked-history-items").waitFor();
+    // 过程段平铺常驻（ADR 0015），思考块直接可交互；
+    // thinking 折叠块自身的默认收起/展开断言不变
     const thinkingBlock = window.getByTestId("thinking-block").first();
     await thinkingBlock.waitFor({ timeout: 20_000 });
     // 默认收起：思考内容不可见
@@ -818,14 +815,13 @@ async function main() {
       await new Promise((r) => setTimeout(r, 100));
     }
     assert(seenBodies.length === 8, `预期 8 个请求，实际 ${seenBodies.length}`);
-    // 等最终文本回复渲染（本轮结束；最终正文在折叠区外，收起也可见）
+    // 等最终文本回复渲染（本轮结束）
     await window
       .getByTestId("message-assistant")
       .nth(6)
       .waitFor({ timeout: 20_000 });
     await new Promise((r) => setTimeout(r, 300));
-    // 轮完成后工具卡收进已工作折叠区：展开回看，read_file 卡仍完整（票 04）
-    await expandWorkedHistory(window, 1);
+    // 过程段平铺常驻（ADR 0015）：工具卡完成自动收起，摘要行回看，卡仍完整
     const restoredToolCard = window.getByTestId("tool-call-card").first();
     await restoredToolCard.waitFor({ timeout: 10_000 });
     assert(

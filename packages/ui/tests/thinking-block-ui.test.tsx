@@ -59,9 +59,7 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
   });
 
   it("思考结束默认收起：无 open 属性、无指示器，摘要行显示首行摘要", () => {
-    // 完成的轮次过程段默认收进「已工作折叠区」（票 04）：预置展开记忆
-    // 让折叠区渲染内容，才观察得到思考块自身的收起态与摘要行
-    setRememberedOpen("history-u1", true);
+    // 过程段平铺常驻（ADR 0015）：思考块自身的收起态与摘要行直接可观察
     const html = streamOf([thinking()]);
     const block = blockMarkup(html, "thinking-block");
     expect(block).not.toContain('open=""');
@@ -70,7 +68,6 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
   });
 
   it("收起态内容仍在 DOM（textContent 可回读全文，e2e 依赖此语义）", () => {
-    setRememberedOpen("history-u1", true);
     const html = streamOf([thinking()]);
     const content = html.match(
       /data-testid="thinking-content"[^>]*>((?:[^<]|<(?!\/div))*)/

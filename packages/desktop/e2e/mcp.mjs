@@ -13,7 +13,6 @@ import { DESKTOP_DIR } from "./launch-target.mjs";
 import {
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -117,14 +116,13 @@ async function main() {
     console.log("[e2e] assist 模式：MCP 工具调用自动放行（无审批卡）");
 
     // 3) fake server 经 stdio 真实往返 → 结果回填卡片与模型
-    //（stdio 往返快于轮次收尾：票 04 完成后工具卡收进折叠区，先等轮完成再展开回看）
+    //（轮完成后工具卡自动收起为摘要行，先等轮完成再展开回看）
 
     await window
       .getByTestId("message-assistant")
       .last()
       .getByText("MCP 工具已执行并返回结果")
       .waitFor({ timeout: 20_000 });
-    await expandWorkedHistory(window, 0);
     const echoCard = window
       .locator('[data-testid="tool-call-card"][data-tool-name="mcp_fake_echo"]')
       .first();

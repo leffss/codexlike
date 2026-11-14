@@ -3,8 +3,8 @@
 // 顺序排列——思考段不再被提升到轮次顶部合并、工具调用之后产生的正文
 // 显示在工具卡之后。断言方式为严格 testid 序列（不靠文本过滤），
 // 并验证思考折叠块与工具卡在新结构下的折叠交互不变、重启恢复形状。
-// 票 04 起过程段收进轮次「已工作折叠区」（收起时不渲染），时序断言
-// 在展开折叠区后进行；收起默认与展开回看本身也是断言对象。
+// ADR 0015 起过程段平铺常驻（已工作折叠区移除），时序断言直接进行；
+// 被隔断的中间正文以过程卡（默认收起）呈现，也是断言对象。
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,6 @@ import process from "node:process";
 import {
   assert,
   closeApp,
-  expandWorkedHistory,
   launchApp,
   NARROW_WIDTH,
   prepareDraft,
@@ -391,7 +390,7 @@ async function main() {
       );
     }
 
-    // ---- 场景 1：轮完成后过程段收进已工作折叠区（票 04 默认收起）----
+    // ---- 场景 1：轮完成后段序列（平铺常驻，ADR 0015）----
     let order = await segmentOrder(window);
     assert(Array.isArray(order), "消息流不存在");
     assert(
@@ -399,50 +398,21 @@ async function main() {
         JSON.stringify([
           "message-turn",
           "message-user",
-          "worked-history",
-          "message-assistant",
-        ]),
-      `轮完成后过程段应收进收起的已工作折叠区，只留最终正文：${JSON.stringify(order)}`
-    );
-    const collapsedToggle = window.getByTestId("worked-history-toggle");
-    assert(
-      (await collapsedToggle.getAttribute("aria-expanded")) === "false",
-      "正常完成的轮折叠区应默认收起"
-    );
-    const summaryText = await window
-      .getByTestId("worked-history-summary")
-      .textContent();
-    assert(
-      summaryText !== null && summaryText.includes("已工作"),
-      `折叠区摘要行应显示工时：${summaryText ?? "(空)"}`
-    );
-    // 展开回看完整过程
-    await collapsedToggle.click();
-    await window.getByTestId("worked-history-items").waitFor();
-
-    assert(
-      (await window.getByTestId("assistant-actions").count()) === 1,
-      "展开过程区后仍仅最终正文显示操作栏"
-    );
-
-    // ---- 场景 1b：严格 DOM 时序断言（testid 序列，不靠文本过滤）----
-    order = await segmentOrder(window);
-    assert(
-      JSON.stringify(order) ===
-        JSON.stringify([
-          "message-turn",
-          "message-user",
-          "worked-history",
           "thinking-block",
-          "message-assistant",
+          "process-text-block",
           "tool-call-card",
           "thinking-block",
           "message-assistant",
         ]),
       `消息段顺序与事件发生顺序不一致：${JSON.stringify(order)}`
     );
+    assert(
+      (await window.getByTestId("assistant-actions").count()) === 1,
+      "仅最终正文显示操作栏"
+    );
 
-    // 各段内容归属正确：两段思考独立成段、两段正文独立成段
+    // 各段内容归属正确：两段思考独立成段；被隔断的中间正文以过程卡
+    // 呈现（默认收起），最终正文单独成段
     const thinkingTexts = await window.evaluate(() =>
       [...document.querySelectorAll('[data-testid="thinking-content"]')].map(
         (node) => node.textContent ?? ""
@@ -454,18 +424,28 @@ async function main() {
         thinkingTexts[1].includes("再核对一遍"),
       `两段思考应交错独立存在：${JSON.stringify(thinkingTexts)}`
     );
+    const processTextBlock = window.getByTestId("process-text-block");
+    assert(
+      (await processTextBlock.count()) === 1,
+      "被工具隔断的中间正文应渲染为过程卡"
+    );
+    const processSummary = await window
+      .getByTestId("process-text-summary")
+      .textContent();
+    assert(
+      processSummary !== null && processSummary.includes("先读文件，"),
+      `过程卡摘要行应显示中间正文首行：${processSummary ?? "(空)"}`
+    );
     const assistantTexts = await window.evaluate(() =>
       [...document.querySelectorAll('[data-testid="assistant-content"]')].map(
         (node) => node.textContent ?? ""
       )
     );
     assert(
-      assistantTexts.length === 2 &&
-        assistantTexts[0].includes("先读文件，") &&
-        !assistantTexts[0].includes("结论") &&
-        assistantTexts[1].includes("结论：内容正确") &&
-        !assistantTexts[1].includes("先读文件，"),
-      `工具卡前后的两段正文应独立：${JSON.stringify(assistantTexts)}`
+      assistantTexts.length === 1 &&
+        assistantTexts[0].includes("结论：内容正确") &&
+        !assistantTexts[0].includes("先读文件，"),
+      `最终正文应为独立一段：${JSON.stringify(assistantTexts)}`
     );
     console.log("[e2e] 交错回复按事件发生顺序渲染（思考/正文/工具/思考/正文）");
 
@@ -544,35 +524,20 @@ async function main() {
       "重启后的完成时间不得改成历史打开时刻"
     );
     await assertCompletedTime(window, completedAt);
-    let restored = await segmentOrder(window);
-    // 票 02 起落库历史带 reasoning；票 04 起恢复后正常完成的轮默认收起
-    // 折叠区（过程段=工具卡与重建的思考段整体收进「已工作折叠区」）
-    assert(
-      JSON.stringify(restored) ===
-        JSON.stringify([
-          "message-turn",
-          "message-user",
-          "worked-history",
-          "message-assistant",
-        ]),
-      `重启恢复后正常完成的轮应默认收起折叠区：${JSON.stringify(restored)}`
-    );
-    // 展开折叠区：工具卡 → 思考段（票 02 终态消息位置在工具卡之后）→ 终稿正文；
+    const restored = await segmentOrder(window);
+    // 票 02 起落库历史带 reasoning；过程段平铺常驻（ADR 0015）：
+    // 工具卡 → 思考段（票 02 终态消息位置在工具卡之后）→ 终稿正文；
     // 运行期的多段思考拼接为终态全文
-    await expandWorkedHistory(window, 0);
-    await window.getByTestId("tool-call-card").waitFor({ timeout: 10_000 });
-    restored = await segmentOrder(window);
     assert(
       JSON.stringify(restored) ===
         JSON.stringify([
           "message-turn",
           "message-user",
-          "worked-history",
           "tool-call-card",
           "thinking-block",
           "message-assistant",
         ]),
-      `重启恢复后展开折叠区的消息段序列不正确：${JSON.stringify(restored)}`
+      `重启恢复后的消息段序列不正确：${JSON.stringify(restored)}`
     );
     const restoredThinking = await window
       .getByTestId("thinking-block")
