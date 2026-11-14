@@ -11,6 +11,9 @@
 //    头部 / 消息流左右缘对齐，输入卡片外扩；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
 // 5) 窗口内容区 1000px（容器 712px <864）→ 基础档：内容列回落全宽（<896px）。
+// 6) 票03 抽屉重基线：右栏为消息流上方 overlay 抽屉，打开不改变内容列宽度，
+//    抽屉自身受 30rem / 上限 60% 任务容器宽约束；两开关驱动同一抽屉 tab 互斥，
+//    面板本体关闭按钮关闭整个抽屉。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -328,31 +331,55 @@ async function main() {
       path: join(screenshots, "existing-task.png"),
     });
 
-    // 独立面板是整个主列的兄弟，外层分档不因面板打开而降档。
+    // 票03 抽屉重基线：面板改为消息流上方的 overlay 抽屉，打开不改变内容列
+    // 宽度（原分栏挤压行为取消），外层分档不因抽屉浮出而降档；抽屉自身受
+    // 宽度约束（30rem，上限 60% 任务容器宽）。
     await resizeWindow(app, 1600, 900);
-    const closed = await assertAligned(window, "message-list", "面板关闭");
+    const closed = await assertAligned(window, "message-list", "抽屉关闭");
     for (const [toggle, panel] of [
       ["resources-toggle", "resources-panel"],
       ["changes-toggle", "changes-panel"],
     ]) {
       await window.getByTestId(toggle).click();
+      await window.getByTestId("panels-drawer").waitFor();
       await window.getByTestId(panel).waitFor();
+      assert(
+        (await window.getByTestId(toggle).getAttribute("aria-expanded")) ===
+          "true",
+        `${toggle} aria-expanded 应与抽屉状态同步`
+      );
       const opened = await assertAligned(window, "message-list", panel);
-      assert(opened.width < closed.width, `${panel} 应占据主列旁边空间`);
-      const panelBox = await window.getByTestId(panel).boundingBox();
-      assert(opened.x + opened.width <= panelBox.x, `${panel} 不能覆盖主列`);
-      // 票01：标题操作行迁入标题栏，面板开合不再有页内头部可换行；
-      // 标题栏自身高度稳定性由断言视口布局覆盖（titlebar rect 不越界）。
+      assert(
+        Math.abs(opened.width - closed.width) <= 1,
+        `${panel} 抽屉打开不得改变内容列宽度（原挤压行为已取消）`
+      );
       // 外层仍为 >=1280 档；若错误改用收窄后主列分档，实际宽度会多 96px。
       const streamWidth = await window
         .getByTestId("message-stream")
         .evaluate((el) => el.clientWidth);
       assert(
         Math.abs(opened.width - (streamWidth - STREAM_PADDING - 192)) <= 1,
-        "面板打开仍使用外层任务容器的6xl档留白"
+        "抽屉打开仍使用外层任务容器的6xl档留白"
+      );
+      // 抽屉自身宽度约束：30rem（480px），上限 60% 任务容器宽（侧栏 288px）。
+      const drawerBox = await window.getByTestId("panels-drawer").boundingBox();
+      const viewportWidth = await window.evaluate(() => window.innerWidth);
+      const expectedDrawer = Math.min(
+        480,
+        (viewportWidth - SIDEBAR_WIDTH) * 0.6
+      );
+      assert(
+        Math.abs(drawerBox.width - expectedDrawer) <= 2,
+        `${panel} 抽屉宽 ${drawerBox.width} 应为 30rem 上限 60% 任务容器（${expectedDrawer}）`
+      );
+      // 抽屉浮于消息流上方：与内容列水平重叠（覆盖而非并列推挤）。
+      assert(
+        drawerBox.x < opened.x + opened.width,
+        `${panel} 抽屉应覆盖在消息流上方而非并列占位`
       );
       await window.screenshot({ path: join(screenshots, `${panel}.png`) });
       await window.getByTestId(toggle).click();
+      await window.getByTestId("panels-drawer").waitFor({ state: "hidden" });
       const restored = await assertAligned(
         window,
         "message-list",
@@ -360,27 +387,44 @@ async function main() {
       );
       assert(
         Math.abs(restored.width - closed.width) <= 1,
-        "收起面板恢复原内容宽度"
+        "收起抽屉恢复原内容宽度"
       );
     }
 
-    // 默认与窄窗口同时打开两个面板：标题栏控件仍可见、不越出窗口
-    // （票01 后任务名 / 徽章 / 搜索 / 面板开关都在标题栏，面板不再与之争宽）。
+    // 默认与窄窗口下两开关驱动同一抽屉（tab 切换互斥）：抽屉受 60% 上限
+    // 约束、不越出消息流区域；标题栏控件仍可见、不越出窗口。
     for (const width of [1280, 1000]) {
       await resizeWindow(app, width, 800);
       await window.getByTestId("resources-toggle").click();
-      await window.getByTestId("changes-toggle").click();
       await window.getByTestId("resources-panel").waitFor();
+      await window.getByTestId("changes-toggle").click();
       await window.getByTestId("changes-panel").waitFor();
+      assert(
+        (await window.getByTestId("panels-drawer").count()) === 1,
+        "两开关驱动同一抽屉，不产生第二个浮层"
+      );
+      assert(
+        (await window.getByTestId("resources-panel").count()) === 0,
+        "切到改动 tab 后规范面板不再挂载"
+      );
+      assert(
+        (await window
+          .getByTestId("resources-toggle")
+          .getAttribute("aria-expanded")) === "false" &&
+          (await window
+            .getByTestId("changes-toggle")
+            .getAttribute("aria-expanded")) === "true",
+        "两开关 aria-expanded 与抽屉 tab 互斥同步"
+      );
       const content = await assertAligned(
         window,
         "message-list",
-        `${width} 双面板`
+        `${width} 抽屉`
       );
       const title = await window.getByTestId("task-title").boundingBox();
       assert(
         title.width >= 40,
-        `${width} 双面板标题不能被压成零宽：${title.width}`
+        `${width} 抽屉打开时标题不能被压成零宽：${title.width}`
       );
       const viewportWidth = await window.evaluate(() => window.innerWidth);
       for (const testId of [
@@ -394,37 +438,58 @@ async function main() {
           button !== null &&
             button.x >= 0 &&
             button.x + button.width <= viewportWidth,
-          `${width} 双面板 ${testId} 应在标题栏内可见且不越出窗口：${JSON.stringify({ button, viewportWidth })}`
+          `${width} 抽屉打开 ${testId} 应在标题栏内可见且不越出窗口：${JSON.stringify({ button, viewportWidth })}`
         );
       }
-      for (const testId of ["resources-panel", "changes-panel"]) {
-        const panel = await window.getByTestId(testId).boundingBox();
+      // 抽屉自身宽度约束：窄窗口（1000）命中 60% 上限而非 30rem。
+      const drawerBox = await window.getByTestId("panels-drawer").boundingBox();
+      const expectedDrawer = Math.min(
+        480,
+        (viewportWidth - SIDEBAR_WIDTH) * 0.6
+      );
+      assert(
+        Math.abs(drawerBox.width - expectedDrawer) <= 2,
+        `${width} 抽屉宽 ${drawerBox.width} 应为 30rem 上限 60% 任务容器（${expectedDrawer}）`
+      );
+      // 抽屉只覆盖消息流区域：底部不越出输入卡顶，面板不覆盖主列内容。
+      const composer = await window.getByTestId("composer-card").boundingBox();
+      assert(
+        drawerBox.y + drawerBox.height <= composer.y + 1,
+        `${width} 抽屉不应越出消息流区域（composer 顶 ${composer.y}，抽屉底 ${
+          drawerBox.y + drawerBox.height
+        }）`
+      );
+      assert(
+        drawerBox.x < content.x + content.width,
+        `${width} 抽屉应浮于消息流上方而非并列占位`
+      );
+      const panel = await window.getByTestId("changes-panel").boundingBox();
+      assert(
+        panel.height > 100 &&
+          panel.x >= drawerBox.x - 1 &&
+          panel.x + panel.width <= drawerBox.x + drawerBox.width + 1,
+        `${width} 改动面板应在抽屉边界内且可用`
+      );
+      for (const button of await window
+        .getByTestId("panels-drawer")
+        .locator("button")
+        .all()) {
+        const box = await button.boundingBox();
         assert(
-          panel.height > 100 && panel.x >= content.x + content.width,
-          `${width} 双面板均应可用且不覆盖主列`
+          box.x >= drawerBox.x &&
+            box.x + box.width <= drawerBox.x + drawerBox.width + 1,
+          `${width} 抽屉头部操作仍在抽屉边界内`
         );
-        const panelHeader = window
-          .getByTestId(testId)
-          .locator("header")
-          .first();
-        for (const button of await panelHeader.locator("button").all()) {
-          const box = await button.boundingBox();
-          assert(
-            box.x >= panel.x && box.x + box.width <= panel.x + panel.width + 1,
-            `${width} ${testId} 内部操作仍在面板边界内`
-          );
-        }
       }
       await window.screenshot({
-        path: join(screenshots, `both-panels-${width}.png`),
+        path: join(screenshots, `drawer-${width}.png`),
       });
       await window.getByTestId("theme-toggle").click();
-      await assertAligned(window, "message-list", `${width} 双面板切换主题`);
+      await assertAligned(window, "message-list", `${width} 抽屉切换主题`);
       await window.getByTestId("theme-toggle").click();
+      // 面板本体关闭按钮（changes-close）关闭整个抽屉。
       await window.getByTestId("changes-close").click();
-      await window.getByTestId("changes-panel").waitFor({ state: "hidden" });
-      await window.getByTestId("resources-toggle").click();
-      await window.getByTestId("resources-panel").waitFor({ state: "hidden" });
+      await window.getByTestId("panels-drawer").waitFor({ state: "hidden" });
     }
 
     // 同一真实任务通过IPC应答闸门切回：只延迟真实结果，不伪造历史。

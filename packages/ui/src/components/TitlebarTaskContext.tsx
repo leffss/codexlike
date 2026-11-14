@@ -16,9 +16,11 @@ export interface TitlebarTask {
   workspaceOriginPath: string | null;
 }
 
-/** 标题栏承载的面板开关（票01 只迁移位置；票03 抽屉化改浮层）。 */
+/** 标题栏承载的面板开关（票01 迁移位置；票03 起两开关驱动同一 overlay 抽屉）。 */
 export interface TitlebarPanels {
+  /** 抽屉当前 tab 为「规范与技能」时 true（与抽屉状态同步） */
   resourcesOpen: boolean;
+  /** 抽屉当前 tab 为「改动」时 true（与抽屉状态同步） */
   changesOpen: boolean;
   /** 无当前任务时两个面板都不可用 */
   disabled: boolean;
@@ -188,31 +190,51 @@ export function TitlebarTaskContext(props: { context: TitlebarContext }) {
   );
 }
 
-/** 面板开关（规范与技能 / 改动）：迁入标题栏右侧，保留现有分栏渲染行为。 */
+/**
+ * 面板开关（规范与技能 / 改动）：迁入标题栏右侧（票01）；
+ * 票03 起驱动同一 overlay 抽屉——aria-expanded 与抽屉状态同步，
+ * 抽屉所在 tab 的开关持久高亮（accent），文案恒定。
+ */
 export function TitlebarPanelToggles(props: { panels: TitlebarPanels }) {
   const { panels } = props;
+  const toggles: Array<{
+    testid: string;
+    label: string;
+    open: boolean;
+    onToggle: () => void;
+  }> = [
+    {
+      testid: "resources-toggle",
+      label: "规范与技能",
+      open: panels.resourcesOpen,
+      onToggle: panels.onToggleResources,
+    },
+    {
+      testid: "changes-toggle",
+      label: "改动",
+      open: panels.changesOpen,
+      onToggle: panels.onToggleChanges,
+    },
+  ];
   return (
     <>
-      <button
-        type="button"
-        data-testid="resources-toggle"
-        disabled={panels.disabled}
-        aria-expanded={panels.resourcesOpen}
-        onClick={panels.onToggleResources}
-        className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-      >
-        规范与技能
-      </button>
-      <button
-        type="button"
-        data-testid="changes-toggle"
-        disabled={panels.disabled}
-        aria-expanded={panels.changesOpen}
-        onClick={panels.onToggleChanges}
-        className="shrink-0 whitespace-nowrap rounded border border-line px-3 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50"
-      >
-        {panels.changesOpen ? "收起改动" : "改动"}
-      </button>
+      {toggles.map(({ testid, label, open, onToggle }) => (
+        <button
+          key={testid}
+          type="button"
+          data-testid={testid}
+          disabled={panels.disabled}
+          aria-expanded={open}
+          onClick={onToggle}
+          className={`shrink-0 whitespace-nowrap rounded border px-3 py-1 text-xs disabled:opacity-50 ${
+            open
+              ? "border-accent text-accent"
+              : "border-line text-fg-muted hover:border-accent hover:text-accent"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
     </>
   );
 }
