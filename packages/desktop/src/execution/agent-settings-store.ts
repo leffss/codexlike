@@ -71,6 +71,70 @@ function resolveToolRounds(value: unknown, fallback: number): number {
   return resolveIntInRange(value, TOOL_ROUNDS_MIN, TOOL_ROUNDS_MAX, fallback);
 }
 
+/**
+ * 共享写入校验（纯函数）：整数且在 [min, max] 内原样返回，否则抛按项定制
+ * 的中文异常（code review 修复 2：四段结构相同的校验块提炼为单一函数）。
+ * store.set（存储层）与 parseAgentSettingsInput（IPC 边界解析）共用，
+ * 保证两条路径的规则与消息一致；typeof 先行收窄使字符串数字（"200"）
+ * 同样落入「非整数」拒绝分支，不经 Number 强转放行。
+ */
+function validateIntInRange(
+  value: unknown,
+  min: number,
+  max: number,
+  label: string
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new Error(`${label}必须是 ${min}-${max} 的整数`);
+  }
+  return value;
+}
+
+/**
+ * IPC 边界输入解析（纯函数，不信任渲染进程）：unknown → AgentSettings，
+ * 形状/类型/范围校验任一失败以中文异常抛回（code review 修复 4：此前
+ * handler 内联 Number(record[...]) 强转使 "200" 这类字符串数字放行；
+ * 与 terminal-settings 的 parseTerminalSettingsInput 同构——值必须是
+ * number 类型，渲染进程伪造的字符串在边界即被拒绝）。
+ */
+export function parseAgentSettingsInput(input: unknown): AgentSettings {
+  if (typeof input !== "object" || input === null) {
+    throw new Error("执行设置输入不合法");
+  }
+  const record = input as Record<string, unknown>;
+  return {
+    maxToolRounds: validateIntInRange(
+      record["maxToolRounds"],
+      TOOL_ROUNDS_MIN,
+      TOOL_ROUNDS_MAX,
+      "主任务工具轮次上限"
+    ),
+    maxSubagentToolRounds: validateIntInRange(
+      record["maxSubagentToolRounds"],
+      TOOL_ROUNDS_MIN,
+      TOOL_ROUNDS_MAX,
+      "子代理工具轮次上限"
+    ),
+    compactKeepRounds: validateIntInRange(
+      record["compactKeepRounds"],
+      COMPACT_KEEP_ROUNDS_MIN,
+      COMPACT_KEEP_ROUNDS_MAX,
+      "压缩保留对话轮数"
+    ),
+    contextWarningThresholdPercent: validateIntInRange(
+      record["contextWarningThresholdPercent"],
+      CONTEXT_WARNING_PERCENT_MIN,
+      CONTEXT_WARNING_PERCENT_MAX,
+      "上下文告警阈值"
+    ),
+  };
+}
+
 /** 执行设置的本地存储（`~/.codexlike/agent-settings.json`）；损坏文件按默认值处理 */
 export function createAgentSettingsStore(options: {
   dir: string;
@@ -118,47 +182,32 @@ export function createAgentSettingsStore(options: {
     },
 
     async set(input: AgentSettings) {
-      const maxToolRounds = input.maxToolRounds;
-      if (
-        !Number.isInteger(maxToolRounds) ||
-        maxToolRounds < TOOL_ROUNDS_MIN ||
-        maxToolRounds > TOOL_ROUNDS_MAX
-      ) {
-        throw new Error(
-          `主任务工具轮次上限必须是 ${TOOL_ROUNDS_MIN}-${TOOL_ROUNDS_MAX} 的整数`
-        );
-      }
-      const maxSubagentToolRounds = input.maxSubagentToolRounds;
-      if (
-        !Number.isInteger(maxSubagentToolRounds) ||
-        maxSubagentToolRounds < TOOL_ROUNDS_MIN ||
-        maxSubagentToolRounds > TOOL_ROUNDS_MAX
-      ) {
-        throw new Error(
-          `子代理工具轮次上限必须是 ${TOOL_ROUNDS_MIN}-${TOOL_ROUNDS_MAX} 的整数`
-        );
-      }
-      const compactKeepRounds = input.compactKeepRounds;
-      if (
-        !Number.isInteger(compactKeepRounds) ||
-        compactKeepRounds < COMPACT_KEEP_ROUNDS_MIN ||
-        compactKeepRounds > COMPACT_KEEP_ROUNDS_MAX
-      ) {
-        throw new Error(
-          `压缩保留对话轮数必须是 ${COMPACT_KEEP_ROUNDS_MIN}-${COMPACT_KEEP_ROUNDS_MAX} 的整数`
-        );
-      }
-      const contextWarningThresholdPercent =
-        input.contextWarningThresholdPercent;
-      if (
-        !Number.isInteger(contextWarningThresholdPercent) ||
-        contextWarningThresholdPercent < CONTEXT_WARNING_PERCENT_MIN ||
-        contextWarningThresholdPercent > CONTEXT_WARNING_PERCENT_MAX
-      ) {
-        throw new Error(
-          `上下文告警阈值必须是 ${CONTEXT_WARNING_PERCENT_MIN}-${CONTEXT_WARNING_PERCENT_MAX} 的整数`
-        );
-      }
+      // 四项各自校验（共享 validateIntInRange，消息与 IPC 边界解析一致）：
+      // 任一项非法整体拒绝，不落盘
+      const maxToolRounds = validateIntInRange(
+        input.maxToolRounds,
+        TOOL_ROUNDS_MIN,
+        TOOL_ROUNDS_MAX,
+        "主任务工具轮次上限"
+      );
+      const maxSubagentToolRounds = validateIntInRange(
+        input.maxSubagentToolRounds,
+        TOOL_ROUNDS_MIN,
+        TOOL_ROUNDS_MAX,
+        "子代理工具轮次上限"
+      );
+      const compactKeepRounds = validateIntInRange(
+        input.compactKeepRounds,
+        COMPACT_KEEP_ROUNDS_MIN,
+        COMPACT_KEEP_ROUNDS_MAX,
+        "压缩保留对话轮数"
+      );
+      const contextWarningThresholdPercent = validateIntInRange(
+        input.contextWarningThresholdPercent,
+        CONTEXT_WARNING_PERCENT_MIN,
+        CONTEXT_WARNING_PERCENT_MAX,
+        "上下文告警阈值"
+      );
       const next: AgentSettings = {
         maxToolRounds,
         maxSubagentToolRounds,

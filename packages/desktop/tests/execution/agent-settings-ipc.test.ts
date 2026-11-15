@@ -65,6 +65,14 @@ describe("agent-settings IPC", () => {
     return { store, saved };
   }
 
+  /** async 包裹直调 set handler：边界解析（parseAgentSettingsInput）的同步
+   * 抛出统一表现为 promise rejection，与 ipcRenderer.invoke 的渲染端语义
+   * 一致（同 terminal-settings-ipc 测试先例） */
+  function invokeSet(input: unknown): Promise<unknown> {
+    const handler = bridge.handlers.get(IPC.agentSettings.set)!;
+    return (async () => handler({}, input))();
+  }
+
   it("get/set 注册到 agent-settings:* 频道；set 落盘并回调 onSaved（内存缓存刷新点）", async () => {
     const { saved } = setup();
 
@@ -83,15 +91,12 @@ describe("agent-settings IPC", () => {
 
     // set：合法值返回保存结果、落盘（经 store）并通知装配层刷新内存缓存
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 500,
-          maxSubagentToolRounds: 300,
-          compactKeepRounds: 5,
-          contextWarningThresholdPercent: 65,
-        }
-      )
+      invokeSet({
+        maxToolRounds: 500,
+        maxSubagentToolRounds: 300,
+        compactKeepRounds: 5,
+        contextWarningThresholdPercent: 65,
+      })
     ).resolves.toEqual({
       maxToolRounds: 500,
       maxSubagentToolRounds: 300,
@@ -119,74 +124,74 @@ describe("agent-settings IPC", () => {
   it("set：非法输入以中文异常抛回且不落盘（边界不信任渲染进程）", async () => {
     const { saved } = setup();
 
-    // 越界/非整数 → store 校验拒绝（四项各自校验）
+    // 越界/非整数 → 边界解析拒绝（四项各自校验，与 store.set 同源同消息）
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 9,
-          maxSubagentToolRounds: 200,
-          compactKeepRounds: 3,
-          contextWarningThresholdPercent: 80,
-        }
-      )
+      invokeSet({
+        maxToolRounds: 9,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+      })
     ).rejects.toThrow("主任务工具轮次上限");
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 200,
-          maxSubagentToolRounds: 1001,
-          compactKeepRounds: 3,
-          contextWarningThresholdPercent: 80,
-        }
-      )
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 1001,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+      })
     ).rejects.toThrow("子代理工具轮次上限");
     // 票 03 两项：压缩保留轮数与告警阈值越界同样拒绝（整数百分比 50–95）
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 200,
-          maxSubagentToolRounds: 200,
-          compactKeepRounds: 0,
-          contextWarningThresholdPercent: 80,
-        }
-      )
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 0,
+        contextWarningThresholdPercent: 80,
+      })
     ).rejects.toThrow("压缩保留对话轮数");
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 200,
-          maxSubagentToolRounds: 200,
-          compactKeepRounds: 3,
-          contextWarningThresholdPercent: 96,
-        }
-      )
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 96,
+      })
     ).rejects.toThrow("上下文告警阈值");
-    // 非数字输入（渲染进程伪造）→ Number 归一后 NaN 同样拒绝
+    // 非数字类型输入（渲染进程伪造）→ 边界解析按类型拒绝（code review 修复 4：
+    // 不再经 Number 强转，字符串在 parseAgentSettingsInput 即被拒收）
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: "abc",
-          maxSubagentToolRounds: 200,
-          compactKeepRounds: 3,
-          contextWarningThresholdPercent: 80,
-        }
-      )
+      invokeSet({
+        maxToolRounds: "abc",
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+      })
     ).rejects.toThrow("主任务工具轮次上限");
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!(
-        {},
-        {
-          maxToolRounds: 200,
-          maxSubagentToolRounds: 200,
-          compactKeepRounds: 3,
-          contextWarningThresholdPercent: "80%",
-        }
-      )
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: "80%",
+      })
+    ).rejects.toThrow("上下文告警阈值");
+    // 字符串数字（"200"）同样拒绝：强转放行缺口（"200" → 200 落盘）已封堵
+    await expect(
+      invokeSet({
+        maxToolRounds: "200",
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+      })
+    ).rejects.toThrow("主任务工具轮次上限");
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: "80",
+      })
     ).rejects.toThrow("上下文告警阈值");
     // 非对象输入（同步抛出，同子代理 handler 先例）
     expect(() => bridge.handlers.get(IPC.agentSettings.set)!({}, 42)).toThrow(
