@@ -55,3 +55,26 @@ export const DEFAULT_CONTEXT_WARNING_PERCENT = 80;
  */
 export const CONTEXT_WARNING_PERCENT_MIN = 50;
 export const CONTEXT_WARNING_PERCENT_MAX = 95;
+
+/**
+ * 终端命令超时默认值（秒，执行设置票04）：工具层乘 1000 换算毫秒消费，
+ * 存储层与设置页直接用于默认值。此前定义在 tools/terminal.ts，范围又散落
+ * desktop store 与 ui 表单两处，执行设置常量收拢后六项设置共用单一来源
+ * （code review 修复 3），防数字分叉。
+ */
+export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
+export const DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS = 120;
+
+/**
+ * 命令超时的设置层合法范围（秒，spec/ADR 0017）：下界 5 防过短打断正常
+ * 命令，上界 600 防单条命令长时间占住回合。
+ */
+export const COMMAND_TIMEOUT_SECONDS_MIN = 5;
+export const COMMAND_TIMEOUT_SECONDS_MAX = 600;
+
+/**
+ * 最大命令超时的设置层合法范围（秒）：上界 1800（30 分钟）为长时间
+ * 构建/测试留余地的同时封顶；「命令超时 ≤ 最大命令超时」联动由设置层校验。
+ */
+export const MAX_COMMAND_TIMEOUT_SECONDS_MIN = 10;
+export const MAX_COMMAND_TIMEOUT_SECONDS_MAX = 1800;

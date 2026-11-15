@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createBuiltinTools } from "../../src/tools/builtin";
@@ -34,13 +38,32 @@ describe("内置工具聚合（createBuiltinTools）", () => {
     }
   });
 
-  it("终端超时注入透传给 run_terminal_command（执行设置票04，注入值反映进工具描述）", () => {
+  it("终端超时注入透传给 run_terminal_command（执行设置票04）：注入默认值行为生效，描述不携带快照数字", async () => {
     const terminal = createBuiltinTools({
-      defaultTimeoutMs: 5_000,
+      env: { ...process.env },
+      defaultTimeoutMs: 3_000,
       maxTimeoutMs: 600_000,
     }).find((tool) => tool.name === "run_terminal_command");
     expect(terminal).toBeDefined();
-    expect(terminal!.description).toContain("超时默认 5 秒");
-    expect(terminal!.description).toContain("上限 600 秒");
-  });
+    // 工具描述不携带创建时刻的超时快照（code review 修复 5：设置可调后
+    // 快照会过时），注入值改由行为透传验证
+    expect(terminal!.description).not.toMatch(/超时默认 \d+ 秒/);
+    expect(terminal!.description).not.toMatch(/上限 \d+ 秒/);
+    // 未带 timeoutMs 的长命令按注入默认值 3 秒超时（而非工具层默认 30 秒），
+    // 证明 createBuiltinTools → createTerminalTool 的注入透传不断
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-builtin-ws-"));
+    const startedAt = Date.now();
+    const result = await terminal!.execute(
+      { command: "echo started; sleep 30" },
+      {
+        workspacePath: workspace,
+        taskId: "builtin-terminal-test",
+        approvalMode: "assist",
+      }
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("started");
+    expect(result.output).toContain("超时");
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  }, 15_000);
 });

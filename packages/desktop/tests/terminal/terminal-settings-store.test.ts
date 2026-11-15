@@ -152,17 +152,19 @@ describe("terminal-settings-store", () => {
     });
   });
 
-  it("越界的历史值读取时收敛到合法范围，且命令超时不大于最大命令超时（防手改文件）", async () => {
+  it("越界的历史值读取时回退该项默认值，联动非法（命令超时 > 最大命令超时）整对回退默认（防手改文件）", async () => {
     const dir = makeDir();
     writeFileSync(
       join(dir, "terminal-settings.json"),
       '{"shell":"cmd","commandTimeoutSeconds":9999,"maxCommandTimeoutSeconds":9999}',
       "utf8"
     );
+    // 两项都越界：各自回退默认（30/120），不夹紧到边界值（夹紧会掩盖误配，
+    // code review 修复 1：与 agent-settings-store 读取侧统一为「回退默认」）
     expect(await createTerminalSettingsStore({ dir }).get()).toEqual({
       shell: "cmd",
-      commandTimeoutSeconds: 600,
-      maxCommandTimeoutSeconds: 1800,
+      commandTimeoutSeconds: 30,
+      maxCommandTimeoutSeconds: 120,
     });
 
     const dir2 = makeDir();
@@ -171,11 +173,25 @@ describe("terminal-settings-store", () => {
       '{"commandTimeoutSeconds":3000,"maxCommandTimeoutSeconds":50}',
       "utf8"
     );
-    // 命令超时先被范围收敛到 600，再被最大命令超时压到 50
+    // 命令超时越界回退默认 30，最大命令超时合法保留（30 ≤ 50 联动自洽）
     expect(await createTerminalSettingsStore({ dir: dir2 }).get()).toEqual({
       shell: null,
-      commandTimeoutSeconds: 50,
+      commandTimeoutSeconds: 30,
       maxCommandTimeoutSeconds: 50,
+    });
+
+    const dir3 = makeDir();
+    writeFileSync(
+      join(dir3, "terminal-settings.json"),
+      '{"commandTimeoutSeconds":600,"maxCommandTimeoutSeconds":10}',
+      "utf8"
+    );
+    // 两项各自合法但联动非法：整对回退默认 30/120（只回退命令超时会留下
+    // 「30 > 10」的残破状态，整对回退恒自洽且与保存侧联动拒绝语义对齐）
+    expect(await createTerminalSettingsStore({ dir: dir3 }).get()).toEqual({
+      shell: null,
+      commandTimeoutSeconds: 30,
+      maxCommandTimeoutSeconds: 120,
     });
   });
 });

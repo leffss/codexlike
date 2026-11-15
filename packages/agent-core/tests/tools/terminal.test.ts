@@ -242,10 +242,18 @@ describe("run_terminal_command 工具（默认 Git Bash）", () => {
     expect(Date.now() - startedAt).toBeLessThan(15_000);
   }, 15_000);
 
-  it("默认值回归：不注入时默认超时 30 秒、上限 120 秒（工具描述可见）", () => {
-    const tool = createTerminalTool({ env: baseEnv });
-    expect(tool.description).toContain("超时默认 30 秒");
-    expect(tool.description).toContain("上限 120 秒");
+  it("工具描述不携带创建时刻的超时数字（设置可改防过时），保留 timeoutMs 用法指引", () => {
+    // 注入非默认值（7/9）同样不出现在描述里：描述不含任何「超时默认 X 秒 /
+    // 上限 Y 秒」快照（code review 修复 5），超时实际值由应用设置决定
+    const tool = createTerminalTool({
+      env: baseEnv,
+      defaultTimeoutMs: 7_000,
+      maxTimeoutMs: 9_000,
+    });
+    expect(tool.description).not.toMatch(/超时默认 \d+ 秒/);
+    expect(tool.description).not.toMatch(/上限 \d+ 秒/);
+    expect(tool.description).toContain("timeoutMs");
+    expect(tool.description).toContain("应用设置");
   });
 
   it("AbortSignal 中断：长命令执行中终止子进程，输出标记为用户中断（区别于超时）", async () => {

@@ -43,11 +43,9 @@ export type {
   TerminalToolOptions,
   TimeoutOption,
 } from "./tools/terminal";
-// 终端命令超时默认值（执行设置票04）：桌面端 terminal-settings 存储共用
-export {
-  DEFAULT_COMMAND_TIMEOUT_SECONDS,
-  DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS,
-} from "./tools/terminal";
+// 终端命令超时默认值（执行设置票04）：常量本体移至 execution-settings.ts 后
+// 经上方 export * from "./index" 随根出口导出（code review 修复 3：单一出口
+// 路径，不再从 ./tools/terminal 二次转发）
 // web_search（工单 10）：搜索源接口 + Tavily 默认实现 + 工具定义
 export {
   createTavilySearchSource,

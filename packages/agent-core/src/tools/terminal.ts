@@ -2,6 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import {
+  DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS,
+} from "../task/execution-settings";
+import {
   expectString,
   optionalNumber,
   optionalString,
@@ -13,13 +17,6 @@ import { resolvePath } from "./workspace";
 
 /** 可配置 shell（spec：默认 Git Bash，可切换 PowerShell/cmd） */
 export type TerminalShell = "git-bash" | "powershell" | "cmd";
-
-/**
- * 命令超时默认值（秒，执行设置票04）：桌面端 terminal-settings 存储与工具层
- * 共用的单一来源——工具层乘 1000 换算毫秒，存储层直接用于默认值与范围校验。
- */
-export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
-export const DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS = 120;
 
 /** 静态值或逐次解析的函数（宿主注入设置缓存，保存后对下一次命令即时生效） */
 export type TimeoutOption = number | (() => number);
@@ -209,17 +206,17 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
       options.maxTimeoutMs,
       DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS * 1000
     );
-  // 工具描述用创建时刻的快照（描述随实例定型；实际执行逐次解析注入值）
-  const initialDefaultTimeoutMs = resolveDefaultTimeoutMs();
-  const initialMaxTimeoutMs = resolveMaxTimeoutMs();
   const maxOutputLength = options.maxOutputLength ?? 30_000;
   const env = options.env ?? {};
 
   return defineTool({
     name: "run_terminal_command",
+    // 工具描述不携带具体超时数字（code review 修复 5）：超时两项已用户可调
+    // （执行设置票04），描述随实例定型，携带创建时刻快照会在设置改动后向
+    // 模型呈现过时数字；改为指明「由应用设置决定」+ timeoutMs 参数用法指引
     description:
       `在工作区内执行终端命令（默认 Git Bash：ls、cat、grep、管道等 POSIX 命令可用）。` +
-      `cwd 默认为工作区根。超时默认 ${initialDefaultTimeoutMs / 1000} 秒（可用 timeoutMs 调整，上限 ${initialMaxTimeoutMs / 1000} 秒），` +
+      `cwd 默认为工作区根。命令默认在应用设置的超时内完成，可用 timeoutMs 参数为单条命令指定更长时限，上限同样由应用设置决定。` +
       `输出最长 ${maxOutputLength} 字符（超出截断）。环境变量仅透传白名单基础项。`,
     parameters: {
       type: "object",
