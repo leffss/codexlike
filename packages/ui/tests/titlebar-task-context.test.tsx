@@ -26,11 +26,11 @@ function task(overrides: Partial<TitlebarTask> = {}): TitlebarTask {
 function context(overrides: Partial<TitlebarContext> = {}): TitlebarContext {
   return {
     task: task(),
-    search: { recordsRevision: 0, onSelect: () => {} },
     panels: {
-      resourcesOpen: false,
+      open: false,
       disabled: false,
-      onToggleResources: () => {},
+      onToggle: () => {},
+      changesCount: null,
     },
     ...overrides,
   };
@@ -47,7 +47,7 @@ it("打开任务时标题栏展示品牌、任务名与「项目 · Worktree/本
   expect(html).toMatch(/data-testid="workspace-badge"/);
   expect(html).toContain("ai-agent");
   expect(html).toMatch(/data-testid="workspace-mode"[^>]*>\s*Worktree\s*</);
-  // 任务搜索已迁出左区（App Header 右侧 nav 图标入口），左区不再渲染
+  // 任务搜索已迁任务列表头部（ADR 0018），标题栏左区不再渲染
   expect(html).not.toMatch(/data-testid="task-search-toggle"/);
 });
 
@@ -120,13 +120,14 @@ it("任务搜索图标入口：放大镜承载语义，文案进无障碍名，�
   expect(button).not.toContain(">关闭搜索<");
 });
 
-it("「规范与技能」图标开关保留定位器并同步 aria 状态，无任务时禁用", () => {
+it("「右栏开关」保留定位器并同步 aria 状态，无任务且草稿无工作区时禁用", () => {
   const open = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
-        resourcesOpen: true,
+        open: true,
         disabled: false,
-        onToggleResources: () => {},
+        onToggle: () => {},
+        changesCount: null,
       },
     })
   );
@@ -136,9 +137,10 @@ it("「规范与技能」图标开关保留定位器并同步 aria 状态，无�
   const closed = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
-        resourcesOpen: false,
+        open: false,
         disabled: false,
-        onToggleResources: () => {},
+        onToggle: () => {},
+        changesCount: null,
       },
     })
   );
@@ -148,22 +150,24 @@ it("「规范与技能」图标开关保留定位器并同步 aria 状态，无�
   const disabled = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
-        resourcesOpen: false,
+        open: false,
         disabled: true,
-        onToggleResources: () => {},
+        onToggle: () => {},
+        changesCount: null,
       },
     })
   );
   expect(disabled).toMatch(/data-testid="resources-toggle"[^>]*disabled/);
 });
 
-it("「规范与技能」图标开关：打开态高亮（accent），图标承载语义", () => {
+it("「右栏开关」：展开态高亮（accent），panel 图标承载语义", () => {
   const open = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
-        resourcesOpen: true,
+        open: true,
         disabled: false,
-        onToggleResources: () => {},
+        onToggle: () => {},
+        changesCount: null,
       },
     })
   );
@@ -172,29 +176,77 @@ it("「规范与技能」图标开关：打开态高亮（accent），图标承�
   )?.[0];
   // 持久高亮 = 非前缀的 `border-accent text-accent`（与 hover 类区分）
   expect(button).toContain("border-accent text-accent");
-  expect(button).toContain('aria-label="规范与技能"');
-  expect(button).toContain('title="规范与技能"');
+  expect(button).toContain('aria-label="右栏开关"');
+  expect(button).toContain('title="收起右栏"');
   expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
-  expect(button).not.toContain(">规范与技能<");
+  expect(button).not.toContain(">右栏开关<");
   const closed = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
-        resourcesOpen: false,
+        open: false,
         disabled: false,
-        onToggleResources: () => {},
+        onToggle: () => {},
+        changesCount: null,
       },
     })
   );
   expect(closed).not.toContain("border-accent text-accent");
+  expect(closed).toContain('title="展开右栏"');
+});
+
+it("未提交变更角标：>0 显示精确数并入无障碍名，0/null 不渲染（ADR 0018）", () => {
+  const withCount = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
+      panels: {
+        open: false,
+        disabled: false,
+        onToggle: () => {},
+        changesCount: 7,
+      },
+    })
+  );
+  expect(withCount).toMatch(
+    /data-testid="resources-toggle-badge"[^>]*>\s*7\s*</
+  );
+  expect(withCount).toContain('aria-label="右栏开关，7 个文件改动"');
+  // 99+ 截断：角标紧凑提醒位折叠，精确数在右栏「改动」tab
+  const capped = renderToStaticMarkup(
+    createElement(TitlebarResourceToggle, {
+      panels: {
+        open: false,
+        disabled: false,
+        onToggle: () => {},
+        changesCount: 120,
+      },
+    })
+  );
+  expect(capped).toMatch(
+    /data-testid="resources-toggle-badge"[^>]*>\s*99\+\s*</
+  );
+  // 0 与 null 都不渲染角标
+  for (const changesCount of [0, null]) {
+    const empty = renderToStaticMarkup(
+      createElement(TitlebarResourceToggle, {
+        panels: {
+          open: false,
+          disabled: false,
+          onToggle: () => {},
+          changesCount,
+        },
+      })
+    );
+    expect(empty).not.toMatch(/resources-toggle-badge/);
+    expect(empty).toContain('aria-label="右栏开关"');
+  }
 });
 
 it("拖动区按控件归属划分（审查修复 1）：徽章免拖，任务名可拖", () => {
   const html = renderToStaticMarkup(
     createElement(TitlebarTaskContext, { context: context() })
   );
-  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）一个；
-  // 任务搜索迁入右侧 nav（nav 整体免拖），左区仅剩徽章。真实拖拽行为由
-  // window-controls 场景以系统级输入验证（品牌回退态），任务态划分以此静态断言兜底。
+  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）一个。
+  // 真实拖拽行为由 window-controls 场景以系统级输入验证（品牌回退态），
+  // 任务态划分以此静态断言兜底。
   expect(html.match(/<div class="window-no-drag/g)).toHaveLength(1);
   // 任务名与品牌是纯展示文本：不落入免拖作用域，跟随父级标题栏拖动
   const titleTag =
@@ -204,16 +256,17 @@ it("拖动区按控件归属划分（审查修复 1）：徽章免拖，任务�
   expect(brandTag).not.toContain("window-no-drag");
 });
 
-it("面板开关动作透传给宿主（先例：window-controls-ui 直接调用 props）", () => {
+it("右栏开关动作透传给宿主（先例：window-controls-ui 直接调用 props）", () => {
   // renderToStaticMarkup 不执行事件；动作透传经组件 props 直接调用验证。
-  const onToggleResources = vi.fn();
+  const onToggle = vi.fn();
   const markup = createElement(TitlebarResourceToggle, {
     panels: {
-      resourcesOpen: false,
+      open: false,
       disabled: false,
-      onToggleResources,
+      onToggle,
+      changesCount: null,
     },
   });
-  markup.props.panels.onToggleResources();
-  expect(onToggleResources).toHaveBeenCalledOnce();
+  markup.props.panels.onToggle();
+  expect(onToggle).toHaveBeenCalledOnce();
 });

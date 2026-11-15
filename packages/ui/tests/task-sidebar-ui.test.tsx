@@ -42,6 +42,7 @@ function renderSidebar(item: TaskListItem) {
       onPin() {},
       onPinProject() {},
       onCollapseProject() {},
+      searchRecordsRevision: 0,
     })
   );
 }
@@ -121,6 +122,7 @@ it("项目置顶入口是独立键盘按钮，置顶标识与空项目均保留"
       onPin() {},
       onPinProject() {},
       onCollapseProject() {},
+      searchRecordsRevision: 0,
     })
   );
   expect(html).toContain('data-testid="project-pinned"');
@@ -158,6 +160,7 @@ it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任�
       onPin() {},
       onPinProject() {},
       onCollapseProject() {},
+      searchRecordsRevision: 0,
     })
   );
   // 标题文案与整行按钮移除（原型 prototype/sidebar-buttons 变体 A 定稿）
@@ -175,6 +178,11 @@ it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任�
   expect(html).toMatch(
     /<button[^>]*data-testid="add-project"[^>]*aria-label="添加项目"/
   );
+  // 任务搜索迁入头部（ADR 0018）：位于「添加项目」之前的独立图标钮
+  const searchPos = html.indexOf('data-testid="task-search-toggle"');
+  const addPos = html.indexOf('data-testid="add-project"');
+  expect(searchPos).toBeGreaterThan(-1);
+  expect(searchPos).toBeLessThan(addPos);
   // 独立任务组头悬停「+」与项目组头同模式
   expect(html).toMatch(
     /<button[^>]*data-testid="standalone-new-task"[^>]*aria-label="新建独立任务"/

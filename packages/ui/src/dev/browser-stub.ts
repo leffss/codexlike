@@ -8,11 +8,13 @@
  */
 import type { CodexLikeApi } from "@codexlike/desktop/ipc";
 import {
+  GIT_STATUS,
   PROJECTS,
   PROFILES,
   RESOURCES,
   TASKS,
   WORKSPACE_FILES,
+  gitDiffFor,
   taskView,
 } from "./fixtures";
 
@@ -166,12 +168,23 @@ function installBrowserStub(): void {
       saveText: async () => ({ saved: false }),
     },
     git: {
-      // 形状对齐真实 IPC 契约（agent-core GitStatus：files/branch 恒在）
-      status: async () => ({ isGitRepo: false, branch: null, files: [] }),
-      diff: async () => ({ oldText: "", newText: "", oldPath: null }),
-      createBranch: async () => ({}),
-      generateCommitMessage: async () => "原型环境：提交消息生成不可用",
-      commit: async () => ({ committed: false }),
+      // 形状对齐真实 IPC 契约（GitStatus 恒在；GitFileDiff{path,original,modified}
+      // ——右栏改动 tab 在纯浏览器预览里有密度可看；写操作 no-op）
+      status: async () => GIT_STATUS,
+      diff: async (_taskId: string, path: string) => ({
+        path,
+        ...gitDiffFor(path),
+      }),
+      createBranch: async () => ({
+        created: true,
+        branch: "codexlike/dev-preview",
+      }),
+      generateCommitMessage: async () =>
+        "dev 预览样例提交消息（可编辑；Electron 下走真实模型）",
+      commit: async () => ({
+        committed: false,
+        reason: "浏览器预览环境不可提交",
+      }),
     },
   } as unknown as CodexLikeApi;
 

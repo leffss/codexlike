@@ -15,7 +15,6 @@ import {
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
-import { TaskSearch } from "./components/TaskSearch";
 
 type View = "workspace" | "settings";
 
@@ -33,10 +32,10 @@ function switchViewWithReport(view: View, setView: (view: View) => void) {
 
 /**
  * 同一行标题栏（票01 任务上下文行）：工作台视图左区承载任务上下文
- * （品牌 › 任务名 + 徽章 + 任务搜索），设置视图左区仅品牌展示。
+ * （品牌 › 任务名 + 徽章），设置视图左区仅品牌展示。
  * 拖动区按控件归属划分（审查修复 1）：header 根元素 window-titlebar-drag
  * 提供整体拖动作用域，左区不再整块免拖——只有真正的交互控件（工作区徽章、
- * 任务搜索、右侧开关/按钮）各自挂在 window-no-drag 作用域内，任务名文本、
+ * 右侧开关/按钮）各自挂在 window-no-drag 作用域内，任务名文本、
  * 徽章间空白与品牌回退态区域恢复可拖动。
  */
 function Header(props: {
@@ -79,12 +78,8 @@ function Header(props: {
       <nav className="window-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
         {props.view === "workspace" && props.titlebar && (
           <>
-            {/* 任务搜索与「规范与技能」图标入口：主题切换之前（改动入口
-             * 已迁出为消息区右上角的改动摘要胶囊，见 WorkspacePage） */}
-            <TaskSearch
-              recordsRevision={props.titlebar.search.recordsRevision}
-              onSelect={props.titlebar.search.onSelect}
-            />
+            {/* 「右栏开关」图标入口：主题切换之前（ADR 0018；任务搜索
+             * 已迁任务列表头部，见 TaskSidebar） */}
             <TitlebarResourceToggle panels={props.titlebar.panels} />
           </>
         )}

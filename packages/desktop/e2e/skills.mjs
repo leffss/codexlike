@@ -8,7 +8,9 @@ import {
   selectComposerOption,
   assert,
   closeApp,
+  closeRailPanel,
   launchApp,
+  openRailPanel,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -153,7 +155,8 @@ async function main() {
       "项目会话 draft 态输入框技能菜单没有列出真实存在的技能"
     );
     await window.getByTestId("composer-input").fill("");
-    await window.getByTestId("resources-toggle").click();
+    // 右栏「规范与技能」tab 默认「下轮预览」档：draft 预览目录即此档
+    await openRailPanel(window, "resources");
     const projectDraftPanel = window.getByTestId("resources-panel");
     await projectDraftPanel.waitFor({ timeout: 5_000 });
     const projectDraftPanelText = await projectDraftPanel.textContent();
@@ -162,7 +165,7 @@ async function main() {
         projectDraftPanelText.includes("reference"),
       "项目会话 draft 态规范与技能面板没有预览目录"
     );
-    await window.getByTestId("resources-toggle").click();
+    await closeRailPanel(window);
 
     await prepareDraft(window, { approvalMode: "assist" });
 
@@ -175,7 +178,7 @@ async function main() {
       "draft 态输入框技能菜单没有列出真实存在的技能"
     );
     await window.getByTestId("composer-input").fill("");
-    await window.getByTestId("resources-toggle").click();
+    await openRailPanel(window, "resources");
     const draftPanel = window.getByTestId("resources-panel");
     await draftPanel.waitFor({ timeout: 5_000 });
     const draftPanelText = await draftPanel.textContent();
@@ -183,7 +186,7 @@ async function main() {
       draftPanelText.includes("review") && draftPanelText.includes("reference"),
       "draft 态规范与技能面板没有预览目录"
     );
-    await window.getByTestId("resources-toggle").click();
+    await closeRailPanel(window);
 
     async function send(text, nextStage) {
       stage = nextStage;
@@ -199,7 +202,7 @@ async function main() {
     }
 
     const discovery = await send("只报告已就绪，不使用技能。", "discover");
-    await window.getByTestId("resources-toggle").click();
+    await openRailPanel(window, "resources");
     const panel = window.getByTestId("resources-panel");
     await panel.waitFor();
     const panelText = await panel.textContent();
@@ -207,12 +210,14 @@ async function main() {
       panelText.includes("review") && panelText.includes("reference"),
       "两套技能来源未展示"
     );
-    assert(panelText.includes("invalid"), "无效技能诊断未展示");
+    // 无效技能：状态文案「无效」（旧面板的英文括注 (invalid) 已随
+    // 三卡片结构移除，密排摘要只出中文状态）
+    assert(panelText.includes("无效"), "无效技能状态未展示");
     assert(
       !panelText.includes(PROJECT_BODY) && !panelText.includes(REFERENCE_BODY),
       "列表不得预加载正文"
     );
-    await window.getByTestId("resources-toggle").click();
+    await closeRailPanel(window);
 
     assert(discovery.length === 1, "未使用技能时应只有首次模型请求");
     assert(
@@ -334,16 +339,22 @@ async function main() {
       "子代理独立资源读取失败"
     );
 
-    await window.getByTestId("resources-toggle").click();
+    // 已加载记录在「上轮」档（last 快照）：子代理已结束，无进行中快照，
+    // 其加载记录落在最近一轮（旧面板断言的「最近」即「最近一轮摘要」标题）
+    await openRailPanel(window, "resources");
+    await window.getByTestId("snapshot-tab-last").click();
     await panel.waitFor();
     const loadedText = await panel.textContent();
     assert(
-      loadedText.includes("review") &&
-        loadedText.includes("reference") &&
-        loadedText.includes("最近"),
-      "最近加载记录未展示"
+      loadedText.includes("review") && loadedText.includes("reference"),
+      "上轮快照未列出两套技能来源"
     );
-    await window.getByTestId("resources-toggle").click();
+    assert(
+      loadedText.includes("已加载") &&
+        (loadedText.match(/main|subagent/g) ?? []).length > 0,
+      "最近加载记录未展示（上轮档已加载分区）"
+    );
+    await closeRailPanel(window);
 
     writeFileSync(join(workspace, "AGENTS.md"), "UPDATED_PROJECT_RULE_15");
     writeFileSync(
@@ -373,30 +384,30 @@ async function main() {
     assert(seenBodies.length === beforeUnknown, "未知显式技能仍向模型发送请求");
 
     await selectComposerOption(window, "approval-mode-select", "ask");
-    await window.getByTestId("resources-toggle").click();
+    // 右栏开着走完审批流：本轮档（active 快照）实时刷新已加载记录
+    await openRailPanel(window, "resources");
+    await window.getByTestId("snapshot-tab-active").click();
     stage = "approval-state";
     await window
       .getByTestId("composer-input")
       .fill("委派子代理测试加载后审批状态。");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("approval-reject").waitFor({ timeout: 30_000 });
-    const activeSection = panel.locator("section").filter({
-      has: window.getByRole("heading", {
-        name: "当前运行快照（active）",
-        exact: true,
-      }),
-    });
-    await activeSection.getByText(/^执行者 /).waitFor({ timeout: 10_000 });
+    const activePanel = window.getByTestId("resources-panel");
+    await activePanel
+      .getByText(/reference/)
+      .first()
+      .waitFor({ timeout: 10_000 });
     assert(
-      (await activeSection.textContent()).includes("reference"),
-      "子代理等待审批时当前快照没有刷新已加载记录"
+      (await activePanel.textContent()).includes("已加载"),
+      "子代理等待审批时本轮快照没有刷新已加载记录"
     );
     await window.getByTestId("approval-reject").click();
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "完成:approval-state" })
       .waitFor({ timeout: 30_000 });
-    await window.getByTestId("resources-toggle").click();
+    await closeRailPanel(window);
     await window.getByTestId("composer-input").fill("/status");
     await window.getByTestId("composer-input").press("Enter");
     const statusAfterLoad = window.getByTestId("message-status").last();

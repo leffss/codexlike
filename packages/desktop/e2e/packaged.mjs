@@ -78,20 +78,20 @@ try {
     "冷启动不得有 toast 残留（提示条须为内存态）"
   );
 
-  // 票03 面板 overlay 抽屉：草稿无面板入口（标题栏开关禁用），
-  // 抽屉仅在任务态打开时渲染（tab 头不出现）。
+  // ADR 0018 检视右栏：冷启动草稿（未选工作区）开关禁用（无面板入口），
+  // 右栏默认关闭不渲染（tab 头不出现）。
   assert(
     await window.getByTestId("resources-toggle").isDisabled(),
-    "草稿态规范与技能开关应为禁用（无面板入口）"
+    "冷启动草稿态右栏开关应为禁用（无面板入口）"
   );
   assert(
-    await window.getByTestId("changes-toggle").isDisabled(),
-    "草稿态改动开关应为禁用（无面板入口）"
+    (await window.getByTestId("rail-panel").count()) === 0,
+    "右栏默认关闭，不得渲染面板节点"
   );
   assert(
-    (await window.getByTestId("drawer-tab-resources").count()) === 0 &&
-      (await window.getByTestId("drawer-tab-changes").count()) === 0,
-    "草稿态不得渲染抽屉 tab 头"
+    (await window.getByTestId("rail-tab-resources").count()) === 0 &&
+      (await window.getByTestId("rail-tab-changes").count()) === 0,
+    "右栏关闭态不得渲染 tab 头"
   );
 
   assert(

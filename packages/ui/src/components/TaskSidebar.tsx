@@ -10,6 +10,7 @@ import type { ProjectRecord } from "@codexlike/agent-core";
 import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { TaskActivityBadge } from "./TaskActivityBadge";
 import { TaskContextMenu, type TaskMenuAnchor } from "./TaskContextMenu";
+import { TaskSearch } from "./TaskSearch";
 
 import { groupTasksByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -135,6 +136,8 @@ export function TaskSidebar(props: {
   onPinProject: (id: string, pinned: boolean) => void;
   onCollapseProject: (id: string, collapsed: boolean) => void;
   onRemoveProject?: (id: string) => void;
+  /** 任务搜索结果的失效信号（任务列表变更时递增；头部搜索消费） */
+  searchRecordsRevision: number;
 }) {
   const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
@@ -668,6 +671,12 @@ export function TaskSidebar(props: {
       <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
         <h2 className="text-sm font-medium text-fg">任务列表</h2>
         <div className="flex items-center gap-1">
+          {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
+              弹层 fixed 贴视口，从侧栏头部下方展开 */}
+          <TaskSearch
+            recordsRevision={props.searchRecordsRevision}
+            onSelect={props.onSelect}
+          />
           <button
             type="button"
             data-testid="add-project"

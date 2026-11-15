@@ -21,6 +21,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  openRailPanel,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -111,8 +112,8 @@ async function main() {
     assert(existsSync(join(repo, "e2e-change.txt")), "write_file 未真实落盘");
     console.log("[e2e] 任务产生真实文件变更");
 
-    // 2) 打开改动面板 → 列表出现「新增」标识的文件
-    await window.getByTestId("changes-toggle").click();
+    // 2) 打开右栏改动 tab → 列表出现「新增」标识的文件
+    await openRailPanel(window);
     const panel = window.getByTestId("changes-panel");
     await panel.waitFor({ timeout: 10_000 });
     const fileItem = panel
@@ -141,7 +142,6 @@ async function main() {
       .locator(".editor.modified .view-lines")
       .first()
       .waitFor({ timeout: 30_000 });
-    await panel.getByTestId("changes-back").click();
     console.log("[e2e] Monaco 双栏 diff 渲染（原/新两侧）");
 
     // 4) 一键创建分支 codexlike/<任务名> → 成功反馈
@@ -214,7 +214,7 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    await window.getByTestId("changes-toggle").click();
+    await openRailPanel(window);
     await window.getByTestId("changes-not-git").waitFor({ timeout: 10_000 });
     assert(
       (await window.getByTestId("changes-not-git").textContent()).includes(

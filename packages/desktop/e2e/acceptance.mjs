@@ -22,7 +22,9 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  closeRailPanel,
   launchApp,
+  openRailPanel,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -204,7 +206,7 @@ async function main() {
     );
 
     // 改动面板：calc.js 显示「修改」，Monaco diff 两侧（原侧 bug 行 / 新侧修复行）
-    await window.getByTestId("changes-toggle").click();
+    await openRailPanel(window);
     const panel = window.getByTestId("changes-panel");
     await panel.waitFor({ timeout: 10_000 });
     const fileItem = panel
@@ -224,7 +226,6 @@ async function main() {
       .locator(".editor.modified .view-lines")
       .first()
       .waitFor({ timeout: 30_000 });
-    await panel.getByTestId("changes-back").click();
     console.log("[e2e] 场景2：改动面板 Monaco 双栏 diff 可见");
 
     // 一键 commit：先让模型生成提交消息（与 changes.mjs 同流程），再提交
@@ -250,7 +251,7 @@ async function main() {
     // ===== 场景 5：同一仓库双任务（本目录直跑 + worktree 模式）并行互不干扰 =====
     enterScenario5();
     // 任务 A：本目录直跑（同一 repo）
-    await window.getByTestId("drawer-close").click(); // 收起面板回到消息流（改动胶囊在抽屉打开期间不渲染）
+    await closeRailPanel(window); // 收起右栏回到消息流全宽
     await prepareDraft(window, { project: true, approvalMode: "assist" });
     await window.getByTestId("composer-input").fill("写入 a-local.txt");
     await window.getByTestId("composer-send").click();

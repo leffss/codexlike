@@ -5,6 +5,7 @@
  * 仅 dev 预览使用，生产构建不含（随 browser-stub.ts 动态引入）。
  */
 import type {
+  GitStatus,
   InteractionRecord,
   ProjectRecord,
   ProviderProfile,
@@ -59,6 +60,77 @@ export const WORKSPACE_FILES: string[] = [
   "packages/ui/src/styles.css",
   "docs/adr/0006-semantic-theme-tokens.md",
 ];
+
+/**
+ * 右栏「改动」tab 的 git 样例（ADR 0018 折叠后 dev 预览用）：混合
+ * 变更类型给足密度；diff 走单文件新旧全文。
+ */
+export const GIT_STATUS: GitStatus = {
+  isGitRepo: true,
+  branch: "main",
+  files: [
+    { path: "packages/ui/src/pages/WorkspacePage.tsx", kind: "modified" },
+    { path: "packages/ui/src/components/RailPanel.tsx", kind: "added" },
+    { path: "packages/ui/src/components/GitActions.tsx", kind: "added" },
+    {
+      path: "docs/agents/panels.md",
+      kind: "renamed",
+      oldPath: "docs/agents/drawer.md",
+    },
+    { path: "packages/ui/src/components/PanelsDrawer.tsx", kind: "deleted" },
+  ],
+};
+
+export const GIT_DIFFS: Record<string, { original: string; modified: string }> =
+  {
+    "packages/ui/src/pages/WorkspacePage.tsx": {
+      original: [
+        "import { PanelsDrawer, type DrawerTab } from '../components/PanelsDrawer';",
+        "",
+        "export function WorkspacePage(props) {",
+        "  const [drawer, setDrawer] = useState<DrawerTab | null>(null);",
+        "  return (",
+        "    <div className='flex min-h-0 flex-1 flex-col'>",
+        "      <MessageStream items={items} />",
+        "      {drawer !== null && (",
+        "        <PanelsDrawer tab={drawer} onClose={closeDrawer} />",
+        "      )}",
+        "    </div>",
+        "  );",
+        "}",
+      ].join("\n"),
+      modified: [
+        "import { RailPanel } from '../components/RailPanel';",
+        "",
+        "export function WorkspacePage(props) {",
+        "  const [railOpen, setRailOpen] = useState(false);",
+        "  return (",
+        "    <div className='flex min-h-0 flex-1'>",
+        "      <MessageStream items={items} />",
+        "      <RailPanel",
+        "        open={railOpen}",
+        "        taskId={currentId}",
+        "        onChangesCount={setChangesCount}",
+        "      />",
+        "    </div>",
+        "  );",
+        "}",
+      ].join("\n"),
+    },
+  };
+
+/** 未命中 GIT_DIFFS 的路径给一段通用样例（点任何文件都有 diff 可看） */
+export function gitDiffFor(path: string): {
+  original: string;
+  modified: string;
+} {
+  const hit = GIT_DIFFS[path];
+  if (hit !== undefined) return hit;
+  return {
+    original: `// HEAD 版本（新文件为空串）：${path}\nexport function sample() {\n  return null;\n}\n`,
+    modified: `// 工作区当前内容（已删除为空串）：${path}\nexport function sample() {\n  return 'preview';\n}\n`,
+  };
+}
 
 /** 主样例任务：围绕「重构主窗口布局」组织消息流文案，贴近本次原型语境。 */
 export const MAIN_TASK_ID = "task-1";

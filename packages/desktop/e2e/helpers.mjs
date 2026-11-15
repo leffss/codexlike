@@ -145,6 +145,30 @@ export async function projectMenuAction(
   await menu.getByTestId(action).click();
 }
 
+/**
+ * 打开检视右栏（ADR 0018）并切到指定 tab：标题栏「右栏开关」唯一开合
+ * 入口（幂等——已展开不再点），tab 切换走右栏自带描边按钮。
+ */
+export async function openRailPanel(window, tab = "changes") {
+  const toggle = window.getByTestId("resources-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  await window.getByTestId(`rail-tab-${tab}`).click();
+  await window
+    .getByTestId(tab === "changes" ? "changes-panel" : "resources-panel")
+    .waitFor();
+}
+
+/** 关闭检视右栏（幂等——已关闭不再点）。 */
+export async function closeRailPanel(window) {
+  const toggle = window.getByTestId("resources-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) === "true") {
+    await toggle.click();
+  }
+  await window.getByTestId("rail-panel").waitFor({ state: "hidden" });
+}
+
 /** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
 export async function assertSemanticOverlay(dialog) {
   const colors = await dialog.evaluate((element) => {

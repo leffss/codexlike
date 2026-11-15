@@ -46,10 +46,7 @@ import {
 
 import { contextWarningMessage } from "../lib/context-warning";
 
-import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
-import { ChangesChip } from "../components/ChangesChip";
-import { ChangesPanel } from "../components/ChangesPanel";
-import { PanelsDrawer, type DrawerTab } from "../components/PanelsDrawer";
+import { RailPanel } from "../components/RailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -214,7 +211,10 @@ export function WorkspacePage(props: {
    * 入口：标题栏「规范与技能」图标开关（resources tab）与消息区右上角的
    * 改动摘要胶囊（changes tab），各自经 aria-expanded 与抽屉状态同步。
    */
-  const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  // 检视右栏（ADR 0018）：默认关闭；开合由标题栏「右栏开关」驱动，
+  // 未提交变更数由右栏上报（标题栏角标消费）
+  const [railOpen, setRailOpen] = useState(false);
+  const [changesCount, setChangesCount] = useState<number | null>(null);
   const [resources, setResources] = useState<TaskResourcesView | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -390,33 +390,24 @@ export function WorkspacePage(props: {
   }, [currentId, draftWorkspacePath, draftPreviewNonce]);
 
   /**
-   * 抽屉状态动作（票03）：标题栏两开关与抽屉 tab 头共用同一状态源。
-   * 打开/切到「规范与技能」页即刷新资源（与原「开面板即刷新」语义一致；
-   * 「改动」面板挂载时自刷新）；动作经稳定引用上报，读取走 ref 防过期闭包。
+   * 右栏状态动作（ADR 0018）：标题栏「右栏开关」唯一开合入口；打开瞬间
+   * 刷新资源（与原「开面板即刷新」语义一致；改动 tab 挂载时自刷新 git
+   * 状态）。关闭瞬间递增 changesRevision（角标在右栏关闭期间仍需刷新）。
    */
-  const drawerRef = useRef<DrawerTab | null>(null);
-  drawerRef.current = drawer;
-  const openDrawer = useCallback(
-    (tab: DrawerTab) => {
-      if (tab === "resources") refreshResourcesForView();
-      setDrawer(tab);
-    },
-    [refreshResourcesForView]
-  );
-  const toggleResources = useCallback(() => {
-    if (drawerRef.current === "resources") setDrawer(null);
-    else openDrawer("resources");
-  }, [openDrawer]);
-  const toggleChanges = useCallback(() => {
-    if (drawerRef.current === "changes") setDrawer(null);
-    else openDrawer("changes");
-  }, [openDrawer]);
-  const closeDrawer = useCallback(() => setDrawer(null), []);
+  const toggleRail = useCallback(() => {
+    setRailOpen((open) => !open);
+  }, []);
+  const prevRailOpenRef = useRef(false);
+  useEffect(() => {
+    if (!prevRailOpenRef.current && railOpen) refreshResourcesForView();
+    if (prevRailOpenRef.current && !railOpen) setChangesRevision((v) => v + 1);
+    prevRailOpenRef.current = railOpen;
+  }, [railOpen, refreshResourcesForView]);
 
   /**
-   * 改动摘要胶囊刷新信号：一轮回答结束（streaming 真转假）与面板抽屉
-   * 关闭（含提交后关闭）时递增，驱动胶囊重新读取 git 状态；任务切换
-   * 由胶囊自身按 taskId 刷新。
+   * git 状态刷新信号：一轮回答结束（streaming 真转假）与右栏关闭时递增，
+   * 驱动右栏 hook 重新读取（标题栏角标在右栏关闭期间也随此刷新）；
+   * 任务切换由 hook 自身按 taskId 刷新。
    */
   const [changesRevision, setChangesRevision] = useState(0);
   const prevStreamingRef = useRef(false);
@@ -425,12 +416,6 @@ export function WorkspacePage(props: {
       setChangesRevision((v) => v + 1);
     prevStreamingRef.current = streaming;
   }, [streaming]);
-  const prevDrawerRef = useRef<DrawerTab | null>(null);
-  useEffect(() => {
-    if (prevDrawerRef.current !== null && drawer === null)
-      setChangesRevision((v) => v + 1);
-    prevDrawerRef.current = drawer;
-  }, [drawer]);
 
   /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
   const pushLocalStatus = useCallback((content: string) => {
@@ -573,9 +558,6 @@ export function WorkspacePage(props: {
       toastState,
     ]
   );
-
-  /** 任务搜索迁入标题栏（票01）：切换任务的入口保持同一 openTask 管线 */
-  const selectTask = useCallback((id: string) => void openTask(id), [openTask]);
 
   useEffect(() => {
     let active = true;
@@ -764,8 +746,8 @@ export function WorkspacePage(props: {
     taskRequestRef.current += 1;
     resourceRequestRef.current += 1;
     loadingRef.current = null;
-    // 任务态抽屉（可能停在「改动」tab）随任务上下文失效，进入草稿即关闭
-    setDrawer(null);
+    // 任务态右栏（可能停在「改动」tab）随任务上下文失效，进入草稿即关闭
+    setRailOpen(false);
     setMessages([]);
     setWorkspaceFiles([]);
     setResources(null);
@@ -1343,26 +1325,25 @@ export function WorkspacePage(props: {
         : null,
     [current, projects]
   );
-  // draft 已选工作区时同样可开「规范与技能」，预览走 draft 管线
+  // draft 已选工作区时同样可开右栏，预览走 draft 管线
   const hasDraftWorkspace = draft !== null && draftWorkspacePath !== null;
   const titlebarContext = useMemo<TitlebarContext>(
     () => ({
       task: titlebarTask,
-      search: { recordsRevision, onSelect: selectTask },
       panels: {
-        resourcesOpen: drawer === "resources",
+        open: railOpen,
         disabled: !hasCurrentTask && !hasDraftWorkspace,
-        onToggleResources: toggleResources,
+        onToggle: toggleRail,
+        changesCount,
       },
     }),
     [
       titlebarTask,
-      recordsRevision,
-      selectTask,
-      drawer,
+      railOpen,
       hasCurrentTask,
       hasDraftWorkspace,
-      toggleResources,
+      toggleRail,
+      changesCount,
     ]
   );
   useEffect(() => {
@@ -1479,6 +1460,7 @@ export function WorkspacePage(props: {
       )}
       <TaskSidebar
         projects={projects}
+        searchRecordsRevision={recordsRevision}
         onRemoveProject={(id) =>
           setRemovingProject(projects.find((item) => item.id === id) ?? null)
         }
@@ -1615,250 +1597,229 @@ export function WorkspacePage(props: {
               </div>
             </div>
           )}
-          {/* 消息流区域容器（票03）：overlay 抽屉的定位基准。抽屉浮于消息流
-              上方（absolute），打开时不改变消息流与内容列宽度——原「分栏
-              兄弟节点 max-w-[40%] 挤压」行为取消；面板开合也不再影响
-              @container/task 容器宽度（三档分档行为保持稳定）。
-              票02：原消息流上方的五类常驻横条已迁为右下角 toast，不再占行。 */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            {/* 消息流顶部行（同宽对齐正文列）：改动摘要胶囊恒驻右上角
-             * （无任务禁用；抽屉打开期间不渲染，关闭与切 tab 走抽屉控件）。
-             * 「已开启自动批准」提示卡已迁至消息流下方、输入区上方——
-             * 靠近审批动作的发生点，宽度对齐正文列。 */}
-            <div className="shrink-0 pt-3 pl-4" style={contentPadding}>
-              <div
-                className={`${contentWidthClass} flex items-start justify-end gap-2`}
-              >
-                {drawer === null && (
-                  <ChangesChip
-                    taskId={currentId}
-                    refreshSignal={changesRevision}
-                    onOpen={toggleChanges}
-                  />
-                )}
-              </div>
-            </div>
-            <MessageStream
-              key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-              taskId={currentId}
-              questionDraft={(requestId) =>
-                currentId === null
-                  ? undefined
-                  : workspaceState.draft(currentId, requestId)
-              }
-              loading={loading}
-              onScrollbarGutterChange={setScrollbarGutter}
-              readingPosition={
-                currentId === null
-                  ? null
-                  : workspaceState.readingPosition(currentId)
-              }
-              onReadingPosition={(position) => {
-                if (currentId !== null)
-                  workspaceState.setReadingPosition(currentId, position);
-              }}
-              items={displayMessages}
-              streaming={streaming}
-              runStartedAt={runStartedAt}
-              compacting={compacting}
-              contentWidthClass={contentWidthClass}
-              followSignal={followSignal}
-              taskTitle={current?.title ?? null}
-              emptyHint={
-                profiles.length === 0 ? (
-                  <button
-                    type="button"
-                    className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
-                    onClick={props.onOpenSettings}
-                  >
-                    前往设置配置模型
-                  </button>
-                ) : undefined
-              }
-            />
-            {drawer !== null && (currentId !== null || draft !== null) && (
-              <PanelsDrawer
-                tab={drawer}
-                onTabChange={openDrawer}
-                onClose={closeDrawer}
-                resources={
-                  <AgentResourcesPanel
-                    resources={resources}
-                    loading={resourcesLoading}
-                    error={resourcesError}
-                    onRefresh={refreshResourcesForView}
-                    onClose={closeDrawer}
-                  />
+          {/* 中列主区（ADR 0018 检视右栏）：主列（消息流 + 审批提示卡 +
+              输入区/交互面板）与右栏并列——打开时整列一起推窄，「输入卡
+              与消息列同宽」不变量保持（票05）；关闭时右栏整体卸载、主列
+              恢复全宽。右栏自带拖拽分隔条与双端最小宽；开合唯一入口在
+              标题栏「右栏开关」（改动计数角标）。@container/task 容器宽度
+              不受右栏开合影响（三档分档行为保持稳定）。票02：原消息流上方
+              的五类常驻横条已迁为右下角 toast，不再占行。 */}
+          <div className="flex min-h-0 flex-1">
+            {/* relative：收拢主列内部的绝对定位悬浮元素（工作计划
+                进度环为 fixed，仍锚视口） */}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <MessageStream
+                key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+                taskId={currentId}
+                questionDraft={(requestId) =>
+                  currentId === null
+                    ? undefined
+                    : workspaceState.draft(currentId, requestId)
                 }
-                changes={
-                  current !== null ? (
-                    <ChangesPanel
-                      key={current.id}
-                      taskId={current.id}
-                      taskTitle={current.title}
-                      selectedProfileId={selectedProfileId}
-                      onClose={closeDrawer}
-                    />
-                  ) : null
+                loading={loading}
+                onScrollbarGutterChange={setScrollbarGutter}
+                readingPosition={
+                  currentId === null
+                    ? null
+                    : workspaceState.readingPosition(currentId)
                 }
-                tabs={currentId !== null ? undefined : ["resources"]}
-              />
-            )}
-          </div>
-          {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
-           *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
-           *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），
-           *  contentWidthClass 的居中基准与消息列、输入区完全一致。 */}
-          {current !== null && autoApproveOn && (
-            <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
-              <div className={contentWidthClass}>
-                <div
-                  data-testid="task-auto-approve"
-                  role="status"
-                  className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
-                >
-                  <span
-                    className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p
-                      data-testid="task-auto-approve-content"
-                      className="break-words"
+                onReadingPosition={(position) => {
+                  if (currentId !== null)
+                    workspaceState.setReadingPosition(currentId, position);
+                }}
+                items={displayMessages}
+                streaming={streaming}
+                runStartedAt={runStartedAt}
+                compacting={compacting}
+                contentWidthClass={contentWidthClass}
+                followSignal={followSignal}
+                taskTitle={current?.title ?? null}
+                emptyHint={
+                  profiles.length === 0 ? (
+                    <button
+                      type="button"
+                      className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
+                      onClick={props.onOpenSettings}
                     >
-                      本任务已开启自动批准
-                    </p>
-                    <p className="break-words opacity-80">
-                      取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
-                    </p>
-                    {autoApproveError !== null && (
-                      <p role="alert">{autoApproveError}</p>
-                    )}
+                      前往设置配置模型
+                    </button>
+                  ) : undefined
+                }
+              />
+              {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
+               *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
+               *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），
+               *  contentWidthClass 的居中基准与消息列、输入区完全一致。 */}
+              {current !== null && autoApproveOn && (
+                <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
+                  <div className={contentWidthClass}>
+                    <div
+                      data-testid="task-auto-approve"
+                      role="status"
+                      className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
+                    >
+                      <span
+                        className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
+                        aria-hidden="true"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p
+                          data-testid="task-auto-approve-content"
+                          className="break-words"
+                        >
+                          本任务已开启自动批准
+                        </p>
+                        <p className="break-words opacity-80">
+                          取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
+                        </p>
+                        {autoApproveError !== null && (
+                          <p role="alert">{autoApproveError}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="task-auto-approve-revoke"
+                        disabled={autoApproveBusy}
+                        // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
+                        onClick={() => {
+                          const id = currentIdRef.current;
+                          if (id !== null) void revokeAutoApprove(id);
+                        }}
+                        className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                      >
+                        {autoApproveBusy ? "取消中…" : "取消自动批准"}
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    data-testid="task-auto-approve-revoke"
-                    disabled={autoApproveBusy}
-                    // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
-                    onClick={() => {
-                      const id = currentIdRef.current;
-                      if (id !== null) void revokeAutoApprove(id);
-                    }}
-                    className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
-                  >
-                    {autoApproveBusy ? "取消中…" : "取消自动批准"}
-                  </button>
                 </div>
-              </div>
-            </div>
-          )}
-          {interaction ? (
-            <InteractionPanel
-              key={interaction.request.id}
-              record={interaction}
-              count={pending.length}
-              draft={workspaceState.draft(
-                interaction.request.taskId,
-                interaction.request.id
               )}
-              {...workspaceState.submission(
-                interaction.request.taskId,
-                interaction.request.id
-              )}
-              onChange={(action) =>
-                workspaceState.edit(
-                  interaction.request.taskId,
-                  interaction.request.id,
-                  action
-                )
-              }
-              onRespond={(response) =>
-                void workspaceState.submit(
-                  interaction.request.taskId,
-                  interaction.request.id,
-                  response,
-                  (taskId, requestId, payload) =>
-                    window.codexlike.tasks.respondInteraction(
-                      taskId,
-                      requestId,
-                      payload
+              {interaction ? (
+                <InteractionPanel
+                  key={interaction.request.id}
+                  record={interaction}
+                  count={pending.length}
+                  draft={workspaceState.draft(
+                    interaction.request.taskId,
+                    interaction.request.id
+                  )}
+                  {...workspaceState.submission(
+                    interaction.request.taskId,
+                    interaction.request.id
+                  )}
+                  onChange={(action) =>
+                    workspaceState.edit(
+                      interaction.request.taskId,
+                      interaction.request.id,
+                      action
                     )
-                )
-              }
-              onStop={() => void stop()}
+                  }
+                  onRespond={(response) =>
+                    void workspaceState.submit(
+                      interaction.request.taskId,
+                      interaction.request.id,
+                      response,
+                      (taskId, requestId, payload) =>
+                        window.codexlike.tasks.respondInteraction(
+                          taskId,
+                          requestId,
+                          payload
+                        )
+                    )
+                  }
+                  onStop={() => void stop()}
+                />
+              ) : (
+                <MessageComposer
+                  key={currentId ?? `draft-${draftProjectId}`}
+                  draftValue={
+                    draft?.text ??
+                    (currentId === null
+                      ? ""
+                      : workspaceState.composer(currentId))
+                  }
+                  onDraftChange={(text) => {
+                    if (draft)
+                      workspaceState.editNewDraft(draft.projectId, { text });
+                    else if (currentId !== null)
+                      workspaceState.setComposer(currentId, text);
+                  }}
+                  clearOnSend={false}
+                  profiles={profiles}
+                  selectedProfileId={
+                    draft?.providerProfileId ?? selectedProfileId
+                  }
+                  onSelectProfile={(id) =>
+                    draft
+                      ? workspaceState.editNewDraft(draft.projectId, {
+                          providerProfileId: id,
+                        })
+                      : setSelectedProfileId(id)
+                  }
+                  onSend={handleSubmit}
+                  contentWidthClass={contentWidthClass}
+                  workspaceFiles={workspaceFiles}
+                  skills={resources?.preview.catalog.skills}
+                  onOpenSkills={refreshResourcesForView}
+                  readOnly={loading || creating}
+                  disabled={
+                    (currentId === null && !draft) ||
+                    current?.archivedAt != null ||
+                    creating ||
+                    profiles.length === 0 ||
+                    // streaming 不再禁用（票 01 输入队列）：忙时 Enter 直接入队；
+                    // 等待用户交互（pending）期间维持禁用（spec 用户故事 17）。
+                    compacting ||
+                    loading ||
+                    pending.length > 0
+                  }
+                  streaming={streaming}
+                  queueState={
+                    currentId === null ? EMPTY_QUEUE_STATE : queueState
+                  }
+                  queueEditingItemId={
+                    queueEdit !== null && queueEdit.taskId === currentId
+                      ? queueEdit.itemId
+                      : null
+                  }
+                  onQueueResume={() => void resumeQueue()}
+                  onQueueClear={() => void clearQueue()}
+                  onQueueRemove={(itemId) => void removeQueueItem(itemId)}
+                  onQueueEditItem={startQueueItemEdit}
+                  onQueueReorder={(orderedIds) => void reorderQueue(orderedIds)}
+                  onQueueCancelEdit={cancelQueueEdit}
+                  onStop={() => void stop()}
+                  hint={composerHint}
+                  approvalMode={
+                    draft?.approvalMode ?? preferences?.approvalMode ?? null
+                  }
+                  onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+                  thinkingEffort={
+                    draft?.thinkingEffort ??
+                    (currentId === null ? null : thinkingEffort)
+                  }
+                  onSelectThinkingEffort={(effort) =>
+                    draft
+                      ? workspaceState.editNewDraft(draft.projectId, {
+                          thinkingEffort: effort,
+                        })
+                      : setThinkingEffort(effort)
+                  }
+                />
+              )}
+            </div>
+            <RailPanel
+              open={railOpen}
+              taskId={currentId}
+              taskTitle={current?.title ?? null}
+              selectedProfileId={selectedProfileId}
+              changesRevision={changesRevision}
+              resources={resources}
+              resourcesLoading={resourcesLoading}
+              resourcesError={resourcesError}
+              onRefreshResources={refreshResourcesForView}
+              onChangesCount={setChangesCount}
             />
-          ) : (
-            <MessageComposer
-              key={currentId ?? `draft-${draftProjectId}`}
-              draftValue={
-                draft?.text ??
-                (currentId === null ? "" : workspaceState.composer(currentId))
-              }
-              onDraftChange={(text) => {
-                if (draft)
-                  workspaceState.editNewDraft(draft.projectId, { text });
-                else if (currentId !== null)
-                  workspaceState.setComposer(currentId, text);
-              }}
-              clearOnSend={false}
-              profiles={profiles}
-              selectedProfileId={draft?.providerProfileId ?? selectedProfileId}
-              onSelectProfile={(id) =>
-                draft
-                  ? workspaceState.editNewDraft(draft.projectId, {
-                      providerProfileId: id,
-                    })
-                  : setSelectedProfileId(id)
-              }
-              onSend={handleSubmit}
-              contentWidthClass={contentWidthClass}
-              workspaceFiles={workspaceFiles}
-              skills={resources?.preview.catalog.skills}
-              onOpenSkills={refreshResourcesForView}
-              readOnly={loading || creating}
-              disabled={
-                (currentId === null && !draft) ||
-                current?.archivedAt != null ||
-                creating ||
-                profiles.length === 0 ||
-                // streaming 不再禁用（票 01 输入队列）：忙时 Enter 直接入队；
-                // 等待用户交互（pending）期间维持禁用（spec 用户故事 17）。
-                compacting ||
-                loading ||
-                pending.length > 0
-              }
-              streaming={streaming}
-              queueState={currentId === null ? EMPTY_QUEUE_STATE : queueState}
-              queueEditingItemId={
-                queueEdit !== null && queueEdit.taskId === currentId
-                  ? queueEdit.itemId
-                  : null
-              }
-              onQueueResume={() => void resumeQueue()}
-              onQueueClear={() => void clearQueue()}
-              onQueueRemove={(itemId) => void removeQueueItem(itemId)}
-              onQueueEditItem={startQueueItemEdit}
-              onQueueReorder={(orderedIds) => void reorderQueue(orderedIds)}
-              onQueueCancelEdit={cancelQueueEdit}
-              onStop={() => void stop()}
-              hint={composerHint}
-              approvalMode={
-                draft?.approvalMode ?? preferences?.approvalMode ?? null
-              }
-              onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-              thinkingEffort={
-                draft?.thinkingEffort ??
-                (currentId === null ? null : thinkingEffort)
-              }
-              onSelectThinkingEffort={(effort) =>
-                draft
-                  ? workspaceState.editNewDraft(draft.projectId, {
-                      thinkingEffort: effort,
-                    })
-                  : setThinkingEffort(effort)
-              }
-            />
-          )}
+          </div>
         </div>
       </section>
       {/* 票02：五类提示的右下角浮层，fixed 定位不占布局行 */}
