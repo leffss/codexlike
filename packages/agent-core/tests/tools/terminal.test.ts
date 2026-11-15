@@ -181,6 +181,73 @@ describe("run_terminal_command 工具（默认 Git Bash）", () => {
     expect(viaCmd.output).toContain("from-cmd");
   }, 30_000);
 
+  it("超时上限夹紧模型请求的 timeoutMs（maxTimeoutMs 为硬上限）", async () => {
+    const workspace = makeWorkspace();
+    // 默认 30s，但上限注入为 3s：模型请求 10s 也只跑 3s
+    const capped = createTerminalTool({
+      env: baseEnv,
+      defaultTimeoutMs: 30_000,
+      maxTimeoutMs: 3_000,
+    });
+    const startedAt = Date.now();
+    const result = await capped.execute(
+      { command: "echo started; sleep 30", timeoutMs: 10_000 },
+      context(workspace)
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("超时");
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  }, 15_000);
+
+  it("注入默认超时生效：未带 timeoutMs 的长命令按注入值超时", async () => {
+    const workspace = makeWorkspace();
+    const tool = createTerminalTool({ env: baseEnv, defaultTimeoutMs: 3_000 });
+    const startedAt = Date.now();
+    const result = await tool.execute(
+      { command: "echo started; sleep 30" },
+      context(workspace)
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("started");
+    expect(result.output).toContain("超时");
+    // 按注入值 3s 超时，而不是默认 30s
+    expect(Date.now() - startedAt).toBeLessThan(15_000);
+  }, 15_000);
+
+  it("函数形态逐次解析：中途改值对下一次执行生效（设置页保存后无需重启工具实例）", async () => {
+    const workspace = makeWorkspace();
+    let currentDefaultMs = 60_000;
+    const tool = createTerminalTool({
+      env: baseEnv,
+      defaultTimeoutMs: () => currentDefaultMs,
+    });
+
+    // 60s 默认下快速命令正常完成（未被超时打断）
+    const before = await tool.execute(
+      { command: "echo from-fast" },
+      context(workspace)
+    );
+    expect(before.isError).toBe(false);
+    expect(before.output).toContain("from-fast");
+
+    // 改小默认超时：同一实例的下一次执行立即按新值超时
+    currentDefaultMs = 3_000;
+    const startedAt = Date.now();
+    const after = await tool.execute(
+      { command: "echo started; sleep 30" },
+      context(workspace)
+    );
+    expect(after.isError).toBe(true);
+    expect(after.output).toContain("超时");
+    expect(Date.now() - startedAt).toBeLessThan(15_000);
+  }, 15_000);
+
+  it("默认值回归：不注入时默认超时 30 秒、上限 120 秒（工具描述可见）", () => {
+    const tool = createTerminalTool({ env: baseEnv });
+    expect(tool.description).toContain("超时默认 30 秒");
+    expect(tool.description).toContain("上限 120 秒");
+  });
+
   it("AbortSignal 中断：长命令执行中终止子进程，输出标记为用户中断（区别于超时）", async () => {
     const workspace = makeWorkspace();
     const controller = new AbortController();

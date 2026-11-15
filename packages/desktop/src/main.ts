@@ -39,10 +39,10 @@ import {
 } from "./search/search-settings-store";
 import {
   createTerminalSettingsStore,
-  isTerminalShell,
   resolveTerminalShell,
-  type TerminalSettingsStore,
+  type TerminalSettings,
 } from "./terminal/terminal-settings-store";
+import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
 import {
   createThemeSettingsStore,
   isThemeName,
@@ -61,7 +61,6 @@ import {
   resolveLaunchBounds,
 } from "./launch-state/display-geometry";
 import { trackWindowLaunchState } from "./launch-state/window-save";
-import type { TerminalShell } from "@codexlike/agent-core/node";
 import { registerTaskHandlers } from "./tasks/task-ipc";
 import { createSqliteInputQueueStore } from "./tasks/input-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
@@ -331,36 +330,6 @@ function registerSearchSettingsHandlers(
 }
 
 /**
- * 注册终端执行偏好的 IPC 指令（code review 修复 1）。
- * 偏好经内存缓存注入终端工具（逐次解析），保存后对下一次 run_terminal_command 即时生效。
- */
-function registerTerminalSettingsHandlers(options: {
-  store: TerminalSettingsStore;
-  onSaved: (shell: TerminalShell) => void;
-}): void {
-  const { store, onSaved } = options;
-  ipcMain.handle(IPC.terminalSettings.get, () => store.get());
-  ipcMain.handle(
-    IPC.terminalSettings.set,
-    (_e: IpcMainInvokeEvent, input: unknown) => {
-      // IPC 边界不信任渲染进程：只接受三档枚举
-      if (!isTerminalShell(input)) {
-        throw new Error("终端偏好必须是 git-bash / powershell / cmd 之一");
-      }
-      return store
-        .set(input)
-        .then((shell) => {
-          onSaved(shell);
-          return shell;
-        })
-        .catch((error: unknown) => {
-          throw error instanceof Error ? error : new Error(String(error));
-        });
-    }
-  );
-}
-
-/**
  * 注册外观主题偏好的 IPC 指令（ADR 0006）。
  * 保存后同步原生窗口底色与 nativeTheme（渲染端由 ThemeProvider 换 data-theme）。
  */
@@ -449,11 +418,11 @@ void app.whenReady().then(async () => {
   };
   await refreshSearchSource();
 
-  // 终端执行偏好（code review 修复 1，spec「设置页：… shell 偏好」）：
+  // 终端设置（code review 修复 1 + 执行设置票04）：shell 偏好与命令超时两项，
   // 内存缓存逐次解析注入终端工具——设置页保存后无需重启即对下一次命令生效；
-  // 未配置时 CODEXLIKE_SHELL 环境变量兜底（E2E/自动化兼容），最终默认 Git Bash。
+  // shell 未配置时 CODEXLIKE_SHELL 环境变量兜底（E2E/自动化兼容），最终默认 Git Bash。
   const terminalSettingsStore = createTerminalSettingsStore({ dir: dataDir() });
-  let shellPreference = await terminalSettingsStore.get();
+  let terminalSettings: TerminalSettings = await terminalSettingsStore.get();
 
   // 外观主题偏好（ADR 0006）：启动时先读偏好再建窗口——窗口底色与页面主题一致，
   // 避免深色用户重启先闪浅色底；未配置默认浅色。渲染端另有 localStorage 镜像防页内闪烁。
@@ -473,9 +442,15 @@ void app.whenReady().then(async () => {
 
   const builtinTools = createBuiltinTools({
     env: process.env,
-    // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 shellPreference 缓存）
+    // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 terminalSettings 缓存）
     shell: () =>
-      resolveTerminalShell(shellPreference, process.env["CODEXLIKE_SHELL"]),
+      resolveTerminalShell(
+        terminalSettings.shell,
+        process.env["CODEXLIKE_SHELL"]
+      ),
+    // 命令超时逐次解析（执行设置票04，与 shell 注入同构）：秒 → 毫秒换算后注入
+    defaultTimeoutMs: () => terminalSettings.commandTimeoutSeconds * 1000,
+    maxTimeoutMs: () => terminalSettings.maxCommandTimeoutSeconds * 1000,
     webSearch: { searchSource: () => searchSource },
   });
 
@@ -581,8 +556,8 @@ void app.whenReady().then(async () => {
   });
   registerTerminalSettingsHandlers({
     store: terminalSettingsStore,
-    onSaved: (shell: TerminalShell) => {
-      shellPreference = shell;
+    onSaved: (settings: TerminalSettings) => {
+      terminalSettings = settings;
     },
   });
   registerThemeSettingsHandlers({
