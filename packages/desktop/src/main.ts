@@ -73,6 +73,8 @@ import {
   type SubagentSettings,
   type SubagentSettingsStore,
 } from "./subagents/subagent-settings-store";
+import { createAgentSettingsStore } from "./execution/agent-settings-store";
+import { registerAgentSettingsHandlers } from "./execution/agent-settings-ipc";
 import { IPC } from "./shared/ipc";
 import { createMcpStore } from "./mcp/mcp-store";
 import { createMcpService } from "./mcp/mcp-service";
@@ -489,6 +491,15 @@ void app.whenReady().then(async () => {
     subagentSettings = await subagentSettingsStore.get();
   };
 
+  // 执行设置（ADR 0017，GLOSSARY「执行设置」）：内存缓存注入 createTaskManager
+  // （逐次解析），主任务在回合开始时快照读取——设置页保存后对下一个回合生效，
+  // 进行中回合不受中途调小影响（无需重启任务）
+  const agentSettingsStore = createAgentSettingsStore({ dir: dataDir() });
+  let agentSettings = await agentSettingsStore.get();
+  const refreshAgentSettings = async () => {
+    agentSettings = await agentSettingsStore.get();
+  };
+
   // MCP（工单 12）：stdio server 的配置存储 + 连接管理；启动时连接全部已配置
   // server（失败不拖垮应用，状态在设置页可见）。任务工具 = 内置 + 启用的 MCP 工具，
   // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
@@ -520,6 +531,9 @@ void app.whenReady().then(async () => {
     tools: taskTools,
     resourcesFor,
     attachToolImages,
+    // 主任务工具轮次上限（执行设置 ADR 0017）：resolver 逐次解析内存缓存，
+    // agent-core 在回合开始时快照——设置改动即时落盘，下一个回合按新值执行
+    toolRoundsLimit: () => agentSettings.maxToolRounds,
     subagents: {
       // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
@@ -560,6 +574,10 @@ void app.whenReady().then(async () => {
     store: subagentSettingsStore,
     profiles: profileStore,
     onSaved: refreshSubagentSettings,
+  });
+  registerAgentSettingsHandlers({
+    store: agentSettingsStore,
+    onSaved: refreshAgentSettings,
   });
   registerTerminalSettingsHandlers({
     store: terminalSettingsStore,

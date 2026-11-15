@@ -53,6 +53,7 @@ import {
   type SubagentOrchestrator,
   type SubagentsConfig,
 } from "./subagent";
+import { DEFAULT_MAX_TOOL_ROUNDS } from "./execution-settings";
 import type {
   CompactRecord,
   CompactResult,
@@ -117,6 +118,14 @@ export interface CreateAgentTaskOptions {
    * 委派 FIFO 排队）；子代理工具调用同样过当前审批模式；报告以工具结果回流主任务。
    */
   subagents?: SubagentsConfig;
+  /**
+   * 主任务工具轮次上限的逐次解析取值函数（执行设置 ADR 0017，GLOSSARY「工具轮次」；
+   * 先例为子代理并发设置的 resolver 范式，agent-core 不依赖任何存储实现）。
+   * 每个回合（sendMessage）开始时读取一次并快照——进行中回合不受中途调小影响，
+   * 下一次发送按当时值重新解析；未注入（纯对话/测试）用 DEFAULT_MAX_TOOL_ROUNDS。
+   * 宿主保证返回合法值（设置层校验 10–1000），agent-core 不重复校验。
+   */
+  toolRoundsLimit?: () => number;
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 时间与 id 生成注入（测试用固定值） */
@@ -173,15 +182,6 @@ export interface AgentTask {
     signal?: AbortSignal;
   }): Promise<CompactResult>;
 }
-
-/**
- * 单次回复允许的工具轮次上限（防模型失控循环的兜底，非日常约束）。
- * 大功能开发一个回合动辄上百次工具调用，取 200 让正常任务单回合装得下；
- * 真正的天花板是上下文窗口——200 轮往返已接近多数模型上限。撞限可见提示
- * 且可发消息继续，但回合内工具往返不进后续上下文（需靠落盘文件与最终
- * 文本重新定位），故正常任务不应撞到。
- */
-const MAX_TOOL_ROUNDS = 200;
 
 /**
  * 内置工具策略的通用风格条款（工作计划/子代理委派等所有策略段共用）：
@@ -506,6 +506,10 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       // 思考档位快照（spec「生效边界」）：发送入口一次性固定，未传等价 auto；
       // 枚举外的值在此拒绝——不把伪造控制值发往服务端（与 provider 工厂同一校验）
       const effort = parseThinkingEffort(thinkingEffort);
+      // 工具轮次上限快照（执行设置 ADR 0017）：回合开始时读取一次——进行中回合
+      // 不受中途调小影响，下一次发送按当时值重新解析；未注入用默认 200
+      const toolRoundsLimit =
+        options.toolRoundsLimit?.() ?? DEFAULT_MAX_TOOL_ROUNDS;
       // 每次发送冻结主执行及其子代理的权限与模型，偏好修改只用于下次发送。
       approvalMode = requestedApprovalMode ?? nextApprovalMode;
       profile = { ...profile };
@@ -649,15 +653,17 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               break;
             }
             round += 1;
-            if (round > MAX_TOOL_ROUNDS) {
-              // 达到轮次上限：停止工具循环，本轮剩余工具调用不再执行，
-              // 已生成文本照常作为助手回复落库；落库一条 error 提示让用户知道为何停在这里
+            if (round > toolRoundsLimit) {
+              // 达到轮次上限（执行设置 ADR 0017：提示携带本回合快照的动态上限值，
+              // 替代固定数字，让用户知道限制来自自己的配置而非固定规则）：
+              // 停止工具循环，本轮剩余工具调用不再执行，已生成文本照常作为助手回复
+              // 落库；落库一条 error 提示让用户知道为何停在这里
               //（role error 不进模型上下文，仅消息流可见）
               const capMessage: StoredMessage = {
                 id: generateId(),
                 taskId: record.id,
                 role: "error",
-                content: `已达到单回合工具轮次上限（${MAX_TOOL_ROUNDS} 轮），本轮停止执行剩余工具调用；发送消息可继续剩余工作。`,
+                content: `已达到单回合工具轮次上限（${toolRoundsLimit} 轮），本轮停止执行剩余工具调用；发送消息可继续剩余工作。`,
                 createdAt: now(),
               };
               persistence.insertMessage(capMessage);

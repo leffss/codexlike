@@ -4,6 +4,7 @@ import type { ProviderProfile } from "@codexlike/agent-core";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
+import { parseToolRoundsInput } from "../lib/execution-settings-form";
 import { useTheme } from "../lib/theme";
 
 /** 编辑中态：'new' 新建；其余为正在编辑的 Profile id */
@@ -150,6 +151,7 @@ export function SettingsPage() {
 
       <SearchSettingsSection />
       <SubagentSettingsSection />
+      <ExecutionSettingsSection />
       <TerminalSettingsSection />
 
       <McpSettingsSection />
@@ -204,6 +206,134 @@ function ThemeSettingsSection() {
           </button>
         </div>
       </div>
+    </section>
+  );
+}
+
+/**
+ * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
+ * agent 执行参数——首个参数主任务工具轮次上限（默认 200，10–1000）。
+ * 改动即时保存；已开始的执行用开始时的值（回合开始快照），下一次发送生效。
+ */
+export function ExecutionSettingsBody(props: {
+  /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
+  maxToolRounds: string;
+  onInput: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  message: string;
+  messageError: boolean;
+}) {
+  return (
+    <div
+      data-testid="execution-settings"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+    >
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        主任务工具轮次上限（10-1000）
+        <input
+          type="number"
+          min={10}
+          max={1000}
+          step={1}
+          data-testid="execution-tool-rounds-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.maxToolRounds}
+          onChange={(e) => props.onInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          单次回复允许的工具轮次上限（防失控兜底，默认
+          200）；撞限后发送消息可继续。
+        </span>
+      </label>
+
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          data-testid="execution-settings-save"
+          disabled={props.saving}
+          className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+          onClick={props.onSave}
+        >
+          {props.saving ? "保存中…" : "保存"}
+        </button>
+        {props.message !== "" && (
+          <p
+            data-testid="execution-settings-message"
+            className={`text-xs ${props.messageError ? "text-danger-fg" : "text-ok-fg"}`}
+          >
+            {props.message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 执行设置容器：IPC 装载与保存（非法输入经 parseToolRoundsInput 回退默认 200） */
+function ExecutionSettingsSection() {
+  const [maxToolRounds, setMaxToolRounds] = useState("200");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageError, setMessageError] = useState(false);
+
+  async function refresh() {
+    try {
+      const settings = await window.codexlike.agentSettings.get();
+      setMaxToolRounds(String(settings.maxToolRounds));
+      setLoaded(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setMessage("");
+    try {
+      // 非法/越界输入回退默认 200（ADR 0017）；回退值写回输入框可见
+      const settings = await window.codexlike.agentSettings.set({
+        maxToolRounds: parseToolRoundsInput(maxToolRounds),
+      });
+      setMaxToolRounds(String(settings.maxToolRounds));
+      setMessage(
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}（对下一次发送生效）`
+      );
+      setMessageError(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      setMessageError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-medium text-fg">执行</h2>
+        <p className="text-xs text-fg-muted">
+          agent
+          执行参数。改动即时保存，已开始的执行用开始时的值；后续执行参数随版本扩展。
+        </p>
+      </div>
+
+      {loaded && (
+        <ExecutionSettingsBody
+          maxToolRounds={maxToolRounds}
+          onInput={setMaxToolRounds}
+          onSave={() => void save()}
+          saving={saving}
+          message={message}
+          messageError={messageError}
+        />
+      )}
     </section>
   );
 }

@@ -28,6 +28,7 @@ import type { TaskStatusInfo } from "../tasks/status";
 import type { QueueChangeReason, QueuedMessage } from "../tasks/input-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
+import type { AgentSettings } from "../execution/agent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
@@ -46,6 +47,7 @@ export type { LaunchState, LaunchView };
 export type { TaskStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
+export type { AgentSettings };
 export type { TerminalShell };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
@@ -153,6 +155,11 @@ export const IPC = {
   subagentSettings: {
     get: "subagent-settings:get",
     set: "subagent-settings:set",
+  },
+  /** 执行设置（ADR 0017）：agent 执行参数（首个：主任务工具轮次上限） */
+  agentSettings: {
+    get: "agent-settings:get",
+    set: "agent-settings:set",
   },
   /** 终端执行偏好（code review 修复 1）：run_terminal_command 的 shell 选择 */
   terminalSettings: {
@@ -532,6 +539,15 @@ export interface CodexLikeApi {
      * 改动对后续任务/下一次委派生效。
      */
     set(input: SubagentSettings): Promise<SubagentSettings>;
+  };
+  agentSettings: {
+    /** 当前执行设置（主任务工具轮次上限默认 200，GLOSSARY「执行设置」） */
+    get(): Promise<AgentSettings>;
+    /**
+     * 保存执行设置（10–1000 的整数校验，非法值以中文异常抛回——UI 侧非法输入
+     * 先回退默认再保存）；改动对下一个回合生效（回合开始快照，ADR 0017）。
+     */
+    set(input: AgentSettings): Promise<AgentSettings>;
   };
   terminalSettings: {
     /** 已保存的终端 shell 偏好；未配置返回 null（此时 CODEXLIKE_SHELL 环境变量兜底） */

@@ -42,6 +42,12 @@ export interface CreateTaskManagerOptions {
    */
   subagents?: SubagentsConfig;
   /**
+   * 主任务工具轮次上限的逐次解析取值函数（执行设置 ADR 0017）：原样透传给每个
+   * 任务的 createAgentTask，回合开始时快照（GLOSSARY「工具轮次」）；
+   * 未注入用默认 200。
+   */
+  toolRoundsLimit?: () => number;
+  /**
    * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
    * options 携带本条消息的思考档位快照（与 agent-task / subagent 的同名
    * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
@@ -207,6 +213,7 @@ export function createTaskManager(
       history,
       tools: options.tools,
       subagents: options.subagents,
+      toolRoundsLimit: options.toolRoundsLimit,
       systemPrompt: systemPromptFor?.(record) ?? "",
       resources:
         options.resourcesFor === undefined

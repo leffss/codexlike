@@ -159,6 +159,10 @@ const api: CodexLikeApi = {
     get: () => ipcRenderer.invoke(IPC.subagentSettings.get),
     set: (input) => ipcRenderer.invoke(IPC.subagentSettings.set, input),
   },
+  agentSettings: {
+    get: () => ipcRenderer.invoke(IPC.agentSettings.get),
+    set: (input) => ipcRenderer.invoke(IPC.agentSettings.set, input),
+  },
   terminalSettings: {
     get: () => ipcRenderer.invoke(IPC.terminalSettings.get),
     set: (shell) => ipcRenderer.invoke(IPC.terminalSettings.set, shell),
