@@ -56,6 +56,7 @@ export type { TaskSearchResult } from "./task/search";
 // 执行设置常量（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：纯常量浏览器安全，
 // desktop 存储校验与 ui 表单回退共用同一默认值/范围来源
 export {
+  DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
   DEFAULT_MAX_TOOL_ROUNDS,
   TOOL_ROUNDS_MAX,
   TOOL_ROUNDS_MIN,

@@ -18,15 +18,15 @@ export function registerAgentSettingsHandlers(options: {
   ipcMain.handle(
     IPC.agentSettings.set,
     (_e: IpcMainInvokeEvent, input: unknown) => {
-      // IPC 边界不信任渲染进程：只接受 { maxToolRounds: number } 形状
+      // IPC 边界不信任渲染进程：只接受 { maxToolRounds, maxSubagentToolRounds } 形状
       if (typeof input !== "object" || input === null) {
         throw new Error("执行设置输入不合法");
       }
-      const maxToolRounds = Number(
-        (input as Record<string, unknown>)["maxToolRounds"]
-      );
+      const record = input as Record<string, unknown>;
+      const maxToolRounds = Number(record["maxToolRounds"]);
+      const maxSubagentToolRounds = Number(record["maxSubagentToolRounds"]);
       return store
-        .set({ maxToolRounds })
+        .set({ maxToolRounds, maxSubagentToolRounds })
         .then(async (settings) => {
           await onSaved(settings);
           return settings;

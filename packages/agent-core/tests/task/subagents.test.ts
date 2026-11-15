@@ -157,6 +157,11 @@ interface SubagentHarnessOptions {
   resolveProfile?: () => Promise<ProviderProfile | null>;
   /** 并发上限（缺省 3） */
   maxConcurrent?: number;
+  /**
+   * 子代理工具轮次上限 resolver（执行设置 ADR 0017；缺省未注入 = 默认 200）。
+   * 直接透传 SubagentsConfig，测试据此注入低值断言提前截断与动态标记。
+   */
+  toolRoundsLimit?: () => number;
   /** 审批模式 */
   approvalMode?: TaskRecord["approvalMode"];
   resources?: () => AgentResourceSnapshot;
@@ -193,6 +198,7 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
       languageModelFor: (p) => (p.id === subProfile.id ? subModel : mainModel),
       settings: () => ({ maxConcurrent: options.maxConcurrent ?? 3 }),
       resolveProfile: options.resolveProfile ?? (async () => subProfile),
+      toolRoundsLimit: options.toolRoundsLimit,
     },
     now: fakeClock(),
   });
@@ -676,6 +682,98 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(resultEvent!.call.isError).toBe(false);
     expect(resultEvent!.call.output).toContain("工具轮次上限（200 轮）");
     expect(resultEvent!.call.output).toContain("工作被截断，未全部完成");
+    persistence.close();
+  });
+
+  it("子代理工具轮次上限注入（ADR 0017 执行设置）：低值提前截断，截断标记携带注入值", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const { task, persistence, subModel } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "cap-spawn",
+              toolName: "spawn_subagent",
+              input: { task: "循环任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      // 子模型每轮都调未注册工具：错误结果回填后继续下一轮，直到撞注入的上限
+      sub: [
+        {
+          kind: "tool",
+          calls: [{ toolCallId: "loop-1", toolName: "nope", input: {} }],
+        },
+      ],
+      // 注入低值 2（执行设置 resolver 范式）：复杂委派上限随用户配置缩放
+      toolRoundsLimit: () => 2,
+    });
+
+    const events = await collect(
+      task.sendMessage({ text: "委派循环任务", profile })
+    );
+
+    // 恰好 3 次子模型请求：2 轮执行 + 第 3 轮触发上限被丢弃（默认 200 时应为 201 次）
+    expect(subModel.doStreamCalls).toHaveLength(3);
+    const resultEvent = events.find(
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
+        e.type === "tool-result" && e.call.toolName === "spawn_subagent"
+    );
+    expect(resultEvent).toBeDefined();
+    // 截断不是失败：主模型据此知道委派未完成，不伪造成完成（isError=false）
+    expect(resultEvent!.call.isError).toBe(false);
+    // 标记携带注入的动态上限值（文本结构不变，仅数字动态化）
+    expect(resultEvent!.call.output).toContain("工具轮次上限（2 轮）");
+    expect(resultEvent!.call.output).toContain("工作被截断，未全部完成");
+    persistence.close();
+  });
+
+  it("子代理轮次上限运行开始快照（ADR 0017 生效语义）：运行中改值不影响已开始的子代理", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    // resolver 首次读取返回 2（快照），此后返回 999——若循环内逐轮重读，
+    // 截断不会发生或标记携带 999；快照语义下两者都不出现
+    let reads = 0;
+    const { task, persistence, subModel } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "cap-spawn",
+              toolName: "spawn_subagent",
+              input: { task: "循环任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [
+        {
+          kind: "tool",
+          calls: [{ toolCallId: "loop-1", toolName: "nope", input: {} }],
+        },
+      ],
+      toolRoundsLimit: () => ((reads += 1) === 1 ? 2 : 999),
+    });
+
+    const events = await collect(
+      task.sendMessage({ text: "委派循环任务", profile })
+    );
+
+    // 按 2 截断：3 次子模型请求（若逐轮重读到 999 则会继续跑到 200 轮）
+    expect(subModel.doStreamCalls).toHaveLength(3);
+    const resultEvent = events.find(
+      (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
+        e.type === "tool-result" && e.call.toolName === "spawn_subagent"
+    );
+    expect(resultEvent).toBeDefined();
+    expect(resultEvent!.call.output).toContain("工具轮次上限（2 轮）");
+    expect(resultEvent!.call.output).not.toContain("999");
     persistence.close();
   });
 

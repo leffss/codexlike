@@ -41,6 +41,7 @@ import type {
 } from "../tools/types";
 
 import { decideApproval, type ApprovalMode } from "./approval";
+import { DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS } from "./execution-settings";
 import { describeModelError, isAbortLike } from "./errors";
 import type { TaskEvent } from "./types";
 
@@ -58,9 +59,6 @@ export const SUBAGENT_DELEGATION_POLICY = [
 
 /** 单任务子代理并发上限默认值（spec：默认 3，设置页可配） */
 export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 3;
-
-/** 子代理单次运行允许的工具轮次上限（与主任务 MAX_TOOL_ROUNDS 一致：失控兜底，非日常约束） */
-const MAX_SUBAGENT_TOOL_ROUNDS = 200;
 
 /** 运行时子代理设置（设置页全局配置的内存快照，逐次解析以便改动即时生效） */
 export interface SubagentRuntimeSettings {
@@ -87,6 +85,15 @@ export interface SubagentsConfig {
   ) => LanguageModel;
   /** 逐次解析的运行时设置（并发上限）；改动对下一次委派生效 */
   settings(): SubagentRuntimeSettings;
+  /**
+   * 子代理工具轮次上限的逐次解析取值函数（执行设置 ADR 0017）：与主任务的
+   * CreateAgentTaskOptions.toolRoundsLimit 同构的 resolver 范式——agent-core
+   * 不依赖任何存储实现，宿主装配层注入内存缓存读取。单个子代理在开始运行时
+   * 快照一次（生效语义「即时保存、回合开始快照」：运行中不受中途调小影响），
+   * 排队未开跑的子代理按开跑时的值解析；未注入用默认 200
+   * （DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS，与设置层共用单一来源）。
+   */
+  toolRoundsLimit?: () => number;
   /**
    * 子代理模型（Provider Profile 引用）：null = 同主模型（用本次 sendMessage 的 profile）。
    * 异步以允许宿主读取加密存储的 Profile。
@@ -334,6 +341,9 @@ export function createSubagentOrchestrator(
     let aborted = false;
     // 达到轮次上限被截断：报告须带标记，主模型据此知道工作未完成（不伪造成完成）
     let capped = false;
+    // 工具轮次上限（执行设置 ADR 0017）：运行开始快照，声明在 try 外供截断标记
+    // 使用（标记在终态区，不在 try 作用域内）；解析失败按默认值兜底
+    let maxToolRounds = DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
     // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
     let reasoning = "";
     try {
@@ -352,6 +362,10 @@ export function createSubagentOrchestrator(
         throw new Error("未解析到子代理模型（Provider Profile）");
       }
       const messages: ModelMessage[] = [{ role: "user", content: entry.task }];
+      // 快照点（执行设置 ADR 0017「回合开始快照」）：子代理开始运行时读取一次，
+      // 运行中不受设置页中途调小影响；未注入用默认 200
+      maxToolRounds =
+        config.toolRoundsLimit?.() ?? DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       const questionsTool = createQuestionsTool((questions, toolCallId) =>
         port.requestInteraction({
@@ -433,7 +447,7 @@ export function createSubagentOrchestrator(
           break;
         }
         round += 1;
-        if (round > MAX_SUBAGENT_TOOL_ROUNDS) {
+        if (round > maxToolRounds) {
           capped = true;
           break;
         }
@@ -518,7 +532,9 @@ export function createSubagentOrchestrator(
       output = "子代理已完成任务，但未产出文本报告";
     }
     if (capped) {
-      const marker = `已达到子代理工具轮次上限（${MAX_SUBAGENT_TOOL_ROUNDS} 轮），工作被截断，未全部完成。`;
+      // 截断标记携带运行开始时快照的上限值（文本结构不变，仅数字动态化）：
+      // 主模型据此知道委派未全部完成，不伪造成完成
+      const marker = `已达到子代理工具轮次上限（${maxToolRounds} 轮），工作被截断，未全部完成。`;
       output = output.trim() === "" ? marker : `${output}\n\n${marker}`;
     }
 

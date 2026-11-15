@@ -9,6 +9,7 @@ import { ExecutionSettingsBody, SettingsPage } from "../src/pages/SettingsPage";
  * 执行设置分区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
  * 校验为纯函数（合法整数生效，非法/越界输入回退默认 200）；分区渲染为
  * 静态标记断言——文案遵循 GLOSSARY 术语（「工具轮次」，不用「回合」）。
+ * 两项参数（票 01/02）：主任务与子代理工具轮次上限，同构输入、独立状态。
  */
 describe("执行设置输入解析（parseToolRoundsInput）", () => {
   it("范围内的整数原样生效；边界 10 与 1000 合法", () => {
@@ -29,20 +30,38 @@ describe("执行设置输入解析（parseToolRoundsInput）", () => {
     expect(parseToolRoundsInput("0")).toBe(200);
     expect(parseToolRoundsInput("-5")).toBe(200);
   });
+
+  it("回退默认值可指定（票 02 子代理项）：同一范围，回退到传入的默认来源", () => {
+    // 主任务项与子代理项默认值同为 200，但来源是各自的常量（防语义耦合后分叉）
+    expect(parseToolRoundsInput("abc", 200)).toBe(200);
+    expect(parseToolRoundsInput("9", 200)).toBe(200);
+    expect(parseToolRoundsInput("1001", 200)).toBe(200);
+    // 合法值与回退来源无关
+    expect(parseToolRoundsInput("42", 200)).toBe(42);
+  });
 });
 
 describe("执行设置分区渲染", () => {
-  it("表单体：数字输入携带范围约束与当前值，保存按钮与提示位存在", () => {
-    const html = renderToStaticMarkup(
+  function renderBody(overrides?: {
+    maxToolRounds?: string;
+    maxSubagentToolRounds?: string;
+  }) {
+    return renderToStaticMarkup(
       createElement(ExecutionSettingsBody, {
-        maxToolRounds: "500",
+        maxToolRounds: overrides?.maxToolRounds ?? "500",
+        maxSubagentToolRounds: overrides?.maxSubagentToolRounds ?? "300",
         onInput: () => {},
+        onSubagentInput: () => {},
         onSave: () => {},
         saving: false,
         message: "",
         messageError: false,
       })
     );
+  }
+
+  it("表单体：主任务项数字输入携带范围约束与当前值", () => {
+    const html = renderBody();
     expect(html).toContain('data-testid="execution-settings"');
     expect(html).toContain("主任务工具轮次上限");
     expect(html).toContain('data-testid="execution-tool-rounds-input"');
@@ -55,11 +74,26 @@ describe("执行设置分区渲染", () => {
     expect(html).not.toContain("回合");
   });
 
+  it("表单体：子代理项与主任务项并排同构（票 02），独立输入与当前值", () => {
+    const html = renderBody({ maxSubagentToolRounds: "300" });
+    expect(html).toContain("子代理工具轮次上限");
+    expect(html).toContain('data-testid="execution-subagent-tool-rounds-input"');
+    expect(html).toContain('value="300"');
+    // 同一合法范围 10–1000
+    expect(html).toContain('min="10"');
+    expect(html).toContain('max="1000"');
+    // 两项并存且各一个输入
+    expect(html.match(/execution-tool-rounds-input/g)).toHaveLength(1);
+    expect(html.match(/execution-subagent-tool-rounds-input/g)).toHaveLength(1);
+  });
+
   it("保存提示：成功为 ok 色、失败为 danger 色", () => {
     const ok = renderToStaticMarkup(
       createElement(ExecutionSettingsBody, {
         maxToolRounds: "200",
+        maxSubagentToolRounds: "200",
         onInput: () => {},
+        onSubagentInput: () => {},
         onSave: () => {},
         saving: false,
         message: "已保存",
@@ -73,7 +107,9 @@ describe("执行设置分区渲染", () => {
     const failed = renderToStaticMarkup(
       createElement(ExecutionSettingsBody, {
         maxToolRounds: "200",
+        maxSubagentToolRounds: "200",
         onInput: () => {},
+        onSubagentInput: () => {},
         onSave: () => {},
         saving: false,
         message: "保存失败",
@@ -84,6 +120,8 @@ describe("执行设置分区渲染", () => {
   });
 
   it("设置页出现「执行」分区，介绍文案遵循 GLOSSARY 术语", () => {
+    // 静态渲染下 IPC 装载不发生（loaded=false），表体不挂载——分区项在
+    // 表体级测试断言（同票 01 页级测试先例）
     const html = renderToStaticMarkup(createElement(SettingsPage));
     expect(html).toContain("执行");
     expect(html).toContain("已开始的执行用开始时的值");

@@ -13,6 +13,17 @@
  */
 export const DEFAULT_MAX_TOOL_ROUNDS = 200;
 
-/** 主任务工具轮次上限的设置层合法范围（设置页/存储校验；agent-core 不重复校验） */
+/**
+ * 子代理工具轮次上限默认值（与主任务同值：失控兜底，非日常约束）。
+ * 撞限语义与主任务不同：子代理不中断主任务回合，报告末尾附截断标记回流，
+ * 主模型据此知道委派未全部完成（不伪造成完成）。与主任务上限相互独立可调
+ * （spec user story 3），常量分开定义防语义耦合。
+ */
+export const DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS = 200;
+
+/**
+ * 工具轮次上限的设置层合法范围（主任务与子代理共用同一范围；
+ * 设置页/存储校验用，agent-core 不重复校验）
+ */
 export const TOOL_ROUNDS_MIN = 10;
 export const TOOL_ROUNDS_MAX = 1000;

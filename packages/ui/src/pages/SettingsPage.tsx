@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
-import type { ProviderProfile } from "@codexlike/agent-core";
+import {
+  DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
+  type ProviderProfile,
+} from "@codexlike/agent-core";
 import type { TerminalSettings } from "@codexlike/desktop/ipc";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
@@ -214,13 +217,16 @@ function ThemeSettingsSection() {
 
 /**
  * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
- * agent 执行参数——首个参数主任务工具轮次上限（默认 200，10–1000）。
- * 改动即时保存；已开始的执行用开始时的值（回合开始快照），下一次发送生效。
+ * agent 执行参数——主任务工具轮次上限（票 01）与子代理工具轮次上限（票 02），
+ * 两项同构输入、独立可调（默认均 200，范围 10–1000）。
+ * 改动即时保存；已开始的执行用开始时的值（回合/运行开始快照），下一次发送生效。
  */
 export function ExecutionSettingsBody(props: {
   /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
   maxToolRounds: string;
+  maxSubagentToolRounds: string;
   onInput: (value: string) => void;
+  onSubagentInput: (value: string) => void;
   onSave: () => void;
   saving: boolean;
   message: string;
@@ -246,6 +252,24 @@ export function ExecutionSettingsBody(props: {
         <span className="text-xs text-fg-subtle">
           单次回复允许的工具轮次上限（防失控兜底，默认
           200）；撞限后发送消息可继续。
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        子代理工具轮次上限（10-1000）
+        <input
+          type="number"
+          min={10}
+          max={1000}
+          step={1}
+          data-testid="execution-subagent-tool-rounds-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.maxSubagentToolRounds}
+          onChange={(e) => props.onSubagentInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          委派子代理允许的工具轮次上限（默认
+          200）；撞限后报告附截断标记回流，主任务据此推进剩余工作。
         </span>
       </label>
 
@@ -275,6 +299,7 @@ export function ExecutionSettingsBody(props: {
 /** 执行设置容器：IPC 装载与保存（非法输入经 parseToolRoundsInput 回退默认 200） */
 function ExecutionSettingsSection() {
   const [maxToolRounds, setMaxToolRounds] = useState("200");
+  const [maxSubagentToolRounds, setMaxSubagentToolRounds] = useState("200");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -284,6 +309,7 @@ function ExecutionSettingsSection() {
     try {
       const settings = await window.codexlike.agentSettings.get();
       setMaxToolRounds(String(settings.maxToolRounds));
+      setMaxSubagentToolRounds(String(settings.maxSubagentToolRounds));
       setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -299,13 +325,19 @@ function ExecutionSettingsSection() {
     setSaving(true);
     setMessage("");
     try {
-      // 非法/越界输入回退默认 200（ADR 0017）；回退值写回输入框可见
+      // 非法/越界输入回退默认 200（ADR 0017）；回退值写回输入框可见。
+      // 两项各自解析、一次保存（独立字段，主任务与子代理互不影响）
       const settings = await window.codexlike.agentSettings.set({
         maxToolRounds: parseToolRoundsInput(maxToolRounds),
+        maxSubagentToolRounds: parseToolRoundsInput(
+          maxSubagentToolRounds,
+          DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS
+        ),
       });
       setMaxToolRounds(String(settings.maxToolRounds));
+      setMaxSubagentToolRounds(String(settings.maxSubagentToolRounds));
       setMessage(
-        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}（对下一次发送生效）`
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}（对下一次执行生效）`
       );
       setMessageError(false);
     } catch (error) {
@@ -329,7 +361,9 @@ function ExecutionSettingsSection() {
       {loaded && (
         <ExecutionSettingsBody
           maxToolRounds={maxToolRounds}
+          maxSubagentToolRounds={maxSubagentToolRounds}
           onInput={setMaxToolRounds}
+          onSubagentInput={setMaxSubagentToolRounds}
           onSave={() => void save()}
           saving={saving}
           message={message}

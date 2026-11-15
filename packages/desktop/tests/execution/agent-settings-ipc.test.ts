@@ -47,6 +47,7 @@ afterEach(() => {
  * 执行设置 IPC 链路（ADR 0017）：get/set 频道与现有设置频道同构——
  * 主进程 handler 持有 store（内存缓存由 main.ts 装配层的 onSaved 刷新），
  * 渲染端经 preload 暴露的 agentSettings 命名空间转发同名 channel。
+ * 两项参数（票 01/02）：主任务与子代理工具轮次上限。
  */
 describe("agent-settings IPC", () => {
   function setup() {
@@ -69,32 +70,45 @@ describe("agent-settings IPC", () => {
     expect(bridge.handlers.has(IPC.agentSettings.get)).toBe(true);
     expect(bridge.handlers.has(IPC.agentSettings.set)).toBe(true);
 
-    // get：未配置返回默认值
+    // get：未配置返回两项默认值
     await expect(
       bridge.handlers.get(IPC.agentSettings.get)!({}, undefined)
-    ).resolves.toEqual({ maxToolRounds: 200 });
+    ).resolves.toEqual({ maxToolRounds: 200, maxSubagentToolRounds: 200 });
 
     // set：合法值返回保存结果、落盘（经 store）并通知装配层刷新内存缓存
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!({}, { maxToolRounds: 500 })
-    ).resolves.toEqual({ maxToolRounds: 500 });
-    expect(saved).toEqual([{ maxToolRounds: 500 }]);
+      bridge.handlers
+        .get(IPC.agentSettings.set)!
+        ({}, { maxToolRounds: 500, maxSubagentToolRounds: 300 })
+    ).resolves.toEqual({ maxToolRounds: 500, maxSubagentToolRounds: 300 });
+    expect(saved).toEqual([
+      { maxToolRounds: 500, maxSubagentToolRounds: 300 },
+    ]);
     await expect(
       bridge.handlers.get(IPC.agentSettings.get)!({}, undefined)
-    ).resolves.toEqual({ maxToolRounds: 500 });
+    ).resolves.toEqual({ maxToolRounds: 500, maxSubagentToolRounds: 300 });
   });
 
   it("set：非法输入以中文异常抛回且不落盘（边界不信任渲染进程）", async () => {
     const { saved } = setup();
 
-    // 越界/非整数 → store 校验拒绝
+    // 越界/非整数 → store 校验拒绝（主任务项与子代理项各自校验）
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!({}, { maxToolRounds: 9 })
-    ).rejects.toThrow("工具轮次上限");
+      bridge.handlers
+        .get(IPC.agentSettings.set)!
+        ({}, { maxToolRounds: 9, maxSubagentToolRounds: 200 })
+    ).rejects.toThrow("主任务工具轮次上限");
+    await expect(
+      bridge.handlers
+        .get(IPC.agentSettings.set)!
+        ({}, { maxToolRounds: 200, maxSubagentToolRounds: 1001 })
+    ).rejects.toThrow("子代理工具轮次上限");
     // 非数字输入（渲染进程伪造）→ Number 归一后 NaN 同样拒绝
     await expect(
-      bridge.handlers.get(IPC.agentSettings.set)!({}, { maxToolRounds: "abc" })
-    ).rejects.toThrow("工具轮次上限");
+      bridge.handlers
+        .get(IPC.agentSettings.set)!
+        ({}, { maxToolRounds: "abc", maxSubagentToolRounds: 200 })
+    ).rejects.toThrow("主任务工具轮次上限");
     // 非对象输入（同步抛出，同子代理 handler 先例）
     expect(() => bridge.handlers.get(IPC.agentSettings.set)!({}, 42)).toThrow(
       "输入不合法"
@@ -110,9 +124,13 @@ describe("agent-settings IPC", () => {
 
     await api.agentSettings!.get();
     expect(bridge.invoke).toHaveBeenLastCalledWith(IPC.agentSettings.get);
-    await api.agentSettings!.set({ maxToolRounds: 300 });
+    await api.agentSettings!.set({
+      maxToolRounds: 300,
+      maxSubagentToolRounds: 400,
+    });
     expect(bridge.invoke).toHaveBeenLastCalledWith(IPC.agentSettings.set, {
       maxToolRounds: 300,
+      maxSubagentToolRounds: 400,
     });
   });
 });

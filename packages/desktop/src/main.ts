@@ -514,6 +514,9 @@ void app.whenReady().then(async () => {
       // 编排器剔除 spawn_subagent 防递归）
       tools: taskTools,
       settings: () => subagentSettings,
+      // 子代理工具轮次上限（执行设置票 02，ADR 0017）：resolver 逐次解析内存缓存，
+      // 子代理开始运行时快照——设置改动即时落盘，下一次委派按新值执行
+      toolRoundsLimit: () => agentSettings.maxSubagentToolRounds,
       // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
       resolveProfile: async () => {
         const profileId = subagentSettings.providerProfileId;
