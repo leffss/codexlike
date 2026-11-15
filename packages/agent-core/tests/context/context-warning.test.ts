@@ -65,6 +65,43 @@ describe("evaluateContextWarning", () => {
   });
 });
 
+/**
+ * 执行设置票 03（ADR 0017，GLOSSARY「执行设置」）：告警阈值为注入值——
+ * 纯函数第三参（占比），调用方每次评估传入当时设置（逐次读取，无快照语义）。
+ * 阈值是占比，与 Provider Profile 的逐模型 contextWindowTokens 叠加：
+ * 告警线 = 窗口 × 阈值。未传/非法回退默认 0.8（既有断言即默认值回归守护）。
+ */
+describe("evaluateContextWarning 阈值注入（执行设置票 03）", () => {
+  it("注入低阈值提前告警：50% 时 64k/128k 即触发", () => {
+    expect(evaluateContextWarning(63_999, 128_000, 0.5)).toBeNull();
+    const warning = evaluateContextWarning(64_000, 128_000, 0.5);
+    expect(warning).not.toBeNull();
+    expect(warning!.ratio).toBeCloseTo(0.5, 5);
+    expect(warning!.message).toContain("/compact");
+  });
+
+  it("注入高阈值延后告警：95% 时 80% 用量不再触发", () => {
+    expect(evaluateContextWarning(102_400, 128_000, 0.95)).toBeNull();
+    const warning = evaluateContextWarning(121_600, 128_000, 0.95);
+    expect(warning).not.toBeNull();
+  });
+
+  it("阈值与 Profile 窗口叠加：同一阈值下小窗口更早触发", () => {
+    // 8k 窗口 × 90% = 7200；与 128k 窗口同占比下触发点随窗口缩小前移
+    expect(evaluateContextWarning(7_199, 8_000, 0.9)).toBeNull();
+    const warning = evaluateContextWarning(7_200, 8_000, 0.9);
+    expect(warning).not.toBeNull();
+    expect(warning!.contextWindowTokens).toBe(8_000);
+  });
+
+  it("非法阈值（非有限/≤0）回退默认 0.8", () => {
+    for (const bad of [Number.NaN, 0, -0.5]) {
+      expect(evaluateContextWarning(101_999, 128_000, bad)).toBeNull();
+      expect(evaluateContextWarning(102_400, 128_000, bad)).not.toBeNull();
+    }
+  });
+});
+
 describe("估算 → 告警 的端到端纯逻辑（estimateTokens 喂给告警）", () => {
   it("长任务文本估算达到阈值触发；未达阈值不触发", () => {
     // 每条消息 400 CJK 字 → ceil(400/1.5) = 267 tokens/条（CJK 1.5 字符/token）

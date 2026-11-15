@@ -27,3 +27,31 @@ export const DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS = 200;
  */
 export const TOOL_ROUNDS_MIN = 10;
 export const TOOL_ROUNDS_MAX = 1000;
+
+/**
+ * /compact 保留的最近原始对话轮数默认值（工单 08 现状 3 轮，执行设置票 03
+ * 起用户可调）。compact 无「进行中」状态：每次执行逐次读取（ADR 0017），
+ * 无回合快照语义——下次压缩立即采用新值。
+ */
+export const DEFAULT_COMPACT_KEEP_ROUNDS = 3;
+
+/**
+ * 压缩保留轮数的设置层合法范围（设置页/存储校验用，agent-core 不重复校验）；
+ * 下界 1 保证 compact 至少保留一轮现场，上界 10 防保留过大失去压缩意义。
+ */
+export const COMPACT_KEEP_ROUNDS_MIN = 1;
+export const COMPACT_KEEP_ROUNDS_MAX = 10;
+
+/**
+ * 上下文告警阈值的默认值，以占上下文窗口的整数百分比存储（现状 0.8 = 80%，
+ * 执行设置票 03 起用户可调）。占比与 Provider Profile 的逐模型 contextWindowTokens
+ * 叠加：告警线 = 窗口 × 阈值。UI 以百分比呈现，消费点换算为占比。
+ */
+export const DEFAULT_CONTEXT_WARNING_PERCENT = 80;
+
+/**
+ * 上下文告警阈值的设置层合法范围（百分比整数；设置页/存储校验用）：
+ * 下界 50 防过早打扰，上界 95 保证告警在耗尽前仍留有处理余地。
+ */
+export const CONTEXT_WARNING_PERCENT_MIN = 50;
+export const CONTEXT_WARNING_PERCENT_MAX = 95;

@@ -509,6 +509,9 @@ void app.whenReady().then(async () => {
     // 主任务工具轮次上限（执行设置 ADR 0017）：resolver 逐次解析内存缓存，
     // agent-core 在回合开始时快照——设置改动即时落盘，下一个回合按新值执行
     toolRoundsLimit: () => agentSettings.maxToolRounds,
+    // /compact 保留轮数（执行设置票 03，ADR 0017）：resolver 逐次解析内存缓存，
+    // agent-core 在每次 compact 执行时读取（无回合快照）——改动对下一次压缩生效
+    compactKeepRounds: () => agentSettings.compactKeepRounds,
     subagents: {
       // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）

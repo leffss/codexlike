@@ -630,6 +630,95 @@ describe("AgentTask.compact（手动压缩）", () => {
   });
 });
 
+/**
+ * 执行设置票 03（ADR 0017，GLOSSARY「执行设置」）：/compact 保留轮数为逐次
+ * 解析的取值函数（resolver 范式）。compact 无「进行中」状态，每次执行读取一次
+ * （无回合快照语义）；未注入用默认 3——既有「保留最近 3 轮」测试即默认值回归
+ * 守护，此处只测注入值行为。
+ */
+describe("AgentTask.compact 保留轮数注入（执行设置票 03）", () => {
+  it("注入低值保留轮数：compact 后仅保留注入的轮数原始对话", async () => {
+    const persistence = memoryStore();
+    persistence.insertTask(taskRecord());
+    const model = compactableModel("压缩摘要。");
+    const task = createAgentTask({
+      record: taskRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      compactKeepRounds: () => 1,
+    });
+
+    await talkRounds(task, 5);
+    const result = await task.compact({ profile });
+
+    // 保留轮数 = 1：库中 = 摘要 + 第 5 轮（2 条原文）；被压缩的是前 4 轮
+    const stored = persistence.listMessages("task-1");
+    expect(stored).toHaveLength(3);
+    expect(stored[0]).toMatchObject({ role: "compact-summary" });
+    expect(stored.slice(1).map((m) => m.content)).toEqual([
+      "第5轮问题",
+      "第5轮回复",
+    ]);
+    expect(result.compactedMessages).toBe(8);
+    expect(result.keptMessages).toHaveLength(2);
+    // 压缩请求包含被压缩的前 4 轮、不含保留的第 5 轮
+    const generateCall = model.doGenerateCalls.at(-1)!;
+    expect(JSON.stringify(generateCall.prompt)).toContain("第4轮回复");
+    expect(JSON.stringify(generateCall.prompt)).not.toContain("第5轮问题");
+  });
+
+  it("逐次读取：同一任务两次 compact 各自读取当时值（无任务创建时快照）", async () => {
+    const persistence = memoryStore();
+    persistence.insertTask(taskRecord());
+    const model = compactableModel("压缩摘要。");
+    let reads = 0;
+    const task = createAgentTask({
+      record: taskRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      compactKeepRounds: () => {
+        reads += 1;
+        return reads === 1 ? 1 : 3;
+      },
+    });
+
+    // 第一次 compact：读到 1，仅保留 1 轮
+    await talkRounds(task, 5);
+    const first = await task.compact({ profile });
+    expect(first.keptMessages).toHaveLength(2);
+
+    // 第二次 compact：读到 3（若任务创建时快照，仍会是 1）——补足对话后保留 3 轮
+    await talkRounds(task, 3);
+    const second = await task.compact({ profile });
+    expect(second.keptMessages).toHaveLength(6);
+    expect(reads).toBe(2);
+  });
+
+  it("历史不超过注入轮数：错误提示携带注入值（文案结构不变，数字动态化）", async () => {
+    const persistence = memoryStore();
+    persistence.insertTask(taskRecord());
+    const model = compactableModel("摘要");
+    const task = createAgentTask({
+      record: taskRecord(),
+      persistence,
+      history: [],
+      languageModelFor: () => model,
+      now: fakeClock(),
+      compactKeepRounds: () => 5,
+    });
+
+    await talkRounds(task, 5);
+    await expect(task.compact({ profile })).rejects.toThrow(
+      "当前历史不超过最近 5 轮"
+    );
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+});
+
 describe("compact 与工具调用记录的合并融合（工单 03+08）", () => {
   it("压缩落地时同步清理被压缩轮次的工具调用记录（保留轮次的不动）", async () => {
     const persistence = memoryStore();

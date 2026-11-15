@@ -35,7 +35,6 @@ import {
 } from "../lib/live-task";
 
 import {
-  evaluateContextWarning,
   resolveComposerSubmission,
   type ApprovalMode,
   type ProviderProfile,
@@ -44,6 +43,8 @@ import {
   type ThinkingEffort,
   type WorkbenchTarget,
 } from "@codexlike/agent-core";
+
+import { contextWarningMessage } from "../lib/context-warning";
 
 import { AgentResourcesPanel } from "../components/AgentResourcesPanel";
 import { ChangesChip } from "../components/ChangesChip";
@@ -431,9 +432,11 @@ export function WorkspacePage(props: {
   }, []);
 
   /**
-   * 上下文告警刷新（code review 修复 2，spec 验收场景 4）：
-   * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）× 80%，
-   * 超阈值以 toast 常驻右下角（票02；/compact 后重估自然消失）；查询失败静默不打扰。
+   * 上下文告警刷新（code review 修复 2，spec 验收场景 4；执行设置票 03）：
+   * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）
+   * × 告警阈值——阈值来自执行设置，每次刷新逐次读取（无快照语义，设置页
+   * 保存后下一次评估即生效，默认 80%），超阈值以 toast 常驻右下角
+   * （票02；/compact 后重估自然消失）；查询失败静默不打扰。
    */
   const refreshContextWarning = useCallback(
     async (taskId: string) => {
@@ -447,10 +450,8 @@ export function WorkspacePage(props: {
         const message =
           status === null
             ? null
-            : (evaluateContextWarning(
-                status.estimatedContextTokens,
-                status.contextWindowTokens ?? undefined
-              )?.message ?? null);
+            : await contextWarningMessage(window.codexlike, status);
+        if (!isCurrent()) return;
         syncToast(
           toastState,
           "context-warning",

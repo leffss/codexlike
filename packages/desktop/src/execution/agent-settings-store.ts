@@ -1,6 +1,12 @@
 import { join } from "node:path";
 
 import {
+  COMPACT_KEEP_ROUNDS_MAX,
+  COMPACT_KEEP_ROUNDS_MIN,
+  CONTEXT_WARNING_PERCENT_MAX,
+  CONTEXT_WARNING_PERCENT_MIN,
+  DEFAULT_COMPACT_KEEP_ROUNDS,
+  DEFAULT_CONTEXT_WARNING_PERCENT,
   DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
   DEFAULT_MAX_TOOL_ROUNDS,
   TOOL_ROUNDS_MAX,
@@ -12,21 +18,31 @@ import { readJsonFile, writeJsonFile } from "../storage/json-file";
 /**
  * 执行设置存储（ADR 0017，GLOSSARY「执行设置」）：agent 执行参数的用户设置，
  * 独立文件 `~/.codexlike/agent-settings.json` 持久化（与现有各设置文件同形态）。
- * 两项参数：主任务与子代理工具轮次上限（执行设置票 01/02）——经内存缓存以
- * resolver 注入 agent-core（主任务回合开始快照、子代理运行开始快照消费），
- * 设置页保存后对下一次执行生效。两项语义不同（主任务中断回合、子代理仅
- * 截断报告），故独立字段、独立校验消息。
+ * 四项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
+ * 与上下文告警阈值（票 03）——经内存缓存以 resolver 注入 agent-core（轮次上限
+ * 回合/运行开始快照消费，compact 与告警阈值逐次读取），设置页保存后生效。
+ * 各项语义独立，故独立字段、独立校验消息。
  */
 export interface AgentSettings {
   /** 主任务工具轮次上限（10–1000，默认 200）；改动对下一个回合生效 */
   maxToolRounds: number;
   /** 子代理工具轮次上限（10–1000，默认 200）；改动对下一次委派生效 */
   maxSubagentToolRounds: number;
+  /**
+   * /compact 保留的最近原始对话轮数（1–10，默认 3）；compact 无「进行中」
+   * 状态，改动对下一次压缩生效（逐次读取，无回合快照语义）
+   */
+  compactKeepRounds: number;
+  /**
+   * 上下文告警阈值，占模型上下文窗口的整数百分比（50–95，默认 80）；
+   * 告警线 = 窗口（Provider Profile 逐模型可配）× 阈值，改动即时生效
+   */
+  contextWarningThresholdPercent: number;
 }
 
 export interface AgentSettingsStore {
   get(): Promise<AgentSettings>;
-  /** 保存设置（两项各自 10–1000 的整数校验；非法输入拒绝，UI 侧先回退默认） */
+  /** 保存设置（四项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
   set(input: AgentSettings): Promise<AgentSettings>;
 }
 
@@ -34,18 +50,25 @@ const FILE_NAME = "agent-settings.json";
 
 /**
  * 读取值的收敛（防手改文件）：合法整数生效，越界/非整数等非法输入回退
- * 指定默认值。主任务与子代理项共用同一合法范围（10–1000），仅默认值来源不同。
+ * 指定默认值。通用形态：范围由各设置项的合法范围常量决定（单一来源取自
+ * agent-core execution-settings），默认值按项传入。
  */
-function resolveToolRounds(value: unknown, fallback: number): number {
+function resolveIntInRange(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number
+): number {
   const num = typeof value === "number" ? value : Number.NaN;
-  if (
-    !Number.isInteger(num) ||
-    num < TOOL_ROUNDS_MIN ||
-    num > TOOL_ROUNDS_MAX
-  ) {
+  if (!Number.isInteger(num) || num < min || num > max) {
     return fallback;
   }
   return num;
+}
+
+/** 轮次上限两项共用同一合法范围（10–1000），仅默认值来源不同 */
+function resolveToolRounds(value: unknown, fallback: number): number {
+  return resolveIntInRange(value, TOOL_ROUNDS_MIN, TOOL_ROUNDS_MAX, fallback);
 }
 
 /** 执行设置的本地存储（`~/.codexlike/agent-settings.json`）；损坏文件按默认值处理 */
@@ -64,11 +87,27 @@ export function createAgentSettingsStore(options: {
       }
     );
     return {
-      maxToolRounds: resolveToolRounds(parsed.maxToolRounds, DEFAULT_MAX_TOOL_ROUNDS),
+      maxToolRounds: resolveToolRounds(
+        parsed.maxToolRounds,
+        DEFAULT_MAX_TOOL_ROUNDS
+      ),
       // 旧格式文件（票 01 只有主任务项）缺字段：子代理项按默认补齐
       maxSubagentToolRounds: resolveToolRounds(
         parsed.maxSubagentToolRounds,
         DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS
+      ),
+      // 旧格式文件（票 01/02 无票 03 两项）：缺字段按默认补齐
+      compactKeepRounds: resolveIntInRange(
+        parsed.compactKeepRounds,
+        COMPACT_KEEP_ROUNDS_MIN,
+        COMPACT_KEEP_ROUNDS_MAX,
+        DEFAULT_COMPACT_KEEP_ROUNDS
+      ),
+      contextWarningThresholdPercent: resolveIntInRange(
+        parsed.contextWarningThresholdPercent,
+        CONTEXT_WARNING_PERCENT_MIN,
+        CONTEXT_WARNING_PERCENT_MAX,
+        DEFAULT_CONTEXT_WARNING_PERCENT
       ),
     };
   }
@@ -99,7 +138,33 @@ export function createAgentSettingsStore(options: {
           `子代理工具轮次上限必须是 ${TOOL_ROUNDS_MIN}-${TOOL_ROUNDS_MAX} 的整数`
         );
       }
-      const next: AgentSettings = { maxToolRounds, maxSubagentToolRounds };
+      const compactKeepRounds = input.compactKeepRounds;
+      if (
+        !Number.isInteger(compactKeepRounds) ||
+        compactKeepRounds < COMPACT_KEEP_ROUNDS_MIN ||
+        compactKeepRounds > COMPACT_KEEP_ROUNDS_MAX
+      ) {
+        throw new Error(
+          `压缩保留对话轮数必须是 ${COMPACT_KEEP_ROUNDS_MIN}-${COMPACT_KEEP_ROUNDS_MAX} 的整数`
+        );
+      }
+      const contextWarningThresholdPercent =
+        input.contextWarningThresholdPercent;
+      if (
+        !Number.isInteger(contextWarningThresholdPercent) ||
+        contextWarningThresholdPercent < CONTEXT_WARNING_PERCENT_MIN ||
+        contextWarningThresholdPercent > CONTEXT_WARNING_PERCENT_MAX
+      ) {
+        throw new Error(
+          `上下文告警阈值必须是 ${CONTEXT_WARNING_PERCENT_MIN}-${CONTEXT_WARNING_PERCENT_MAX} 的整数`
+        );
+      }
+      const next: AgentSettings = {
+        maxToolRounds,
+        maxSubagentToolRounds,
+        compactKeepRounds,
+        contextWarningThresholdPercent,
+      };
       writeJsonFile(filePath, next);
       return next;
     },

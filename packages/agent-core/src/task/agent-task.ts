@@ -53,7 +53,10 @@ import {
   type SubagentOrchestrator,
   type SubagentsConfig,
 } from "./subagent";
-import { DEFAULT_MAX_TOOL_ROUNDS } from "./execution-settings";
+import {
+  DEFAULT_COMPACT_KEEP_ROUNDS,
+  DEFAULT_MAX_TOOL_ROUNDS,
+} from "./execution-settings";
 import type {
   CompactRecord,
   CompactResult,
@@ -126,6 +129,15 @@ export interface CreateAgentTaskOptions {
    * 宿主保证返回合法值（设置层校验 10–1000），agent-core 不重复校验。
    */
   toolRoundsLimit?: () => number;
+  /**
+   * /compact 保留最近原始对话轮数的逐次解析取值函数（执行设置票 03，ADR 0017，
+   * GLOSSARY「执行设置」；先例为主任务 toolRoundsLimit 的 resolver 范式，
+   * agent-core 不依赖任何存储实现）。compact 无「进行中」状态：每次执行
+   * /compact 时读取一次（逐次读取，无回合快照语义）——下次压缩立即采用新值。
+   * 未注入用 DEFAULT_COMPACT_KEEP_ROUNDS；宿主保证返回合法值（设置层校验
+   * 1–10），agent-core 不重复校验。
+   */
+  compactKeepRounds?: () => number;
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 时间与 id 生成注入（测试用固定值） */
@@ -172,7 +184,8 @@ export interface AgentTask {
   sendMessage(options: SendMessageOptions): AsyncIterable<TaskEvent>;
   /**
    * /compact 手动压缩（工单 08，GLOSSARY「Compact」）：
-   * 用当前模型把既有历史压成摘要 → 摘要替换旧历史、保留最近 3 轮原始对话 →
+   * 用当前模型把既有历史压成摘要 → 摘要替换旧历史、保留最近 N 轮原始对话
+   * （N 为执行设置的保留轮数，compact 执行时逐次读取，默认 3）→
    * 单事务落库（摘要消息 + 保留轮次 + compact 记录）。
    * 摘要生成成功前不动任何状态（失败可原样重试）；
    * 与 sendMessage 共享互斥（回复中不可压缩、压缩中不可发送）。
@@ -229,8 +242,7 @@ function toolResultOutput(
   return { output: { type: "text", value: result.output } };
 }
 
-/** /compact 保留的最近原始对话轮数（工单 08） */
-export const COMPACT_KEEP_ROUNDS = 3;
+/** /compact 保留的最近原始对话轮数默认值迁至 execution-settings.ts（执行设置票 03 单一来源） */
 
 /** 从工具参数中安全读取 command 字段（run_terminal_command 的命令原文） */
 function commandOfToolInput(input: unknown): string | undefined {
@@ -263,15 +275,15 @@ function serializeContextForCompaction(messages: ModelMessage[]): string {
 }
 
 /**
- * 计算保留边界：上下文尾部 KEEP_ROUNDS 轮（一轮 = user 开头的一段）之前的部分可压缩。
- * 返回保留部分在 context 中的起始下标；整个上下文不足 KEEP_ROUNDS 轮时返回 0。
+ * 计算保留边界：上下文尾部 keepRounds 轮（一轮 = user 开头的一段）之前的部分可压缩。
+ * 返回保留部分在 context 中的起始下标；整个上下文不足 keepRounds 轮时返回 0。
  */
-function keptRoundsStart(context: ModelMessage[]): number {
+function keptRoundsStart(context: ModelMessage[], keepRounds: number): number {
   let rounds = 0;
   for (let i = context.length - 1; i >= 0; i -= 1) {
     if (context[i]!.role === "user") {
       rounds += 1;
-      if (rounds === COMPACT_KEEP_ROUNDS) {
+      if (rounds === keepRounds) {
         return i;
       }
     }
@@ -914,10 +926,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       if (busy) {
         throw new Error("任务正在回复或压缩中，请等待完成后再操作");
       }
-      const keptStart = keptRoundsStart(context);
+      // 保留轮数逐次读取（执行设置票 03，ADR 0017）：compact 无「进行中」状态，
+      // 每次执行读取一次——设置页保存后对下一次 /compact 立即生效
+      const keepRounds =
+        options.compactKeepRounds?.() ?? DEFAULT_COMPACT_KEEP_ROUNDS;
+      const keptStart = keptRoundsStart(context, keepRounds);
       if (keptStart === 0) {
         throw new Error(
-          `当前历史不超过最近 ${COMPACT_KEEP_ROUNDS} 轮，没有可压缩的内容`
+          `当前历史不超过最近 ${keepRounds} 轮，没有可压缩的内容`
         );
       }
       signal?.throwIfAborted();

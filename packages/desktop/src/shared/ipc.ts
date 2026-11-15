@@ -543,11 +543,17 @@ export interface CodexLikeApi {
     set(input: SubagentSettings): Promise<SubagentSettings>;
   };
   agentSettings: {
-    /** 当前执行设置（主任务工具轮次上限默认 200，GLOSSARY「执行设置」） */
+    /**
+     * 当前执行设置（GLOSSARY「执行设置」，ADR 0017）：主任务/子代理工具轮次
+     * 上限（默认 200）、压缩保留对话轮数（默认 3）、上下文告警阈值百分比
+     * （默认 80）——四项默认值与现状一致。
+     */
     get(): Promise<AgentSettings>;
     /**
-     * 保存执行设置（10–1000 的整数校验，非法值以中文异常抛回——UI 侧非法输入
-     * 先回退默认再保存）；改动对下一个回合生效（回合开始快照，ADR 0017）。
+     * 保存执行设置（四项各自范围与整数校验：轮次 10–1000、保留轮数 1–10、
+     * 阈值 50–95，非法值以中文异常抛回——UI 侧非法输入先回退默认再保存）；
+     * 轮次上限对下一个回合/委派生效（开始时快照），保留轮数对下一次 /compact
+     * 生效、告警阈值即时生效（两者逐次读取，ADR 0017）。
      */
     set(input: AgentSettings): Promise<AgentSettings>;
   };

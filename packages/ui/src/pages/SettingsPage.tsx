@@ -8,7 +8,11 @@ import type { TerminalSettings } from "@codexlike/desktop/ipc";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
-import { parseToolRoundsInput } from "../lib/execution-settings-form";
+import {
+  parseCompactKeepRoundsInput,
+  parseContextWarningPercentInput,
+  parseToolRoundsInput,
+} from "../lib/execution-settings-form";
 import { validateTerminalTimeouts } from "../lib/terminal-settings";
 import { useTheme } from "../lib/theme";
 
@@ -217,16 +221,21 @@ function ThemeSettingsSection() {
 
 /**
  * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
- * agent 执行参数——主任务工具轮次上限（票 01）与子代理工具轮次上限（票 02），
- * 两项同构输入、独立可调（默认均 200，范围 10–1000）。
- * 改动即时保存；已开始的执行用开始时的值（回合/运行开始快照），下一次发送生效。
+ * agent 执行参数——主任务工具轮次上限（票 01）、子代理工具轮次上限（票 02）、
+ * 压缩保留对话轮数与上下文告警阈值（票 03），同构输入、独立可调。
+ * 改动即时保存；轮次上限用开始时的值（回合/运行开始快照），保留轮数与告警
+ * 阈值无「进行中」状态逐次读取（保留轮数对下一次 /compact 生效、阈值即时生效）。
  */
 export function ExecutionSettingsBody(props: {
   /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
   maxToolRounds: string;
   maxSubagentToolRounds: string;
+  compactKeepRounds: string;
+  contextWarningThresholdPercent: string;
   onInput: (value: string) => void;
   onSubagentInput: (value: string) => void;
+  onCompactKeepInput: (value: string) => void;
+  onContextWarningInput: (value: string) => void;
   onSave: () => void;
   saving: boolean;
   message: string;
@@ -273,6 +282,42 @@ export function ExecutionSettingsBody(props: {
         </span>
       </label>
 
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        压缩保留对话轮数（1-10）
+        <input
+          type="number"
+          min={1}
+          max={10}
+          step={1}
+          data-testid="execution-compact-keep-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.compactKeepRounds}
+          onChange={(e) => props.onCompactKeepInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          执行 /compact 压缩历史后保留的最近对话轮数（默认
+          3）；改动对下一次压缩生效。
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        上下文告警阈值（50-95%）
+        <input
+          type="number"
+          min={50}
+          max={95}
+          step={1}
+          data-testid="execution-context-warning-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.contextWarningThresholdPercent}
+          onChange={(e) => props.onContextWarningInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          上下文用量达到上下文窗口的百分之多少时提醒（默认
+          80%）；窗口由接入设置的 Provider Profile 逐模型配置。
+        </span>
+      </label>
+
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -296,10 +341,13 @@ export function ExecutionSettingsBody(props: {
   );
 }
 
-/** 执行设置容器：IPC 装载与保存（非法输入经 parseToolRoundsInput 回退默认 200） */
+/** 执行设置容器：IPC 装载与保存（非法输入经各解析函数回退默认值） */
 function ExecutionSettingsSection() {
   const [maxToolRounds, setMaxToolRounds] = useState("200");
   const [maxSubagentToolRounds, setMaxSubagentToolRounds] = useState("200");
+  const [compactKeepRounds, setCompactKeepRounds] = useState("3");
+  const [contextWarningThresholdPercent, setContextWarningThresholdPercent] =
+    useState("80");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -310,6 +358,10 @@ function ExecutionSettingsSection() {
       const settings = await window.codexlike.agentSettings.get();
       setMaxToolRounds(String(settings.maxToolRounds));
       setMaxSubagentToolRounds(String(settings.maxSubagentToolRounds));
+      setCompactKeepRounds(String(settings.compactKeepRounds));
+      setContextWarningThresholdPercent(
+        String(settings.contextWarningThresholdPercent)
+      );
       setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -325,19 +377,27 @@ function ExecutionSettingsSection() {
     setSaving(true);
     setMessage("");
     try {
-      // 非法/越界输入回退默认 200（ADR 0017）；回退值写回输入框可见。
-      // 两项各自解析、一次保存（独立字段，主任务与子代理互不影响）
+      // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
+      // 四项各自解析、一次保存（独立字段，互不影响）
       const settings = await window.codexlike.agentSettings.set({
         maxToolRounds: parseToolRoundsInput(maxToolRounds),
         maxSubagentToolRounds: parseToolRoundsInput(
           maxSubagentToolRounds,
           DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS
         ),
+        compactKeepRounds: parseCompactKeepRoundsInput(compactKeepRounds),
+        contextWarningThresholdPercent: parseContextWarningPercentInput(
+          contextWarningThresholdPercent
+        ),
       });
       setMaxToolRounds(String(settings.maxToolRounds));
       setMaxSubagentToolRounds(String(settings.maxSubagentToolRounds));
+      setCompactKeepRounds(String(settings.compactKeepRounds));
+      setContextWarningThresholdPercent(
+        String(settings.contextWarningThresholdPercent)
+      );
       setMessage(
-        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}（对下一次执行生效）`
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%`
       );
       setMessageError(false);
     } catch (error) {
@@ -362,8 +422,12 @@ function ExecutionSettingsSection() {
         <ExecutionSettingsBody
           maxToolRounds={maxToolRounds}
           maxSubagentToolRounds={maxSubagentToolRounds}
+          compactKeepRounds={compactKeepRounds}
+          contextWarningThresholdPercent={contextWarningThresholdPercent}
           onInput={setMaxToolRounds}
           onSubagentInput={setMaxSubagentToolRounds}
+          onCompactKeepInput={setCompactKeepRounds}
+          onContextWarningInput={setContextWarningThresholdPercent}
           onSave={() => void save()}
           saving={saving}
           message={message}

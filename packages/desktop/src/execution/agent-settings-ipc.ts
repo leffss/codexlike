@@ -18,15 +18,25 @@ export function registerAgentSettingsHandlers(options: {
   ipcMain.handle(
     IPC.agentSettings.set,
     (_e: IpcMainInvokeEvent, input: unknown) => {
-      // IPC 边界不信任渲染进程：只接受 { maxToolRounds, maxSubagentToolRounds } 形状
+      // IPC 边界不信任渲染进程：只接受四字段形状（票 01/02/03），非法值经
+      // store 校验以中文异常抛回
       if (typeof input !== "object" || input === null) {
         throw new Error("执行设置输入不合法");
       }
       const record = input as Record<string, unknown>;
       const maxToolRounds = Number(record["maxToolRounds"]);
       const maxSubagentToolRounds = Number(record["maxSubagentToolRounds"]);
+      const compactKeepRounds = Number(record["compactKeepRounds"]);
+      const contextWarningThresholdPercent = Number(
+        record["contextWarningThresholdPercent"]
+      );
       return store
-        .set({ maxToolRounds, maxSubagentToolRounds })
+        .set({
+          maxToolRounds,
+          maxSubagentToolRounds,
+          compactKeepRounds,
+          contextWarningThresholdPercent,
+        })
         .then(async (settings) => {
           await onSaved(settings);
           return settings;

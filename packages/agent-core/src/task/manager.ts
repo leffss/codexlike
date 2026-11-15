@@ -48,6 +48,12 @@ export interface CreateTaskManagerOptions {
    */
   toolRoundsLimit?: () => number;
   /**
+   * /compact 保留最近原始对话轮数的逐次解析取值函数（执行设置票 03，ADR 0017）：
+   * 原样透传给每个任务的 createAgentTask，compact 执行时读取一次（无回合快照）；
+   * 未注入用默认 3。
+   */
+  compactKeepRounds?: () => number;
+  /**
    * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
    * options 携带本条消息的思考档位快照（与 agent-task / subagent 的同名
    * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
@@ -214,6 +220,7 @@ export function createTaskManager(
       tools: options.tools,
       subagents: options.subagents,
       toolRoundsLimit: options.toolRoundsLimit,
+      compactKeepRounds: options.compactKeepRounds,
       systemPrompt: systemPromptFor?.(record) ?? "",
       resources:
         options.resourcesFor === undefined
