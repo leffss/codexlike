@@ -144,6 +144,24 @@ describe("规范与技能 IPC", () => {
     });
   });
 
+  it("draft 态按工作区路径预览规范与技能，只返回元数据并拒绝非字符串路径", () => {
+    const { workspace } = setup();
+    const preview = invoke(IPC.tasks.draftResources, workspace);
+    expect(preview).toMatchObject({
+      active: null,
+      last: null,
+      preview: { loaded: [] },
+    });
+    expect(JSON.stringify(preview)).toContain("审查改动");
+    expect(JSON.stringify(preview)).not.toContain("SECRET_SKILL_BODY");
+    expect(() => invoke(IPC.tasks.draftResources, 123)).toThrow(
+      "draftResources：workspacePath 必须是非空字符串"
+    );
+    expect(() => invoke(IPC.tasks.draftResources, "  ")).toThrow(
+      "draftResources：workspacePath 必须是非空字符串"
+    );
+  });
+
   it("拒绝伪造 taskId 参数，不允许以任意文件路径作为读取入口", () => {
     setup();
     expect(() =>

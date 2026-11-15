@@ -79,7 +79,7 @@ async function setup() {
     model: "private-model-config",
   });
   function register() {
-    const resourcesFor = ({ workspacePath }: TaskRecord) =>
+    const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
       createAgentResourceSnapshot({
         workspacePath,
         globalDir: home,

@@ -24,7 +24,6 @@ import {
   createWorktreeService,
   validateProviderProfile,
   type SearchSource,
-  type TaskRecord,
 } from "@codexlike/agent-core/node";
 
 import {
@@ -504,7 +503,7 @@ void app.whenReady().then(async () => {
     ...browserTools,
   ];
   // 每条消息发现一次规范与技能；预览和运行使用同一规则，执行中的快照不被预览替换。
-  const resourcesFor = (record: TaskRecord) =>
+  const resourcesFor = (record: { workspacePath: string }) =>
     createAgentResourceSnapshot({
       workspacePath: record.workspacePath,
       globalDir: dataDir(),

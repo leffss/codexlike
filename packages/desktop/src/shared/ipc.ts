@@ -122,6 +122,8 @@ export const IPC = {
     status: "tasks:status",
     /** 规范与技能：当前/最近运行摘要及下条消息的磁盘预览。 */
     resources: "tasks:resources",
+    /** 规范与技能：draft 态（首条消息前无任务记录）按工作区路径的磁盘预览。 */
+    draftResources: "tasks:draft-resources",
     /** /compact：手动压缩历史为摘要（保留最近 3 轮）；成功返回压缩概要 */
     compact: "tasks:compact",
     /** @引用 菜单候选：工作区文件相对路径列表 */
@@ -464,6 +466,11 @@ export interface TaskApi {
   status(taskId: string): Promise<TaskStatusInfo | null>;
   /** 只返回资源元数据与加载记录，不返回全部技能正文。 */
   resources(taskId: string): Promise<TaskResourcesView | null>;
+  /**
+   * draft 态（首条消息前无任务记录）按工作区路径预览规范与技能：
+   * 与 tasks.resources 的 preview 同构（active/last 恒空），只返回元数据。
+   */
+  draftResources(workspacePath: string): Promise<TaskResourcesView>;
   /**
    * /compact：用所选 Provider Profile 的模型压缩历史为摘要（保留最近 3 轮）。
    * 压缩失败（模型错误 / 历史过短 / 任务正忙）以异常抛回，原历史不受损，可重试。

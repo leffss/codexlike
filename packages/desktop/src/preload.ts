@@ -64,6 +64,8 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
       ipcRenderer.invoke(channels.archive, taskId, archived),
     status: (taskId) => ipcRenderer.invoke(channels.status, taskId),
     resources: (taskId) => ipcRenderer.invoke(channels.resources, taskId),
+    draftResources: (workspacePath) =>
+      ipcRenderer.invoke(channels.draftResources, workspacePath),
     compact: (taskId, providerProfileId) =>
       ipcRenderer.invoke(channels.compact, taskId, providerProfileId),
     workspaceFiles: (taskId) =>

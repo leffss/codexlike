@@ -24,6 +24,10 @@ E2E（`packages/desktop/e2e/*.mjs`）中的元素定位按用途收口（`pnpm c
 
 测试必须覆盖「父目录不存在」分支：E2E 以 `mkdtempSync` 预建 `CODEXLIKE_HOME` 的习惯会掩盖该分支——2026-11-11 打包黑屏事故中 `createSqliteSessionStore` 未建 `~/.codexlike`，11 条 E2E 全绿仍黑屏，靠 `test:e2e:packaged` 冷启动冒烟兜底。
 
+## 会话初始态覆盖
+
+E2E 场景默认从发送首条消息开始驱动（mock provider 便于造轮次），这个习惯会掩盖「首条消息之前」的生命周期分支：凡宣称会话内可用的 UI 能力（输入框菜单、侧栏面板、标题栏入口），至少一条断言覆盖初始态（draft 未发首条消息、任务恢复后未运行、发送失败后），再测运行态。先例：2026-11-15 修复 draft 态技能不可用（ADR 0007 补 draft 预览通道）时，skills.mjs 全部技能断言都在首条消息之后，该分支骗过全部场景，由用户实测暴露。审查者按「断言覆盖了初始态还是只覆盖运行态」检查。
+
 ## 拆分提交（partial-staged）
 
 同一文件混两批改动、只提交其中一批时，lint-staged 在「恢复未暂存改动」一步失败并整体 revert——工具边界，不是格式问题。流程：对 staged 内容先跑 `prettier --check` 确认格式，再 `git commit --no-verify`；能整文件提交就拆开两批先后提交，避免 partial-staged（2026-11-11 项目侧栏拆分提交踩此坑）。

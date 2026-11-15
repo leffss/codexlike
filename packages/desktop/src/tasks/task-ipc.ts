@@ -64,7 +64,8 @@ export function registerTaskHandlers(options: {
   /** 托管 Worktree 服务：首次发送创建隔离副本，不按数量清理。 */
   worktreeService: WorktreeService;
   /** 与真实发送共用的发现工厂；预览不会替换运行中的快照。 */
-  resourcesFor: (record: TaskRecord) => AgentResourceSnapshot;
+  /** 只用 workspacePath 发现快照；draft 预览传 { workspacePath } 即可复用同一实现。 */
+  resourcesFor: (record: { workspacePath: string }) => AgentResourceSnapshot;
   /** 输入队列持久化（票 01 / ADR 0013）：同一 SQLite 库的独立连接；缺省内存（单测装配）。 */
   queueStore?: InputQueueStore;
 }): TaskExitRuntime & { startInputQueues(): void } {
@@ -905,6 +906,23 @@ export function registerTaskHandlers(options: {
       return {
         ...manager.resourceState(taskId),
         preview: resourcesFor(record).summary(),
+      };
+    }
+  );
+
+  // draft 态（首条消息前无任务记录）按工作区路径预览：与 tasks.resources 的
+  // preview 同构（active/last 恒空），只返回元数据；worktree 模式的草稿用
+  // 源工作区路径预览（worktree 在首条消息后才创建，内容一致）。
+  ipcMain.handle(
+    IPC.tasks.draftResources,
+    (_e: IpcMainInvokeEvent, workspacePath: unknown) => {
+      if (typeof workspacePath !== "string" || workspacePath.trim() === "") {
+        throw new Error("draftResources：workspacePath 必须是非空字符串");
+      }
+      return {
+        active: null,
+        last: null,
+        preview: resourcesFor({ workspacePath }).summary(),
       };
     }
   );

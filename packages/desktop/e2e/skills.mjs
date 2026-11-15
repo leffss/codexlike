@@ -141,6 +141,25 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
+    // draft 态（首条消息发出前）技能必须可用：菜单与面板都来自真实磁盘技能。
+    await window.getByTestId("composer-input").fill("$rev");
+    await window.getByTestId("composer-menu").waitFor({ timeout: 5_000 });
+    const draftMenu = await window.getByTestId("composer-menu").textContent();
+    assert(
+      draftMenu.includes("review") && draftMenu.includes("项目代码审查"),
+      "draft 态输入框技能菜单没有列出真实存在的技能"
+    );
+    await window.getByTestId("composer-input").fill("");
+    await window.getByTestId("resources-toggle").click();
+    const draftPanel = window.getByTestId("resources-panel");
+    await draftPanel.waitFor({ timeout: 5_000 });
+    const draftPanelText = await draftPanel.textContent();
+    assert(
+      draftPanelText.includes("review") && draftPanelText.includes("reference"),
+      "draft 态规范与技能面板没有预览目录"
+    );
+    await window.getByTestId("resources-toggle").click();
+
     async function send(text, nextStage) {
       stage = nextStage;
       const start = seenBodies.length;

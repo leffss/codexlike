@@ -17,14 +17,20 @@ export function DrawerTabHeader(props: {
   active: DrawerTab;
   onTabChange: (tab: DrawerTab) => void;
   onClose: () => void;
+  /** 可用 tab 子集（缺省全量）：draft 态「改动」依赖任务级 git 快照，不提供。 */
+  tabs?: readonly DrawerTab[];
 }) {
+  // 子集按 DRAWER_TABS 固定顺序过滤，标签查表，调用方只传 key
+  const tabs = props.tabs
+    ? DRAWER_TABS.filter(({ key }) => props.tabs!.includes(key))
+    : DRAWER_TABS;
   return (
     <div
       role="tablist"
       aria-label="面板切换"
       className="flex shrink-0 items-stretch border-b border-line"
     >
-      {DRAWER_TABS.map(({ key, label }) => (
+      {tabs.map(({ key, label }) => (
         <button
           key={key}
           type="button"
@@ -69,6 +75,8 @@ export function PanelsDrawer(props: {
   onClose: () => void;
   resources: ReactNode;
   changes: ReactNode;
+  /** 可用 tab 子集（缺省两 tab 全量）：draft 态只渲染「规范与技能」。 */
+  tabs?: readonly DrawerTab[];
 }) {
   return (
     <aside
@@ -80,6 +88,7 @@ export function PanelsDrawer(props: {
         active={props.tab}
         onTabChange={props.onTabChange}
         onClose={props.onClose}
+        tabs={props.tabs}
       />
       <div className="flex min-h-0 flex-1 flex-col [&>aside]:h-auto [&>aside]:min-h-0 [&>aside]:min-w-0 [&>aside]:w-full [&>aside]:flex-1 [&>aside]:border-l-0">
         {props.tab === "resources" ? props.resources : props.changes}

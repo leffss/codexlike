@@ -334,6 +334,52 @@ export function WorkspacePage(props: {
     if (id !== null) void refreshResources(id);
   }, [refreshResources]);
 
+  /** draft 态预览的主动刷新旋钮（面板刷新按钮 / 抽屉打开即刷新共用）。 */
+  const [draftPreviewNonce, setDraftPreviewNonce] = useState(0);
+  /** draft 与任务两态统一的资源刷新入口：按当前视图路由到对应管线。 */
+  const refreshResourcesForView = useCallback(() => {
+    if (currentIdRef.current !== null) refreshCurrentResources();
+    else setDraftPreviewNonce((nonce) => nonce + 1);
+  }, [refreshCurrentResources]);
+
+  /**
+   * draft 态（首条消息前无任务记录）按工作区路径预览规范与技能：
+   * 输入框技能菜单与「规范与技能」面板共用同一 resources 状态，首条消息
+   * 发出后由 tasks.start → openTask 切换到任务快照管线。worktree 模式的
+   * 草稿用源工作区路径预览（worktree 在首条消息后才创建，内容一致）。
+   * request 代数防旧结果串线（与 refreshResources 同款守卫）。
+   */
+  const draftWorkspacePath = draft?.workspacePath ?? null;
+  useEffect(() => {
+    if (currentId !== null) return; // 任务态由 openTask 管线负责
+    if (draftWorkspacePath === null) {
+      setResources(null); // draft 未选工作区（或已关闭），无可预览
+      return;
+    }
+    const request = ++resourceRequestRef.current;
+    const isCurrent = () =>
+      currentIdRef.current === null && resourceRequestRef.current === request;
+    setResourcesLoading(true);
+    setResourcesError(null);
+    window.codexlike.tasks
+      .draftResources(draftWorkspacePath)
+      .then((view) => {
+        if (!isCurrent()) return;
+        setResources(view);
+        if (view === null) setResourcesError("任务资源不可用");
+      })
+      .catch((error) => {
+        if (!isCurrent()) return;
+        setResources(null);
+        setResourcesError(
+          `读取规范与技能失败：${error instanceof Error ? error.message : String(error)}`
+        );
+      })
+      .finally(() => {
+        if (isCurrent()) setResourcesLoading(false);
+      });
+  }, [currentId, draftWorkspacePath, draftPreviewNonce]);
+
   /**
    * 抽屉状态动作（票03）：标题栏两开关与抽屉 tab 头共用同一状态源。
    * 打开/切到「规范与技能」页即刷新资源（与原「开面板即刷新」语义一致；
@@ -343,10 +389,10 @@ export function WorkspacePage(props: {
   drawerRef.current = drawer;
   const openDrawer = useCallback(
     (tab: DrawerTab) => {
-      if (tab === "resources") refreshCurrentResources();
+      if (tab === "resources") refreshResourcesForView();
       setDrawer(tab);
     },
-    [refreshCurrentResources]
+    [refreshResourcesForView]
   );
   const toggleResources = useCallback(() => {
     if (drawerRef.current === "resources") setDrawer(null);
@@ -709,6 +755,8 @@ export function WorkspacePage(props: {
     taskRequestRef.current += 1;
     resourceRequestRef.current += 1;
     loadingRef.current = null;
+    // 任务态抽屉（可能停在「改动」tab）随任务上下文失效，进入草稿即关闭
+    setDrawer(null);
     setMessages([]);
     setWorkspaceFiles([]);
     setResources(null);
@@ -1286,13 +1334,15 @@ export function WorkspacePage(props: {
         : null,
     [current, projects]
   );
+  // draft 已选工作区时同样可开「规范与技能」，预览走 draft 管线
+  const hasDraftWorkspace = draft !== null && draftWorkspacePath !== null;
   const titlebarContext = useMemo<TitlebarContext>(
     () => ({
       task: titlebarTask,
       search: { recordsRevision, onSelect: selectTask },
       panels: {
         resourcesOpen: drawer === "resources",
-        disabled: !hasCurrentTask,
+        disabled: !hasCurrentTask && !hasDraftWorkspace,
         onToggleResources: toggleResources,
       },
     }),
@@ -1302,6 +1352,7 @@ export function WorkspacePage(props: {
       selectTask,
       drawer,
       hasCurrentTask,
+      hasDraftWorkspace,
       toggleResources,
     ]
   );
@@ -1616,7 +1667,7 @@ export function WorkspacePage(props: {
                 ) : undefined
               }
             />
-            {currentId !== null && drawer !== null && (
+            {drawer !== null && (currentId !== null || draft !== null) && (
               <PanelsDrawer
                 tab={drawer}
                 onTabChange={openDrawer}
@@ -1626,7 +1677,7 @@ export function WorkspacePage(props: {
                     resources={resources}
                     loading={resourcesLoading}
                     error={resourcesError}
-                    onRefresh={refreshCurrentResources}
+                    onRefresh={refreshResourcesForView}
                     onClose={closeDrawer}
                   />
                 }
@@ -1641,6 +1692,7 @@ export function WorkspacePage(props: {
                     />
                   ) : null
                 }
+                tabs={currentId !== null ? undefined : ["resources"]}
               />
             )}
           </div>
@@ -1753,7 +1805,7 @@ export function WorkspacePage(props: {
               contentWidthClass={contentWidthClass}
               workspaceFiles={workspaceFiles}
               skills={resources?.preview.catalog.skills}
-              onOpenSkills={refreshCurrentResources}
+              onOpenSkills={refreshResourcesForView}
               readOnly={loading || creating}
               disabled={
                 (currentId === null && !draft) ||
