@@ -29,6 +29,7 @@ import type { QueueChangeReason, QueuedMessage } from "../tasks/input-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
+import type { TerminalSettings } from "../terminal/terminal-settings-store";
 import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
@@ -46,6 +47,7 @@ export type { LaunchState, LaunchView };
 export type { TaskStatusInfo };
 export type { SearchSettings };
 export type { SubagentSettings };
+export type { TerminalSettings };
 export type { TerminalShell };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
@@ -154,7 +156,7 @@ export const IPC = {
     get: "subagent-settings:get",
     set: "subagent-settings:set",
   },
-  /** 终端执行偏好（code review 修复 1）：run_terminal_command 的 shell 选择 */
+  /** 终端设置（code review 修复 1 + 执行设置票04）：shell 偏好 + 命令超时两项 */
   terminalSettings: {
     get: "terminal-settings:get",
     set: "terminal-settings:set",
@@ -534,10 +536,16 @@ export interface CodexLikeApi {
     set(input: SubagentSettings): Promise<SubagentSettings>;
   };
   terminalSettings: {
-    /** 已保存的终端 shell 偏好；未配置返回 null（此时 CODEXLIKE_SHELL 环境变量兜底） */
-    get(): Promise<TerminalShell | null>;
-    /** 保存 shell 偏好（git-bash / powershell / cmd），对下一次终端命令即时生效 */
-    set(shell: TerminalShell): Promise<TerminalShell>;
+    /**
+     * 已保存的终端设置（shell 偏好 + 命令超时两项，执行设置票04）；
+     * shell 为 null 表示未配置（此时 CODEXLIKE_SHELL 环境变量兜底），超时为默认值。
+     */
+    get(): Promise<TerminalSettings>;
+    /**
+     * 保存终端设置（shell 枚举 + 命令超时 5-600s + 最大命令超时 10-1800s，
+     * 且命令超时 ≤ 最大命令超时），对下一次终端命令即时生效；非法输入以中文异常抛回。
+     */
+    set(settings: TerminalSettings): Promise<TerminalSettings>;
   };
   themeSettings: {
     /** 已保存的外观主题；未配置返回 null（UI 以浅色兜底，ADR 0006） */

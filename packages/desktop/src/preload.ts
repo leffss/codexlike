@@ -161,7 +161,7 @@ const api: CodexLikeApi = {
   },
   terminalSettings: {
     get: () => ipcRenderer.invoke(IPC.terminalSettings.get),
-    set: (shell) => ipcRenderer.invoke(IPC.terminalSettings.set, shell),
+    set: (settings) => ipcRenderer.invoke(IPC.terminalSettings.set, settings),
   },
   themeSettings: {
     get: () => ipcRenderer.invoke(IPC.themeSettings.get),

@@ -14,6 +14,16 @@ import { resolvePath } from "./workspace";
 /** 可配置 shell（spec：默认 Git Bash，可切换 PowerShell/cmd） */
 export type TerminalShell = "git-bash" | "powershell" | "cmd";
 
+/**
+ * 命令超时默认值（秒，执行设置票04）：桌面端 terminal-settings 存储与工具层
+ * 共用的单一来源——工具层乘 1000 换算毫秒，存储层直接用于默认值与范围校验。
+ */
+export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
+export const DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS = 120;
+
+/** 静态值或逐次解析的函数（宿主注入设置缓存，保存后对下一次命令即时生效） */
+export type TimeoutOption = number | (() => number);
+
 export interface TerminalToolOptions {
   /**
    * shell 偏好：静态值或逐次解析的函数（宿主可注入「设置项优先、环境变量兜底」的
@@ -22,10 +32,10 @@ export interface TerminalToolOptions {
   shell?: TerminalShell | (() => TerminalShell);
   /** 宿主传入的完整环境变量；工具层按白名单过滤（不透传全部，spec 约定） */
   env?: Record<string, string | undefined>;
-  /** 默认超时（毫秒） */
-  defaultTimeoutMs?: number;
-  /** 超时上限（毫秒） */
-  maxTimeoutMs?: number;
+  /** 默认超时（毫秒）；函数形态逐次解析，解析结果非正有限数时回退默认 */
+  defaultTimeoutMs?: TimeoutOption;
+  /** 超时上限（毫秒）；函数形态逐次解析，解析结果非正有限数时回退默认 */
+  maxTimeoutMs?: TimeoutOption;
   /** 合并输出的字符上限 */
   maxOutputLength?: number;
   /** 显式指定 bash.exe 路径（测试或高级配置用） */
@@ -174,8 +184,34 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
     typeof options.shell === "function"
       ? options.shell()
       : (options.shell ?? "git-bash");
-  const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
-  const maxTimeoutMs = options.maxTimeoutMs ?? 120_000;
+  /**
+   * 超时在每次执行时解析（与 shell 同构）：函数形态读宿主设置缓存，
+   * 解析结果非正有限数时回退默认（防宿主注入非法值）。
+   */
+  const resolveTimeoutOption = (
+    value: TimeoutOption | undefined,
+    fallbackMs: number
+  ): number => {
+    const resolved = typeof value === "function" ? value() : value;
+    return typeof resolved === "number" &&
+      Number.isFinite(resolved) &&
+      resolved > 0
+      ? resolved
+      : fallbackMs;
+  };
+  const resolveDefaultTimeoutMs = (): number =>
+    resolveTimeoutOption(
+      options.defaultTimeoutMs,
+      DEFAULT_COMMAND_TIMEOUT_SECONDS * 1000
+    );
+  const resolveMaxTimeoutMs = (): number =>
+    resolveTimeoutOption(
+      options.maxTimeoutMs,
+      DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS * 1000
+    );
+  // 工具描述用创建时刻的快照（描述随实例定型；实际执行逐次解析注入值）
+  const initialDefaultTimeoutMs = resolveDefaultTimeoutMs();
+  const initialMaxTimeoutMs = resolveMaxTimeoutMs();
   const maxOutputLength = options.maxOutputLength ?? 30_000;
   const env = options.env ?? {};
 
@@ -183,7 +219,7 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
     name: "run_terminal_command",
     description:
       `在工作区内执行终端命令（默认 Git Bash：ls、cat、grep、管道等 POSIX 命令可用）。` +
-      `cwd 默认为工作区根。超时默认 ${defaultTimeoutMs / 1000} 秒（可用 timeoutMs 调整，上限 ${maxTimeoutMs / 1000} 秒），` +
+      `cwd 默认为工作区根。超时默认 ${initialDefaultTimeoutMs / 1000} 秒（可用 timeoutMs 调整，上限 ${initialMaxTimeoutMs / 1000} 秒），` +
       `输出最长 ${maxOutputLength} 字符（超出截断）。环境变量仅透传白名单基础项。`,
     parameters: {
       type: "object",
@@ -208,9 +244,10 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
       const command = expectString(args, "command");
       const cwdArg = optionalString(args, "cwd");
       const requestedTimeout = optionalNumber(args, "timeoutMs");
+      // 超时逐次解析：默认值与上限都可能在两次执行之间被设置页改写
       const timeoutMs = Math.min(
-        requestedTimeout ?? defaultTimeoutMs,
-        maxTimeoutMs
+        requestedTimeout ?? resolveDefaultTimeoutMs(),
+        resolveMaxTimeoutMs()
       );
 
       // 中断先于 spawn 到达：已 abort 的 signal 不会触发 listener，显式短路

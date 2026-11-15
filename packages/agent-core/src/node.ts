@@ -38,7 +38,16 @@ export { createApplyPatchTool } from "./tools/apply-patch";
 export { createGlobTool } from "./tools/glob";
 export { createGrepTool } from "./tools/grep";
 export { createTerminalTool } from "./tools/terminal";
-export type { TerminalShell, TerminalToolOptions } from "./tools/terminal";
+export type {
+  TerminalShell,
+  TerminalToolOptions,
+  TimeoutOption,
+} from "./tools/terminal";
+// 终端命令超时默认值（执行设置票04）：桌面端 terminal-settings 存储共用
+export {
+  DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_MAX_COMMAND_TIMEOUT_SECONDS,
+} from "./tools/terminal";
 // web_search（工单 10）：搜索源接口 + Tavily 默认实现 + 工具定义
 export {
   createTavilySearchSource,

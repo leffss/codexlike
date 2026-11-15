@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
 import type { ProviderProfile } from "@codexlike/agent-core";
+import type { TerminalSettings } from "@codexlike/desktop/ipc";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
+import { validateTerminalTimeouts } from "../lib/terminal-settings";
 import { useTheme } from "../lib/theme";
 
 /** 编辑中态：'new' 新建；其余为正在编辑的 Profile id */
@@ -209,25 +211,33 @@ function ThemeSettingsSection() {
 }
 
 /**
- * 终端执行偏好区（code review 修复 1，spec「设置页：… shell 偏好」）：
- * run_terminal_command 的 shell（Git Bash 默认 / PowerShell / cmd）。
+ * 终端执行设置区（code review 修复 1 + 执行设置票04）：
+ * run_terminal_command 的 shell（Git Bash 默认 / PowerShell / cmd）
+ * 与命令超时、最大命令超时两项（跑构建/测试不被默认 30s 打断）。
  * 保存后经主进程内存缓存逐次解析，对下一次终端命令即时生效（无需重启任务）。
  */
 function TerminalSettingsSection() {
   const [shell, setShell] = useState<"git-bash" | "powershell" | "cmd">(
     "git-bash"
   );
-  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [commandTimeout, setCommandTimeout] = useState("30");
+  const [maxCommandTimeout, setMaxCommandTimeout] = useState("120");
+  const [loaded, setLoaded] = useState(false);
+  const [shellConfigured, setShellConfigured] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
     try {
-      const saved = await window.codexlike.terminalSettings.get();
-      // 未配置时默认展示 Git Bash（保存前 CODEXLIKE_SHELL 环境变量兜底）
-      setShell(saved ?? "git-bash");
-      setConfigured(saved !== null);
+      const settings: TerminalSettings =
+        await window.codexlike.terminalSettings.get();
+      // shell 未配置时默认展示 Git Bash（保存前 CODEXLIKE_SHELL 环境变量兜底）
+      setShell(settings.shell ?? "git-bash");
+      setShellConfigured(settings.shell !== null);
+      setCommandTimeout(String(settings.commandTimeoutSeconds));
+      setMaxCommandTimeout(String(settings.maxCommandTimeoutSeconds));
+      setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
       setMessageError(true);
@@ -239,12 +249,29 @@ function TerminalSettingsSection() {
   }, []);
 
   async function save() {
+    // 联动校验先于请求：越界/非法输入在 UI 层即被阻止（渲染层同样不可信的
+    // 最终把关在主进程 IPC 边界）
+    const validationError = validateTerminalTimeouts(
+      commandTimeout,
+      maxCommandTimeout
+    );
+    if (validationError !== null) {
+      setMessage(validationError);
+      setMessageError(true);
+      return;
+    }
     setSaving(true);
     setMessage("");
     try {
-      await window.codexlike.terminalSettings.set(shell);
-      setConfigured(true);
-      setMessage("终端偏好已保存（对下一次终端命令生效）");
+      const settings = await window.codexlike.terminalSettings.set({
+        shell,
+        commandTimeoutSeconds: Number(commandTimeout),
+        maxCommandTimeoutSeconds: Number(maxCommandTimeout),
+      });
+      setCommandTimeout(String(settings.commandTimeoutSeconds));
+      setMaxCommandTimeout(String(settings.maxCommandTimeoutSeconds));
+      setLoaded(true);
+      setMessage("终端设置已保存（对下一次终端命令生效）");
       setMessageError(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -260,13 +287,14 @@ function TerminalSettingsSection() {
         <h2 className="text-base font-medium text-fg">终端执行</h2>
         <p className="text-xs text-fg-muted">
           run_terminal_command 工具使用的 shell（默认 Git Bash，POSIX
-          命令可用）。
-          {configured === false &&
-            " 尚未配置时环境变量 CODEXLIKE_SHELL 可兜底指定。"}
+          命令可用）与命令超时、最大命令超时（跑构建/测试不被默认 30 秒打断）。
+          {loaded &&
+            shellConfigured === false &&
+            " shell 尚未配置时环境变量 CODEXLIKE_SHELL 可兜底指定。"}
         </p>
       </div>
 
-      {configured !== null && (
+      {loaded && (
         <div
           data-testid="terminal-settings"
           className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
@@ -283,6 +311,34 @@ function TerminalSettingsSection() {
               <option value="powershell">PowerShell</option>
               <option value="cmd">cmd</option>
             </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-fg-muted">
+            命令超时（5-600 秒）
+            <input
+              type="number"
+              min={5}
+              max={600}
+              step={1}
+              data-testid="terminal-command-timeout-input"
+              className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              value={commandTimeout}
+              onChange={(e) => setCommandTimeout(e.target.value)}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-fg-muted">
+            最大命令超时（10-1800 秒）
+            <input
+              type="number"
+              min={10}
+              max={1800}
+              step={1}
+              data-testid="terminal-max-command-timeout-input"
+              className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              value={maxCommandTimeout}
+              onChange={(e) => setMaxCommandTimeout(e.target.value)}
+            />
           </label>
 
           <div className="flex items-center justify-end gap-3">

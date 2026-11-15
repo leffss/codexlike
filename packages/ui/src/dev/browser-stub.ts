@@ -113,8 +113,13 @@ function installBrowserStub(): void {
       set: async (value: unknown) => value,
     },
     terminalSettings: {
-      get: async () => null,
-      set: async (shell: unknown) => shell,
+      // 形状对齐真实 IPC 契约（执行设置票04）：shell null = 未配置 + 超时默认值
+      get: async () => ({
+        shell: null,
+        commandTimeoutSeconds: 30,
+        maxCommandTimeoutSeconds: 120,
+      }),
+      set: async (settings: unknown) => settings,
     },
     themeSettings: {
       get: async () =>
