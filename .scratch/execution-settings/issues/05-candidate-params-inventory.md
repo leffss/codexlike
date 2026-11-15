@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** needs-triage
+**Status:** done
 
 ## Parent
 
@@ -12,7 +12,11 @@
 
 ## Acceptance criteria
 
-- [ ] 清单覆盖调研发现的全部候选：MCP 调用/连接超时、浏览器工具三类超时与输出截断、web_search 超时与结果数上限、read-file 行数上限、grep 结果数与单行截断、glob 结果数上限、AGENTS.md 注入体积、@引用大小、文件树扫描上限、commit-message 样本参数等，逐项给出语义、当前值与用户场景。
-- [ ] 每项标注初步判断：值得进设置 / 属防护性护栏不建议暴露。
-- [ ] 明确引用 ADR 0017 的范围界定，后续 triage 可直接据此分拣。
+- [x] 清单覆盖调研发现的全部候选：MCP 调用/连接超时、浏览器工具三类超时与输出截断、web_search 超时与结果数上限、read-file 行数上限、grep 结果数与单行截断、glob 结果数上限、AGENTS.md 注入体积、@引用大小、文件树扫描上限、commit-message 样本参数等，逐项给出语义、当前值与用户场景。
+- [x] 每项标注初步判断：值得进设置 / 属防护性护栏不建议暴露。
+- [x] 明确引用 ADR 0017 的范围界定，后续 triage 可直接据此分拣。
+
+## Comments
+
+- 清单已落为 [06-candidate-params-inventory.md](06-candidate-params-inventory.md)（needs-triage），本票关闭。
 
