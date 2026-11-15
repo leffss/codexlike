@@ -14,6 +14,7 @@ import {
   closeApp,
   launchApp,
   projectAction,
+  projectMenuAction,
   taskMenu,
   startMockProvider,
 } from "./helpers.mjs";
@@ -128,7 +129,7 @@ async function main() {
       .click();
     await item("归档所属").waitFor({ state: "detached" });
     await create("当前所属", true);
-    await projectAction(window, "project-remove");
+    await projectMenuAction(window, "project-remove-menu");
     await window.getByTestId("project-removal-dialog").waitFor();
     await assertSemanticOverlay(window.getByTestId("project-removal-dialog"));
     assert(
@@ -164,7 +165,7 @@ async function main() {
       .filter({ hasText: "先停止" })
       .waitFor();
     await window.getByTestId("membership-cancel").click();
-    await projectAction(window, "project-remove");
+    await projectMenuAction(window, "project-remove-menu");
     await window.getByTestId("project-removal-confirm").click();
     await window
       .getByTestId("project-removal-error")
@@ -178,14 +179,14 @@ async function main() {
       .waitFor({ state: "detached" });
     await window.getByTestId("composer-send").waitFor();
     // 票05：搜索面板随票01 迁入标题栏左区（384px 浮层），打开时覆盖左栏顶部
-    // project-header 右端的悬浮操作区（project-remove 不可命中）——移除项目前
-    // 先收起面板；移除后重开搜索（query 跨开合保留并自动重查）验证结果随项目
-    // 移除消失。结果列表由实时状态派生，产品语义与原「面板开着时结果即时消失」一致。
+    // project-header（右键不可命中）——移除项目前先收起面板；移除后重开搜索
+    // （query 跨开合保留并自动重查）验证结果随项目移除消失。结果列表由实时
+    // 状态派生，产品语义与原「面板开着时结果即时消失」一致。
     await window.getByTestId("task-search-toggle").click();
     await window.getByTestId("task-search-input").fill("当前所属");
     await window.getByTestId("task-search-result").waitFor();
     await window.getByTestId("task-search-toggle").click();
-    await projectAction(window, "project-remove");
+    await projectMenuAction(window, "project-remove-menu");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     await window.getByTestId("task-search-toggle").click();
@@ -230,7 +231,7 @@ async function main() {
     await window.getByTestId("add-project").click();
     await projectAction(window);
     await window.getByTestId("composer-input").fill("只属于移除项目的草稿");
-    await projectAction(window, "project-remove");
+    await projectMenuAction(window, "project-remove-menu");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     await window
@@ -243,7 +244,7 @@ async function main() {
       (await window.getByTestId("composer-input").inputValue()) === "",
       "重新添加项目不恢复已移除草稿"
     );
-    await projectAction(window, "project-remove");
+    await projectMenuAction(window, "project-remove-menu");
     await window.getByTestId("project-removal-confirm").click();
     await window.getByTestId("project-group").waitFor({ state: "detached" });
     console.log(

@@ -13,9 +13,14 @@ interface MenuItem {
   onSelect: () => void;
 }
 
-/** 焦点仅在主动取消时归还；执行操作不能抢走对话框或重命名输入的焦点。 */
+/**
+ * 焦点仅在主动取消时归还；执行操作不能抢走对话框或重命名输入的焦点。
+ * taskId 缺省即为项目等非任务实体的菜单（不输出 data-task-id），
+ * menuLabel 承担 aria-label 与归属区分（任务菜单默认「任务操作」）。
+ */
 export function TaskContextMenu(props: {
-  taskId: string;
+  taskId?: string;
+  menuLabel?: string;
   anchor: TaskMenuAnchor;
   items: MenuItem[];
   onClose: (restoreFocus: boolean) => void;
@@ -117,7 +122,7 @@ export function TaskContextMenu(props: {
     <div
       ref={menuRef}
       role="menu"
-      aria-label="任务操作"
+      aria-label={props.menuLabel ?? "任务操作"}
       data-testid="task-context-menu"
       data-task-id={props.taskId}
       className="fixed z-50 w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-surface p-1 text-sm text-fg shadow-lg"

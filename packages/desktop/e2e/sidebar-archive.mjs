@@ -424,11 +424,6 @@ async function main() {
       false,
       "默认隐藏项目新建"
     );
-    await assertAction(
-      header.getByTestId("project-remove"),
-      false,
-      "默认隐藏项目移除"
-    );
     await hoverFor(window, item("独立A"));
     await assertAction(
       row(aId).getByTestId("pin-button"),
@@ -464,11 +459,6 @@ async function main() {
       true,
       "项目头悬浮展示新建"
     );
-    await assertAction(
-      header.getByTestId("project-remove"),
-      true,
-      "项目头悬浮展示移除"
-    );
     for (const pin of await window.getByTestId("pin-button").all())
       await assertAction(pin, false, "项目悬浮不展示内部行操作");
     await neutral();
@@ -490,11 +480,6 @@ async function main() {
       header.getByTestId("project-new-task"),
       true,
       "项目头键盘焦点展示新建"
-    );
-    await assertAction(
-      header.getByTestId("project-remove"),
-      true,
-      "项目头键盘焦点展示移除"
     );
     assert(
       !(await header.getByTestId("project-task-count").isVisible()),

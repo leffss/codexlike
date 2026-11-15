@@ -126,6 +126,25 @@ export async function projectAction(
   await hoverClick(window, header.getByTestId(action), `悬浮操作 ${action}`);
 }
 
+/**
+ * 项目组头右键打开菜单并点击指定菜单项（移除项目收进右键菜单，
+ * 悬停 × 已取消）；菜单为 portal 渲染，按 aria-label 校验归属。
+ */
+export async function projectMenuAction(
+  window,
+  action,
+  header = window.getByTestId("project-header")
+) {
+  await header.click({ button: "right" });
+  const menu = window.getByTestId("task-context-menu");
+  await menu.waitFor();
+  assert(
+    (await menu.getAttribute("aria-label")) === "项目操作",
+    "菜单必须是项目操作"
+  );
+  await menu.getByTestId(action).click();
+}
+
 /** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
 export async function assertSemanticOverlay(dialog) {
   const colors = await dialog.evaluate((element) => {

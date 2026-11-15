@@ -16,6 +16,7 @@ import {
   closeApp,
   launchApp,
   projectAction,
+  projectMenuAction,
   taskMenu,
   startMockProvider,
   workspaceBadgeInfo,
@@ -333,7 +334,7 @@ try {
   await window.getByTestId("task-search-toggle").click();
   await window.getByTestId("task-search-input").fill("待移除项目成员");
   await window.getByTestId("task-search-result").waitFor();
-  await projectAction(window, "project-remove");
+  await projectMenuAction(window, "project-remove-menu");
   await window.getByTestId("project-removal-confirm").click();
   await window.getByTestId("project-group").waitFor({ state: "detached" });
   await window.getByTestId("task-search-result").waitFor({ state: "detached" });

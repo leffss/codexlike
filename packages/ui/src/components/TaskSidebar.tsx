@@ -28,8 +28,8 @@ function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
 function FolderIcon(props: { open: boolean }) {
   return (
     <svg
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -52,8 +52,8 @@ function FolderIcon(props: { open: boolean }) {
 function StandaloneIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -116,6 +116,8 @@ function PlusIcon() {
  * 任务标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
  * 整理操作收进右键菜单，键盘与鼠标均可访问；
  * 重命名 / 归档与 /rename /archive 走同一 IPC 通道。
+ * 移除项目不在组头悬停出现，收进项目组头右键菜单（整行可右键，
+ * ContextMenu / Shift+F10 等效），菜单项仍走确认弹窗后才移除。
  */
 export function TaskSidebar(props: {
   tasks: TaskListItem[];
@@ -144,6 +146,11 @@ export function TaskSidebar(props: {
     taskId: string;
     projectId: TaskListItem["projectId"];
     archivedAt: TaskListItem["archivedAt"];
+    anchor: TaskMenuAnchor;
+  } | null>(null);
+  // 项目组头右键菜单：移除项目入口（悬停 × 已取消，仍走确认弹窗）
+  const [projectMenu, setProjectMenu] = useState<{
+    projectId: string;
     anchor: TaskMenuAnchor;
   } | null>(null);
   // 统一新建菜单（顶栏「+」）：独立任务 / 各项目任务
@@ -200,6 +207,49 @@ export function TaskSidebar(props: {
         !menu.anchor.target.isConnected)
     ) {
       closeMenu(true);
+    }
+  });
+
+  const closeProjectMenu = useCallback(
+    (restoreFocus: boolean) => {
+      if (restoreFocus && projectMenu) {
+        const active = document.activeElement;
+        const activeMenu =
+          active instanceof HTMLElement
+            ? active.closest<HTMLElement>("[data-testid='task-context-menu']")
+            : null;
+        if (
+          (active === document.body ||
+            (activeMenu !== null && activeMenu.dataset.taskId === undefined)) &&
+          !document.querySelector("[role='dialog'][aria-modal='true']")
+        ) {
+          const header = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-testid='project-header']"
+            )
+          ).find(
+            (element) => element.dataset.projectId === projectMenu.projectId
+          );
+          header
+            ?.querySelector<HTMLElement>("button")
+            ?.focus({ preventScroll: true });
+        }
+      }
+      setProjectMenu(null);
+    },
+    [projectMenu]
+  );
+
+  // 项目被移除或组头不再挂载时收起项目菜单（对齐任务菜单的失效检查）
+  useLayoutEffect(() => {
+    if (
+      projectMenu &&
+      (!props.projects.some(
+        (project) => project.id === projectMenu.projectId
+      ) ||
+        !projectMenu.anchor.target.isConnected)
+    ) {
+      closeProjectMenu(true);
     }
   });
 
@@ -421,6 +471,37 @@ export function TaskSidebar(props: {
           }
           data-project-id={group.projectId ?? undefined}
           className="group/header flex items-center rounded-md text-fg hover:bg-hover"
+          onContextMenu={(event) => {
+            if (group.projectId === null || !props.onRemoveProject) return;
+            event.preventDefault();
+            const target = event.currentTarget.querySelector<HTMLButtonElement>(
+              "[data-testid='project-group']"
+            );
+            if (!target) return;
+            setProjectMenu({
+              projectId: group.projectId,
+              anchor: { x: event.clientX, y: event.clientY, target },
+            });
+          }}
+          onKeyDown={(event) => {
+            if (
+              group.projectId === null ||
+              !props.onRemoveProject ||
+              !(
+                event.key === "ContextMenu" ||
+                (event.shiftKey && event.key === "F10")
+              )
+            )
+              return;
+            event.preventDefault();
+            event.stopPropagation();
+            const target = event.target as HTMLElement;
+            const rect = target.getBoundingClientRect();
+            setProjectMenu({
+              projectId: group.projectId,
+              anchor: { x: rect.left, y: rect.bottom, target },
+            });
+          }}
         >
           <button
             type="button"
@@ -429,7 +510,7 @@ export function TaskSidebar(props: {
             }
             title={group.path}
             aria-expanded={expanded}
-            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-semibold"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-semibold"
             onClick={() =>
               group.projectId === null
                 ? setStandaloneCollapsed((prev) => !prev)
@@ -463,7 +544,7 @@ export function TaskSidebar(props: {
               {group.archived.length > 0 && ` · 归档 ${group.archived.length}`}
             </span>
             {group.projectId !== null && (
-              <span className="pointer-events-none col-start-1 row-start-1 flex justify-end gap-0.5 opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
+              <span className="pointer-events-none col-start-1 row-start-1 flex items-center justify-end gap-0.5 opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
                 <button
                   type="button"
                   data-testid="project-pin"
@@ -483,37 +564,25 @@ export function TaskSidebar(props: {
                   title="在此项目新建任务"
                   aria-label="在此项目新建任务"
                   disabled={props.creating}
-                  className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover disabled:opacity-50"
+                  className="flex h-6 w-6 items-center justify-center rounded text-accent hover:bg-hover disabled:opacity-50"
                   onClick={() => props.onCreateInProject(group.projectId!)}
                 >
-                  +
+                  <PlusIcon />
                 </button>
-                {props.onRemoveProject && (
-                  <button
-                    type="button"
-                    data-testid="project-remove"
-                    title="移除项目"
-                    aria-label="移除项目"
-                    className="rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-warn-fg"
-                    onClick={() => props.onRemoveProject!(group.projectId!)}
-                  >
-                    ×
-                  </button>
-                )}
               </span>
             )}
             {group.projectId === null && (
-              <span className="pointer-events-none col-start-1 row-start-1 flex justify-end opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
+              <span className="pointer-events-none col-start-1 row-start-1 flex items-center justify-end opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100">
                 <button
                   type="button"
                   data-testid="standalone-new-task"
                   title="新建独立任务"
                   aria-label="新建独立任务"
                   disabled={props.creating}
-                  className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover disabled:opacity-50"
+                  className="flex h-6 w-6 items-center justify-center rounded text-accent hover:bg-hover disabled:opacity-50"
                   onClick={() => props.onCreate()}
                 >
-                  +
+                  <PlusIcon />
                 </button>
               </span>
             )}
@@ -578,6 +647,20 @@ export function TaskSidebar(props: {
               label: menuTask.archivedAt === null ? "归档" : "恢复",
               onSelect: () =>
                 props.onArchive(menuTask.id, menuTask.archivedAt === null),
+            },
+          ]}
+        />
+      )}
+      {projectMenu && (
+        <TaskContextMenu
+          menuLabel="项目操作"
+          anchor={projectMenu.anchor}
+          onClose={closeProjectMenu}
+          items={[
+            {
+              testId: "project-remove-menu",
+              label: "移除项目",
+              onSelect: () => props.onRemoveProject!(projectMenu.projectId),
             },
           ]}
         />

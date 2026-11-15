@@ -179,6 +179,8 @@ it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任�
   expect(html).toMatch(
     /<button[^>]*data-testid="standalone-new-task"[^>]*aria-label="新建独立任务"/
   );
+  // 移除项目收进项目组头右键菜单，悬停 × 按钮不再存在
+  expect(html).not.toContain('data-testid="project-remove"');
   // 两种组头的计数在悬停时都让位隐藏
   expect(
     (html.match(/group-hover\/header:invisible/g) ?? []).length
