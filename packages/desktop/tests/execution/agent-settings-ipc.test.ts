@@ -47,8 +47,8 @@ afterEach(() => {
  * 执行设置 IPC 链路（ADR 0017）：get/set 频道与现有设置频道同构——
  * 主进程 handler 持有 store（内存缓存由 main.ts 装配层的 onSaved 刷新），
  * 渲染端经 preload 暴露的 agentSettings 命名空间转发同名 channel。
- * 四项参数（票 01/02/03）：主任务与子代理工具轮次上限、压缩保留对话轮数、
- * 上下文告警阈值。
+ * 六项参数（票 01/02/03/07）：主任务与子代理工具轮次上限、压缩保留对话轮数、
+ * 上下文告警阈值、MCP 工具调用超时与连接超时（秒）。
  */
 describe("agent-settings IPC", () => {
   function setup() {
@@ -79,7 +79,7 @@ describe("agent-settings IPC", () => {
     expect(bridge.handlers.has(IPC.agentSettings.get)).toBe(true);
     expect(bridge.handlers.has(IPC.agentSettings.set)).toBe(true);
 
-    // get：未配置返回四项默认值
+    // get：未配置返回六项默认值
     await expect(
       bridge.handlers.get(IPC.agentSettings.get)!({}, undefined)
     ).resolves.toEqual({
@@ -87,6 +87,8 @@ describe("agent-settings IPC", () => {
       maxSubagentToolRounds: 200,
       compactKeepRounds: 3,
       contextWarningThresholdPercent: 80,
+      mcpCallTimeoutSeconds: 30,
+      mcpConnectTimeoutSeconds: 15,
     });
 
     // set：合法值返回保存结果、落盘（经 store）并通知装配层刷新内存缓存
@@ -96,12 +98,16 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 300,
         compactKeepRounds: 5,
         contextWarningThresholdPercent: 65,
+        mcpCallTimeoutSeconds: 120,
+        mcpConnectTimeoutSeconds: 60,
       })
     ).resolves.toEqual({
       maxToolRounds: 500,
       maxSubagentToolRounds: 300,
       compactKeepRounds: 5,
       contextWarningThresholdPercent: 65,
+      mcpCallTimeoutSeconds: 120,
+      mcpConnectTimeoutSeconds: 60,
     });
     expect(saved).toEqual([
       {
@@ -109,6 +115,8 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 300,
         compactKeepRounds: 5,
         contextWarningThresholdPercent: 65,
+        mcpCallTimeoutSeconds: 120,
+        mcpConnectTimeoutSeconds: 60,
       },
     ]);
     await expect(
@@ -118,6 +126,8 @@ describe("agent-settings IPC", () => {
       maxSubagentToolRounds: 300,
       compactKeepRounds: 5,
       contextWarningThresholdPercent: 65,
+      mcpCallTimeoutSeconds: 120,
+      mcpConnectTimeoutSeconds: 60,
     });
   });
 
@@ -148,6 +158,8 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 0,
         contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("压缩保留对话轮数");
     await expect(
@@ -156,8 +168,31 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: 96,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("上下文告警阈值");
+    // 票 07 两项：MCP 超时越界拒绝（调用 5–300 秒、连接 5–120 秒）
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 301,
+        mcpConnectTimeoutSeconds: 15,
+      })
+    ).rejects.toThrow("MCP 工具调用超时");
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 4,
+      })
+    ).rejects.toThrow("MCP 连接超时");
     // 非数字类型输入（渲染进程伪造）→ 边界解析按类型拒绝（code review 修复 4：
     // 不再经 Number 强转，字符串在 parseAgentSettingsInput 即被拒收）
     await expect(
@@ -166,6 +201,8 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("主任务工具轮次上限");
     await expect(
@@ -174,8 +211,31 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: "80%",
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("上下文告警阈值");
+    // 票 07 两项：字符串数字同样按类型拒绝
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: "30",
+        mcpConnectTimeoutSeconds: 15,
+      })
+    ).rejects.toThrow("MCP 工具调用超时");
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: "15",
+      })
+    ).rejects.toThrow("MCP 连接超时");
     // 字符串数字（"200"）同样拒绝：强转放行缺口（"200" → 200 落盘）已封堵
     await expect(
       invokeSet({
@@ -183,6 +243,8 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("主任务工具轮次上限");
     await expect(
@@ -191,6 +253,8 @@ describe("agent-settings IPC", () => {
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: "80",
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       })
     ).rejects.toThrow("上下文告警阈值");
     // 非对象输入（同步抛出，同子代理 handler 先例）
@@ -213,12 +277,16 @@ describe("agent-settings IPC", () => {
       maxSubagentToolRounds: 400,
       compactKeepRounds: 5,
       contextWarningThresholdPercent: 70,
+      mcpCallTimeoutSeconds: 90,
+      mcpConnectTimeoutSeconds: 45,
     });
     expect(bridge.invoke).toHaveBeenLastCalledWith(IPC.agentSettings.set, {
       maxToolRounds: 300,
       maxSubagentToolRounds: 400,
       compactKeepRounds: 5,
       contextWarningThresholdPercent: 70,
+      mcpCallTimeoutSeconds: 90,
+      mcpConnectTimeoutSeconds: 45,
     });
   });
 });

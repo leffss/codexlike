@@ -6,6 +6,12 @@ import {
   DEFAULT_COMPACT_KEEP_ROUNDS,
   DEFAULT_CONTEXT_WARNING_PERCENT,
   DEFAULT_MAX_TOOL_ROUNDS,
+  DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  MCP_CALL_TIMEOUT_SECONDS_MAX,
+  MCP_CALL_TIMEOUT_SECONDS_MIN,
+  MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+  MCP_CONNECT_TIMEOUT_SECONDS_MIN,
   TOOL_ROUNDS_MAX,
   TOOL_ROUNDS_MIN,
 } from "@codexlike/agent-core";
@@ -71,6 +77,39 @@ export function parseContextWarningPercentInput(
     text,
     CONTEXT_WARNING_PERCENT_MIN,
     CONTEXT_WARNING_PERCENT_MAX,
+    fallback
+  );
+}
+
+/**
+ * MCP 工具调用超时解析（票 07）：合法范围 5–300 秒，默认
+ * DEFAULT_MCP_CALL_TIMEOUT_SECONDS；宿主侧乘 1000 换算毫秒注入 manager，
+ * 改动对下一次工具调用生效（逐次读取）。
+ */
+export function parseMcpCallTimeoutInput(
+  text: string,
+  fallback: number = DEFAULT_MCP_CALL_TIMEOUT_SECONDS
+): number {
+  return parseIntInRange(
+    text,
+    MCP_CALL_TIMEOUT_SECONDS_MIN,
+    MCP_CALL_TIMEOUT_SECONDS_MAX,
+    fallback
+  );
+}
+
+/**
+ * MCP 连接建立超时解析（票 07）：合法范围 5–120 秒，默认
+ * DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS；改动对下一次连接（含惰性自动重连）生效。
+ */
+export function parseMcpConnectTimeoutInput(
+  text: string,
+  fallback: number = DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS
+): number {
+  return parseIntInRange(
+    text,
+    MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+    MCP_CONNECT_TIMEOUT_SECONDS_MAX,
     fallback
   );
 }

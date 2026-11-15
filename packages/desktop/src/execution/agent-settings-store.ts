@@ -9,6 +9,12 @@ import {
   DEFAULT_CONTEXT_WARNING_PERCENT,
   DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
   DEFAULT_MAX_TOOL_ROUNDS,
+  DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  MCP_CALL_TIMEOUT_SECONDS_MAX,
+  MCP_CALL_TIMEOUT_SECONDS_MIN,
+  MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+  MCP_CONNECT_TIMEOUT_SECONDS_MIN,
   TOOL_ROUNDS_MAX,
   TOOL_ROUNDS_MIN,
 } from "@codexlike/agent-core/node";
@@ -18,9 +24,10 @@ import { readJsonFile, writeJsonFile } from "../storage/json-file";
 /**
  * 执行设置存储（ADR 0017，GLOSSARY「执行设置」）：agent 执行参数的用户设置，
  * 独立文件 `~/.codexlike/agent-settings.json` 持久化（与现有各设置文件同形态）。
- * 四项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
- * 与上下文告警阈值（票 03）——经内存缓存以 resolver 注入 agent-core（轮次上限
- * 回合/运行开始快照消费，compact 与告警阈值逐次读取），设置页保存后生效。
+ * 六项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
+ * 与上下文告警阈值（票 03）、MCP 工具调用超时与连接超时（票 07，秒存储与终端
+ * 超时同构）——经内存缓存以 resolver 注入 agent-core（轮次上限回合/运行开始
+ * 快照消费，compact、告警阈值与 MCP 超时逐次读取），设置页保存后生效。
  * 各项语义独立，故独立字段、独立校验消息。
  */
 export interface AgentSettings {
@@ -38,11 +45,21 @@ export interface AgentSettings {
    * 告警线 = 窗口（Provider Profile 逐模型可配）× 阈值，改动即时生效
    */
   contextWarningThresholdPercent: number;
+  /**
+   * MCP 工具调用超时（5–300 秒，默认 30；执行设置票 07）：宿主侧乘 1000
+   * 换算毫秒注入 manager（与终端超时注入同构），改动对下一次工具调用生效
+   */
+  mcpCallTimeoutSeconds: number;
+  /**
+   * MCP 连接建立（spawn + initialize + tools/list）超时（5–120 秒，默认 15；
+   * 执行设置票 07）：改动对下一次连接（含惰性自动重连）生效
+   */
+  mcpConnectTimeoutSeconds: number;
 }
 
 export interface AgentSettingsStore {
   get(): Promise<AgentSettings>;
-  /** 保存设置（四项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
+  /** 保存设置（六项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
   set(input: AgentSettings): Promise<AgentSettings>;
 }
 
@@ -132,6 +149,18 @@ export function parseAgentSettingsInput(input: unknown): AgentSettings {
       CONTEXT_WARNING_PERCENT_MAX,
       "上下文告警阈值"
     ),
+    mcpCallTimeoutSeconds: validateIntInRange(
+      record["mcpCallTimeoutSeconds"],
+      MCP_CALL_TIMEOUT_SECONDS_MIN,
+      MCP_CALL_TIMEOUT_SECONDS_MAX,
+      "MCP 工具调用超时"
+    ),
+    mcpConnectTimeoutSeconds: validateIntInRange(
+      record["mcpConnectTimeoutSeconds"],
+      MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+      MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+      "MCP 连接超时"
+    ),
   };
 }
 
@@ -173,6 +202,19 @@ export function createAgentSettingsStore(options: {
         CONTEXT_WARNING_PERCENT_MAX,
         DEFAULT_CONTEXT_WARNING_PERCENT
       ),
+      // 旧格式文件（票 01–03 无票 07 两项）：缺字段按默认补齐
+      mcpCallTimeoutSeconds: resolveIntInRange(
+        parsed.mcpCallTimeoutSeconds,
+        MCP_CALL_TIMEOUT_SECONDS_MIN,
+        MCP_CALL_TIMEOUT_SECONDS_MAX,
+        DEFAULT_MCP_CALL_TIMEOUT_SECONDS
+      ),
+      mcpConnectTimeoutSeconds: resolveIntInRange(
+        parsed.mcpConnectTimeoutSeconds,
+        MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+        MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+        DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS
+      ),
     };
   }
 
@@ -182,7 +224,7 @@ export function createAgentSettingsStore(options: {
     },
 
     async set(input: AgentSettings) {
-      // 四项各自校验（共享 validateIntInRange，消息与 IPC 边界解析一致）：
+      // 六项各自校验（共享 validateIntInRange，消息与 IPC 边界解析一致）：
       // 任一项非法整体拒绝，不落盘
       const maxToolRounds = validateIntInRange(
         input.maxToolRounds,
@@ -208,11 +250,25 @@ export function createAgentSettingsStore(options: {
         CONTEXT_WARNING_PERCENT_MAX,
         "上下文告警阈值"
       );
+      const mcpCallTimeoutSeconds = validateIntInRange(
+        input.mcpCallTimeoutSeconds,
+        MCP_CALL_TIMEOUT_SECONDS_MIN,
+        MCP_CALL_TIMEOUT_SECONDS_MAX,
+        "MCP 工具调用超时"
+      );
+      const mcpConnectTimeoutSeconds = validateIntInRange(
+        input.mcpConnectTimeoutSeconds,
+        MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+        MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+        "MCP 连接超时"
+      );
       const next: AgentSettings = {
         maxToolRounds,
         maxSubagentToolRounds,
         compactKeepRounds,
         contextWarningThresholdPercent,
+        mcpCallTimeoutSeconds,
+        mcpConnectTimeoutSeconds,
       };
       writeJsonFile(filePath, next);
       return next;

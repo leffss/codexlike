@@ -78,3 +78,31 @@ export const COMMAND_TIMEOUT_SECONDS_MAX = 600;
  */
 export const MAX_COMMAND_TIMEOUT_SECONDS_MIN = 10;
 export const MAX_COMMAND_TIMEOUT_SECONDS_MAX = 1800;
+
+/**
+ * MCP 工具调用超时默认值（秒，执行设置票 07）：工具层乘 1000 换算毫秒消费。
+ * 外部 MCP server 快慢差异大，慢 server 的工具调用此前被写死的 30s 掐断；
+ * manager 的 MCP_DEFAULT_CALL_TIMEOUT_MS 改由本常量派生（单一来源防数字分叉）。
+ */
+export const DEFAULT_MCP_CALL_TIMEOUT_SECONDS = 30;
+
+/**
+ * MCP 工具调用超时的设置层合法范围（秒）：下界 5 防过短打断正常工具往返，
+ * 上界 300 封顶防单次调用长时间占住回合（外接 server 崩死时任务可继续推进）。
+ */
+export const MCP_CALL_TIMEOUT_SECONDS_MIN = 5;
+export const MCP_CALL_TIMEOUT_SECONDS_MAX = 300;
+
+/**
+ * MCP 连接建立（spawn + initialize + tools/list）超时默认值（秒，执行设置票 07）。
+ * 慢启动的 server 此前被写死的 15s 掐断；manager 的 MCP_DEFAULT_CONNECT_TIMEOUT_MS
+ * 改由本常量派生。
+ */
+export const DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS = 15;
+
+/**
+ * MCP 连接超时的设置层合法范围（秒）：连接是一次性等待（工具调用才是高频路径），
+ * 上界 120 给慢启动 server 更宽的余地，同时避免连接阶段长时间无反馈。
+ */
+export const MCP_CONNECT_TIMEOUT_SECONDS_MIN = 5;
+export const MCP_CONNECT_TIMEOUT_SECONDS_MAX = 120;

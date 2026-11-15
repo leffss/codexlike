@@ -378,7 +378,10 @@ function ExecutionSettingsSection() {
     setMessage("");
     try {
       // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
-      // 四项各自解析、一次保存（独立字段，互不影响）
+      // 四项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
+      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 六字段整体形状），
+      // 避免用装载快照覆盖 MCP 分区的并发保存。
+      const current = await window.codexlike.agentSettings.get();
       const settings = await window.codexlike.agentSettings.set({
         maxToolRounds: parseToolRoundsInput(maxToolRounds),
         maxSubagentToolRounds: parseToolRoundsInput(
@@ -389,6 +392,8 @@ function ExecutionSettingsSection() {
         contextWarningThresholdPercent: parseContextWarningPercentInput(
           contextWarningThresholdPercent
         ),
+        mcpCallTimeoutSeconds: current.mcpCallTimeoutSeconds,
+        mcpConnectTimeoutSeconds: current.mcpConnectTimeoutSeconds,
       });
       setMaxToolRounds(String(settings.maxToolRounds));
       setMaxSubagentToolRounds(String(settings.maxSubagentToolRounds));

@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 
 import type { McpServerView } from "@codexlike/desktop/ipc";
 
+import {
+  parseMcpCallTimeoutInput,
+  parseMcpConnectTimeoutInput,
+} from "../lib/execution-settings-form";
 import { parseMcpServerForm, type McpServerForm } from "../lib/mcp-form";
 
 /** 连接状态的中文徽标文案与配色 */
@@ -25,6 +29,8 @@ const EMPTY_FORM: McpServerForm = {
 /**
  * 设置页「MCP servers」区（工单 12）：添加/删除 stdio server、
  * 连接状态与错误可见、逐工具启停（对任务即时生效）、手动重连。
+ * 工具调用与连接超时两项（执行设置票 07）经 agentSettings 读写——
+ * 保存后主进程逐次解析注入 manager，下一次连接/工具调用即按新值执行。
  */
 export function McpSettingsSection() {
   const [servers, setServers] = useState<McpServerView[] | null>(null);
@@ -34,6 +40,58 @@ export function McpSettingsSection() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
+
+  // MCP 超时两项（票 07）：同一 agent-settings.json 的六项执行设置中，
+  // 本分区只编辑 MCP 两项；保存时其余四项读取当前最新值原样回传
+  // （IPC 六字段整体形状，避免用装载快照覆盖执行分区的并发保存）
+  const [callTimeout, setCallTimeout] = useState("30");
+  const [connectTimeout, setConnectTimeout] = useState("15");
+  const [timeoutLoaded, setTimeoutLoaded] = useState(false);
+  const [timeoutSaving, setTimeoutSaving] = useState(false);
+  const [timeoutMessage, setTimeoutMessage] = useState("");
+  const [timeoutMessageError, setTimeoutMessageError] = useState(false);
+
+  async function refreshTimeouts() {
+    try {
+      const settings = await window.codexlike.agentSettings.get();
+      setCallTimeout(String(settings.mcpCallTimeoutSeconds));
+      setConnectTimeout(String(settings.mcpConnectTimeoutSeconds));
+      setTimeoutLoaded(true);
+    } catch (error) {
+      setTimeoutMessage(error instanceof Error ? error.message : String(error));
+      setTimeoutMessageError(true);
+    }
+  }
+
+  useEffect(() => {
+    void refreshTimeouts();
+  }, []);
+
+  async function saveTimeouts() {
+    setTimeoutSaving(true);
+    setTimeoutMessage("");
+    try {
+      // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
+      // 六项一次保存（同一文件的整体形状），本分区只呈现 MCP 两项的编辑。
+      const current = await window.codexlike.agentSettings.get();
+      const settings = await window.codexlike.agentSettings.set({
+        ...current,
+        mcpCallTimeoutSeconds: parseMcpCallTimeoutInput(callTimeout),
+        mcpConnectTimeoutSeconds: parseMcpConnectTimeoutInput(connectTimeout),
+      });
+      setCallTimeout(String(settings.mcpCallTimeoutSeconds));
+      setConnectTimeout(String(settings.mcpConnectTimeoutSeconds));
+      setTimeoutMessage(
+        `已保存：工具调用超时 ${settings.mcpCallTimeoutSeconds} 秒、连接超时 ${settings.mcpConnectTimeoutSeconds} 秒（对下一次工具调用/连接生效）`
+      );
+      setTimeoutMessageError(false);
+    } catch (error) {
+      setTimeoutMessage(error instanceof Error ? error.message : String(error));
+      setTimeoutMessageError(true);
+    } finally {
+      setTimeoutSaving(false);
+    }
+  }
 
   async function refresh() {
     try {
@@ -134,6 +192,19 @@ export function McpSettingsSection() {
           </button>
         )}
       </div>
+
+      {timeoutLoaded && (
+        <McpTimeoutSettingsBody
+          callTimeout={callTimeout}
+          connectTimeout={connectTimeout}
+          onCallInput={setCallTimeout}
+          onConnectInput={setConnectTimeout}
+          onSave={() => void saveTimeouts()}
+          saving={timeoutSaving}
+          message={timeoutMessage}
+          messageError={timeoutMessageError}
+        />
+      )}
 
       {message !== "" && (
         <p
@@ -320,5 +391,86 @@ export function McpSettingsSection() {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * MCP 超时表体（执行设置票 07，容器/表体分离同 ExecutionSettingsBody 先例，
+ * 便于静态渲染测试）：工具调用超时与连接超时两项数字输入 + 一次保存。
+ * 非法输入在保存时经解析函数回退默认值并写回（与执行分区同语义）；
+ * 超时以秒呈现与存储，宿主侧换算毫秒注入 manager。
+ */
+export function McpTimeoutSettingsBody(props: {
+  /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
+  callTimeout: string;
+  connectTimeout: string;
+  onCallInput: (value: string) => void;
+  onConnectInput: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  message: string;
+  messageError: boolean;
+}) {
+  return (
+    <div
+      data-testid="mcp-timeout-settings"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+    >
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        工具调用超时（5-300 秒）
+        <input
+          type="number"
+          min={5}
+          max={300}
+          step={1}
+          data-testid="mcp-call-timeout-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.callTimeout}
+          onChange={(e) => props.onCallInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          等待 MCP 工具执行返回的时限（默认 30）；慢外部 server
+          可调大，改动对下一次工具调用生效。
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        连接超时（5-120 秒）
+        <input
+          type="number"
+          min={5}
+          max={120}
+          step={1}
+          data-testid="mcp-connect-timeout-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.connectTimeout}
+          onChange={(e) => props.onConnectInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          建立 server 连接（启动进程 + 握手 + 工具发现）的时限（默认
+          15）；慢启动的 server 可调大，改动对下一次连接生效。
+        </span>
+      </label>
+
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          data-testid="mcp-timeout-settings-save"
+          disabled={props.saving}
+          className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+          onClick={props.onSave}
+        >
+          {props.saving ? "保存中…" : "保存"}
+        </button>
+        {props.message !== "" && (
+          <p
+            data-testid="mcp-timeout-settings-message"
+            className={`text-xs ${props.messageError ? "text-danger-fg" : "text-ok-fg"}`}
+          >
+            {props.message}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

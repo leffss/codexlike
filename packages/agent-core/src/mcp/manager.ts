@@ -4,6 +4,11 @@ import {
   getDefaultEnvironment,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+import {
+  DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+} from "../task/execution-settings";
+import type { TimeoutOption } from "../tools/terminal";
 import type { ToolDefinition, ToolResult } from "../tools/types";
 
 import type {
@@ -14,20 +19,29 @@ import type {
 
 export type { McpServerConfig, McpServerState } from "./types";
 
-/** 默认工具调用超时：30 秒（spec「工具执行带超时」） */
-export const MCP_DEFAULT_CALL_TIMEOUT_MS = 30_000;
-/** 默认连接建立（spawn + initialize + tools/list）超时：15 秒 */
-export const MCP_DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+/**
+ * 默认工具调用超时：30 秒（spec「工具执行带超时」）。毫秒值从 execution-settings
+ * 的秒常量同源派生（执行设置票 07：常量单一来源防数字分叉），对外毫秒语义不变。
+ */
+export const MCP_DEFAULT_CALL_TIMEOUT_MS =
+  DEFAULT_MCP_CALL_TIMEOUT_SECONDS * 1000;
+/** 默认连接建立（spawn + initialize + tools/list）超时：15 秒（同上派生） */
+export const MCP_DEFAULT_CONNECT_TIMEOUT_MS =
+  DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS * 1000;
 
 export interface McpManagerOptions {
   /** 逐次解析当前 server 配置（设置页改配置免重启对下一次连接生效） */
   servers: () => McpServerConfig[];
   /** 被禁用工具的全名集合（逐次解析，逐工具启停对之后的任务生效） */
   disabledTools?: () => Iterable<string>;
-  /** 工具调用超时毫秒（默认 30s） */
-  callTimeoutMs?: number;
-  /** 连接建立超时毫秒（默认 15s） */
-  connectTimeoutMs?: number;
+  /**
+   * 工具调用超时毫秒（默认 30s）：静态值或逐次解析的函数（执行设置票 07，
+   * 与 terminal.ts 的 TimeoutOption 同构——宿主注入设置缓存，保存后对下一次
+   * 调用即时生效）；解析结果非正有限数时回退默认（防宿主注入非法值）。
+   */
+  callTimeoutMs?: TimeoutOption;
+  /** 连接建立超时毫秒（默认 15s）：函数形态逐次解析，语义同上 */
+  connectTimeoutMs?: TimeoutOption;
 }
 
 export interface McpManager {
@@ -104,9 +118,29 @@ function contentToOutput(raw: unknown): { output: string; isError: boolean } {
 
 /** 创建 MCP 连接管理器：stdio transport、工具发现、调用适配（GLOSSARY「MCP」「工具注册表」） */
 export function createMcpManager(options: McpManagerOptions): McpManager {
-  const callTimeoutMs = options.callTimeoutMs ?? MCP_DEFAULT_CALL_TIMEOUT_MS;
-  const connectTimeoutMs =
-    options.connectTimeoutMs ?? MCP_DEFAULT_CONNECT_TIMEOUT_MS;
+  /**
+   * 超时在每次连接/每次调用时解析（执行设置票 07，与 terminal.ts 的
+   * resolveTimeoutOption 同构）：函数形态读宿主设置缓存，解析结果非正有限数
+   * 时回退默认（防宿主注入非法值）——设置页保存后对下一次连接/调用即时生效。
+   */
+  const resolveTimeoutOption = (
+    value: TimeoutOption | undefined,
+    fallbackMs: number
+  ): number => {
+    const resolved = typeof value === "function" ? value() : value;
+    return typeof resolved === "number" &&
+      Number.isFinite(resolved) &&
+      resolved > 0
+      ? resolved
+      : fallbackMs;
+  };
+  const resolveCallTimeoutMs = (): number =>
+    resolveTimeoutOption(options.callTimeoutMs, MCP_DEFAULT_CALL_TIMEOUT_MS);
+  const resolveConnectTimeoutMs = (): number =>
+    resolveTimeoutOption(
+      options.connectTimeoutMs,
+      MCP_DEFAULT_CONNECT_TIMEOUT_MS
+    );
 
   /** serverId → 管理簿记（断线不清除，保留最后已知工具） */
   const entries = new Map<string, Entry>();
@@ -151,6 +185,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     };
 
     try {
+      // 连接超时逐次解析：每次 establish（显式 connect 或惰性重连）读当前值
+      const connectTimeoutMs = resolveConnectTimeoutMs();
       await client.connect(transport, { timeout: connectTimeoutMs });
       const listed = await client.listTools(undefined, {
         timeout: connectTimeoutMs,
@@ -308,6 +344,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       // spec：MCP 工具按 command 级权限处理（server 端行为不可知，保守对待）
       permission: "command",
       async execute(args, context): Promise<ToolResult> {
+        // 调用超时逐次解析（执行设置票 07）：每次调用读当前值，无创建时快照；
+        // 解析一次供调用与超时错误消息共用（错误里报告的秒数 = 实际生效值）
+        const callTimeoutMs = resolveCallTimeoutMs();
         try {
           // 惰性自动重连：连接断开（server 崩溃/重启）时先重建，再转发调用
           const entry = entryOf(config.id);

@@ -8,7 +8,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import { runTool } from "../../src/tools/registry";
 
 import {
+  DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+} from "../../src/task/execution-settings";
+import {
   createMcpManager,
+  MCP_DEFAULT_CALL_TIMEOUT_MS,
+  MCP_DEFAULT_CONNECT_TIMEOUT_MS,
   type McpManager,
   type McpManagerOptions,
   type McpServerConfig,
@@ -233,5 +239,107 @@ describe("McpManager 韧性：崩溃/超时/启动失败不拖垮调用方", () 
       serverId: "srv-1",
       status: "disconnected",
     });
+  });
+});
+
+describe("McpManager 超时注入（执行设置票 07）：函数形态逐次解析", () => {
+  it("callTimeoutMs 函数形态生效：慢调用在注入的超时内被掐断", async () => {
+    const manager = newManager({
+      servers: () => [fakeServer()],
+      callTimeoutMs: () => 300,
+    });
+    await manager.connect("srv-1");
+
+    const slow = manager
+      .tools()
+      .find((tool) => tool.name === "mcp_fake_slow_echo")!;
+    const result = await runTool(
+      slow,
+      { text: "慢", delayMs: 10_000 },
+      { workspacePath: tmpdir(), taskId: "mcp-test", approvalMode: "assist" }
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("超时");
+  });
+
+  it("调用超时逐次解析：同一 manager 两次调用各读当时值（无创建时快照）", async () => {
+    let callTimeoutMs = 300;
+    const manager = newManager({
+      servers: () => [fakeServer()],
+      callTimeoutMs: () => callTimeoutMs,
+    });
+    await manager.connect("srv-1");
+
+    const slow = manager
+      .tools()
+      .find((tool) => tool.name === "mcp_fake_slow_echo")!;
+    const timedOut = await runTool(
+      slow,
+      { text: "慢", delayMs: 10_000 },
+      { workspacePath: tmpdir(), taskId: "mcp-test", approvalMode: "assist" }
+    );
+    expect(timedOut.isError).toBe(true);
+
+    // 设置页调大超时后，下一次调用按新值执行（调用超时不破坏连接）
+    callTimeoutMs = 5_000;
+    const recovered = await runTool(
+      slow,
+      { text: "恢复", delayMs: 300 },
+      { workspacePath: tmpdir(), taskId: "mcp-test", approvalMode: "assist" }
+    );
+    expect(recovered).toEqual({ output: "echo: 恢复", isError: false });
+  });
+
+  it("解析结果非正有限数回退默认 30s（防宿主注入非法值，与终端 TimeoutOption 同构）", async () => {
+    const manager = newManager({
+      servers: () => [fakeServer()],
+      callTimeoutMs: () => Number.NaN,
+    });
+    await manager.connect("srv-1");
+
+    const slow = manager
+      .tools()
+      .find((tool) => tool.name === "mcp_fake_slow_echo")!;
+    // 默认 30s 足够 300ms 的慢调用完成
+    const result = await runTool(
+      slow,
+      { text: "默认", delayMs: 300 },
+      { workspacePath: tmpdir(), taskId: "mcp-test", approvalMode: "assist" }
+    );
+    expect(result).toEqual({ output: "echo: 默认", isError: false });
+  });
+
+  it("connectTimeoutMs 函数形态逐次解析：小超时连接失败，调大后重连成功", async () => {
+    let connectTimeoutMs = 300;
+    const manager = newManager({
+      servers: () => [
+        fakeServer({
+          env: { FAKE_MCP_LIST_TOOLS_DELAY_MS: "800" },
+        }),
+      ],
+      connectTimeoutMs: () => connectTimeoutMs,
+    });
+
+    // tools/list 被 server 延迟 800ms，300ms 连接超时掐断（连接失败不抛）
+    const failed = await manager.connect("srv-1");
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toContain("连接超时");
+
+    // 调大后下一次连接（重连语义）按新值执行
+    connectTimeoutMs = 5_000;
+    const recovered = await manager.connect("srv-1");
+    expect(recovered.status).toBe("connected");
+    expect(recovered.tools.map((tool) => tool.originalName)).toContain("echo");
+  });
+
+  it("默认值 30s/15s 硬约束：毫秒常量从秒常量同源派生（对外毫秒语义不变）", async () => {
+    expect(MCP_DEFAULT_CALL_TIMEOUT_MS).toBe(30_000);
+    expect(MCP_DEFAULT_CONNECT_TIMEOUT_MS).toBe(15_000);
+    expect(MCP_DEFAULT_CALL_TIMEOUT_MS).toBe(
+      DEFAULT_MCP_CALL_TIMEOUT_SECONDS * 1000
+    );
+    expect(MCP_DEFAULT_CONNECT_TIMEOUT_MS).toBe(
+      DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS * 1000
+    );
   });
 });

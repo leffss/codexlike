@@ -480,6 +480,10 @@ void app.whenReady().then(async () => {
   // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
   const mcpService = createMcpService({
     store: createMcpStore({ dir: dataDir(), safeStorage: asSafeStorageLike() }),
+    // MCP 超时逐次解析（执行设置票 07，ADR 0017）：秒 → 毫秒换算在宿主侧
+    // （与终端超时注入同构），设置页保存后对下一次连接/工具调用即时生效
+    callTimeoutMs: () => agentSettings.mcpCallTimeoutSeconds * 1000,
+    connectTimeoutMs: () => agentSettings.mcpConnectTimeoutSeconds * 1000,
   });
   await mcpService.startup();
 

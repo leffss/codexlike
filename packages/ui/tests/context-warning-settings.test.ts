@@ -29,6 +29,8 @@ function settingsOf(percent: number): AgentSettings {
     maxSubagentToolRounds: 200,
     compactKeepRounds: 3,
     contextWarningThresholdPercent: percent,
+    mcpCallTimeoutSeconds: 30,
+    mcpConnectTimeoutSeconds: 15,
   };
 }
 

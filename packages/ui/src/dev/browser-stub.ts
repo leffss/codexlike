@@ -113,13 +113,15 @@ function installBrowserStub(): void {
       set: async (value: unknown) => value,
     },
     agentSettings: {
-      // 形状对齐真实 IPC 契约（执行设置票 03）：四项均为默认值——
+      // 形状对齐真实 IPC 契约（执行设置票 03/07）：六项均为默认值——
       // 票 01/02 的执行分区此前缺 stub，dev 预览打开设置页时分区加载失败
       get: async () => ({
         maxToolRounds: 200,
         maxSubagentToolRounds: 200,
         compactKeepRounds: 3,
         contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
       }),
       set: async (value: unknown) => value,
     },

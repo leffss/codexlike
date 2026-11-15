@@ -4,6 +4,7 @@ import {
   type McpManager,
   type McpServerConfig,
   type McpServerStatus,
+  type TimeoutOption,
 } from "@codexlike/agent-core/node";
 import type { ToolDefinition } from "@codexlike/agent-core";
 
@@ -51,7 +52,13 @@ export interface McpService {
  */
 export function createMcpService(options: {
   store: McpStore;
-  callTimeoutMs?: number;
+  /**
+   * MCP 工具调用超时毫秒（执行设置票 07）：静态值或逐次解析函数，透传
+   * manager（函数形态由宿主注入设置缓存 resolver，保存后对下一次调用生效）
+   */
+  callTimeoutMs?: TimeoutOption;
+  /** MCP 连接建立超时毫秒：语义同上，对下一次连接（含惰性重连）生效 */
+  connectTimeoutMs?: TimeoutOption;
 }): McpService {
   const { store } = options;
 
@@ -62,6 +69,7 @@ export function createMcpService(options: {
     servers: () => configs,
     disabledTools: () => disabledTools,
     callTimeoutMs: options.callTimeoutMs,
+    connectTimeoutMs: options.connectTimeoutMs,
   });
 
   async function reload(): Promise<void> {

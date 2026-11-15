@@ -5,6 +5,7 @@ import process from "node:process";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import { runTool } from "@codexlike/agent-core/node";
 import type { ToolDefinition } from "@codexlike/agent-core";
 
 import { createMcpStore } from "../../src/mcp/mcp-store";
@@ -167,5 +168,64 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
     expect(
       merged.find((tool) => tool.name === "mcp_fake_echo")?.description
     ).toBe("内置同名工具");
+  });
+
+  it("MCP 超时经函数形态透传 manager（执行设置票 07）：连接与调用逐次解析，改动即时生效", async () => {
+    // 宿主侧模拟设置缓存：闭包变量即「当前设置值」（秒→毫秒换算由装配层做，
+    // service 层只透传毫秒 resolver）
+    let connectTimeoutMs = 300;
+    let callTimeoutMs = 300;
+    tempDir = mkdtempSync(join(tmpdir(), "codexlike-mcp-service-"));
+    const store = createMcpStore({
+      dir: tempDir,
+      safeStorage: fakeSafeStorage,
+    });
+    const service = createMcpService({
+      store,
+      connectTimeoutMs: () => connectTimeoutMs,
+      callTimeoutMs: () => callTimeoutMs,
+    });
+    services.push(service);
+
+    // 连接阶段：tools/list 被 server 延迟 800ms，300ms 连接超时掐断（添加仍成功）
+    const added = await service.addServer({
+      ...fakeServerInput,
+      env: { FAKE_MCP_LIST_TOOLS_DELAY_MS: "800" },
+    });
+    expect(added.status).toBe("failed");
+    expect(added.error).toContain("连接超时");
+
+    // 调大后手动重连按新值执行
+    connectTimeoutMs = 5_000;
+    const reconnected = await service.reconnect(added.config.id);
+    expect(reconnected.status).toBe("connected");
+
+    // 调用阶段：小超时掐断慢调用，调大后同一 service 下一次调用成功
+    const slow = service
+      .taskTools()
+      .find((tool: ToolDefinition) => tool.name === "mcp_fake_slow_echo")!;
+    const timedOut = await runTool(
+      slow,
+      { text: "慢", delayMs: 10_000 },
+      {
+        workspacePath: tmpdir(),
+        taskId: "mcp-service-test",
+        approvalMode: "assist",
+      }
+    );
+    expect(timedOut.isError).toBe(true);
+    expect(timedOut.output).toContain("超时");
+
+    callTimeoutMs = 5_000;
+    const recovered = await runTool(
+      slow,
+      { text: "恢复", delayMs: 300 },
+      {
+        workspacePath: tmpdir(),
+        taskId: "mcp-service-test",
+        approvalMode: "assist",
+      }
+    );
+    expect(recovered).toEqual({ output: "echo: 恢复", isError: false });
   });
 });
