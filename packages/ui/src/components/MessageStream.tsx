@@ -301,12 +301,12 @@ export function MessageStream(props: {
         {/* min-h-full 弹性列：空流态（新任务发送瞬间尚无用户段）也能把
             运行指示压到可视区左下角；有消息时紧跟在消息列表之后 */}
         <div className="flex min-h-full flex-col">
-          {/* 工作计划常驻条（GLOSSARY「工作计划」，ADR 0016）：当前计划
-              由段序列派生，sticky 吸附消息流顶部；无计划时渲染 null */}
+          {/* 工作计划悬浮徽章（GLOSSARY「工作计划」，ADR 0016）：当前计划
+              由段序列派生，fixed 悬浮默认页垂直中央+消息区左缘（可拖动/
+              记忆/右键复位）；无计划时渲染 null */}
           <WorkPlanBannerFromSegments
             items={props.items}
             taskId={props.taskId}
-            className={contentWidthClass}
           />
           {props.items.length === 0 && props.compacting !== true ? (
             <div

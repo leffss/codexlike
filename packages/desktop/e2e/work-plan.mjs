@@ -1,9 +1,9 @@
-// E2E 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 B 定稿）：
-// 1) 模型调 update_plan → 消息流顶部出现常驻计划条（当前步骤 + N/M + 进度条），
-//    流内调用处只留一行极简标记，不渲染通用工具卡；
+// E2E 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 C 定稿）：
+// 1) 模型调 update_plan → 悬浮进度环徽章出现（N/M 计数 + 进度环，
+//    aria 携带当前步骤），流内调用处只留一行极简标记，不渲染通用工具卡；
 // 2) 相邻两次 update_plan 不折叠成工具组（分组排除），标记行逐次累计；
-// 3) 常驻条随最新调用全量替换（计数/当前步骤/全部完成态），点击展开完整
-//    步骤面板（完成项删除线）；
+// 3) 徽章随最新调用全量替换（计数/全部完成态），点击展开完整步骤面板
+//    （完成项删除线）；
 // 4) 工具结果（中文统计摘要）回传模型，下一轮请求体可查。
 // 运行：pnpm test:e2e:work-plan（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -109,18 +109,18 @@ async function main() {
       .waitFor({ timeout: 30_000 });
     assert(
       (await window.getByTestId("plan-banner-count").textContent()) === "1/3",
-      "常驻条计数应为 1/3"
+      "徽章计数应为 1/3"
     );
-    const bannerText = await window
+    const badgeLabel = await window
       .getByTestId("plan-banner-toggle")
-      .textContent();
+      .getAttribute("aria-label");
     assert(
-      bannerText !== null && bannerText.includes("梳理分区清单"),
-      `常驻条摘要应显示当前步骤：${bannerText ?? "(空)"}`
+      badgeLabel !== null && badgeLabel.includes("梳理分区清单"),
+      `徽章 aria 应携带当前步骤：${badgeLabel ?? "(空)"}`
     );
     assert(
-      (await window.getByTestId("plan-progress-bar").count()) === 1,
-      "常驻条应带进度条"
+      (await window.getByTestId("plan-badge-ring").count()) === 1,
+      "徽章应带进度环"
     );
     assert(
       (await window.getByTestId("plan-marker-row").count()) === 1,
@@ -132,7 +132,7 @@ async function main() {
         .count()) === 0,
       "update_plan 不得渲染通用工具卡"
     );
-    console.log("[e2e] 首次更新：常驻计划条 + 流内单条标记（无工具卡）");
+    console.log("[e2e] 首次更新：悬浮徽章 + 流内单条标记（无工具卡）");
 
     // ---- 场景 2：相邻两次更新 → 分组排除 + 全量替换 + 结果回传 ----
     await window.getByTestId("composer-input").fill("推进计划到完成");
@@ -151,21 +151,21 @@ async function main() {
     );
     assert(
       (await window.getByTestId("plan-banner-count").textContent()) === "3/3",
-      "常驻条应随最新调用全量替换为 3/3"
+      "徽章应随最新调用全量替换为 3/3"
     );
-    const summaryText = await window
+    const summaryLabel = await window
       .getByTestId("plan-banner-toggle")
-      .textContent();
+      .getAttribute("aria-label");
     assert(
-      summaryText !== null && summaryText.includes("全部完成"),
-      `全部完成后摘要应显示「全部完成」：${summaryText ?? "(空)"}`
+      summaryLabel !== null && summaryLabel.includes("全部完成"),
+      `全部完成后徽章 aria 应显示「全部完成」：${summaryLabel ?? "(空)"}`
     );
     const planResult = toolResult(seenBodies.at(-1) ?? "", "plan-c3");
     assert(
       typeof planResult === "string" && planResult.includes("工作计划已更新"),
       `工具结果（中文统计摘要）应回传模型：${planResult ?? "(未找到)"}`
     );
-    console.log("[e2e] 相邻更新分组排除、常驻条全量替换、统计结果回传");
+    console.log("[e2e] 相邻更新分组排除、徽章全量替换、统计结果回传");
 
     // ---- 场景 3：展开常驻条 → 完整步骤面板（完成项删除线） ----
     await window.getByTestId("plan-banner-toggle").click();

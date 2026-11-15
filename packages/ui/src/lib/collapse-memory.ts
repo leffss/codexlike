@@ -25,6 +25,34 @@ export function setRememberedOpen(key: string, open: boolean): void {
 }
 
 /**
+ * 悬浮元素位置记忆（工作计划徽章，ADR 0016）：key → 用户拖设的视口坐标。
+ * 与开合同属渲染层内存态（ADR 0011）：任务切换、组件重挂载不丢；跨应用
+ * 重启不记忆——默认位置随窗口重新锚定（记忆的是视口坐标，重启后窗口
+ * 尺寸可能不同，保留旧值反而错位）。
+ */
+const rememberedPositions = new Map<string, { x: number; y: number }>();
+
+/** 读取位置记忆；未拖设过返回 undefined */
+export function rememberedPosition(
+  key: string
+): { x: number; y: number } | undefined {
+  return rememberedPositions.get(key);
+}
+
+/** 记录一次拖设收官的位置（徽章左上角视口坐标） */
+export function setRememberedPosition(
+  key: string,
+  pos: { x: number; y: number }
+): void {
+  rememberedPositions.set(key, pos);
+}
+
+/** 清除位置记忆（右键「回到默认位置」） */
+export function clearRememberedPosition(key: string): void {
+  rememberedPositions.delete(key);
+}
+
+/**
  * 折叠开合 hook：open 是「记忆值 ?? 默认值」的派生态。
  * toggle/setOpen 写记忆并触发重渲染；默认值变化（如运行中→完成）对
  * 未手动操作过的键立即生效（完成即收起，用户故事 17），

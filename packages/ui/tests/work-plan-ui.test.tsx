@@ -14,9 +14,9 @@ import {
 import type { MessageSegment, ToolCallSegment } from "../src/lib/task-view";
 
 /**
- * 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 B 定稿）：
+ * 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 C 定稿）：
  * 派生层纯函数（参数解析 / 快照收集 / 当前计划 / 派生量）与呈现层
- * （常驻计划条 + 流内标记行 + 连续工具分组排除）。
+ * （悬浮进度环徽章 + 流内标记行 + 连续工具分组排除）。
  * Seam：renderToStaticMarkup（存在性与收起态默认值；开合交互由
  * collapse-memory 承载，静态渲染断言首帧 + setRememberedOpen 预置记忆）。
  */
@@ -152,8 +152,8 @@ describe("plan-view 派生层纯函数", () => {
   });
 });
 
-describe("工作计划呈现（常驻条 + 标记行，ADR 0016）", () => {
-  it("有计划时渲染常驻条：当前步骤 + N/M 计数 + 进度条 + sticky 吸附，默认收起无步骤面板", () => {
+describe("工作计划呈现（悬浮徽章 + 标记行，ADR 0016）", () => {
+  it("有计划时渲染悬浮徽章：进度环 + N/M 计数，fixed 悬浮脱离布局流，aria 携带当前步骤，默认收起无面板", () => {
     const html = streamOf([
       userSeg("u1", "t1"),
       planSeg("p1", "t1", SEVEN_STEPS),
@@ -162,10 +162,13 @@ describe("工作计划呈现（常驻条 + 标记行，ADR 0016）", () => {
     expect(html).toContain('data-testid="plan-banner"');
     expect(html).toContain('data-testid="plan-banner-count"');
     expect(html).toContain("5/7");
-    expect(html).toContain("右栏两面板改 tab 切换");
-    expect(html).toContain('data-testid="plan-progress-bar"');
-    expect(html).toContain("sticky top-0");
-    // 默认收起：完整步骤面板不渲染（当前状态由摘要行 + 进度条承载）
+    // 收起态当前步骤进 aria-label（视觉上徽章只有环 + 计数）
+    expect(html).toContain("当前：右栏两面板改 tab 切换");
+    expect(html).toContain('data-testid="plan-badge-ring"');
+    expect(html).toContain('role="progressbar"');
+    // fixed 悬浮脱离布局流（原型 C 定稿：不再 sticky 全宽吸附）
+    expect(html).toContain("pointer-events-none fixed");
+    // 默认收起：完整步骤面板不渲染（当前状态由进度环 + 计数承载）
     expect(html).not.toContain('data-testid="plan-banner-panel"');
     // 全量参数 JSON 不进呈现层（对用户无阅读价值）
     expect(html).not.toContain('data-testid="tool-call-card"');
@@ -192,7 +195,7 @@ describe("工作计划呈现（常驻条 + 标记行，ADR 0016）", () => {
     expect(openHtml.match(/line-through/g)?.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("全部完成态：摘要显示「全部完成」+ 完成对勾", () => {
+  it("全部完成态：aria-label 显示「全部完成」且不再带当前步骤", () => {
     const allDone = SEVEN_STEPS.map((step) => ({
       ...step,
       status: "completed",
@@ -201,8 +204,9 @@ describe("工作计划呈现（常驻条 + 标记行，ADR 0016）", () => {
       [userSeg("u1", "t1"), planSeg("p1", "t1", allDone), textSeg("a1", "t1")],
       "s3"
     );
-    expect(html).toContain("全部完成");
+    expect(html).toContain("工作计划 7/7，全部完成");
     expect(html).toContain("7/7");
+    expect(html).not.toContain("当前：");
   });
 
   it("流内标记行：每次 update_plan 一行（计划更新 N + N/M + 当时步骤），相邻两次不成工具组", () => {
