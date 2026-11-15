@@ -139,6 +139,31 @@ async function main() {
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Skills Mock", { exact: true }).first().waitFor();
     await window.getByTestId("settings-back").click();
+    // 项目会话草稿形态：项目路径在项目记录上、发送前不落 draft，预览须按
+    // 项目记录解析（项目目录即 fixture workspace，含全部技能 fixture）。
+    await prepareDraft(window, { project: true, approvalMode: "assist" });
+    await window.getByTestId("composer-input").fill("$rev");
+    await window.getByTestId("composer-menu").waitFor({ timeout: 5_000 });
+    const projectDraftMenu = await window
+      .getByTestId("composer-menu")
+      .textContent();
+    assert(
+      projectDraftMenu.includes("review") &&
+        projectDraftMenu.includes("项目代码审查"),
+      "项目会话 draft 态输入框技能菜单没有列出真实存在的技能"
+    );
+    await window.getByTestId("composer-input").fill("");
+    await window.getByTestId("resources-toggle").click();
+    const projectDraftPanel = window.getByTestId("resources-panel");
+    await projectDraftPanel.waitFor({ timeout: 5_000 });
+    const projectDraftPanelText = await projectDraftPanel.textContent();
+    assert(
+      projectDraftPanelText.includes("review") &&
+        projectDraftPanelText.includes("reference"),
+      "项目会话 draft 态规范与技能面板没有预览目录"
+    );
+    await window.getByTestId("resources-toggle").click();
+
     await prepareDraft(window, { approvalMode: "assist" });
 
     // draft 态（首条消息发出前）技能必须可用：菜单与面板都来自真实磁盘技能。

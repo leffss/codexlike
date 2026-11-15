@@ -350,7 +350,15 @@ export function WorkspacePage(props: {
    * 草稿用源工作区路径预览（worktree 在首条消息后才创建，内容一致）。
    * request 代数防旧结果串线（与 refreshResources 同款守卫）。
    */
-  const draftWorkspacePath = draft?.workspacePath ?? null;
+  const draftWorkspacePath = draft
+    ? (draft.workspacePath ??
+      // 独立任务草稿的路径经「选择已有目录」写入 draft；项目会话草稿的
+      // 路径在项目记录上（发送前不落 draft，主进程 tasks:start 从 project
+      // 解析且禁改工作区），渲染时从 projects 现查。应用专用持久目录型
+      // 项目无路径（首次发送时分配），与界面文案一致地不可预览。
+      projects.find((p) => p.id === draft.projectId)?.workspacePath ??
+      null)
+    : null;
   useEffect(() => {
     if (currentId !== null) return; // 任务态由 openTask 管线负责
     if (draftWorkspacePath === null) {
