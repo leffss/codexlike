@@ -27,7 +27,7 @@ const snapshot: TaskView = {
   executionId: "e1",
   sequence: 2,
   history: [],
-  // 子代理恢复快照（票 03）：类型兼容暂空，恢复重建断言随票 04 补齐
+  // 子代理恢复快照（票 03/04）：hydrate 重建的并行数据面（见下方恢复用例）
   subagents: [],
   events: [delta(1, "第一段"), delta(2, "第二段")],
   pendingInteractions: [],
@@ -390,7 +390,7 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
       },
     ],
     events: [],
-    // 子代理恢复快照（票 03）：类型兼容暂空，恢复重建断言随票 04 补齐
+    // 子代理恢复快照（票 03/04）：本用例无子代理，空数组即旧路径
     subagents: [],
     pendingInteractions: [],
     activity: { ...activity, running: false, outcome: "completed" },
@@ -408,6 +408,119 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
   if (restoredThinking?.kind !== "thinking")
     throw new Error("恢复后的第二段应为思考段");
   expect(restoredThinking.streaming).toBeUndefined();
+});
+
+it("子代理恢复（票 04）：view 并行快照随 hydrate 重建过程段；compact 整体重放不丢富数据", () => {
+  const spawnRow = {
+    kind: "tool-call" as const,
+    call: {
+      id: "delegate-1",
+      taskId: "a",
+      toolName: "spawn_subagent",
+      arguments: '{"task":"调研折叠记忆"}',
+      output: "最终报告：已梳理",
+      isError: false,
+      createdAt: "2026-11-14T08:00:02Z",
+    },
+  };
+  const subagents = [
+    {
+      record: {
+        id: "sa-1",
+        taskId: "a",
+        task: "调研折叠记忆",
+        status: "completed" as const,
+        queuedAt: "2026-11-14T08:00:01Z",
+        startedAt: "2026-11-14T08:00:02Z",
+        completedAt: "2026-11-14T08:00:30Z",
+      },
+      messages: [
+        {
+          id: "sm-1",
+          taskId: "a",
+          subagentId: "sa-1",
+          content: "第一轮正文",
+          reasoning: "第一轮思考",
+          createdAt: "2026-11-14T08:00:10Z",
+        },
+        {
+          id: "sm-2",
+          taskId: "a",
+          subagentId: "sa-1",
+          content: "最终报告：已梳理",
+          createdAt: "2026-11-14T08:00:28Z",
+        },
+      ],
+      toolCalls: [
+        {
+          id: "st-1",
+          taskId: "a",
+          subagentId: "sa-1",
+          toolName: "grep",
+          arguments: '{"pattern":"x"}',
+          output: "命中 1 行",
+          isError: false,
+          createdAt: "2026-11-14T08:00:15Z",
+        },
+      ],
+    },
+  ];
+  const view: TaskView = {
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    history: [spawnRow],
+    subagents,
+    events: [],
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  const restored = hydrateLiveTask(view);
+  expect(restored.items).toHaveLength(1);
+  expect(restored.items[0]).toMatchObject({
+    kind: "subagent",
+    id: "sa-1",
+    state: "done",
+    tools: [{ id: "st-1", toolName: "grep" }],
+    turns: [
+      { reasoning: "第一轮思考", content: "第一轮正文" },
+      { content: "最终报告：已梳理" },
+    ],
+  });
+
+  // compact 整体重放（spawn 行在保留轮次内）：消息流位置随新 history，
+  // 过程富数据（轮次/工具/起止时间）不因 compact 丢失（ADR 0021：记录与 compact 无关）
+  const compacted = receiveLiveEvent(restored, {
+    ...delta(3, "", "compact-1"),
+    activity: { ...activity, running: false, outcome: "completed" },
+    event: {
+      type: "compact-finished",
+      outcome: "completed",
+      history: [
+        {
+          kind: "message",
+          message: {
+            id: "summary",
+            taskId: "a",
+            role: "compact-summary",
+            content: "权威摘要",
+            createdAt: "2026-11-14T09:00:00Z",
+          },
+        },
+        spawnRow,
+      ],
+    },
+  });
+  const segment = compacted.items.at(-1);
+  expect(segment).toMatchObject({
+    kind: "subagent",
+    id: "sa-1",
+    state: "done",
+    tools: [{ id: "st-1", toolName: "grep" }],
+    turns: [
+      { reasoning: "第一轮思考", content: "第一轮正文" },
+      { content: "最终报告：已梳理" },
+    ],
+  });
 });
 
 it("空闲队列事件按任务水位接续，加载缓冲与重复事件不回退队列", () => {

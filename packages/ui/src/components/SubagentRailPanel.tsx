@@ -8,6 +8,8 @@ import { DisclosureArrow } from "./DisclosureArrow";
 import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
+import { subagentExportMarkdown } from "../lib/subagent-export";
+import { statusClass, statusText } from "../lib/subagent-status";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 import type { SubagentSegment } from "../lib/task-view";
@@ -115,18 +117,39 @@ export function SubagentRailPanelBody(props: {
   );
 }
 
-/** 详情区：委派要求块 + 三态内容（排队提示 / 运行进度 / 报告与操作行） */
+/** 详情区：委派要求块 + 三态内容（排队提示 / 运行进度 / 报告与操作行；interrupted 留痕回看） */
 function SubagentDetail(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
-  const hasReasoning =
-    subagent.reasoning !== undefined && subagent.reasoning !== "";
+  // 分轮呈现（票 04）：turns 逐轮重建/流式；旧记录（无快照）回退拼接种思考单段
+  const thinkingRounds =
+    subagent.turns !== undefined
+      ? subagent.turns
+          .filter(
+            (turn) => turn.reasoning !== undefined && turn.reasoning !== ""
+          )
+          .map((turn) => turn.reasoning!)
+      : subagent.reasoning !== undefined && subagent.reasoning !== ""
+        ? [subagent.reasoning]
+        : [];
+  // 空轮（工具事件预置的占位轮）不显示；最终轮即报告轮照常呈现
+  const bodyRounds = (subagent.turns ?? [])
+    .map((turn) => turn.content)
+    .filter((content) => content !== "");
+  const streaming = subagent.state === "running";
   return (
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
       <DelegationBrief subagent={subagent} />
-      {hasReasoning && (
+      {thinkingRounds.length > 0 && (
         <SubagentThinking
-          reasoning={subagent.reasoning!}
-          streaming={subagent.state === "running"}
+          rounds={thinkingRounds}
+          streaming={streaming}
+          subagentId={subagent.id}
+        />
+      )}
+      {bodyRounds.length > 0 && (
+        <SubagentBody
+          rounds={bodyRounds}
+          streaming={streaming}
           subagentId={subagent.id}
         />
       )}
@@ -135,6 +158,17 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
         <p className="text-xs text-warn-fg">
           并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
         </p>
+      )}
+      {subagent.state === "interrupted" && (
+        <>
+          <p
+            data-testid="subagent-interrupted-note"
+            className="text-xs text-warn-fg"
+          >
+            应用在该委派运行中退出：此委派被中断，以上为已发生的部分记录。
+          </p>
+          <ToolsDetails subagent={subagent} />
+        </>
       )}
       {subagent.state === "done" && (
         <>
@@ -249,23 +283,23 @@ function RunningStatus(props: { subagent: SubagentSegment }) {
 }
 
 /**
- * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库）：与主任务
- * 思考块同构——流式运行中默认展开实时可见、结束自动收起、收起后以
- * 一行摘要回看（开合按 collapseKey 记忆）；与报告文本分离，重启后由
- * 落盘 reasoning 重建（旧记录自然缺失，不渲染空块）。
+ * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库、票 04 起分轮）：
+ * 与主任务思考块同构——流式运行中默认展开实时可见、结束自动收起、收起后
+ * 以一行摘要回看（开合按 collapseKey 记忆）；与报告文本分离，重启后由
+ * 快照逐轮重建（旧记录回退拼接种单段，无轮边界）。
  * 受控 <details open> 的 onToggle 记忆规则同 ThinkingBlock（见其注释）。
  */
 function SubagentThinking(props: {
-  reasoning: string;
+  rounds: string[];
   streaming?: boolean;
   subagentId: string;
 }) {
-  const { reasoning, streaming } = props;
+  const { rounds, streaming } = props;
   const { open, setOpen } = useCollapseState(
     `subagent-thinking-${props.subagentId}`,
     streaming === true
   );
-  const summary = thinkingSummary(reasoning);
+  const summary = thinkingSummary(rounds[rounds.length - 1] ?? "");
   return (
     <details
       data-testid="subagent-thinking-block"
@@ -287,6 +321,7 @@ function SubagentThinking(props: {
           className="min-w-0 flex-1 truncate"
         >
           {streaming === true ? "思考中" : "已思考"}
+          {rounds.length > 1 && ` · ${rounds.length} 轮`}
           {summary !== "" && ` · ${summary}`}
         </span>
       </summary>
@@ -294,7 +329,73 @@ function SubagentThinking(props: {
         data-testid="subagent-thinking-content"
         className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
       >
-        {reasoning}
+        {rounds.map((text, index) => (
+          <div key={index} data-testid={`subagent-thinking-round-${index + 1}`}>
+            {rounds.length > 1 && (
+              <p className="mb-1 text-fg-subtle">第 {index + 1} 轮</p>
+            )}
+            <p className="mb-2 last:mb-0">{text}</p>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * 子代理正文折叠块（ADR 0021 票 04）：与思考折叠同构（流式默认展开、
+ * 结束收起、collapse-memory 独立键 subagent-body-{id}），逐轮分段呈现
+ * （轮边界 = subagent_messages 行边界）；最终轮即报告轮——完成态报告
+ * 块照旧呈现全文，本块是过程回看视角，两者并存不互斥。
+ */
+function SubagentBody(props: {
+  rounds: string[];
+  streaming?: boolean;
+  subagentId: string;
+}) {
+  const { rounds, streaming } = props;
+  const { open, setOpen } = useCollapseState(
+    `subagent-body-${props.subagentId}`,
+    streaming === true
+  );
+  const summary = thinkingSummary(rounds[rounds.length - 1] ?? "");
+  return (
+    <details
+      data-testid="subagent-body-block"
+      open={open}
+      onToggle={(event) => {
+        if (event.currentTarget.open !== open) {
+          setOpen(event.currentTarget.open);
+        }
+      }}
+      className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+    >
+      <summary
+        data-testid="subagent-body-toggle"
+        className="flex cursor-pointer select-none items-center gap-2"
+      >
+        <DisclosureArrow open={open} />
+        <span
+          data-testid="subagent-body-summary"
+          className="min-w-0 flex-1 truncate"
+        >
+          {streaming === true ? "生成中" : "正文"}
+          {rounds.length > 1 && ` · ${rounds.length} 轮`}
+          {summary !== "" && ` · ${summary}`}
+        </span>
+      </summary>
+      <div
+        data-testid="subagent-body-content"
+        className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
+      >
+        {rounds.map((text, index) => (
+          <div key={index} data-testid={`subagent-body-round-${index + 1}`}>
+            {rounds.length > 1 && (
+              <p className="mb-1 text-fg-subtle">第 {index + 1} 轮</p>
+            )}
+            <p className="mb-2 last:mb-0">{text}</p>
+          </div>
+        ))}
       </div>
     </details>
   );
@@ -409,7 +510,9 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
     try {
       const result = await window.codexlike.files.saveText({
         defaultFileName: `子代理-${exportFileNameBase(subagent.task)}.md`,
-        content: report,
+        // 逐轮结构导出（票 04）：委派说明 + 逐轮思考/正文 + 最终报告；
+        // 复制按钮仍是纯报告文本（快速取用），两者口径不同
+        content: subagentExportMarkdown(subagent),
       });
       if (exportAttempt.current !== current) return;
       if (result.saved) {
@@ -550,7 +653,7 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
 /* ------------------------------------------------------------------ */
 /* 共享小件（列表行与详情头共用；标记行 SubagentStreamMarker 复用导出） */
 
-/** 状态点：排队灰 / 运行黄脉冲 / 完成绿 / 失败红 */
+/** 状态点：排队灰 / 运行黄脉冲 / 中断黄静态 / 完成绿 / 失败红 */
 export function StatusDot(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
   const running = subagent.state === "running";
@@ -559,7 +662,7 @@ export function StatusDot(props: { subagent: SubagentSegment }) {
       ? subagent.ok === false
         ? "bg-danger-fg"
         : "bg-ok-fg"
-      : subagent.state === "running"
+      : subagent.state === "running" || subagent.state === "interrupted"
         ? "bg-warn-fg"
         : "bg-fg-subtle";
   return (
@@ -571,27 +674,13 @@ export function StatusDot(props: { subagent: SubagentSegment }) {
   );
 }
 
-export function statusText(subagent: SubagentSegment): string {
-  return subagent.state === "queued"
-    ? "排队中"
-    : subagent.state === "running"
-      ? "运行中"
-      : subagent.ok === false
-        ? "失败"
-        : "完成";
-}
-
-export function statusClass(subagent: SubagentSegment): string {
-  return subagent.state === "done"
-    ? subagent.ok === false
-      ? "text-danger-fg"
-      : "text-ok-fg"
-    : "text-warn-fg";
-}
+// 状态文案/配色（票 04 抽到 lib/subagent-status 供导出共用；转出口保持
+// SubagentStreamMarker 等既有 import 路径稳定）
+export { statusText, statusClass };
 
 /**
- * 已用时（mm:ss）：运行中以 now 实时刷新；完成态以 endedAt 定格总耗时。
- * 恢复的记录无 startedAt（或完成态缺 endedAt）则不显示数字。
+ * 已用时（mm:ss）：运行中以 now 实时刷新；完成/中断终态以 endedAt 定格。
+ * 恢复的记录无 startedAt（或终态缺 endedAt）则不显示数字。
  */
 export function formatElapsed(
   subagent: SubagentSegment,
@@ -601,7 +690,7 @@ export function formatElapsed(
   const started = Date.parse(subagent.startedAt);
   if (Number.isNaN(started)) return null;
   const end =
-    subagent.state === "done"
+    subagent.state === "done" || subagent.state === "interrupted"
       ? subagent.endedAt === null
         ? NaN
         : Date.parse(subagent.endedAt)

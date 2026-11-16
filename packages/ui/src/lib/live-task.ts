@@ -8,6 +8,7 @@ import {
   applyTaskEvent,
   initialTranscript,
   mergeInteractions,
+  mergeSubagentsAfterCompact,
   type MessageSegment,
 } from "./task-view";
 
@@ -38,7 +39,9 @@ function applyLiveEvent(
 ): MessageSegment[] {
   if (event.type === "compact-start") return items;
   if (event.type === "compact-finished")
-    return initialTranscript(event.history);
+    // compact 只裁消息流历史；子代理过程记录与 compact 无关（ADR 0021），
+    // 重放后按 toolCallId 回接 compact 前的过程富段（轮次/工具/起止时间）
+    return mergeSubagentsAfterCompact(initialTranscript(event.history), items);
   if (event.type === "queue-changed") return items;
   return applyTaskEvent(items, event);
 }
@@ -99,7 +102,8 @@ export function hydrateLiveTask(
   view: TaskView,
   buffered: TaskEventEnvelope[] = []
 ): LiveTask {
-  let items = initialTranscript(view.history);
+  // 恢复新路径（票 04）：并行子代理快照随 history 同一载荷重建过程段
+  let items = initialTranscript(view.history, view.subagents);
   for (const envelope of view.events)
     items = applyLiveEvent(items, envelope.event);
   let state: LiveTask = {

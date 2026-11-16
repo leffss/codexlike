@@ -231,7 +231,9 @@ async function main() {
       (await window.getByTestId("thinking-block").count()) === 2,
       `重启后思考段数量应为 2，实际 ${await window.getByTestId("thinking-block").count()}`
     );
-    // 子代理详情思考折叠块不空白（ADR 0020 右栏详情；先打开定位）
+    // 子代理详情思考折叠块不空白（ADR 0020 右栏详情；先打开定位）。
+    // 票 04 起恢复走并行快照新路径：spawn 行已瘦身（reasoning 不再拼接），
+    // 思考与逐轮正文都由 subagent_messages 行重建——正文折叠块即新路径证据
     const subagentPanel = await openSubagentDetail(window);
     const subThinking = subagentPanel.getByTestId("subagent-thinking-block");
     await subThinking.waitFor({ timeout: 10_000 });
@@ -241,7 +243,18 @@ async function main() {
       .textContent();
     assert(
       subText !== null && subText.includes("子代理重启前的思考"),
-      `重启后子代理思考为空白：${subText ?? "(空)"}`
+      `重启后子代理思考为空白（快照新路径未重建）：${subText ?? "(空)"}`
+    );
+    // 正文折叠块（票 04）：逐轮正文由快照 messages 重建，最终轮即报告轮
+    const subBody = subagentPanel.getByTestId("subagent-body-block");
+    await subBody.waitFor({ timeout: 10_000 });
+    await subBody.getByTestId("subagent-body-toggle").click();
+    const bodyText = await subBody
+      .getByTestId("subagent-body-content")
+      .textContent();
+    assert(
+      bodyText !== null && bodyText.includes("子代理最终报告"),
+      `重启后子代理正文折叠块缺失报告轮：${bodyText ?? "(空)"}`
     );
     const reportText = await subagentPanel
       .getByTestId("subagent-report")

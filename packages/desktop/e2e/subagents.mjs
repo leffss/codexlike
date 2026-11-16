@@ -260,8 +260,9 @@ async function main() {
     );
     console.log("[e2e] 报告回流主任务上下文（第二轮请求体验证）");
 
-    // 7) 重启应用：标记行与右栏详情恢复（报告随 spawn_subagent 调用记录
-    //    持久化；ADR 0020 恢复态完成记录在右栏直接可读）
+    // 7) 重启应用：标记行与右栏详情恢复（票 04 起走并行快照新路径：
+    //    骨架起止时间 + 逐轮正文/思考 + 工具清单由三表重建，spawn 行
+    //    瘦身后仍带回最终报告；ADR 0020 恢复态完成记录在右栏直接可读）
     await closeApp(app);
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({
       homeDir,
@@ -288,6 +289,22 @@ async function main() {
     assert(
       restoredReport?.includes(REPORT_MARKER) === true,
       `重启后嵌套卡片报告缺失：${restoredReport}`
+    );
+    // 新路径证据：起止时间恢复（列表行已用时定格渲染）+ 逐轮正文折叠块
+    // （最终轮即报告轮，正文内含报告标记）
+    await restoredPanel
+      .locator('[data-testid="subagent-elapsed"]')
+      .first()
+      .waitFor({ timeout: 10_000 });
+    const restoredBody = restoredPanel.getByTestId("subagent-body-block");
+    await restoredBody.waitFor({ timeout: 10_000 });
+    await restoredBody.getByTestId("subagent-body-toggle").click();
+    const restoredBodyText = await restoredBody
+      .getByTestId("subagent-body-content")
+      .textContent();
+    assert(
+      restoredBodyText?.includes(REPORT_MARKER) === true,
+      `重启后正文折叠块缺失报告轮（快照新路径未重建）：${restoredBodyText}`
     );
     console.log("[e2e] 重启后嵌套卡片恢复（持久化验证）");
 

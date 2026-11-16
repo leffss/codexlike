@@ -10,6 +10,7 @@ import type {
   ProjectRecord,
   ProviderProfile,
   StoredMessage,
+  SubagentSnapshot,
   TaskResourcesView,
   ToolCallRecord,
 } from "@codexlike/agent-core";
@@ -391,21 +392,32 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
     type: "subagent-reasoning",
     subagentId: "sub-live-1",
     delta:
-      "段分派集中在 SegmentView：subagent 段渲染右栏标记行，正文走 SubagentRailPanel。",
+      "折叠记忆统一用任务作用域键前缀 subagent-，切换任务不丢。继续查 grep 结果。",
   }),
+  // 正文流式增量（票 04「正文」折叠块）：逐轮出现，与思考折叠同构
   subEnvelope(7, {
+    type: "subagent-text-delta",
+    subagentId: "sub-live-1",
+    delta: "第一轮先汇报阶段性结论：SegmentView 按 kind 分派，",
+  }),
+  subEnvelope(8, {
+    type: "subagent-text-delta",
+    subagentId: "sub-live-1",
+    delta: "subagent 段的正文全部收纳右栏，主序列只留标记行。",
+  }),
+  subEnvelope(9, {
     type: "subagent-reasoning",
     subagentId: "sub-live-1",
     delta:
       "折叠记忆统一用任务作用域键前缀 subagent-，切换任务不丢。继续查 grep 结果。",
   }),
-  subEnvelope(8, {
+  subEnvelope(10, {
     type: "subagent-start",
     subagentId: "sub-live-2",
     task: "盘点布局相关 e2e 断言清单",
     toolCallId: "tc-sub-live-2",
   }),
-  subEnvelope(9, {
+  subEnvelope(11, {
     type: "subagent-tool",
     subagentId: "sub-live-2",
     phase: "call",
@@ -417,7 +429,7 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
       T3
     ),
   }),
-  subEnvelope(10, {
+  subEnvelope(12, {
     type: "subagent-tool",
     subagentId: "sub-live-2",
     phase: "result",
@@ -429,13 +441,13 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
       T3
     ),
   }),
-  subEnvelope(11, {
+  subEnvelope(13, {
     type: "subagent-reasoning",
     subagentId: "sub-live-2",
     delta:
       "布局几何断言集中在 width-tiers 与 acceptance 两个 spec，共 3 处直接引用 rail-panel。",
   }),
-  subEnvelope(12, {
+  subEnvelope(14, {
     type: "subagent-report",
     subagentId: "sub-live-2",
     task: "盘点布局相关 e2e 断言清单",
@@ -450,6 +462,108 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
     ].join("\n"),
     ok: true,
   }),
+];
+
+/**
+ * 子代理恢复快照样例（票 04，ADR 0021 恢复新路径）：与 MAIN_HISTORY 的
+ * spawn 行按委派说明匹配——sub-rec-1 命中 tc-sub-r3（瘦身后新记录：行只带
+ * 报告，过程由快照三表重建）；sub-rec-2 无行（运行中被杀：行随轮末回填、
+ * 未落），恢复时追加时间线末尾留痕（interrupted 态）。tc-sub-r1 / tc-sub-r2
+ * 是本特性前的旧记录（无快照），照旧走 subagentFromToolRecord 反推路径。
+ */
+const SUBAGENT_TASK_R3 = "梳理右栏 tab 化的宽度断言链";
+
+const SUBAGENTS: SubagentSnapshot[] = [
+  {
+    record: {
+      id: "sub-rec-1",
+      taskId: MAIN_TASK_ID,
+      task: SUBAGENT_TASK_R3,
+      status: "completed",
+      queuedAt: T2,
+      startedAt: T2,
+      completedAt: T3,
+    },
+    messages: [
+      {
+        id: "sm-r3-1",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        content:
+          "第一轮：先确认 width-tiers 的三档断言与 rail-separator 的拖拽边界。",
+        reasoning: "宽度断言分散在 e2e 与 clampRailWidth 两处，先收集再归纳。",
+        createdAt: T2,
+      },
+      {
+        id: "sm-r3-2",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        content: [
+          "宽度断言链梳理结论：",
+          "",
+          "1. `clampRailWidth` 纯函数夹取 320–640，单元测试直测；",
+          "2. `width-tiers.mjs` 走真实窗口三档几何（默认 400 / 拖宽 640 / 收窄 320）；",
+          "3. tab 化后新增 tab 互斥断言依赖 `rail-tab-*` testid，与宽度链正交。",
+        ].join("\n"),
+        createdAt: T3,
+      },
+    ],
+    toolCalls: [
+      {
+        id: "st-r3-1",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        toolName: "grep",
+        arguments: '{"pattern":"clampRailWidth","path":"packages/ui"}',
+        output: "RailPanel.tsx:42  rail-panel-ui.test.tsx:61",
+        isError: false,
+        createdAt: T2,
+      },
+      {
+        id: "st-r3-2",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        toolName: "read_file",
+        arguments: '{"path":"packages/desktop/e2e/width-tiers.mjs"}',
+        output: "…（约 120 行）三档断言：默认 400、拖宽夹 640、收窄夹 320…",
+        isError: false,
+        createdAt: T2,
+      },
+    ],
+  },
+  {
+    record: {
+      id: "sub-rec-2",
+      taskId: MAIN_TASK_ID,
+      task: "压缩后回归验证消息流宽度",
+      status: "interrupted",
+      queuedAt: T3,
+      startedAt: T3,
+      completedAt: T3,
+    },
+    messages: [
+      {
+        id: "sm-r4-1",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-2",
+        content: "中断前已确认消息流内容宽随容器 tier 收窄，断言用",
+        reasoning: "先复跑 width-tiers 再看 compact 后的消息流宽度是否有回归。",
+        createdAt: T3,
+      },
+    ],
+    toolCalls: [
+      {
+        id: "st-r4-1",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-2",
+        toolName: "glob",
+        arguments: '{"pattern":"packages/desktop/e2e/*.mjs"}',
+        output: "width-tiers.mjs  changes.mjs  …",
+        isError: false,
+        createdAt: T3,
+      },
+    ],
+  },
 ];
 
 const MAIN_HISTORY = [
@@ -586,6 +700,24 @@ const MAIN_HISTORY = [
       T2
     ),
   },
+  /* 子代理样例：瘦身后新记录（票 04 contract 步）——行只带最终报告
+     （无 reasoning 拼接），逐轮过程由 SUBAGENTS 快照 sub-rec-1 重建 */
+  {
+    kind: "tool-call" as const,
+    call: toolCall(
+      "tc-sub-r3",
+      "spawn_subagent",
+      { task: SUBAGENT_TASK_R3 },
+      [
+        "宽度断言链梳理结论：",
+        "",
+        "1. `clampRailWidth` 纯函数夹取 320–640，单元测试直测；",
+        "2. `width-tiers.mjs` 走真实窗口三档几何（默认 400 / 拖宽 640 / 收窄 320）；",
+        "3. tab 化后新增 tab 互斥断言依赖 `rail-tab-*` testid，与宽度链正交。",
+      ].join("\n"),
+      T3
+    ),
+  },
   { kind: "interaction" as const, interaction: APPROVAL_INTERACTION },
   {
     kind: "message" as const,
@@ -668,8 +800,9 @@ export function taskView(taskId: string): TaskView | null {
     executionId: "exec-1",
     sequence: 24,
     history,
-    // 子代理恢复快照（票 03）：类型兼容暂空——恢复记录样例随票 04 的 ui 重建补齐
-    subagents: [],
+    // 子代理恢复快照（票 04）：恢复新路径样例（完成重建 + interrupted 留痕），
+    // 仅主任务携带；其余任务空数组即旧路径
+    subagents: taskId === MAIN_TASK_ID ? SUBAGENTS : [],
     // 子代理运行态样例仅主任务回放
     events: taskId === MAIN_TASK_ID ? SUBAGENT_EVENTS : [],
     pendingInteractions: [],

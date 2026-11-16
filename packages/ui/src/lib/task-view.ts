@@ -1,5 +1,6 @@
 import type {
   InteractionRecord,
+  SubagentSnapshot,
   TaskEvent,
   StoredMessage,
   ToolCallRecord,
@@ -105,32 +106,47 @@ export interface ToolCallSegment extends SegmentBase {
 
 /**
  * 子代理卡段（GLOSSARY「子代理」）：排队 → 运行（当前活动工具 + 已用时）→
- * 完成（报告可展开）。卡内嵌套的子代理工具进度与思考是卡片内部状态，
- * 不是主序列成员。
+ * 完成（报告可展开）｜运行中被中断（重启收尾补记的终态，ADR 0021）。
+ * 卡内嵌套的子代理工具进度与思考是卡片内部状态，不是主序列成员。
  */
 export interface SubagentSegment extends SegmentBase {
   kind: "subagent";
-  /** 子代理 id（编排器生成，进度事件匹配键） */
+  /** 子代理 id（编排器生成，进度事件匹配键；恢复新路径 = 骨架行 id） */
   id: string;
   /** 主任务 spawn_subagent 的 tool call id（报告回流匹配；queued 阶段尚未知为空串） */
   toolCallId: string;
   /** 委派任务描述 */
   task: string;
-  state: "queued" | "running" | "done";
+  state: "queued" | "running" | "done" | "interrupted";
   /** 开始运行时间（ISO；已用时的计算基准） */
   startedAt: string | null;
   /** 结束时间（ISO；完成态总耗时定格的计算基准，运行期为 null） */
   endedAt: string | null;
   /**
-   * 子代理思考过程（与报告文本分开累积）；运行期由 subagent-reasoning
-   * 事件累积，重启后由落库 reasoning 列重建（票 02，旧记录自然缺失）
+   * 子代理思考跨轮全文（票 02）：运行期由 subagent-reasoning 事件累积，
+   * 旧记录恢复时由落库 reasoning 列重建（无轮边界）；分轮呈现见 turns
    */
   reasoning?: string;
+  /**
+   * 逐轮正文与思考（ADR 0021 票 04）：一轮 = 一次流式生成（思考先于正文，
+   * 轮边界即 subagent_messages 行边界）；运行期由 subagent-reasoning /
+   * subagent-text-delta 逐轮累积（工具事件后新起轮），恢复新路径由快照
+   * messages 逐行重建；旧记录（无快照）自然缺失 undefined
+   */
+  turns?: SubagentTurn[];
   report: string | null;
   /** null = 未结束；false = 失败或被中断 */
   ok: boolean | null;
   /** 子代理内部的工具调用（卡内嵌套进度列表） */
   tools: SubagentToolCall[];
+}
+
+/** 子代理一个模型轮（GLOSSARY「轮次」）：思考 + 正文（各自可缺） */
+export interface SubagentTurn {
+  /** 本轮思考；本轮无思考时缺失 */
+  reasoning?: string;
+  /** 本轮正文；纯工具轮无正文 */
+  content: string;
 }
 
 /** 子代理卡内嵌套的工具调用进度（无段字段：不是消息流序列成员） */
@@ -260,9 +276,22 @@ function replaceSegment(
  * 任务时间线（消息 + 工具调用 + 交互）→ 消息段时序序列。
  * 历史恢复与运行期流式输出共用同一形状：本函数产出的段序列与
  * applyTaskEvent 归并出的段序列同类同构。
+ *
+ * 恢复新路径（ADR 0021 票 04）：载荷带并行子代理快照时，spawn_subagent
+ * 行按委派说明匹配快照（task 参数原文 == 骨架行 task），命中即由快照
+ * 重建完整过程（骨架状态与起止时间 + 逐轮正文与思考 + 工具清单），
+ * 报告与 ok 仍取自行本身（行 output 含截断标记等终稿口径）；未命中的
+ * 行回退 subagentFromToolRecord 旧路径（旧任务照旧）。无 spawn 行的
+ * 快照（运行中被杀：行随轮末回填、进程死亡未落）追加在时间线末尾
+ * 留痕——被杀时刻必然晚于任何已落库条目，末尾即其时序位置。
  */
-export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
+export function initialTranscript(
+  history: TranscriptItem[],
+  subagents: SubagentSnapshot[] = []
+): MessageSegment[] {
   const segments: MessageSegment[] = [];
+  // 待匹配快照（匹配即消费）：骨架按排队时间正序，行按 transcript 序出现
+  const pending = subagents.slice();
   for (const item of history) {
     if (item.kind === "interaction") {
       segments.push({
@@ -279,7 +308,16 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
     if (item.kind === "tool-call") {
       const call = item.call;
       if (call.toolName === "spawn_subagent") {
-        segments.push(subagentFromToolRecord(call, segments));
+        const task = subagentTaskOf(call);
+        const matched = pending.findIndex(
+          (entry) => entry.record.task === task
+        );
+        if (matched >= 0) {
+          const [entry] = pending.splice(matched, 1);
+          segments.push(subagentFromSnapshot(entry!, call, segments));
+        } else {
+          segments.push(subagentFromToolRecord(call, segments));
+        }
         continue;
       }
       segments.push({
@@ -303,7 +341,76 @@ export function initialTranscript(history: TranscriptItem[]): MessageSegment[] {
     const message = item.message;
     segments.push(...messageSegments(message, segments));
   }
+  // 无 spawn 行的快照（运行中被杀 / 排队中被杀）：末尾留痕
+  for (const entry of pending) {
+    segments.push(subagentFromSnapshot(entry, null, segments));
+  }
   return segments;
+}
+
+/** spawn 行参数里的委派说明（task 原文）；解析失败返回空串（不匹配任何快照） */
+function subagentTaskOf(call: ToolCallRecord): string {
+  try {
+    const parsed: unknown = JSON.parse(call.arguments);
+    if (typeof parsed === "object" && parsed !== null && "task" in parsed) {
+      const value = (parsed as { task?: unknown }).task;
+      if (typeof value === "string") return value;
+    }
+  } catch {
+    // 参数非 JSON（旧数据防御）：按空委派说明处理
+  }
+  return "";
+}
+
+/**
+ * 恢复新路径（ADR 0021 票 04）：子代理快照 → 子代理段。
+ * call 为匹配到的 spawn 行（报告 / ok / 段时序位置与 toolCallId 来源）；
+ * 运行中被杀的快照无行（call=null）：报告为空、追加在时间线末尾。
+ */
+function subagentFromSnapshot(
+  entry: SubagentSnapshot,
+  call: ToolCallRecord | null,
+  segments: MessageSegment[]
+): SubagentSegment {
+  const { record } = entry;
+  return {
+    kind: "subagent",
+    id: record.id,
+    seq: nextSeq(segments),
+    turnId: deriveTurnId(segments, record.id),
+    responseId: null,
+    at: parseIso(record.queuedAt),
+    toolCallId: call?.id ?? "",
+    task: record.task,
+    state:
+      record.status === "interrupted"
+        ? "interrupted"
+        : record.status === "queued"
+          ? "queued"
+          : record.status === "running"
+            ? "running"
+            : "done",
+    startedAt: record.startedAt,
+    endedAt: record.completedAt,
+    // 逐轮重建（轮边界即行边界）；空行不落库，这里不产生空轮
+    turns: entry.messages.map((row) => ({
+      ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+      content: row.content,
+    })),
+    report: call?.output ?? null,
+    ok: call !== null ? !call.isError : false,
+    tools: entry.toolCalls.map((row) => ({
+      id: row.id,
+      taskId: row.taskId,
+      toolName: row.toolName,
+      arguments: row.arguments,
+      output: row.output,
+      isError: row.isError,
+      running: false,
+      // 行内只有完成时刻单一时间戳（发起时刻即落库时刻）：不显示行耗时
+      startedAt: parseIso(row.createdAt),
+    })),
+  };
 }
 
 /**
@@ -362,23 +469,11 @@ function messageSegments(
   }
 }
 
-/** 重启恢复：spawn_subagent 的落库记录 → 完成态子代理段（task 从参数解析、报告即 output） */
+/** 重启恢复（旧路径）：spawn_subagent 的落库记录 → 完成态子代理段（task 从参数解析、报告即 output） */
 function subagentFromToolRecord(
   call: ToolCallRecord,
   segments: MessageSegment[]
 ): SubagentSegment {
-  let task = "";
-  try {
-    const parsed: unknown = JSON.parse(call.arguments);
-    if (typeof parsed === "object" && parsed !== null && "task" in parsed) {
-      const value = (parsed as { task?: unknown }).task;
-      if (typeof value === "string") {
-        task = value;
-      }
-    }
-  } catch {
-    task = "";
-  }
   return {
     kind: "subagent",
     id: `restore-${call.id}`,
@@ -387,7 +482,7 @@ function subagentFromToolRecord(
     responseId: null,
     at: parseIso(call.createdAt),
     toolCallId: call.id,
-    task,
+    task: subagentTaskOf(call),
     state: "done",
     startedAt: null,
     // 恢复的记录无起止时间对：完成态不显示总耗时
@@ -576,6 +671,7 @@ export function applyTaskEvent(
         state: "queued",
         startedAt: null,
         endedAt: null,
+        turns: [],
         report: null,
         ok: null,
         tools: [],
@@ -613,22 +709,34 @@ export function applyTaskEvent(
                 event.call,
                 event.phase === "call"
               ),
+              // 工具后正文/思考属下一轮：预置空轮占位（轮边界与落库行同构）
+              turns: subagentTurnBoundary(item.turns ?? []),
             }
           : item
       );
 
     case "subagent-reasoning":
-      // 子代理思考：与报告分离累积到所属卡片；未知 subagentId（任务切换后迟到）忽略
+    case "subagent-text-delta": {
+      // 子代理思考/正文增量（ADR 0021）：逐轮累积到所属卡片（未知
+      // subagentId——任务切换后迟到——忽略）；思考另累积跨轮全文
+      // （reasoning 字段，旧记录恢复同构），分轮呈现读 turns
+      const isText = event.type === "subagent-text-delta";
       return replaceSegment(items, event.subagentId, (item) =>
         item.kind === "subagent"
-          ? { ...item, reasoning: (item.reasoning ?? "") + event.delta }
+          ? {
+              ...item,
+              turns: appendSubagentTurnDelta(
+                item.turns ?? [],
+                isText,
+                event.delta
+              ),
+              ...(isText
+                ? {}
+                : { reasoning: (item.reasoning ?? "") + event.delta }),
+            }
           : item
       );
-
-    case "subagent-text-delta":
-      // 子代理正文流式增量（ADR 0021 票 02 已发射）：右栏「正文」折叠块的
-      // 逐轮流式呈现属后续票（ui 恢复回看 + 正文块），此处先保持类型穷尽
-      return items;
+    }
 
     case "subagent-report":
       return replaceSegment(items, event.subagentId, (item) =>
@@ -734,6 +842,43 @@ function finalizeResponse(
   return next;
 }
 
+/**
+ * 子代理轮增量归并（轮边界启发式，与子代理循环落库口径同构）：一轮 =
+ * 一次流式生成，思考先于正文；正文已出现后的思考增量、工具事件之后的
+ * 首个增量都属新轮。工具事件由 subagentTurnBoundary 预置空轮占位，
+ * 正文增量追加到当前轮（流内正文连续），思考增量在无正文的当前轮累积。
+ */
+function appendSubagentTurnDelta(
+  turns: SubagentTurn[],
+  isText: boolean,
+  delta: string
+): SubagentTurn[] {
+  const last = turns[turns.length - 1];
+  if (last === undefined) {
+    return [isText ? { content: delta } : { content: "", reasoning: delta }];
+  }
+  if (isText) {
+    return [...turns.slice(0, -1), { ...last, content: last.content + delta }];
+  }
+  // 思考在正文之后出现 = 新一轮开始（轮内思考恒先于正文）
+  if (last.content !== "") {
+    return [...turns, { content: "", reasoning: delta }];
+  }
+  return [
+    ...turns.slice(0, -1),
+    { ...last, reasoning: (last.reasoning ?? "") + delta },
+  ];
+}
+
+/** 工具事件后的轮边界：当前轮已有内容则预置空轮（承接下一轮增量） */
+function subagentTurnBoundary(turns: SubagentTurn[]): SubagentTurn[] {
+  const last = turns[turns.length - 1];
+  if (last === undefined || (last.content === "" && !last.reasoning)) {
+    return turns;
+  }
+  return [...turns, { content: "" }];
+}
+
 /** 子代理卡内嵌套的工具进度归并（call → 运行中，result → 终态） */
 function applySubagentTool(
   tools: SubagentToolCall[],
@@ -782,6 +927,36 @@ function applySubagentTool(
         }
       : tool
   );
+}
+
+/**
+ * compact 整体重放后的子代理富段回接（ADR 0021：子代理记录与 compact
+ * 无关）。compact 事件只携带替换后的 history（spawn 行按旧路径重建为
+ * 过程空段），这里按 toolCallId 把 compact 前的过程富数据（轮次/工具/
+ * 起止时间/中断态）接回重建段：消息流位置随新 history，过程内容不丢。
+ * 无对应行的段（被裁轮次 / interrupted 留痕）随消息流语义移除——
+ * 下一次整体 hydrate 会经并行快照重新带回。
+ */
+export function mergeSubagentsAfterCompact(
+  rebuilt: MessageSegment[],
+  previous: MessageSegment[]
+): MessageSegment[] {
+  const rich = new Map(
+    previous
+      .filter(
+        (item): item is SubagentSegment =>
+          item.kind === "subagent" && item.toolCallId !== ""
+      )
+      .map((item) => [item.toolCallId, item])
+  );
+  if (rich.size === 0) return rebuilt;
+  return rebuilt.map((item) => {
+    if (item.kind !== "subagent") return item;
+    const before = rich.get(item.toolCallId);
+    if (before === undefined) return item;
+    // 段 id / 时序槽位沿用重建结果，过程富数据沿用 compact 前的段
+    return { ...before, id: item.id, seq: item.seq, turnId: item.turnId };
+  });
 }
 
 /** 渲染层本地段（status / error）：不入事件流，尾部追加并归当前轮 */

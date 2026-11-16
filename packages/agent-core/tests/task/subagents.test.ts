@@ -1960,12 +1960,13 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(
       persistence.listSubagentToolCalls("task-1").map((row) => row.id)
     ).toEqual(["sub-read-1", "sub-read-2"]);
-    // spawn_subagent 行照旧（票 02 不动）：output=各轮正文拼接，reasoning=思考全文拼接
+    // spawn_subagent 行瘦身（票 04 contract 步）：output=最终报告（回填模型
+    // 的只有 output），reasoning 不再拼接思考全文——权威记录在子代理侧三表
     const spawn = persistence
       .listToolCalls("task-1")
       .find((call) => call.toolName === "spawn_subagent");
     expect(spawn?.output).toBe("第一轮正文。最终报告正文。");
-    expect(spawn?.reasoning).toBe("第一轮思考第二轮思考");
+    expect(spawn?.reasoning).toBeUndefined();
     persistence.close();
   });
 

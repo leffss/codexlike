@@ -177,12 +177,6 @@ interface SubagentEntry {
   /** 最终报告（成功）或中文失败/中断原因 */
   output: string;
   isError: boolean;
-  /**
-   * 思考过程全文（票 02）：与报告分离累积，随 spawn_subagent 延迟 tool-result
-   * 一并回流落库（tool_calls.reasoning 列），仅为恢复后展示；
-   * 不回填模型（回填内容只有 output）。
-   */
-  reasoning: string;
 }
 
 export interface SubagentOrchestrator {
@@ -366,10 +360,9 @@ export function createSubagentOrchestrator(
     // 工具轮次上限（执行设置 ADR 0017）：运行开始快照，声明在 try 外供截断标记
     // 使用（标记在终态区，不在 try 作用域内）；解析失败按默认值兜底
     let maxToolRounds = DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
-    // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
-    let reasoning = "";
     // 本轮正文与思考缓冲（ADR 0021 票 02）：轮终态即写一行 subagent_messages
-    // （轮边界即行边界）；跨轮全文仍照旧累积——报告与 spawn 行 reasoning 拼接不变
+    // （轮边界即行边界）——思考的权威记录即在此表；spawn 行不再拼接
+    // （票 04 contract 步：双份存储无消费者）
     let roundText = "";
     let roundReasoning = "";
 
@@ -466,9 +459,9 @@ export function createSubagentOrchestrator(
         }[] = [];
         for await (const part of result.fullStream) {
           if (part.type === "reasoning-delta") {
-            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积全文
-            // （随终态报告回流落库，票 02）；不进入子代理消息上下文
-            reasoning += part.text;
+            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积进本轮
+            // 缓冲（轮终态随 subagent_messages 落库，票 02）；不进入子代理
+            // 消息上下文，也不随 spawn 行回流（票 04 contract 步）
             roundReasoning += part.text;
             emit({
               type: "subagent-reasoning",
@@ -613,7 +606,6 @@ export function createSubagentOrchestrator(
 
     entry.output = output;
     entry.isError = isError;
-    entry.reasoning = reasoning;
     entry.state = "done";
     fallbackProfiles.delete(entry.subagentId);
     // 骨架行终态更新（ADR 0021）：状态与完成时间随报告回流一并落库；
@@ -679,7 +671,6 @@ export function createSubagentOrchestrator(
         thinkingEffort: context.thinkingEffort ?? "auto",
         output: "",
         isError: false,
-        reasoning: "",
       };
       entries.set(subagentId, entry);
       if (context.profile !== undefined) {
@@ -717,12 +708,12 @@ export function createSubagentOrchestrator(
     resultFor(toolCallId) {
       for (const entry of entries.values()) {
         if (entry.toolCallId === toolCallId && entry.state === "done") {
-          // 思考全文随报告一并回流（票 02）：任务侧落库进 tool_calls.reasoning 列；
-          // 回填模型的仍只有 output
+          // spawn 行瘦身（票 04 contract 步，ADR 0021）：回填的只有最终报告
+          // （tool result 自包含性不变）；思考全文的权威记录在子代理侧
+          // subagent_messages，不再随 spawn 行拼接（双份存储无消费者）
           return {
             output: entry.output,
             isError: entry.isError,
-            ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
           };
         }
       }
