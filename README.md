@@ -2,6 +2,44 @@
 
 本地 AI coding agent 桌面工作台（Electron，Windows 优先，全中文界面）：agent 在你本机的工作区里读文件、改代码、跑命令、搜网络，你通过界面审批与检视结果——一个自己可控的「Codex Desktop 功能平替」。
 
+## 界面截图
+
+![使用截图 1](docs/img/ScreenShot_2026-11-16_100233_728.png)
+
+![使用截图 2](docs/img/ScreenShot_2026-11-16_100240_463.png)
+
+![使用截图 3](docs/img/ScreenShot_2026-11-16_100251_803.png)
+
+![使用截图 4](docs/img/ScreenShot_2026-11-16_100259_311.png)
+
+![使用截图 5](docs/img/ScreenShot_2026-11-16_100305_574.png)
+
+![使用截图 6](docs/img/ScreenShot_2026-11-16_100315_348.png)
+
+![使用截图 7](docs/img/ScreenShot_2026-11-16_100343_952.png)
+
+![使用截图 8](docs/img/ScreenShot_2026-11-16_100920_299.png)
+
+![使用截图 9](docs/img/ScreenShot_2026-11-16_100929_941.png)
+
+![使用截图 10](docs/img/ScreenShot_2026-11-16_100947_281.png)
+
+![使用截图 11](docs/img/ScreenShot_2026-11-16_101050_480.png)
+
+![使用截图 12](docs/img/ScreenShot_2026-11-16_101105_928.png)
+
+![使用截图 13](docs/img/ScreenShot_2026-11-16_101132_944.png)
+
+![使用截图 14](docs/img/ScreenShot_2026-11-16_101142_880.png)
+
+![使用截图 15](docs/img/ScreenShot_2026-11-16_101213_429.png)
+
+![使用截图 16](docs/img/ScreenShot_2026-11-16_101238_959.png)
+
+![使用截图 17](docs/img/ScreenShot_2026-11-16_101250_855.png)
+
+![使用截图 18](docs/img/ScreenShot_2026-11-16_101302_239.png)
+
 ## 功能一览
 
 - **任意 OpenAI 兼容端点**：多份 Provider Profile（`baseURL` / `apiKey` / `model`，GLM、DeepSeek、OpenAI、Ollama……），API key 经系统加密（Windows DPAPI）落盘，任务中随时切换。
