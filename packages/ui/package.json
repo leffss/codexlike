@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "CodexLike 渲染进程 UI：React + Vite + Tailwind，全中文界面。",
   "type": "module",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "vite",

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "CodexLike 桌面宿主：Electron 主进程、类型化 IPC 桥与本地配置存储（safeStorage 加密）。",
   "type": "module",
+  "license": "MIT",
   "private": true,
   "main": "./dist/main.cjs",
   "exports": {

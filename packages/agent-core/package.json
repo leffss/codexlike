@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "CodexLike Agent Core：agent 运行时（Provider Profile、对话循环、工具注册表、审批状态机）。纯 TypeScript，零 Electron 依赖（ADR-0002）。",
   "type": "module",
+  "license": "MIT",
   "private": true,
   "sideEffects": false,
   "main": "./dist/index.js",
