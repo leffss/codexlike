@@ -57,20 +57,23 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(html).not.toMatch(/data-testid="subagent-rail-item"/);
   });
 
-  it("默认选中最后一个（最新）：列表项与详情同渲染，报告直接可读", () => {
+  it("默认选中最后一个（最新）：摘要行计数 + 当前行锚点 + 详情报告直接可读", () => {
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
         subagents: [subSeg("sa-1"), subSeg("sa-2", { report: "最新报告" })],
         focus: null,
       })
     );
+    // 摘要行常驻：总数一目了然（浮层收起，列表行不渲染）
+    expect(html).toMatch(/data-testid="subagent-rail-summary"/);
+    expect(html).toContain("子代理 2 个");
+    expect(html).not.toMatch(/data-testid="subagent-rail-item"/);
+    // 当前行：默认最后一个（最新）作为详情锚点
     expect(html).toMatch(
-      /data-testid="subagent-rail-item"[^>]*data-subagent-state="done"/
+      /data-testid="subagent-rail-current"[^>]*data-subagent-state="done"/
     );
-    expect((html.match(/data-testid="subagent-rail-item"/g) ?? []).length).toBe(
-      2
-    );
-    // 详情：默认最后一个被选中（bg-hover）且报告直接渲染（无展开记忆门槛）
+    expect(html).toContain("任务 sa-2");
+    // 详情：报告直接渲染（无展开记忆门槛）
     expect(html).toContain("最新报告");
     expect(html).toMatch(/data-testid="subagent-report"/);
     expect(html).toMatch(/data-testid="subagent-report-copy"/);
@@ -132,7 +135,7 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       })
     );
     expect(html).toMatch(
-      /data-testid="subagent-rail-item"[^>]*data-subagent-state="running"/
+      /data-testid="subagent-rail-current"[^>]*data-subagent-state="running"/
     );
     expect(html).toContain("read_file");
     const block = html.match(
@@ -279,9 +282,9 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
         focus: null,
       })
     );
-    // 列表状态点 + 详情徽章（委派说明块头）同文案
+    // 当前行状态点 + 详情徽章（委派说明块头）同文案
     expect(html).toMatch(
-      /data-testid="subagent-rail-item"[^>]*data-subagent-state="interrupted"/
+      /data-testid="subagent-rail-current"[^>]*data-subagent-state="interrupted"/
     );
     expect(html.match(/运行中被中断/g)?.length).toBeGreaterThanOrEqual(2);
     // 中断说明 + 已发生过程内容可回看（正文折叠 + 工具清单）

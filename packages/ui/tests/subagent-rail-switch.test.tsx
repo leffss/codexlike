@@ -44,6 +44,11 @@ function listItemAt(index: number): HTMLElement {
   return item;
 }
 
+/** 展开浮层列表（摘要行点击；focus 为 null 的用例需手动展开） */
+function openList(): void {
+  fireEvent.click(screen.getByTestId("subagent-rail-summary"));
+}
+
 afterEach(() => cleanup());
 
 beforeAll(() => {
@@ -58,10 +63,14 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
     const { rerender } = render(
       <SubagentRailPanelBody subagents={[a, b]} focus={null} />
     );
-    // 默认选中最后一个（sa-b）
+    // 默认选中最后一个（sa-b）；浮层收起：完整列表在摘要行展开后才渲染
     expect(selectedTask()).toContain("sa-b");
+    expect(screen.queryAllByTestId("subagent-rail-item")).toHaveLength(0);
+    openList();
     fireEvent.click(listItemAt(0));
     expect(selectedTask()).toContain("sa-a");
+    // 点选即选中并收起浮层
+    expect(screen.queryAllByTestId("subagent-rail-item")).toHaveLength(0);
     // 静态数据 rerender（新数组引用）：选中不回跳
     rerender(
       <SubagentRailPanelBody
@@ -89,6 +98,8 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
       />
     );
     expect(selectedTask()).toContain("sa-done");
+    // focus 定位自动展开浮层（消息流标记行进来要找的就是那一项）
+    expect(screen.getAllByTestId("subagent-rail-item").length).toBe(2);
     // 用户点击列表中正在运行的子代理，查看其流式详情
     fireEvent.click(listItemAt(1));
     expect(selectedTask()).toContain("sa-run");

@@ -23,16 +23,18 @@ import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 
 /**
- * 子代理检视面板（ADR 0020，prototype/subagent-rail 变体 A 转正）：
- * 右栏第三 tab「子代理」的 tab 体——主从分栏（与「改动」tab 的
- * 文件列表 → diff 同构）。子代理的正文（最终报告 / 思考 / 工具进度）
- * 全部收纳于此，主消息流只留单行轻量标记（SubagentStreamMarker）。
+ * 子代理检视面板（ADR 0020，prototype/subagent-rail 变体 A 转正；主次
+ * 层级重构为 prototype/subagent-hierarchy 变体 C）：右栏第三 tab「子代理」
+ * 的 tab 体。子代理的正文（最终报告 / 思考 / 工具进度）全部收纳于此，
+ * 主消息流只留单行轻量标记（SubagentStreamMarker）。
  *
- * 结构：上段子代理列表（状态点 + 任务截断 + 状态 + 已用时，运行中每秒
- * 跳动），下段选中者完整详情（任务头 → 思考折叠 → 运行态当前工具 /
- * 完成态报告 + 操作行 + 工具清单）。无选中（或选中者已不在列表）时
- * 默认选中最后一个（最新）；消息流标记行点击经 focus prop 定位选中
- * 并滚动到列表项。
+ * 结构（摘要选择器，解决「子代理多时上段列表与下段详情视觉权重相同
+ * 主次不清」）：顶部计数摘要行（总数 + 进行中/排队/失败/中断非零计数）
+ * + 当前选中行常驻；完整列表点开浮层按需展开（遮罩/Escape/再点收起，
+ * 点选即选中并收起），详情独占剩余全部高度。无选中（或选中者已不在
+ * 列表）时默认选中最后一个（最新）；消息流标记行点击经 focus prop
+ * 定位——选中并自动展开浮层滚动到对应项（用户从消息流进来要找的就是
+ * 那一项，浮层可见才可定位）。
  */
 
 /** 消息流标记行点击的定位信号（seq 递增触发 effect，id 为目标） */
@@ -48,10 +50,13 @@ export function SubagentRailPanelBody(props: {
 }) {
   const { subagents } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  // focus 定位目标：listOpen 置位与浮层挂载不同帧，滚动延到浮层渲染后
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
-  // 标记行点击定位：focus 信号变化时选中对应子代理并滚动到列表项。
-  // 每个 focus.seq 只消费一次（ref 幂等）：依赖里保留 subagents 是为
-  // 「段晚于点击到达列表」的重试，但运行中流式会持续产生新数组引用，
+  // 标记行点击定位：focus 信号变化时选中对应子代理、展开浮层并滚动到
+  // 列表项。每个 focus.seq 只消费一次（ref 幂等）：依赖里保留 subagents
+  // 是为「段晚于点击到达列表」的重试，但运行中流式会持续产生新数组引用，
   // 无幂等守卫时每次流式事件都重放 setSelectedId(focus.id)，把用户在
   // 列表里手动点选的子代理强行拉回 focus 目标（点击无法切换的回归）。
   const focus = props.focus;
@@ -62,10 +67,26 @@ export function SubagentRailPanelBody(props: {
     if (!subagents.some((item) => item.id === focus.id)) return;
     consumedFocusSeqRef.current = focus.seq;
     setSelectedId(focus.id);
-    listRef.current
-      ?.querySelector(`[data-subagent-id="${focus.id}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    setListOpen(true);
+    setPendingScrollId(focus.id);
   }, [focus, subagents]);
+  // 浮层挂载后定位滚动（focus effect 与浮层渲染之间隔一帧）
+  useEffect(() => {
+    if (!listOpen || pendingScrollId === null) return;
+    listRef.current
+      ?.querySelector(`[data-subagent-id="${pendingScrollId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+    setPendingScrollId(null);
+  }, [listOpen, pendingScrollId]);
+  // Escape 收起浮层（浮层标准交互；摘要行/遮罩/点选之外补键盘出口）
+  useEffect(() => {
+    if (!listOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setListOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [listOpen]);
   const selected =
     subagents.find((item) => item.id === selectedId) ??
     subagents.at(-1) ??
@@ -80,52 +101,120 @@ export function SubagentRailPanelBody(props: {
     );
   }
 
+  const running = subagents.filter((item) => item.state === "running").length;
+  const queued = subagents.filter((item) => item.state === "queued").length;
+  const failed = subagents.filter(
+    (item) => item.state === "done" && item.ok === false
+  ).length;
+  const interrupted = subagents.filter(
+    (item) => item.state === "interrupted"
+  ).length;
+
   return (
     <div
       data-testid="subagents-panel-body"
-      className="flex min-h-0 flex-1 flex-col"
+      className="relative flex min-h-0 flex-1 flex-col"
     >
-      {/* 上段：子代理列表（同改动 tab 文件清单的 max-h 配比与行样式） */}
-      <ul
-        ref={listRef}
-        className="max-h-[45%] shrink-0 overflow-auto border-b border-line py-0.5"
+      {/* 摘要行：总数 + 进行中/异常计数（非零渲染），常驻「一眼知全局」。
+          relative z-30：浮层展开时仍在其上层可见——收起把手不消失 */}
+      <button
+        type="button"
+        data-testid="subagent-rail-summary"
+        onClick={() => setListOpen(!listOpen)}
+        aria-expanded={listOpen}
+        className="relative z-30 flex w-full shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-1.5 text-left hover:bg-hover"
       >
-        {subagents.map((item) => (
-          <li key={item.id} data-subagent-id={item.id}>
-            <button
-              type="button"
-              data-testid="subagent-rail-item"
-              data-subagent-state={item.state}
-              onClick={() => setSelectedId(item.id)}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-                selected?.id === item.id ? "bg-hover" : "hover:bg-hover"
-              }`}
-            >
-              <StatusDot subagent={item} />
-              <span
-                className={`min-w-0 flex-1 truncate text-xs ${
-                  selected?.id === item.id ? "text-fg" : "text-fg-muted"
-                }`}
-                title={item.task}
-              >
-                {item.task === "" ? "（任务描述缺失）" : item.task}
-              </span>
-              <span className={`shrink-0 text-xs ${statusClass(item)}`}>
-                {statusText(item)}
-              </span>
-              <Elapsed subagent={item} />
-            </button>
-          </li>
-        ))}
-      </ul>
-      {/* 下段：选中者详情 */}
-      {selected === null ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-fg-subtle">
-          点上方子代理查看详情
-        </div>
-      ) : (
-        <SubagentDetail subagent={selected} />
+        <span className="text-xs text-fg-subtle">
+          子代理 {subagents.length} 个
+        </span>
+        {running > 0 && (
+          <span className="text-xs text-warn-fg">进行中 {running}</span>
+        )}
+        {queued > 0 && (
+          <span className="text-xs text-fg-subtle">排队 {queued}</span>
+        )}
+        {failed > 0 && (
+          <span className="text-xs text-danger-fg">失败 {failed}</span>
+        )}
+        {interrupted > 0 && (
+          <span className="text-xs text-warn-fg">中断 {interrupted}</span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs text-fg-muted">
+          {listOpen ? "收起列表" : "展开列表"}
+          <DisclosureArrow open={listOpen} />
+        </span>
+      </button>
+      {/* 当前选中行：详情对象的常驻锚点（点选/focus 定位都汇到这里） */}
+      {selected !== null && (
+        <button
+          type="button"
+          data-testid="subagent-rail-current"
+          data-subagent-state={selected.state}
+          onClick={() => setListOpen(!listOpen)}
+          className="flex w-full shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 text-left hover:bg-hover"
+        >
+          <StatusDot subagent={selected} />
+          <span className="min-w-0 flex-1 truncate text-xs text-fg">
+            {selected.task === "" ? "（任务描述缺失）" : selected.task}
+          </span>
+          <span className={`shrink-0 text-xs ${statusClass(selected)}`}>
+            {statusText(selected)}
+          </span>
+          <Elapsed subagent={selected} />
+        </button>
       )}
+      {/* 浮层完整列表：遮罩 + 列表（absolute 覆盖，点选即选中并收起）。
+          覆盖感：投影/描边/圆角与面板拉开层次 + 轻遮罩压暗底层（主题
+          --overlay 降浓度——模态级 45% 对右栏内小浮层过重）（原型评审
+          反馈「像内联列表」的修复） */}
+      {listOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="收起列表"
+            onClick={() => setListOpen(false)}
+            className="absolute inset-0 z-10 cursor-default bg-overlay/50"
+          />
+          <ul
+            ref={listRef}
+            data-testid="subagent-rail-list"
+            className="absolute inset-x-0 top-0 z-20 max-h-[70%] overflow-auto rounded-b-lg border border-line bg-surface py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+          >
+            {subagents.map((item) => (
+              <li key={item.id} data-subagent-id={item.id}>
+                <button
+                  type="button"
+                  data-testid="subagent-rail-item"
+                  data-subagent-state={item.state}
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    setListOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                    selected?.id === item.id ? "bg-hover" : "hover:bg-hover"
+                  }`}
+                >
+                  <StatusDot subagent={item} />
+                  <span
+                    className={`min-w-0 flex-1 truncate text-xs ${
+                      selected?.id === item.id ? "text-fg" : "text-fg-muted"
+                    }`}
+                    title={item.task}
+                  >
+                    {item.task === "" ? "（任务描述缺失）" : item.task}
+                  </span>
+                  <span className={`shrink-0 text-xs ${statusClass(item)}`}>
+                    {statusText(item)}
+                  </span>
+                  <Elapsed subagent={item} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {/* 详情：独占剩余高度 */}
+      {selected !== null && <SubagentDetail subagent={selected} />}
     </div>
   );
 }
