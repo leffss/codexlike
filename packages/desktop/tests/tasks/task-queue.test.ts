@@ -25,8 +25,9 @@ function createMemoryStore(): TaskQueueStore {
 function harness(overrides?: {
   limit?: () => number;
   start?: (entry: QueuedTaskStart) => Promise<void>;
+  store?: TaskQueueStore;
 }) {
-  const store = createMemoryStore();
+  const store = overrides?.store ?? createMemoryStore();
   const started: QueuedTaskStart[] = [];
   const changes: {
     taskId: string;
@@ -245,6 +246,36 @@ describe("createTaskQueueCoordinator（满员入队与 FIFO 自动开跑）", ()
     expect(app.queue.snapshot().map((item) => item.taskId)).toEqual(["task-d"]);
   });
 
+  it("pump 中 remove 落库失败（存储故障）：开跑不重复、错误上抛不吞", async () => {
+    // remove 对队首抛错模拟存储故障（如 SQLite 写锁）：与开跑失败不同，
+    // 此时消息已进入任务（start 成功）——吞错会让「开跑成功才出队落库」
+    // 的意图静默失效，条目残留待下轮重复开跑同一首条。
+    const base = createMemoryStore();
+    const store: TaskQueueStore = {
+      ...base,
+      remove(taskId: string) {
+        if (taskId === "task-c") throw new Error("db locked");
+        return base.remove(taskId);
+      },
+    };
+    const app = harness({ store });
+    app.setExecuting(["task-a", "task-b"]);
+    app.queue.gate("task-c", START_INPUT);
+    app.queue.gate("task-d", START_INPUT);
+
+    // 释放一个名额：pump 开跑队首，出队落库时撞上存储故障
+    app.setExecuting(["task-a"]);
+
+    await expect(app.queue.pump()).rejects.toThrow("db locked");
+    // 队首只开跑一次（不因吞错继续循环重复 start）；后续条目不被连带开跑
+    expect(app.started.map((entry) => entry.taskId)).toEqual(["task-c"]);
+    // 条目仍在快照里（存储故障不被静默清掉），错误可见后由调用方处置
+    expect(app.queue.snapshot().map((entry) => entry.taskId)).toEqual([
+      "task-c",
+      "task-d",
+    ]);
+  });
+
   it("remove 出队：条目消失并推送通知，pump 跳过被移除任务", async () => {
     const app = harness();
     app.setExecuting(["task-a", "task-b"]);
@@ -309,7 +340,7 @@ describe("设置生效语义（调大立即补跑、调小只拦新）", () => {
 });
 
 describe("内存 store（票 02 持久化假件，票 05 换真实实现）", () => {
-  it("按 position 升序列出、remove 后追加不回退、clear 清空", () => {
+  it("按 position 升序列出、remove 后追加不回退", () => {
     const store = createMemoryTaskQueueStore();
     const first = store.append({
       taskId: "task-a",
@@ -346,8 +377,6 @@ describe("内存 store（票 02 持久化假件，票 05 换真实实现）", ()
       createdAt: "t3",
     });
     expect(third.position).toBeGreaterThan(first.position);
-    store.clear();
-    expect(store.list()).toEqual([]);
     store.close();
   });
 });

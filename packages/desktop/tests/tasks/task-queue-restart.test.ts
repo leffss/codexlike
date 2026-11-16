@@ -210,6 +210,36 @@ it("排队中重启：启动泵一次后按原顺序自动开跑（上限内）�
   expect(queuedCMessages).toEqual(["重启排队丙"]);
 }, 30_000);
 
+it("重启后仍排队任务打开可见：view 携带排队首条文本与 queued 活动态（状态条与首条回显的数据源）", async () => {
+  const app = await setup(1);
+  const first = app.open();
+  const running = await app.start("重启可见占坑");
+  await app.holdReply("重启可见占坑");
+  const queued = await app.start("重启可见排队首条");
+  expect(app.activity(queued).queued).toBe(true);
+  await first.close();
+
+  // 重启后（未泵前）：排队任务无任何 task-queue-changed 信封可重放
+  //（view.events 为空），排队首条文本与 queued 活动态只能由 view 的
+  // 排队快照字段恢复——ui 状态条与首条回显沿票 03 的 hydrate 路径接上
+  const reopened = app.open();
+  const view = invoke("view", queued);
+  expect(view.events).toEqual([]);
+  expect(view.activity.queued).toBe(true);
+  expect(view.queuedStart).toBe("重启可见排队首条");
+  // 侧栏数据源（tasks.list 活动态）同样恢复
+  expect(app.activity(queued).queued).toBe(true);
+
+  // 开跑出队后：快照不再含本任务，view 字段随之撤销
+  reopened.runtime.pumpTaskQueue();
+  await app.finish("重启可见排队首条");
+  await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
+  const viewAfter = invoke("view", queued);
+  expect(viewAfter.activity.queued).toBe(false);
+  expect(viewAfter.queuedStart).toBeNull();
+  void running;
+}, 30_000);
+
 it("中断出队清除持久化记录：重启后不复活排队、名额让给后续排队任务", async () => {
   const app = await setup(1);
   const first = app.open();

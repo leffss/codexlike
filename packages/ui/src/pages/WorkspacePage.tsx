@@ -759,7 +759,7 @@ export function WorkspacePage(props: {
         event.type === "interaction-request" ||
         event.type === "interaction-resolved" ||
         // 任务排队变更（任务并发上限票 03）：排队态进出（入队/开跑出队/中断
-        // 出队）驱动侧栏徽章与「N 个运行中」统计刷新——后台任务的排队变化
+        // 出队）驱动侧栏徽章与「N 个执行中」统计刷新——后台任务的排队变化
         // 不进消息流，仅刷新列表
         event.type === "task-queue-changed"
       ) {
@@ -1486,9 +1486,10 @@ export function WorkspacePage(props: {
   const autoApproveError =
     current === null ? null : (revokeErrors[current.id] ?? null);
   /**
-   * 「N 个任务运行中」（任务并发上限票 03）：任务列表活动态统计——含等待
-   * 审批/问答（占坑口径，ADR 0022，waiting-user 也视为执行中）；排队任务
-   * 自身 running=false 不计入。侧栏徽章与状态条同一数据面（事件驱动刷新）。
+   * 「N 个任务执行中」（任务并发上限票 03）：任务列表活动态统计——含等待
+   * 审批/问答（占坑口径，ADR 0022 / GLOSSARY「任务并发上限」：执行中含
+   * 等待用户交互）；排队任务自身 running=false 不计入。侧栏徽章与状态条
+   * 同一数据面（事件驱动刷新）。
    */
   const runningTaskCount = tasks.filter(
     (task) => task.activity?.running === true
@@ -1668,7 +1669,7 @@ export function WorkspacePage(props: {
             </div>
           )}
           {/* 任务排队状态条（任务并发上限票 03 / ADR 0022）：满员排队期间
-              显示等待原因与当前运行数（首条消息本地回显进消息流）；开跑后
+              显示等待原因与当前执行数（首条消息本地回显进消息流）；开跑后
               随 queuedStart 清空卸载。仅任务态渲染（草稿无排队）。 */}
           {queuedVisible && (
             <div

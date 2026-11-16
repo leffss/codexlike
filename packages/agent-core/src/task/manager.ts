@@ -23,6 +23,7 @@ import { workbenchKey } from "./workbench-state";
 import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
+  MentionAttachment,
   ProjectRecord,
   SubagentSnapshot,
   TaskRecord,
@@ -124,6 +125,16 @@ export interface TaskManager {
   search(query: string, includeArchived?: boolean): TaskSearchResult[];
   /** 指定任务的消息历史（读持久层，不实例化任务对象） */
   messages(taskId: string): StoredMessage[];
+  /**
+   * 补记一条已发送未回复的用户消息（任务并发上限 review 修复 / ADR 0022
+   * 「中断排队出队回空闲，已发消息保留」）：排队首条被中断出队时由宿主
+   * 把快照文本补落进消息流——呈现为已发出、未获回复，不触发执行；后续
+   * sendMessage 的上下文组装照常包含它。任务不存在返回 null。
+   */
+  appendUserMessage(
+    taskId: string,
+    message: { content: string; mentions?: MentionAttachment[] }
+  ): StoredMessage | null;
   /** 持久交互记录不随上下文压缩消失；仅用于历史与草稿归属校验，不恢复等待。 */
   interactions(
     taskId: string
@@ -382,6 +393,31 @@ export function createTaskManager(
 
     messages(taskId) {
       return persistence.listMessages(taskId);
+    },
+
+    appendUserMessage(taskId, message) {
+      const record = persistence
+        .listTasks()
+        .find((candidate) => candidate.id === taskId);
+      if (record === undefined) return null;
+      const stored: StoredMessage = {
+        id: generateId(),
+        taskId,
+        role: "user",
+        content: message.content,
+        mentions:
+          message.mentions !== undefined && message.mentions.length > 0
+            ? message.mentions
+            : undefined,
+        createdAt: now(),
+      };
+      persistence.insertMessage(stored);
+      // 缓存任务对象的上下文一次性构建于创建/恢复时：空闲任务（本接口的
+      // 调用契约——中断排队出队场景恒空闲）丢弃缓存让下一次 get 从持久层
+      // 重建，补记消息随之进入后续执行的模型上下文（与重启恢复同构）；
+      // 非空闲属调用方违约，只落库不动缓存。
+      if (cache.has(taskId) && record.status === "idle") cache.delete(taskId);
+      return stored;
     },
 
     interactions: (taskId) => persistence.listInteractions(taskId),

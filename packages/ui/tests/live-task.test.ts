@@ -725,6 +725,29 @@ it("任务排队首条消息随 task-queue-changed 与 view 快照接续（票 0
     activity: idleActivity,
   });
   expect(removed.queuedStart).toBeNull();
+
+  // 重启后仍排队（review 修复 F2）：重启后 view.events 无信封可重放，
+  // 排队首条由 view 的排队快照字段恢复（desktop 从当前排队快照给出），
+  // 状态条与首条回显据此恢复
+  const restartedQueued = hydrateLiveTask({
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    events: [],
+    activity: { ...idleActivity, queued: true },
+    queuedStart: "排队首条",
+  });
+  expect(restartedQueued.queuedStart).toBe("排队首条");
+  // 同进程会话中信封重放晚于快照，以信封为准（快照字段不覆盖新事件）
+  const replayedNewer = hydrateLiveTask({
+    ...snapshot,
+    executionId: "q1",
+    sequence: 3,
+    events: [enqueue],
+    activity: { ...idleActivity, queued: true },
+    queuedStart: null,
+  });
+  expect(replayedNewer.queuedStart).toBe("排队首条");
 });
 
 it("输入队列随事件与快照接续（票 01）：入队更新快照，出队开启新执行起点，不进消息流", () => {

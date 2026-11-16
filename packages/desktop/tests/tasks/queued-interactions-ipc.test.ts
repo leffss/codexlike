@@ -209,7 +209,7 @@ it("排队期间发送的消息进入输入队列不直接执行；开跑后首�
   void holder;
 }, 30_000);
 
-it("中断排队任务立即出队回空闲：不再排队中、输入队列保留且暂停、名额让给后续排队任务", async () => {
+it("中断排队任务立即出队回空闲：首条补落为已发送未回复、输入队列保留且暂停、名额让给后续排队任务", async () => {
   const app = await setup({ limit: 1 });
   const holder = await invoke("start", {
     requestId: "qi-stop-holder",
@@ -247,7 +247,20 @@ it("中断排队任务立即出队回空闲：不再排队中、输入队列保�
   );
   expect(removedEvents.length).toBeGreaterThanOrEqual(1);
   expect(removedEvents.at(-1)!.activity.queued).toBe(false);
-  // 已发消息保留：输入队列条目原样保留，且暂停消费（中断语义——空闲不自动发）
+  // 已发消息保留（spec 用户故事 8 / review 修复 F1）：首条从未触发执行，
+  // 出队时补落为已发送未回复的 user message（不触发模型请求），并经
+  // user-message 事件推送接管本地回显；输入队列条目原样保留且暂停消费
+  const firstUserTexts = invoke("messages", first.id)
+    .filter((item: any) => item.message?.role === "user")
+    .map((item: any) => item.message.content);
+  expect(firstUserTexts).toEqual(["排队甲首条"]);
+  const backfillEvents = app.delivered.filter(
+    (envelope) =>
+      envelope.taskId === first.id &&
+      (envelope.event as any).type === "user-message" &&
+      (envelope.event as any).message.content === "排队甲首条"
+  );
+  expect(backfillEvents.length).toBeGreaterThanOrEqual(1);
   const view = invoke("view", first.id);
   expect(view.queueState.queue.map((item: any) => item.text)).toEqual([
     "排队甲补充",
@@ -269,7 +282,7 @@ it("中断排队任务立即出队回空闲：不再排队中、输入队列保�
   void holder;
 }, 30_000);
 
-it("中断排队后重新发消息：仍满员则重新排队，开跑完成后输入队列按插话语义恢复消费", async () => {
+it("中断排队后重新发消息：旧首条补落为已发送未回复，仍满员则重新排队，开跑后输入队列按插话语义恢复消费", async () => {
   const app = await setup({ limit: 1 });
   const holder = await invoke("start", {
     requestId: "qi-resend-holder",
@@ -289,13 +302,13 @@ it("中断排队后重新发消息：仍满员则重新排队，开跑完成后�
     invoke("list").find((item: any) => item.id === task.id).activity.queued
   ).toBe(false);
 
-  // 重新发消息：仍满员 → 重新排队（中断丢弃的旧快照不复活）
+  // 重新发消息：仍满员 → 重新排队（中断丢弃的旧快照不复活、不重复补落）
   await invoke("send", task.id, "重新发送", app.profile.id);
   expect(
     invoke("list").find((item: any) => item.id === task.id).activity.queued
   ).toBe(true);
 
-  // 名额释放：开跑的是重发的消息；中断前的首条快照不再重发
+  // 名额释放：开跑的是重发的消息；中断前的首条快照不再执行（已补落）
   await app.finish("重发占位");
   await waitFor(() => expect(app.hasRequest("重新发送")).toBe(true));
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -305,10 +318,10 @@ it("中断排队后重新发消息：仍满员则重新排队，开跑完成后�
   await waitFor(() => expect(app.hasRequest("中断前补充")).toBe(true));
   await app.finish("中断前补充");
   await waitFor(() => expect(invoke("execution", task.id).running).toBe(false));
-  // 消息流完整：只含重发消息与补充（旧首条快照从未发出）
+  // 消息流完整：旧首条补落在前（已发送未回复），重发与补充随后执行落库
   const userTexts = invoke("messages", task.id)
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
-  expect(userTexts).toEqual(["重新发送", "中断前补充"]);
+  expect(userTexts).toEqual(["重发任务首条", "重新发送", "中断前补充"]);
   void holder;
 }, 30_000);

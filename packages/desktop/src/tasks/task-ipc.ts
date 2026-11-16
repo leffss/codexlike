@@ -17,6 +17,7 @@ import {
   type AgentResourceSnapshot,
   type ApprovalMode,
   type BrowserTaskManager,
+  type MentionAttachment,
   type ProviderProfile,
   type TaskManager,
   type TaskRecord,
@@ -141,9 +142,9 @@ export function registerTaskHandlers(options: {
       input.event
     );
     if (!envelope) return;
-    // 任务排队态（票 02）不属于执行现场：信封活动态统一补 queued（单一真相
-    // 是任务排队协调器的快照，live-tasks 不感知应用级排队）。
-    envelope.activity.queued = taskQueue.isQueued(input.taskId);
+    // 任务排队态（票 02）不属于执行现场：信封活动态统一走 activityOf 单点
+    // 取数叠加 queued（review 修复 F5：live-tasks 不感知应用级排队）。
+    envelope.activity = activityOf(input.taskId);
     const win = getWindow();
     if (win !== null && !win.isDestroyed()) {
       win.webContents.send(IPC.taskEvents, envelope);
@@ -174,7 +175,8 @@ export function registerTaskHandlers(options: {
         queue,
       });
       if (!envelope) return;
-      envelope.activity.queued = taskQueue.isQueued(taskId);
+      // 活动态含 queued 单点取数（review 修复 F5）：与 emit/list/view 同源
+      envelope.activity = activityOf(taskId);
       for (const window of getWindows()) {
         if (!window.isDestroyed()) {
           window.webContents.send(IPC.taskEvents, envelope);
@@ -189,6 +191,18 @@ export function registerTaskHandlers(options: {
       ...liveTasks.activity(taskId),
       queued: taskQueue.isQueued(taskId),
     };
+  }
+
+  /**
+   * 推进任务排队（review 修复 F3）：pump 的出队落库失败（存储故障）会
+   * 上抛——这里显式记录，保证「开跑成功才出队落库」的意图不被静默吞掉
+   * （条目残留待下轮重复开跑同一首条），也不让触发点变成 unhandled
+   * rejection。
+   */
+  function runQueuePump() {
+    taskQueue.pump().catch((error: unknown) => {
+      console.error("[tasks] 任务排队出队落库失败", error);
+    });
   }
 
   // 输入队列（票 01 / ADR 0013）：任务忙时 send 入队，执行结束或入队时空闲
@@ -279,7 +293,7 @@ export function registerTaskHandlers(options: {
           // 名额释放（票 02 / ADR 0022）：任务排队按 FIFO 推进；同时重泵
           // 各任务输入队列——此前被满员拦下的内部消费（条目保留）在此重试。
           continueInputQueues();
-          void taskQueue.pump();
+          runQueuePump();
         }
       },
     };
@@ -334,6 +348,11 @@ export function registerTaskHandlers(options: {
           // 活动态含任务排队标志（票 02）：任务内排队状态条的数据来源（票 03）
           activity: activityOf(taskId),
           queueState: queueSnapshot(taskId),
+          // 排队首条快照（review 修复 F2）：重启后仍排队任务无信封可重放，
+          // 排队首条回显与状态条由此恢复（不在队为 null）
+          queuedStart:
+            taskQueue.snapshot().find((entry) => entry.taskId === taskId)
+              ?.text ?? null,
         };
   });
   ipcMain.handle(
@@ -827,6 +846,43 @@ export function registerTaskHandlers(options: {
     track(send(...args))
   );
 
+  /**
+   * 中断排队出队的首条补落（review 修复 F1 / spec 用户故事 8、ADR 0022
+   * 「中断排队出队回空闲，已发消息保留」）：满员入队不落 transcript，
+   * 中断出队时把首条快照补记为已发送未回复的 user message——与中断
+   * 运行任务「已发消息保留」语义对齐（GLOSSARY「排队任务」：首条消息
+   * 已在消息流可见）。不触发执行（不占名额、不发模型请求），重发才触发。
+   */
+  function backfillQueuedStart(
+    taskId: string,
+    text: string,
+    mentionPaths: string[]
+  ) {
+    const record = manager.list().find((item) => item.id === taskId);
+    if (!record) return;
+    let mentions: MentionAttachment[] | undefined;
+    try {
+      mentions = readMentionAttachments(record.workspacePath, mentionPaths);
+    } catch {
+      // 引用文件已不可读（删除/移走）：降级补落纯文本，不阻塞出队
+    }
+    const stored = manager.appendUserMessage(taskId, {
+      content: text,
+      mentions,
+    });
+    if (!stored) return;
+    // 补落消息经 user-message 事件推送（排在 remove 信封之后到达：
+    // 显示层先撤下排队回显，再由真实消息段接管——无双重呈现窗口）
+    const executionId = liveTasks.ensureExecution(taskId);
+    if (executionId !== null) {
+      emit({
+        taskId,
+        executionId,
+        event: { type: "user-message", message: stored },
+      });
+    }
+  }
+
   ipcMain.handle(
     IPC.tasks.interrupt,
     (_e: IpcMainInvokeEvent, taskId: unknown) => {
@@ -842,9 +898,15 @@ export function registerTaskHandlers(options: {
       // 名额让给后续排队任务（remove 推送事件链，空位仍由释放点推进）。
       // 有活跃流时也复查出队：开跑的 await 窗口内任务已执行但尚未出队，
       // 此时中断必须一并出队，否则下一次 pump 会把刚被中断的任务重跑。
+      const entry = taskQueue.snapshot().find((item) => item.taskId === taskId);
       const removed = taskQueue.remove(taskId);
       if (removed) {
-        void taskQueue.pump();
+        // 首条补落只补「从未真正发出」的（无活跃流 = user message 未落库）；
+        // 活跃流中断（含开跑窗口的复查出队）首条已随 sendMessage 落库，不补
+        if (entry !== undefined && !interrupted) {
+          backfillQueuedStart(taskId, entry.text, entry.mentionPaths);
+        }
+        runQueuePump();
       }
       if (interrupted || removed) {
         // 停止路径（票 02）：排队消息存在时置队列暂停——队列原样保留、
@@ -1291,7 +1353,7 @@ export function registerTaskHandlers(options: {
      * 任务排队推进通道（票 02）：设置保存回调（main.ts 装配）在上限调大后
      * 调用——排队任务立即补位开跑；调小时 pump 自然无事可做（只拦新）。
      */
-    pumpTaskQueue: () => void taskQueue.pump(),
+    pumpTaskQueue: runQueuePump,
     hasWork: () =>
       starts.size > 0 ||
       tasks.size > 0 ||

@@ -1,6 +1,7 @@
 /**
  * 任务内顶部排队状态条（任务并发上限票 03 / ADR 0022）：当前任务因全局
- * 并发满员进入应用级任务排队、尚未开跑时提示等待原因与当前运行数；
+ * 并发满员进入应用级任务排队、尚未开跑时提示等待原因与当前执行数
+ *（GLOSSARY「任务并发上限」：执行中含等待用户交互的占坑口径）；
  * 开跑（或出队回空闲）后由父层随排队态卸载，组件只管呈现。
  */
 export function TaskQueuedNotice(props: { runningCount: number }) {
@@ -27,7 +28,7 @@ export function TaskQueuedNotice(props: { runningCount: number }) {
         <path d="M6 3.8V6l1.4 1.4" />
       </svg>
       <span className="tabular-nums">
-        排队中（并发已满，{props.runningCount} 个任务运行中）
+        排队中（并发已满，{props.runningCount} 个任务执行中）
       </span>
     </div>
   );

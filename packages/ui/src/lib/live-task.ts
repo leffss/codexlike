@@ -130,11 +130,11 @@ export function hydrateLiveTask(
 ): LiveTask {
   // 恢复新路径（票 04）：并行子代理快照随 history 同一载荷重建过程段
   let items = initialTranscript(view.history, view.subagents);
-  let queuedStart: string | null = null;
+  // 排队首条快照（review 修复 F2）：重启后仍排队任务无信封可重放，
+  // 由 view 的排队快照字段恢复；同进程会话 events 里的信封重放更新
+  //（最后一个含/不含本任务的快照生效），覆盖快照字段。
+  let queuedStart: string | null = view.queuedStart ?? null;
   for (const envelope of view.events) {
-    // 任务排队快照（票 03）：与输入队列不同，view 无专用字段，排队首条
-    // 执行文本从 events 里的 task-queue-changed 信封快照按序重放提取
-    //（最后一个含/不含本任务的快照生效）。
     if (envelope.event.type === "task-queue-changed")
       queuedStart = queuedStartOf(view.taskId, envelope.event);
     items = applyLiveEvent(items, envelope.event);
