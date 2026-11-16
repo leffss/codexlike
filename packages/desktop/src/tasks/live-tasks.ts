@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { TaskManager, TranscriptItem } from "@codexlike/agent-core/node";
+import type {
+  SubagentSnapshot,
+  TaskManager,
+  TranscriptItem,
+} from "@codexlike/agent-core/node";
 import type { TaskActivity, TaskEventEnvelope, TaskView } from "../shared/ipc";
 
 interface LiveExecution {
   executionId: string;
   history: TranscriptItem[];
+  /** 子代理恢复快照（票 03）：与 history 同为执行起点快照，compact 只替换 history */
+  subagents: SubagentSnapshot[];
   events: TaskEventEnvelope[];
   sequence: number;
   viewed: number;
@@ -17,6 +23,8 @@ interface LiveExecution {
  * 同步采样水位及事件，renderer 先订阅、后读取、仅接续水位之后事件。
  * 日志限于最后一次执行且仅在内存；思考随终态消息/委派记录落 SQLite（票 02），
  * 重启后走 transcript 恢复，与这里的内存重放互不重复。
+ * 子代理恢复快照（票 03）与 history 并行同点采样：本轮新委派经事件流重建
+ * （不与落库行重复计数），compact 整体替换 history 时并行字段原样保留。
  */
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();
@@ -39,6 +47,7 @@ export function createLiveTasks(manager: TaskManager) {
     tasks.set(id, {
       executionId,
       history: manager.transcript(id),
+      subagents: manager.subagents(id),
       events: [],
       sequence: previous?.sequence ?? 0,
       viewed: previous?.sequence ?? 0,
@@ -143,6 +152,7 @@ export function createLiveTasks(manager: TaskManager) {
       tasks.set(id, {
         executionId: randomUUID(),
         history: manager.transcript(id),
+        subagents: manager.subagents(id),
         events: [],
         sequence: 0,
         viewed: 0,
@@ -163,6 +173,9 @@ export function createLiveTasks(manager: TaskManager) {
       executionId: live?.executionId ?? null,
       sequence: live?.sequence ?? 0,
       history: live?.history ?? manager.transcript(id),
+      // 并行恢复字段（票 03）：有现场用执行起点快照，无现场（重启后首次查看）
+      // 直接读库——含启动收尾补记的 interrupted 骨架
+      subagents: live?.subagents ?? manager.subagents(id),
       events: live ? [...live.events] : [],
       pendingInteractions: manager.get(id)?.pendingInteractions ?? [],
       activity: activity(id),

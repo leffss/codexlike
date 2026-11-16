@@ -7,6 +7,7 @@ import type {
   ProviderProfile,
   ProviderProfileInput,
   ProjectRecord,
+  SubagentSnapshot,
   TaskEvent,
   TaskRecord,
   TaskSearchResult,
@@ -255,6 +256,13 @@ export interface TaskView {
   executionId: string | null;
   sequence: number;
   history: TranscriptItem[];
+  /**
+   * 子代理恢复快照（ADR 0021 票 03）：骨架+逐轮消息+工具调用一次读出
+   * （含重启收尾补记的 interrupted 骨架），随初始 history 同一次 IPC 发出、
+   * 不走按需拉取；compact 整体替换 history 时本字段保留。
+   * 仅为检视与导出，模型上下文组装不读它（transcript 仍是唯一来源）。
+   */
+  subagents: SubagentSnapshot[];
   events: TaskEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: TaskActivity;

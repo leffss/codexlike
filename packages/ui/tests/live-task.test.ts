@@ -27,6 +27,8 @@ const snapshot: TaskView = {
   executionId: "e1",
   sequence: 2,
   history: [],
+  // 子代理恢复快照（票 03）：类型兼容暂空，恢复重建断言随票 04 补齐
+  subagents: [],
   events: [delta(1, "第一段"), delta(2, "第二段")],
   pendingInteractions: [],
   activity,
@@ -388,6 +390,8 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
       },
     ],
     events: [],
+    // 子代理恢复快照（票 03）：类型兼容暂空，恢复重建断言随票 04 补齐
+    subagents: [],
     pendingInteractions: [],
     activity: { ...activity, running: false, outcome: "completed" },
   });
