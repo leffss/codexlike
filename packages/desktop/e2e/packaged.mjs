@@ -52,8 +52,12 @@ try {
     "草稿态标题栏不得渲染工作区徽章"
   );
   assert(
-    (await titlebar.getByTestId("task-search-toggle").count()) === 1,
-    "任务搜索未迁入标题栏"
+    (await window.getByTestId("task-search-toggle").count()) === 1,
+    "任务搜索应在任务列表头部（ADR 0018 自标题栏迁位）"
+  );
+  assert(
+    (await titlebar.getByTestId("task-search-toggle").count()) === 0,
+    "任务搜索不得留在标题栏（ADR 0018 已迁任务列表头部）"
   );
 
   // 票01 workspace-info 常驻行取消：完整路径只出现在草稿就地收纳行
