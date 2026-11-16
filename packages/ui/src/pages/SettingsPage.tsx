@@ -11,6 +11,7 @@ import { McpSettingsSection } from "../components/McpSettingsSection";
 import {
   parseCompactKeepRoundsInput,
   parseContextWarningPercentInput,
+  parseTaskConcurrencyLimitInput,
   parseToolRoundsInput,
 } from "../lib/execution-settings-form";
 import { validateTerminalTimeouts } from "../lib/terminal-settings";
@@ -222,9 +223,11 @@ function ThemeSettingsSection() {
 /**
  * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
  * agent 执行参数——主任务工具轮次上限（票 01）、子代理工具轮次上限（票 02）、
- * 压缩保留对话轮数与上下文告警阈值（票 03），同构输入、独立可调。
+ * 压缩保留轮数与上下文告警阈值（票 03）、任务并发上限（任务并发上限票 01，
+ * GLOSSARY「任务并发上限」），同构输入、独立可调。
  * 改动即时保存；轮次上限用开始时的值（回合/运行开始快照），保留轮数与告警
- * 阈值无「进行中」状态逐次读取（保留轮数对下一次 /compact 生效、阈值即时生效）。
+ * 阈值无「进行中」状态逐次读取（保留轮数对下一次 /compact 生效、阈值即时生效）；
+ * 任务并发上限由 desktop 主进程发送闸门消费，改动对队列即时生效。
  */
 export function ExecutionSettingsBody(props: {
   /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
@@ -232,10 +235,12 @@ export function ExecutionSettingsBody(props: {
   maxSubagentToolRounds: string;
   compactKeepRounds: string;
   contextWarningThresholdPercent: string;
+  taskConcurrencyLimit: string;
   onInput: (value: string) => void;
   onSubagentInput: (value: string) => void;
   onCompactKeepInput: (value: string) => void;
   onContextWarningInput: (value: string) => void;
+  onTaskConcurrencyInput: (value: string) => void;
   onSave: () => void;
   saving: boolean;
   message: string;
@@ -318,6 +323,24 @@ export function ExecutionSettingsBody(props: {
         </span>
       </label>
 
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        任务并发上限（1-8）
+        <input
+          type="number"
+          min={1}
+          max={8}
+          step={1}
+          data-testid="execution-task-concurrency-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.taskConcurrencyLimit}
+          onChange={(e) => props.onTaskConcurrencyInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          同时执行的任务个数上限（默认 3）；达到上限时新任务排队等待，
+          有空位按发起顺序自动开跑。
+        </span>
+      </label>
+
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -348,6 +371,7 @@ function ExecutionSettingsSection() {
   const [compactKeepRounds, setCompactKeepRounds] = useState("3");
   const [contextWarningThresholdPercent, setContextWarningThresholdPercent] =
     useState("80");
+  const [taskConcurrencyLimit, setTaskConcurrencyLimit] = useState("3");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -362,6 +386,7 @@ function ExecutionSettingsSection() {
       setContextWarningThresholdPercent(
         String(settings.contextWarningThresholdPercent)
       );
+      setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
       setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -378,8 +403,8 @@ function ExecutionSettingsSection() {
     setMessage("");
     try {
       // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
-      // 四项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
-      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 六字段整体形状），
+      // 五项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
+      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 七字段整体形状），
       // 避免用装载快照覆盖 MCP 分区的并发保存。
       const current = await window.codexlike.agentSettings.get();
       const settings = await window.codexlike.agentSettings.set({
@@ -392,6 +417,8 @@ function ExecutionSettingsSection() {
         contextWarningThresholdPercent: parseContextWarningPercentInput(
           contextWarningThresholdPercent
         ),
+        taskConcurrencyLimit:
+          parseTaskConcurrencyLimitInput(taskConcurrencyLimit),
         mcpCallTimeoutSeconds: current.mcpCallTimeoutSeconds,
         mcpConnectTimeoutSeconds: current.mcpConnectTimeoutSeconds,
       });
@@ -401,8 +428,9 @@ function ExecutionSettingsSection() {
       setContextWarningThresholdPercent(
         String(settings.contextWarningThresholdPercent)
       );
+      setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
       setMessage(
-        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%`
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%、任务并发上限 ${settings.taskConcurrencyLimit}`
       );
       setMessageError(false);
     } catch (error) {
@@ -429,10 +457,12 @@ function ExecutionSettingsSection() {
           maxSubagentToolRounds={maxSubagentToolRounds}
           compactKeepRounds={compactKeepRounds}
           contextWarningThresholdPercent={contextWarningThresholdPercent}
+          taskConcurrencyLimit={taskConcurrencyLimit}
           onInput={setMaxToolRounds}
           onSubagentInput={setMaxSubagentToolRounds}
           onCompactKeepInput={setCompactKeepRounds}
           onContextWarningInput={setContextWarningThresholdPercent}
+          onTaskConcurrencyInput={setTaskConcurrencyLimit}
           onSave={() => void save()}
           saving={saving}
           message={message}

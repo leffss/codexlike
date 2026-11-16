@@ -585,3 +585,46 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     persistence2.close();
   });
 });
+
+describe("appendUserMessage（中断排队出队的首条补落）", () => {
+  it("补记为已发送未回复的 user message：随 transcript 持久化、进入后续执行的模型上下文；任务不存在返回 null", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "append-user-"));
+    tempDirs.push(directory);
+    const model = okModel();
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
+      persistence,
+      languageModelFor: () => model,
+    });
+    const task = manager.create({ workspacePath: directory });
+
+    // 满员排队的中断出队（宿主语义，ADR 0022）：首条从未触发执行，
+    // 由宿主补落为「已发送未回复」——不触发模型、无 assistant 跟随
+    const stored = manager.appendUserMessage(task.id, {
+      content: "排队期间的首条",
+    });
+    expect(stored).toMatchObject({
+      taskId: task.id,
+      role: "user",
+      content: "排队期间的首条",
+    });
+    expect(manager.transcript(task.id).at(-1)).toMatchObject({
+      kind: "message",
+      message: { role: "user", content: "排队期间的首条" },
+    });
+
+    // 补记消息进入后续执行的模型上下文：宿主中断出队后经 manager.get
+    // 惰性恢复（缓存已失效重建），与重启恢复同构
+    for await (const _event of manager.get(task.id)!.sendMessage({
+      text: "后续消息",
+      profile,
+    })) {
+      void _event;
+    }
+    expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
+      "排队期间的首条"
+    );
+
+    expect(manager.appendUserMessage("nope", { content: "x" })).toBeNull();
+  });
+});

@@ -63,6 +63,7 @@ import {
 import { trackWindowLaunchState } from "./launch-state/window-save";
 import { registerTaskHandlers } from "./tasks/task-ipc";
 import { createSqliteInputQueueStore } from "./tasks/input-queue-store";
+import { createSqliteTaskQueueStore } from "./tasks/task-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
 import { registerWindowControls } from "./window/window-controls";
 import { registerNavigationPolicy } from "./window/navigation-policy";
@@ -468,7 +469,9 @@ void app.whenReady().then(async () => {
 
   // 执行设置（ADR 0017，GLOSSARY「执行设置」）：内存缓存注入 createTaskManager
   // （逐次解析），主任务在回合开始时快照读取——设置页保存后对下一个回合生效，
-  // 进行中回合不受中途调小影响（无需重启任务）
+  // 进行中回合不受中途调小影响（无需重启任务）。其中任务并发上限（任务并发
+  // 上限票 01，GLOSSARY「任务并发上限」）不经 agent-core，由主进程任务发送
+  // 闸门直接读缓存消费（ADR 0022）
   const agentSettingsStore = createAgentSettingsStore({ dir: dataDir() });
   let agentSettings = await agentSettingsStore.get();
   const refreshAgentSettings = async () => {
@@ -560,9 +563,17 @@ void app.whenReady().then(async () => {
     profiles: profileStore,
     onSaved: refreshSubagentSettings,
   });
+  // 任务排队推进通道（任务并发上限票 02）：设置保存在 taskRuntime 装配前
+  // 注册，闭包经可变槽位延后绑定——onSaved 时 taskRuntime 必已就绪。
+  let pumpTaskQueue: () => void = () => {};
   registerAgentSettingsHandlers({
     store: agentSettingsStore,
-    onSaved: refreshAgentSettings,
+    onSaved: async () => {
+      await refreshAgentSettings();
+      // 上限调大：排队任务立即补位开跑（ADR 0022 生效语义；调小只拦新，
+      // pump 按新上限判定自然无事可做，不中断运行中的）。
+      pumpTaskQueue();
+    },
   });
   registerTerminalSettingsHandlers({
     store: terminalSettingsStore,
@@ -583,6 +594,11 @@ void app.whenReady().then(async () => {
   const queueStore = createSqliteInputQueueStore(
     join(dataDir(), WORKBENCH_DB_FILENAME)
   );
+  // 任务排队持久化（任务并发上限票 05 / ADR 0022）：同一库文件的独立连接，
+  // 排队跨重启不丢；存量库无 task_queue 表时建空表（读取侧天然兼容）。
+  const taskQueueStore = createSqliteTaskQueueStore(
+    join(dataDir(), WORKBENCH_DB_FILENAME)
+  );
   const taskRuntime = registerTaskHandlers({
     manager,
     profiles: store,
@@ -593,7 +609,13 @@ void app.whenReady().then(async () => {
     worktreeService,
     resourcesFor,
     queueStore,
+    // 任务并发上限（票 02，ADR 0022）：resolver 逐次解析内存缓存，主进程
+    // 发送闸门直接消费（不经 agent-core）——设置保存后刷新缓存并补跑排队
+    //（onSaved 里的 pumpTaskQueue）。
+    concurrencyLimit: () => agentSettings.taskConcurrencyLimit,
+    taskQueueStore,
   });
+  pumpTaskQueue = taskRuntime.pumpTaskQueue;
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
   // 渲染层文件导出（复制旁的「导出 Markdown」）
@@ -601,6 +623,10 @@ void app.whenReady().then(async () => {
   // 输入队列恢复（票 04 / ADR 0013）：主进程服务与凭据装配完成后启用，
   // 不依赖窗口、view 或渲染层加载；暂停态队列由持久标志保持不消费。
   taskRuntime.startInputQueues();
+  // 任务排队恢复（任务并发上限票 05 / ADR 0022）：启动时泵一次——重启前
+  // 排队的任务按原顺序自动开跑（上限内，执行中判定此时为空）；中断出队的
+  // 条目已在持久层清除，不会复活。此后由名额释放/上限调大触发推进。
+  taskRuntime.pumpTaskQueue();
   // 启动现场（票01/03）：与主题同构的建窗前时序——先读现场再建窗；无窗口
   // bounds 现场或损坏（null）维持默认 1280×800 居中。票03 目标/视图上报通道
   // 建窗前装配（渲染层启动即查询启动现场）。
@@ -623,6 +649,7 @@ void app.whenReady().then(async () => {
     closeStorage: () => {
       persistence.close();
       queueStore.close();
+      taskQueueStore.close();
     },
     releaseResources: async () => {
       await Promise.allSettled([mcpService.shutdown(), browserManager.close()]);

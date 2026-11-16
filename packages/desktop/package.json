@@ -53,6 +53,7 @@
     "test:e2e:input-queue-pause": "node e2e/input-queue-pause.mjs",
     "test:e2e:input-queue-composer": "node e2e/input-queue-composer.mjs",
     "test:e2e:input-queue-restart": "node e2e/input-queue-restart.mjs",
+    "test:e2e:task-queue-restart": "node e2e/task-queue-restart.mjs",
     "test:e2e:process-segments": "node e2e/process-segments.mjs",
     "test:e2e:work-plan": "node e2e/work-plan.mjs",
     "test:e2e:width": "node e2e/width-tiers.mjs",

@@ -27,6 +27,10 @@ import type {
 
 import type { TaskStatusInfo } from "../tasks/status";
 import type { QueueChangeReason, QueuedMessage } from "../tasks/input-queue";
+import type {
+  QueuedTaskStart,
+  TaskQueueChangeReason,
+} from "../tasks/task-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { AgentSettings } from "../execution/agent-settings-store";
@@ -56,6 +60,8 @@ export type { McpServerView, McpServerInput };
 export type { ThemeName };
 // 输入队列（票 01/02）：队列条与事件载荷的公共形状
 export type { QueuedMessage, QueueChangeReason };
+// 任务排队（任务并发上限票 02）：队列条与事件载荷的公共形状
+export type { QueuedTaskStart, TaskQueueChangeReason };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -235,6 +241,16 @@ export interface TaskEventEnvelope {
         paused: boolean;
         /** 正在发出的条目 id（票 03）：队列快照中置顶锁定显示的条目；省略/null 表示无 */
         sendingId?: string | null;
+      }
+    | {
+        /**
+         * 任务排队变更（任务并发上限票 02 / ADR 0022）：入队 / 出队开跑 / 出队
+         * 移除；queue 为变更后的全局任务排队完整快照（按发起顺序），信封的
+         * activity 同步携带 queued 活动态（侧栏徽章渲染是票 03）。
+         */
+        type: "task-queue-changed";
+        reason: TaskQueueChangeReason;
+        queue: QueuedTaskStart[];
       };
   activity: TaskActivity;
 }
@@ -243,6 +259,12 @@ export interface TaskEventEnvelope {
 export interface TaskActivity {
   /** 仅活动期间用于恢复正确入口；省略表示普通消息执行或空闲。 */
   operation?: "compact";
+  /**
+   * 任务排队中（任务并发上限票 02 / ADR 0022）：空闲任务的发送因全局满员
+   * 进入应用级任务排队、尚未开跑；开跑或出队后撤销。排队不是执行
+   * （running=false），侧栏「排队中」徽章渲染是票 03。
+   */
+  queued?: boolean;
   running: boolean;
   waitingForUser: boolean;
   outcome: "completed" | "failed" | "interrupted" | null;
@@ -271,6 +293,13 @@ export interface TaskView {
    * 切换/重启恢复时队列条（含暂停态与正在发出条目）原样恢复。
    */
   queueState?: QueueSnapshot;
+  /**
+   * 任务排队中的首条执行文本（任务并发上限 review 修复 F2 / ADR 0022）：
+   * 当前排队快照里本任务的条目文本，不在队为 null。重启后排队任务无
+   * task-queue-changed 信封可重放，view 以此字段恢复排队首条回显与
+   * 状态条；同进程会话以 events 里的信封重放为准（晚于快照）。
+   */
+  queuedStart?: string | null;
 }
 
 /**
@@ -444,7 +473,8 @@ export interface TaskApi {
    * 打断指定任务运行中的本轮（停止按钮）：
    * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
    * 排队消息存在时队列原样保留并进入队列暂停（票 02）。
-   * 任务空闲时幂等返回 false。
+   * 排队中的任务即使空闲也中断：立即出队回空闲、已发消息保留（票 04
+   * / ADR 0022）——返回 true；完全空闲且不在排队时幂等返回 false。
    */
   interrupt(taskId: string): Promise<boolean>;
   /**
@@ -554,16 +584,18 @@ export interface CodexLikeApi {
     /**
      * 当前执行设置（GLOSSARY「执行设置」，ADR 0017）：主任务/子代理工具轮次
      * 上限（默认 200）、压缩保留对话轮数（默认 3）、上下文告警阈值百分比
-     * （默认 80）、MCP 工具调用超时（默认 30 秒）与连接超时（默认 15 秒）——
-     * 六项默认值与现状一致。
+     * （默认 80）、MCP 工具调用超时（默认 30 秒）与连接超时（默认 15 秒）、
+     * 任务并发上限（默认 3，GLOSSARY「任务并发上限」，desktop 主进程发送
+     * 闸门消费、不经 agent-core）——七项中前六项默认值与现状一致。
      */
     get(): Promise<AgentSettings>;
     /**
-     * 保存执行设置（六项各自范围与整数校验：轮次 10–1000、保留轮数 1–10、
-     * 阈值 50–95、MCP 调用超时 5–300 秒与连接超时 5–120 秒，非法值以中文异常
-     * 抛回——UI 侧非法输入先回退默认再保存）；轮次上限对下一个回合/委派生效
-     * （开始时快照），保留轮数对下一次 /compact 生效、告警阈值即时生效、
-     * MCP 超时对下一次连接/工具调用生效（均逐次读取，ADR 0017）。
+     * 保存执行设置（七项各自范围与整数校验：轮次 10–1000、保留轮数 1–10、
+     * 阈值 50–95、MCP 调用超时 5–300 秒与连接超时 5–120 秒、任务并发上限
+     * 1–8，非法值以中文异常抛回——UI 侧非法输入先回退默认再保存）；轮次上限
+     * 对下一个回合/委派生效（开始时快照），保留轮数对下一次 /compact 生效、
+     * 告警阈值即时生效、MCP 超时对下一次连接/工具调用生效（均逐次读取，
+     * ADR 0017），任务并发上限对队列即时生效。
      */
     set(input: AgentSettings): Promise<AgentSettings>;
   };

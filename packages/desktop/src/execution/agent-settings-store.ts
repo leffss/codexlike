@@ -11,10 +11,13 @@ import {
   DEFAULT_MAX_TOOL_ROUNDS,
   DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
   DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_TASK_CONCURRENCY_LIMIT,
   MCP_CALL_TIMEOUT_SECONDS_MAX,
   MCP_CALL_TIMEOUT_SECONDS_MIN,
   MCP_CONNECT_TIMEOUT_SECONDS_MAX,
   MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+  TASK_CONCURRENCY_LIMIT_MAX,
+  TASK_CONCURRENCY_LIMIT_MIN,
   TOOL_ROUNDS_MAX,
   TOOL_ROUNDS_MIN,
 } from "@codexlike/agent-core/node";
@@ -24,10 +27,12 @@ import { readJsonFile, writeJsonFile } from "../storage/json-file";
 /**
  * 执行设置存储（ADR 0017，GLOSSARY「执行设置」）：agent 执行参数的用户设置，
  * 独立文件 `~/.codexlike/agent-settings.json` 持久化（与现有各设置文件同形态）。
- * 六项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
+ * 七项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
  * 与上下文告警阈值（票 03）、MCP 工具调用超时与连接超时（票 07，秒存储与终端
- * 超时同构）——经内存缓存以 resolver 注入 agent-core（轮次上限回合/运行开始
- * 快照消费，compact、告警阈值与 MCP 超时逐次读取），设置页保存后生效。
+ * 超时同构）、任务并发上限（任务并发上限票 01，GLOSSARY「任务并发上限」）——
+ * 前六项经内存缓存以 resolver 注入 agent-core（轮次上限回合/运行开始快照消费，
+ * compact、告警阈值与 MCP 超时逐次读取），任务并发上限由 desktop 主进程发送
+ * 闸门消费（不经 agent-core，ADR 0022），设置页保存后生效。
  * 各项语义独立，故独立字段、独立校验消息。
  */
 export interface AgentSettings {
@@ -55,11 +60,17 @@ export interface AgentSettings {
    * 执行设置票 07）：改动对下一次连接（含惰性自动重连）生效
    */
   mcpConnectTimeoutSeconds: number;
+  /**
+   * 任务并发上限（1–8，默认 3；任务并发上限票 01，GLOSSARY「任务并发上限」）：
+   * 同时处于执行中的任务个数上限（执行中含等待用户交互）；desktop 主进程发送
+   * 闸门消费，改动对队列即时生效（调大补跑排队、调小不中断运行中）
+   */
+  taskConcurrencyLimit: number;
 }
 
 export interface AgentSettingsStore {
   get(): Promise<AgentSettings>;
-  /** 保存设置（六项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
+  /** 保存设置（七项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
   set(input: AgentSettings): Promise<AgentSettings>;
 }
 
@@ -161,6 +172,12 @@ export function parseAgentSettingsInput(input: unknown): AgentSettings {
       MCP_CONNECT_TIMEOUT_SECONDS_MAX,
       "MCP 连接超时"
     ),
+    taskConcurrencyLimit: validateIntInRange(
+      record["taskConcurrencyLimit"],
+      TASK_CONCURRENCY_LIMIT_MIN,
+      TASK_CONCURRENCY_LIMIT_MAX,
+      "任务并发上限"
+    ),
   };
 }
 
@@ -215,6 +232,13 @@ export function createAgentSettingsStore(options: {
         MCP_CONNECT_TIMEOUT_SECONDS_MAX,
         DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS
       ),
+      // 旧格式文件（任务并发上限票 01 之前只有六项）：缺字段按默认补齐
+      taskConcurrencyLimit: resolveIntInRange(
+        parsed.taskConcurrencyLimit,
+        TASK_CONCURRENCY_LIMIT_MIN,
+        TASK_CONCURRENCY_LIMIT_MAX,
+        DEFAULT_TASK_CONCURRENCY_LIMIT
+      ),
     };
   }
 
@@ -262,6 +286,12 @@ export function createAgentSettingsStore(options: {
         MCP_CONNECT_TIMEOUT_SECONDS_MAX,
         "MCP 连接超时"
       );
+      const taskConcurrencyLimit = validateIntInRange(
+        input.taskConcurrencyLimit,
+        TASK_CONCURRENCY_LIMIT_MIN,
+        TASK_CONCURRENCY_LIMIT_MAX,
+        "任务并发上限"
+      );
       const next: AgentSettings = {
         maxToolRounds,
         maxSubagentToolRounds,
@@ -269,6 +299,7 @@ export function createAgentSettingsStore(options: {
         contextWarningThresholdPercent,
         mcpCallTimeoutSeconds,
         mcpConnectTimeoutSeconds,
+        taskConcurrencyLimit,
       };
       writeJsonFile(filePath, next);
       return next;
