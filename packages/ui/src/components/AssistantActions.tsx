@@ -191,7 +191,8 @@ export function AssistantActions(props: {
         title={exportLabel}
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
       >
-        {/* 下载（向下箭头 + 托盘） */}
+        {/* 下载（向下箭头 + 托盘，lucide download 官方 path）。旧版托盘弧
+            命令多写一位参数，Chromium 解析到 h 处断链只渲染出左下小碎片。 */}
         <svg
           viewBox="0 0 24 24"
           className="h-4 w-4"
@@ -202,8 +203,9 @@ export function AssistantActions(props: {
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M12 3v12m0 0-4-4m4 4 4-4" />
-          <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
       </button>
       <span

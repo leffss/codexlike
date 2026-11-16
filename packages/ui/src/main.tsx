@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import type { LaunchState } from "@codexlike/desktop/ipc";
+import { installScrollbarVisibility } from "./lib/scrollbar-visibility";
 import "./styles.css";
 // highlight.js token 色不再全局导入 github-dark.css：
 // 已在 styles.css 以 --hl-* 变量随 data-theme 主题化（ADR 0006）
@@ -18,6 +19,10 @@ const container = document.getElementById("root");
 if (!container) {
   throw new Error("找不到 #root 挂载点");
 }
+
+// 全局滚动条显隐（透明 thumb 方案）：scroll 捕获 + mousemove 边缘检测
+// 给滚动容器挂 .scrollbar-live；应用生命周期内常驻，不卸载。
+installScrollbarVisibility();
 const root = createRoot(container);
 
 function render(launchState: LaunchState | null) {

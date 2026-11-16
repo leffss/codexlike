@@ -115,22 +115,14 @@ export function SubagentRailPanelBody(props: {
   );
 }
 
-/** 详情区：任务头 + 三态内容（排队提示 / 运行进度 / 报告与操作行） */
+/** 详情区：委派要求块 + 三态内容（排队提示 / 运行进度 / 报告与操作行） */
 function SubagentDetail(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
   const hasReasoning =
     subagent.reasoning !== undefined && subagent.reasoning !== "";
   return (
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-      <div className="flex items-start gap-2">
-        <StatusDot subagent={subagent} />
-        <span className="min-w-0 flex-1 break-words text-sm text-fg">
-          {subagent.task === "" ? "（任务描述缺失）" : subagent.task}
-        </span>
-        <span className={`shrink-0 text-xs ${statusClass(subagent)}`}>
-          {statusText(subagent)}
-        </span>
-      </div>
+      <DelegationBrief subagent={subagent} />
       {hasReasoning && (
         <SubagentThinking
           reasoning={subagent.reasoning!}
@@ -164,6 +156,63 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
           <SubagentReportActions subagent={subagent} />
           <ToolsDetails subagent={subagent} />
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 委派说明块（详情首块）：主代理 spawn 时发来的委派正文——task 参数本身
+ * 即完整委派说明（委派策略要求自包含目标/范围/线索/约束，多为多行长文）。
+ * accent 左边框引述样式特殊标明「这是主代理的输入」，与子代理自身产出
+ * （思考 / 报告）区分；默认 line-clamp-3 只露头部，挂载后测得文本实际
+ * 溢出才显示「展开全部」，开合按 collapse-memory 记忆（默认部分显示）。
+ */
+function DelegationBrief(props: { subagent: SubagentSegment }) {
+  const { subagent } = props;
+  const { open, setOpen } = useCollapseState(
+    `subagent-delegation-${subagent.id}`,
+    false
+  );
+  const textRef = useRef<HTMLParagraphElement | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  // 只在收起态测量：展开后 scrollHeight == clientHeight 会误报未截断，
+  // 按钮随之消失就再也收不回去；SSR / 首帧默认 false（无按钮），挂载后修正。
+  useEffect(() => {
+    if (open) return;
+    const el = textRef.current;
+    if (el !== null) setTruncated(el.scrollHeight > el.clientHeight + 1);
+  }, [open, subagent.task]);
+  return (
+    <div
+      data-testid="subagent-delegation"
+      className="rounded border-l-2 border-accent bg-surface-muted py-2 pl-3 pr-2"
+    >
+      <div className="flex items-center gap-2">
+        <StatusDot subagent={subagent} />
+        <span className="text-xs text-fg-subtle">主代理的委派说明</span>
+        <span className={`ml-auto shrink-0 text-xs ${statusClass(subagent)}`}>
+          {statusText(subagent)}
+        </span>
+      </div>
+      <p
+        ref={textRef}
+        data-testid="subagent-delegation-text"
+        className={`mt-1 whitespace-pre-wrap break-words text-sm text-fg ${
+          open ? "" : "line-clamp-3"
+        }`}
+      >
+        {subagent.task === "" ? "（任务描述缺失）" : subagent.task}
+      </p>
+      {truncated && (
+        <button
+          type="button"
+          data-testid="subagent-delegation-toggle"
+          onClick={() => setOpen(!open)}
+          className="mt-1 text-xs text-accent hover:underline"
+        >
+          {open ? "收起" : "展开全部"}
+        </button>
       )}
     </div>
   );
@@ -453,7 +502,8 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
         title={exportLabel}
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg disabled:opacity-50"
       >
-        {/* 下载（向下箭头 + 托盘） */}
+        {/* 下载（向下箭头 + 托盘，lucide download 官方 path）。旧版托盘弧
+            命令多写一位参数，Chromium 解析到 h 处断链只渲染出左下小碎片。 */}
         <svg
           viewBox="0 0 24 24"
           className="h-4 w-4"
@@ -464,8 +514,9 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M12 3v12m0 0-4-4m4 4 4-4" />
-          <path d="M4 17v2a2 2 2 0 0 0 2 2h12a2 2 2 0 0 0 2-2v-2" />
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
       </button>
       <span

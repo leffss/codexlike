@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { setRememberedOpen } from "../src/lib/collapse-memory";
 import { MessageStream } from "../src/components/MessageStream";
 import {
   SubagentRailPanelBody,
@@ -139,6 +140,47 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     )?.[0];
     expect(block).toContain('open=""');
     expect(html).not.toMatch(/data-testid="subagent-report-actions"/);
+  });
+
+  it("委派说明块：主代理委派正文特殊标明，默认 line-clamp-3 部分显示", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-d")],
+        focus: null,
+      })
+    );
+    expect(html).toMatch(/data-testid="subagent-delegation"/);
+    expect(html).toContain("主代理的委派说明");
+    // accent 左边框引述样式（与子代理自身产出区分）
+    expect(html).toMatch(/data-testid="subagent-delegation"[^>]*border-accent/);
+    // 默认收起：正文带 line-clamp-3；SSR 无测量，切换按钮不渲染
+    expect(html).toMatch(
+      /data-testid="subagent-delegation-text"[^>]*line-clamp-3/
+    );
+    expect(html).not.toMatch(/data-testid="subagent-delegation-toggle"/);
+  });
+
+  it("委派说明块：预置展开记忆时正文无截断类；空任务给占位", () => {
+    setRememberedOpen("subagent-delegation-sa-open", true);
+    const opened = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-open")],
+        focus: null,
+      })
+    );
+    const openedText = opened.match(
+      /data-testid="subagent-delegation-text"[^>]*>任务 sa-open/
+    )?.[0];
+    expect(openedText).toBeDefined();
+    expect(openedText).not.toContain("line-clamp-3");
+
+    const empty = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-empty", { task: "" })],
+        focus: null,
+      })
+    );
+    expect(empty).toContain("（任务描述缺失）");
   });
 });
 
