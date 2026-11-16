@@ -106,3 +106,19 @@ export const DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS = 15;
  */
 export const MCP_CONNECT_TIMEOUT_SECONDS_MIN = 5;
 export const MCP_CONNECT_TIMEOUT_SECONDS_MAX = 120;
+
+/**
+ * 任务并发上限默认值（GLOSSARY「任务并发上限」，ADR 0022）：同时处于执行中的
+ * 任务个数上限（执行中含等待用户交互）。消费点在 desktop 主进程发送闸门，
+ * agent-core 不消费也不注入（无全局任务并发概念）——常量放此处仅取
+ * 「范围/默认值单一来源」：desktop 存储校验与 ui 表单回退共用，防数字分叉。
+ * 默认 3 与子代理并发默认一致（两个机制相互独立，数值巧合非语义耦合）。
+ */
+export const DEFAULT_TASK_CONCURRENCY_LIMIT = 3;
+
+/**
+ * 任务并发上限的设置层合法范围：下界 1 保证至少一个任务能立即执行（无「不限」
+ * 档，想要宽松就设 8），上界 8 封顶防无限并行失去设置意义。
+ */
+export const TASK_CONCURRENCY_LIMIT_MIN = 1;
+export const TASK_CONCURRENCY_LIMIT_MAX = 8;

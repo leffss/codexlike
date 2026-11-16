@@ -41,9 +41,9 @@ export function McpSettingsSection() {
   const [message, setMessage] = useState("");
   const [messageError, setMessageError] = useState(false);
 
-  // MCP 超时两项（票 07）：同一 agent-settings.json 的六项执行设置中，
-  // 本分区只编辑 MCP 两项；保存时其余四项读取当前最新值原样回传
-  // （IPC 六字段整体形状，避免用装载快照覆盖执行分区的并发保存）
+  // MCP 超时两项（票 07）：同一 agent-settings.json 的七项执行设置中，
+  // 本分区只编辑 MCP 两项；保存时其余五项读取当前最新值原样回传
+  // （IPC 七字段整体形状，避免用装载快照覆盖执行分区的并发保存）
   const [callTimeout, setCallTimeout] = useState("30");
   const [connectTimeout, setConnectTimeout] = useState("15");
   const [timeoutLoaded, setTimeoutLoaded] = useState(false);
@@ -72,7 +72,7 @@ export function McpSettingsSection() {
     setTimeoutMessage("");
     try {
       // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
-      // 六项一次保存（同一文件的整体形状），本分区只呈现 MCP 两项的编辑。
+      // 七项一次保存（同一文件的整体形状），本分区只呈现 MCP 两项的编辑。
       const current = await window.codexlike.agentSettings.get();
       const settings = await window.codexlike.agentSettings.set({
         ...current,
