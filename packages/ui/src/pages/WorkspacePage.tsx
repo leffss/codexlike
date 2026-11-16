@@ -51,6 +51,7 @@ import type { SubagentFocus } from "../components/SubagentRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
+import { TaskQueuedNotice } from "../components/TaskQueuedNotice";
 import { WorkPlanCardFromSegments } from "../components/WorkPlanCard";
 import {
   type TitlebarContext,
@@ -69,6 +70,7 @@ import {
   mergeInteractions,
   type MessageSegment,
   type SubagentSegment,
+  type UserSegment,
 } from "../lib/task-view";
 import {
   formatTaskStatus,
@@ -170,6 +172,13 @@ export function WorkspacePage(props: {
   /** 编辑任务的即时读数：事件回调里不读过期的渲染帧状态 */
   const queueEditRef = useRef<QueueEditTask | null>(null);
   queueEditRef.current = queueEdit;
+  /**
+   * 任务排队中的首条执行文本（任务并发上限票 03 / ADR 0022）：随 openTask
+   * 快照与 task-queue-changed 事件接续（live 状态机单一来源）。非 null 且
+   * 未开跑（streaming=false）时：消息流本地呈现首条消息 + 顶部状态条；
+   * 开跑后 user-message 接管首条、dequeue 快照清空字段。
+   */
+  const [queuedStart, setQueuedStart] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   /**
    * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
@@ -252,10 +261,33 @@ export function WorkspacePage(props: {
   const current = tasks.find((task) => task.id === currentId) ?? null;
   const pending = currentId === null ? [] : workspaceState.pending(currentId);
   const interaction = pending[0];
-  const displayMessages =
-    currentId === null
-      ? messages
-      : mergeInteractions(messages, workspaceState.records(currentId));
+  /**
+   * 排队首条的本地呈现窗口（任务并发上限票 03）：有排队快照且未开跑
+   *（开跑瞬间 user-message 信封的 running 已置真而 dequeue 快照可能未到，
+   * 以 streaming 判定避免本地段与真实首条同帧重复）。
+   */
+  const queuedVisible =
+    currentId !== null && queuedStart !== null && !streaming;
+  const displayMessages = useMemo(() => {
+    const merged =
+      currentId === null
+        ? messages
+        : mergeInteractions(messages, workspaceState.records(currentId));
+    if (!queuedVisible || queuedStart === null) return merged;
+    // 排队任务的首条消息尚未进入执行（不落 transcript、无事件），从任务
+    // 排队快照本地回显为首条用户段；开跑后由 user-message 事件接管。
+    return [
+      {
+        id: "queued-start",
+        seq: 0,
+        turnId: "queued-start",
+        responseId: null,
+        kind: "user",
+        content: queuedStart,
+      } satisfies UserSegment,
+      ...merged,
+    ];
+  }, [currentId, messages, queuedVisible, queuedStart, workspaceState]);
   // 子代理段（ADR 0020）：右栏「子代理」tab 的数据来源（消息段过滤）
   const subagentSegments = useMemo(
     () =>
@@ -495,6 +527,8 @@ export function WorkspacePage(props: {
         currentIdRef.current === id && taskRequestRef.current === request;
       setMessages([]);
       setQueueState(EMPTY_QUEUE_STATE);
+      // 排队首条（票 03）：随快照恢复，加载期间先清空防上个任务的值闪现
+      setQueuedStart(null);
       setWorkspaceFiles([]);
       setResources(null);
       toastState.retract("context-warning");
@@ -534,6 +568,7 @@ export function WorkspacePage(props: {
         );
         setMessages(live.items);
         setQueueState(live.queueState);
+        setQueuedStart(live.queuedStart);
         setStreaming(live.activity.running);
         // 运行中恢复：从消息段重推运行起点（轮次起点），工时不因重开清零
         setRunStartedAt(
@@ -664,6 +699,7 @@ export function WorkspacePage(props: {
             ...prev.filter((item) => item.kind === "status"),
           ]);
           setQueueState(live.queueState);
+          setQueuedStart(live.queuedStart);
           setStreaming(live.activity.running);
           // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
           // 连续计时；本地未记账的运行中接续（prev 为空）才从消息段重推
@@ -721,7 +757,11 @@ export function WorkspacePage(props: {
         event.type === "assistant-aborted" ||
         event.type === "error" ||
         event.type === "interaction-request" ||
-        event.type === "interaction-resolved"
+        event.type === "interaction-resolved" ||
+        // 任务排队变更（任务并发上限票 03）：排队态进出（入队/开跑出队/中断
+        // 出队）驱动侧栏徽章与「N 个运行中」统计刷新——后台任务的排队变化
+        // 不进消息流，仅刷新列表
+        event.type === "task-queue-changed"
       ) {
         // 审批事件也驱动侧栏状态徽标（运行中 ↔ 等待审批）
         void refreshTasks();
@@ -769,6 +809,7 @@ export function WorkspacePage(props: {
     // 任务态右栏（可能停在「改动」tab）随任务上下文失效，进入草稿即关闭
     setRailOpen(false);
     setMessages([]);
+    setQueuedStart(null);
     setWorkspaceFiles([]);
     setResources(null);
     setLoading(false);
@@ -1085,6 +1126,7 @@ export function WorkspacePage(props: {
       loadingRef.current = null;
       liveRef.current = null;
       setMessages([]);
+      setQueuedStart(null);
       setWorkspaceFiles([]);
       setResources(null);
       setStreaming(false);
@@ -1443,6 +1485,14 @@ export function WorkspacePage(props: {
   const autoApproveBusy = current !== null && revoking.has(current.id);
   const autoApproveError =
     current === null ? null : (revokeErrors[current.id] ?? null);
+  /**
+   * 「N 个任务运行中」（任务并发上限票 03）：任务列表活动态统计——含等待
+   * 审批/问答（占坑口径，ADR 0022，waiting-user 也视为执行中）；排队任务
+   * 自身 running=false 不计入。侧栏徽章与状态条同一数据面（事件驱动刷新）。
+   */
+  const runningTaskCount = tasks.filter(
+    (task) => task.activity?.running === true
+  ).length;
 
   return (
     <div className="flex h-full">
@@ -1614,6 +1664,19 @@ export function WorkspacePage(props: {
                     {draft.error}
                   </p>
                 )}
+              </div>
+            </div>
+          )}
+          {/* 任务排队状态条（任务并发上限票 03 / ADR 0022）：满员排队期间
+              显示等待原因与当前运行数（首条消息本地回显进消息流）；开跑后
+              随 queuedStart 清空卸载。仅任务态渲染（草稿无排队）。 */}
+          {queuedVisible && (
+            <div
+              className="shrink-0 border-b border-line px-4 py-2"
+              style={contentPadding}
+            >
+              <div className={contentWidthClass}>
+                <TaskQueuedNotice runningCount={runningTaskCount} />
               </div>
             </div>
           )}

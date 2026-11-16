@@ -607,6 +607,126 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
   expect(restored.queueState.sendingId).toBe("q1");
 });
 
+/** 全局任务排队快照条目（任务并发上限票 02/03）：按 desktop 导出形状构造 */
+function queuedStartEntry(overrides: {
+  taskId: string;
+  position: number;
+  text: string;
+}) {
+  return {
+    mentionPaths: [],
+    providerProfileId: "p1",
+    thinkingEffort: "auto" as const,
+    approvalMode: "ask" as const,
+    createdAt: "2026-11-16T08:00:00Z",
+    ...overrides,
+  };
+}
+
+it("任务排队首条消息随 task-queue-changed 与 view 快照接续（票 03）：排队可见、开跑由执行接管、出队清空", () => {
+  const idleActivity = { ...activity, running: false };
+  const enqueue: TaskEventEnvelope = {
+    taskId: "a",
+    executionId: "q1",
+    sequence: 3,
+    activity: { ...idleActivity, queued: true },
+    event: {
+      type: "task-queue-changed",
+      reason: "enqueue",
+      queue: [
+        queuedStartEntry({
+          taskId: "b",
+          position: 0,
+          text: "先排队的那条（别的任务）",
+        }),
+        queuedStartEntry({ taskId: "a", position: 1, text: "排队首条" }),
+      ],
+    },
+  };
+  // 排队中的任务无执行现场（running=false）：enqueue 信封携带全局快照，
+  // 只取本任务条目进 queuedStart——首条消息本地呈现的唯一数据源
+  const before = hydrateLiveTask({ ...snapshot, activity: idleActivity });
+  let state = receiveLiveEvent(before, enqueue);
+  expect(state.queuedStart).toBe("排队首条");
+  // 任务排队是任务状态而非消息增量：不进消息流（items 引用不变）
+  expect(state.items).toBe(before.items);
+
+  // 开跑（desktop 顺序）：user-message 先到（store 出队在 start 之后），
+  // 首条消息由真实执行段接管；快照未清前 queuedStart 保留，显示层按 running 判定
+  const started = receiveLiveEvent(state, {
+    taskId: "a",
+    executionId: "e2",
+    sequence: 4,
+    activity: { ...activity },
+    event: {
+      type: "user-message",
+      message: {
+        id: "user-queued",
+        taskId: "a",
+        role: "user",
+        content: "排队首条",
+        createdAt: "2026-11-16T08:00:01Z",
+      },
+    },
+  });
+  expect(started.items.at(-1)).toMatchObject({
+    kind: "user",
+    content: "排队首条",
+  });
+  expect(started.queuedStart).toBe("排队首条");
+
+  // dequeue 信封（全局快照不再含本任务）→ queuedStart 清空
+  const dequeued = receiveLiveEvent(started, {
+    taskId: "a",
+    executionId: "e2",
+    sequence: 5,
+    activity: { ...activity },
+    event: {
+      type: "task-queue-changed",
+      reason: "dequeue",
+      queue: [
+        queuedStartEntry({
+          taskId: "b",
+          position: 0,
+          text: "先排队的那条（别的任务）",
+        }),
+      ],
+    },
+  });
+  expect(dequeued.queuedStart).toBeNull();
+
+  // 切换/重开恢复：view.events 重放含 enqueue 信封 → queuedStart 恢复
+  const restored = hydrateLiveTask({
+    ...snapshot,
+    executionId: "q1",
+    sequence: 3,
+    events: [enqueue],
+    activity: { ...idleActivity, queued: true },
+  });
+  expect(restored.queuedStart).toBe("排队首条");
+
+  // 中断出队（remove）：最后到达的快照不含本任务 → 恢复后为空
+  const removed = hydrateLiveTask({
+    ...snapshot,
+    executionId: "q1",
+    sequence: 4,
+    events: [
+      enqueue,
+      {
+        ...enqueue,
+        sequence: 4,
+        event: {
+          type: "task-queue-changed",
+          reason: "remove",
+          queue: [],
+        },
+      },
+    ],
+    activity: idleActivity,
+  });
+  expect(removed.queuedStart).toBeNull();
+});
+
 it("输入队列随事件与快照接续（票 01）：入队更新快照，出队开启新执行起点，不进消息流", () => {
   const queued = [
     {
