@@ -293,6 +293,13 @@ export interface TaskView {
    * 切换/重启恢复时队列条（含暂停态与正在发出条目）原样恢复。
    */
   queueState?: QueueSnapshot;
+  /**
+   * 任务排队中的首条执行文本（任务并发上限 review 修复 F2 / ADR 0022）：
+   * 当前排队快照里本任务的条目文本，不在队为 null。重启后排队任务无
+   * task-queue-changed 信封可重放，view 以此字段恢复排队首条回显与
+   * 状态条；同进程会话以 events 里的信封重放为准（晚于快照）。
+   */
+  queuedStart?: string | null;
 }
 
 /**
@@ -466,7 +473,8 @@ export interface TaskApi {
    * 打断指定任务运行中的本轮（停止按钮）：
    * 流式输出立即中断（已生成部分保留）、工具执行中终止子进程。
    * 排队消息存在时队列原样保留并进入队列暂停（票 02）。
-   * 任务空闲时幂等返回 false。
+   * 排队中的任务即使空闲也中断：立即出队回空闲、已发消息保留（票 04
+   * / ADR 0022）——返回 true；完全空闲且不在排队时幂等返回 false。
    */
   interrupt(taskId: string): Promise<boolean>;
   /**

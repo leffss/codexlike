@@ -157,21 +157,31 @@ export function createLiveTasks(manager: TaskManager) {
       | Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>
       | Extract<TaskEventEnvelope["event"], { type: "task-queue-changed" }>
   ): TaskEventEnvelope | null {
-    if (!tasks.has(id)) {
-      if (!manager.list().some((record) => record.id === id)) return null;
-      tasks.set(id, {
-        executionId: randomUUID(),
-        history: manager.transcript(id),
-        subagents: manager.subagents(id),
-        events: [],
-        sequence: 0,
-        viewed: 0,
-        terminalAt: 0,
-        stopped: false,
-        activity: activity(id),
-      });
-    }
-    return accept(id, tasks.get(id)!.executionId, event);
+    const executionId = ensureExecution(id);
+    return executionId === null ? null : accept(id, executionId, event);
+  }
+  /**
+   * 延续或建立无执行现场任务的现场并返回其 executionId（review 修复 F1）：
+   * 排队等离流事件（补落的 user-message）需挂在现场信封上推送；任务不
+   * 存在返回 null（与 acceptQueue 建现场同一分支抽出）。
+   */
+  function ensureExecution(id: string): string | null {
+    const live = tasks.get(id);
+    if (live !== undefined) return live.executionId;
+    if (!manager.list().some((record) => record.id === id)) return null;
+    const created: LiveExecution = {
+      executionId: randomUUID(),
+      history: manager.transcript(id),
+      subagents: manager.subagents(id),
+      events: [],
+      sequence: 0,
+      viewed: 0,
+      terminalAt: 0,
+      stopped: false,
+      activity: activity(id),
+    };
+    tasks.set(id, created);
+    return created.executionId;
   }
   function view(id: string): TaskView | null {
     const record = manager.list().find((record) => record.id === id);
@@ -216,6 +226,7 @@ export function createLiveTasks(manager: TaskManager) {
     begin,
     accept,
     acceptQueue,
+    ensureExecution,
     view,
     activity,
     markViewed,

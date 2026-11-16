@@ -36,8 +36,6 @@ export interface TaskQueueStore {
   append(entry: Omit<QueuedTaskStart, "position">): QueuedTaskStart;
   /** 出队指定任务；不在队列返回 false。 */
   remove(taskId: string): boolean;
-  /** 清空全部排队。 */
-  clear(): void;
   /** 释放存储句柄（宿主退出前调用；内存实现为空操作）。 */
   close(): void;
 }
@@ -94,15 +92,20 @@ export function createTaskQueueCoordinator(deps: {
         const head = store.list()[0];
         if (head === undefined) return;
         if (executingTaskIds().length >= limit()) return;
-        // 开跑成功才出队（崩溃重启不重发由持久层保证，与输入队列同构）
-        await start(head);
+        try {
+          await start(head);
+        } catch {
+          // 开跑失败：队首条目保留（消息不丢、FIFO 不跳过），等待下一个
+          // 触发点（下一次名额释放或上限调大）重试。
+          return;
+        }
+        // 开跑成功才出队（崩溃重启不重发由持久层保证，与输入队列同构）。
+        // 出队落库 / 通知失败（存储故障）与开跑失败是两种错误：消息已进入
+        // 任务，吞错会让条目残留待下轮重复开跑同一首条——上抛由调用方
+        // 记录处置，本轮 pump 就此终止。
         store.remove(head.taskId);
         notify(head.taskId, "dequeue");
       }
-    } catch {
-      // 开跑失败：队首条目保留（消息不丢、FIFO 不跳过），等待下一个
-      // 触发点（下一次名额释放或上限调大）重试。
-      return;
     } finally {
       pumping = false;
     }
@@ -173,9 +176,6 @@ export function createMemoryTaskQueueStore(): TaskQueueStore {
       if (index === -1) return false;
       rows.splice(index, 1);
       return true;
-    },
-    clear() {
-      rows.length = 0;
     },
     close() {},
   };

@@ -73,7 +73,6 @@ export function createSqliteTaskQueueStore(dbPath: string): TaskQueueStore {
     "SELECT COALESCE(MAX(position) + 1, 0) AS next FROM task_queue"
   );
   const removeStmt = db.prepare("DELETE FROM task_queue WHERE task_id = ?");
-  const clearStmt = db.prepare("DELETE FROM task_queue");
 
   return {
     list() {
@@ -99,9 +98,6 @@ export function createSqliteTaskQueueStore(dbPath: string): TaskQueueStore {
     },
     remove(taskId) {
       return removeStmt.run(taskId).changes > 0;
-    },
-    clear() {
-      clearStmt.run();
     },
     close() {
       db.close();

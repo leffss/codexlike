@@ -11,7 +11,7 @@ import type { QueuedTaskStart } from "../../src/tasks/task-queue";
 /**
  * 任务排队 SQLite 持久化（任务并发上限票 05 / ADR 0022）：沿输入队列
  * 存储先例（ADR 0013）——与任务消息同一个库文件的独立连接、有序语义、
- * 重开恢复。只测外部可见的 list/append/remove/clear/close 契约。
+ * 重开恢复。只测外部可见的 list/append/remove/close 契约。
  */
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -49,7 +49,7 @@ it("append 分配递增 position，list 按升序返回完整快照", () => {
   ]);
 });
 
-it("remove 出队幂等；出队后追加 position 不回退；clear 清空", () => {
+it("remove 出队幂等；出队后追加 position 不回退", () => {
   const store = createSqliteTaskQueueStore(tempDbPath("task-queue-store-"));
   cleanup.push(() => store.close());
   store.append({ ...ENTRY });
@@ -61,8 +61,6 @@ it("remove 出队幂等；出队后追加 position 不回退；clear 清空", ()
   // position 单调递增：新条目排在既有之后（严格 FIFO 不因出队错位）
   const third = store.append({ ...ENTRY, taskId: "task-c" });
   expect(third.position).toBeGreaterThan(1);
-  store.clear();
-  expect(store.list()).toEqual([]);
 });
 
 it("close 后重开同一库：排队条目与顺序原样恢复（跨重启不丢）", () => {
