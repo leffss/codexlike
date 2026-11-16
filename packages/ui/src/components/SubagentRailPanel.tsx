@@ -49,11 +49,18 @@ export function SubagentRailPanelBody(props: {
   const { subagents } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
-  // 标记行点击定位：focus 信号变化时选中对应子代理并滚动到列表项
+  // 标记行点击定位：focus 信号变化时选中对应子代理并滚动到列表项。
+  // 每个 focus.seq 只消费一次（ref 幂等）：依赖里保留 subagents 是为
+  // 「段晚于点击到达列表」的重试，但运行中流式会持续产生新数组引用，
+  // 无幂等守卫时每次流式事件都重放 setSelectedId(focus.id)，把用户在
+  // 列表里手动点选的子代理强行拉回 focus 目标（点击无法切换的回归）。
   const focus = props.focus;
+  const consumedFocusSeqRef = useRef(-1);
   useEffect(() => {
     if (focus === null) return;
+    if (focus.seq === consumedFocusSeqRef.current) return;
     if (!subagents.some((item) => item.id === focus.id)) return;
+    consumedFocusSeqRef.current = focus.seq;
     setSelectedId(focus.id);
     listRef.current
       ?.querySelector(`[data-subagent-id="${focus.id}"]`)
