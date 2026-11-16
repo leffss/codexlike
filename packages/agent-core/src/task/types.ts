@@ -313,18 +313,35 @@ export type TaskEvent =
   /**
    * 子代理思考过程的流式增量（GLOSSARY「思考档位」，思考档位 03）：
    * 与报告文本分离，按 subagentId 归属各自的嵌套卡片（并发不串流）；
-   * 随终态报告写入 spawn_subagent 工具记录的 reasoning 列（票 02，
-   * 仅为恢复后展示）；不回传请求历史（provider 层剥离），
+   * 思考全文的权威记录在子代理侧 subagent_messages（票 04 起 spawn 行
+   * 不再拼接）；不回传请求历史（provider 层剥离），
    * 终态由 subagent-report 一并收敛。
    */
-  | { type: "subagent-reasoning"; subagentId: string; delta: string }
+  | {
+      type: "subagent-reasoning";
+      subagentId: string;
+      delta: string;
+      /**
+       * 显式轮键（review 修复：消灭 ui 侧轮边界双写启发式）：本次增量
+       * 属于子代理第几轮流式生成（0 起，与 subagent 循环 round 计数同源）。
+       * 可选字段：ui 读到时按它归并轮次，缺失（构造点未升级）时回退
+       * 增量启发式（见 ui appendSubagentTurnDelta，两处口径互为镜像）。
+       */
+      roundIndex?: number;
+    }
   /**
    * 子代理正文（报告文本）的流式增量（ADR 0021，票 02，形态对齐 subagent-reasoning）：
    * 按轮累积驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages
    * 行落库（逐轮正文与思考，轮边界即行边界），仅为检视与恢复回看；
    * 不进入主任务模型上下文，终态由 subagent-report 一并收敛。
+   * roundIndex 同 subagent-reasoning（显式轮键，缺失回退启发式）。
    */
-  | { type: "subagent-text-delta"; subagentId: string; delta: string }
+  | {
+      type: "subagent-text-delta";
+      subagentId: string;
+      delta: string;
+      roundIndex?: number;
+    }
   /**
    * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
    * ok=false 表示失败或被中断（report 为中文原因）。

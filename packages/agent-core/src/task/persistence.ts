@@ -94,8 +94,15 @@ export interface TaskPersistence {
    * 状态更新见 updateSubagent，按任务列出见 listSubagents。
    */
   insertSubagent(record: SubagentRecord): void;
-  /** 只更新给定字段；目标不存在时静默忽略（与 updateTask 同语义） */
-  updateSubagent(id: string, patch: Partial<Omit<SubagentRecord, "id">>): void;
+  /**
+   * 只更新状态机推进触碰的列（status / startedAt / completedAt）；
+   * 归属与委派说明（taskId / task / queuedAt）建行后不变，不提供更新。
+   * 目标不存在时静默忽略（与 updateTask 同语义）。
+   */
+  updateSubagent(
+    id: string,
+    patch: Partial<Pick<SubagentRecord, "status" | "startedAt" | "completedAt">>
+  ): void;
   /** 指定任务的子代理骨架行，按排队时间正序；未知任务返回空数组 */
   listSubagents(taskId: string): SubagentRecord[];
   /**
@@ -930,24 +937,12 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     },
 
     updateSubagent(id, patch) {
-      // 只更新给定字段（状态机推进只触碰状态与时间列），目标不存在静默忽略
+      // 只更新状态机推进的列（status/startedAt/completedAt），目标不存在静默忽略
       const columns: string[] = [];
       const values: (string | number | null)[] = [];
-      if (patch.taskId !== undefined) {
-        columns.push("task_id = ?");
-        values.push(patch.taskId);
-      }
-      if (patch.task !== undefined) {
-        columns.push("task = ?");
-        values.push(patch.task);
-      }
       if (patch.status !== undefined) {
         columns.push("status = ?");
         values.push(patch.status);
-      }
-      if (patch.queuedAt !== undefined) {
-        columns.push("queued_at = ?");
-        values.push(patch.queuedAt);
       }
       if (patch.startedAt !== undefined) {
         columns.push("started_at = ?");

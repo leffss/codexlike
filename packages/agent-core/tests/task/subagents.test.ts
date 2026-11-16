@@ -1878,7 +1878,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     persistence.close();
   });
 
-  it("轮终态写逐轮正文与思考（票 02）：轮边界即行边界、纯工具轮不产生空行、spawn 行照旧拼接全文", async () => {
+  it("轮终态写逐轮正文与思考（票 02）：轮边界即行边界、纯工具轮不产生空行、spawn 行瘦身只回填报告", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     writeFileSync(join(workspace, "note.txt"), "轮终态用例的文件内容");
     const { task, persistence } = makeSubagentTask({
@@ -1956,6 +1956,18 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     });
     // 时间戳随轮递增（fakeClock 单调），双归属齐备
     expect(rounds[0]!.createdAt < rounds[1]!.createdAt).toBe(true);
+    // 显式轮键（review 修复）：第 1 轮 0、纯工具轮后第 3 轮 2——与
+    // flushRound 的行边界同源（ui 侧按它归并轮次，消灭双写启发式）
+    const subTextDeltas = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-text-delta" }> =>
+        event.type === "subagent-text-delta"
+    );
+    expect(subTextDeltas.map((event) => event.roundIndex)).toEqual([0, 2]);
+    const subReasonings = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-reasoning" }> =>
+        event.type === "subagent-reasoning"
+    );
+    expect(subReasonings.map((event) => event.roundIndex)).toEqual([0, 2]);
     // 逐条工具调用：两次 read_file 各一行（完成即写）
     expect(
       persistence.listSubagentToolCalls("task-1").map((row) => row.id)

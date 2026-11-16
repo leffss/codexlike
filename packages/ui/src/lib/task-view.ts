@@ -7,6 +7,8 @@ import type {
   TranscriptItem,
 } from "@codexlike/agent-core";
 
+import { subagentSegmentState } from "./subagent-status";
+
 /**
  * 时序消息段模型（GLOSSARY「消息段」「轮次」，ADR 0011）：
  * 任务视图状态是按事件发生顺序排列的扁平消息段序列——思考段、正文段、
@@ -281,9 +283,22 @@ function replaceSegment(
  * 行按委派说明匹配快照（task 参数原文 == 骨架行 task），命中即由快照
  * 重建完整过程（骨架状态与起止时间 + 逐轮正文与思考 + 工具清单），
  * 报告与 ok 仍取自行本身（行 output 含截断标记等终稿口径）；未命中的
- * 行回退 subagentFromToolRecord 旧路径（旧任务照旧）。无 spawn 行的
- * 快照（运行中被杀：行随轮末回填、进程死亡未落）追加在时间线末尾
- * 留痕——被杀时刻必然晚于任何已落库条目，末尾即其时序位置。
+ * 行回退 subagentFromToolRecord 旧路径（旧任务照旧）。
+ *
+ * 匹配键为何是委派说明文本而非 id（review 显式化的顺序对齐假设）：
+ * 数据模型两侧无共享 id 可桥——spawn 行（tool_calls）与骨架行（subagents）
+ * 互不持有对方 id，快照亦不带 toolCallId；桥接须给 subagents 表加列并做
+ * 旧库迁移，与 ADR 0021「建表即兼容、无数据迁移」冲突。文本匹配在
+ * 同文本多委派场景下靠顺序对齐保证正确，且该顺序有结构性保证：
+ * 行侧 listToolCalls 按（created_at=委派时刻, rowid=回填插入序）排序，
+ * 轮末回填（agent-task deferredDelegations）按派发序落库；快照侧
+ * listSubagents 按（queued_at=入队时刻, rowid）排序——两序同源（同一
+ * 任务时钟、同一执行序），findIndex 取首个文本匹配即按序配对。
+ * 守护测试见 tests/subagent-view.test.ts「同文本多委派」。
+ *
+ * 无 spawn 行的快照（运行中被杀 / 排队中被杀：行随轮末回填、进程死亡
+ * 未落）按委派时点（queuedAt）插入时间线的正确位置留痕——排队被杀的
+ * 委派回到委派时点附近，而非堆积在末尾。
  */
 export function initialTranscript(
   history: TranscriptItem[],
@@ -309,6 +324,7 @@ export function initialTranscript(
       const call = item.call;
       if (call.toolName === "spawn_subagent") {
         const task = subagentTaskOf(call);
+        // 顺序对齐假设（见函数注释）：同文本时 findIndex 首个匹配 = 按委派序配对
         const matched = pending.findIndex(
           (entry) => entry.record.task === task
         );
@@ -341,9 +357,26 @@ export function initialTranscript(
     const message = item.message;
     segments.push(...messageSegments(message, segments));
   }
-  // 无 spawn 行的快照（运行中被杀 / 排队中被杀）：末尾留痕
+  // 无 spawn 行的快照（运行中被杀 / 排队中被杀）：按委派时点插入正确位置
+  // （pending 已按 queuedAt 正序，逐个插入自然保序）；queuedAt 缺失或晚于
+  // 全部已落库条目时落末尾。段 seq 仍取全局递增（永不复用），只有数组
+  // 位置反映时序；turnId 以插入点之前的段推导（归入委派发生时的轮）。
   for (const entry of pending) {
-    segments.push(subagentFromSnapshot(entry, null, segments));
+    const at = parseIso(entry.record.queuedAt);
+    let index = segments.length;
+    if (at !== undefined) {
+      // 从尾向前找第一个不晚于委派时点的段，插到它后面（同时刻稳定居后）
+      while (index > 0) {
+        const prev = segments[index - 1]!;
+        if (prev.at === undefined || prev.at <= at) break;
+        index -= 1;
+      }
+    }
+    segments.splice(
+      index,
+      0,
+      subagentFromSnapshot(entry, null, segments, segments.slice(0, index))
+    );
   }
   return segments;
 }
@@ -365,31 +398,29 @@ function subagentTaskOf(call: ToolCallRecord): string {
 /**
  * 恢复新路径（ADR 0021 票 04）：子代理快照 → 子代理段。
  * call 为匹配到的 spawn 行（报告 / ok / 段时序位置与 toolCallId 来源）；
- * 运行中被杀的快照无行（call=null）：报告为空、追加在时间线末尾。
+ * 无行的快照（call=null，运行中/排队中被杀）：报告为空、按委派时点插回
+ * 时间线（见 initialTranscript 尾部插入）。
+ * segments 为 seq 与兜底轮的推导基准；turnScope 为 turnId 推导基准
+ * （无行快照插回中段时 = 插入点之前缀，缺省同 segments）。
  */
 function subagentFromSnapshot(
   entry: SubagentSnapshot,
   call: ToolCallRecord | null,
-  segments: MessageSegment[]
+  segments: MessageSegment[],
+  turnScope: MessageSegment[] = segments
 ): SubagentSegment {
   const { record } = entry;
   return {
     kind: "subagent",
     id: record.id,
     seq: nextSeq(segments),
-    turnId: deriveTurnId(segments, record.id),
+    turnId: deriveTurnId(turnScope, record.id),
     responseId: null,
     at: parseIso(record.queuedAt),
     toolCallId: call?.id ?? "",
     task: record.task,
-    state:
-      record.status === "interrupted"
-        ? "interrupted"
-        : record.status === "queued"
-          ? "queued"
-          : record.status === "running"
-            ? "running"
-            : "done",
+    // 骨架 status → 段 state 的唯一映射在 lib/subagent-status（单一来源）
+    state: subagentSegmentState(record.status),
     startedAt: record.startedAt,
     endedAt: record.completedAt,
     // 逐轮重建（轮边界即行边界）；空行不落库，这里不产生空轮
@@ -719,7 +750,8 @@ export function applyTaskEvent(
     case "subagent-text-delta": {
       // 子代理思考/正文增量（ADR 0021）：逐轮累积到所属卡片（未知
       // subagentId——任务切换后迟到——忽略）；思考另累积跨轮全文
-      // （reasoning 字段，旧记录恢复同构），分轮呈现读 turns
+      // （reasoning 字段，旧记录恢复同构），分轮呈现读 turns；
+      // 轮次按事件显式轮键（roundIndex，子代理循环同源计数）归并
       const isText = event.type === "subagent-text-delta";
       return replaceSegment(items, event.subagentId, (item) =>
         item.kind === "subagent"
@@ -728,7 +760,8 @@ export function applyTaskEvent(
               turns: appendSubagentTurnDelta(
                 item.turns ?? [],
                 isText,
-                event.delta
+                event.delta,
+                event.roundIndex
               ),
               ...(isText
                 ? {}
@@ -843,16 +876,45 @@ function finalizeResponse(
 }
 
 /**
- * 子代理轮增量归并（轮边界启发式，与子代理循环落库口径同构）：一轮 =
- * 一次流式生成，思考先于正文；正文已出现后的思考增量、工具事件之后的
- * 首个增量都属新轮。工具事件由 subagentTurnBoundary 预置空轮占位，
- * 正文增量追加到当前轮（流内正文连续），思考增量在无正文的当前轮累积。
+ * 子代理轮增量归并：一轮 = 一次流式生成（与 agent-core 子代理循环
+ * flushRound 的行边界同构——那边改轮边界须同步核对这里）。
+ *
+ * 轮次判定优先读显式轮键 roundIndex（事件携带，与落库 round 计数同源，
+ * review 修复消灭双写启发式）：目标轮不足则以空轮补齐（与
+ * subagentTurnBoundary 的工具占位轮同构），增量落入对应轮。
+ * 键缺失（构造点未升级的旧事件 / fixtures）回退增量启发式：思考先于
+ * 正文，正文已出现后的思考增量属新轮；工具事件由 subagentTurnBoundary
+ * 预置空轮占位，正文增量追加到当前轮（流内正文连续），思考增量在
+ * 无正文的当前轮累积。两条路径产出的轮结构同构（守护测试见
+ * tests/subagent-view.test.ts「显式轮键」）。
  */
 function appendSubagentTurnDelta(
   turns: SubagentTurn[],
   isText: boolean,
-  delta: string
+  delta: string,
+  roundIndex?: number
 ): SubagentTurn[] {
+  if (roundIndex !== undefined) {
+    if (!Number.isInteger(roundIndex) || roundIndex < 0) {
+      // 非法轮键（防御）：按缺失回退启发式，不产生稀疏数组
+      return appendSubagentTurnDelta(turns, isText, delta);
+    }
+    let next = turns;
+    while (next.length <= roundIndex) {
+      next = [...next, { content: "" }];
+    }
+    const target = next[roundIndex]!;
+    return [
+      ...next.slice(0, roundIndex),
+      isText
+        ? { ...target, content: target.content + delta }
+        : {
+            ...target,
+            reasoning: (target.reasoning ?? "") + delta,
+          },
+      ...next.slice(roundIndex + 1),
+    ];
+  }
   const last = turns[turns.length - 1];
   if (last === undefined) {
     return [isText ? { content: delta } : { content: "", reasoning: delta }];

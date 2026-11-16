@@ -9,7 +9,13 @@ import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
 import { subagentExportMarkdown } from "../lib/subagent-export";
-import { statusClass, statusText } from "../lib/subagent-status";
+import {
+  isTerminalSubagentState,
+  statusClass,
+  statusDotClassName,
+  statusPulses,
+  statusText,
+} from "../lib/subagent-status";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
 import type { SubagentSegment } from "../lib/task-view";
@@ -283,26 +289,36 @@ function RunningStatus(props: { subagent: SubagentSegment }) {
 }
 
 /**
- * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库、票 04 起分轮）：
- * 与主任务思考块同构——流式运行中默认展开实时可见、结束自动收起、收起后
- * 以一行摘要回看（开合按 collapseKey 记忆）；与报告文本分离，重启后由
- * 快照逐轮重建（旧记录回退拼接种单段，无轮边界）。
+ * 逐轮折叠块骨架（review Duplicated Code 修复：SubagentThinking 与
+ * SubagentBody 同构提取）：流式默认展开、结束收起、collapse-memory 按
+ * variant 记忆（subagent-thinking-{id} / subagent-body-{id}，语义不变）、
+ * 逐轮分段（多轮时标注轮序）。data-testid 以 variant 前缀派生
+ * （subagent-thinking-* / subagent-body-*），e2e 断言目标不变。
  * 受控 <details open> 的 onToggle 记忆规则同 ThinkingBlock（见其注释）。
  */
-function SubagentThinking(props: {
+function SubagentRoundsDisclosure(props: {
   rounds: string[];
   streaming?: boolean;
   subagentId: string;
+  variant: "thinking" | "body";
 }) {
-  const { rounds, streaming } = props;
+  const { rounds, streaming, variant } = props;
   const { open, setOpen } = useCollapseState(
-    `subagent-thinking-${props.subagentId}`,
+    `subagent-${variant}-${props.subagentId}`,
     streaming === true
   );
   const summary = thinkingSummary(rounds[rounds.length - 1] ?? "");
+  const title =
+    streaming === true
+      ? variant === "thinking"
+        ? "思考中"
+        : "生成中"
+      : variant === "thinking"
+        ? "已思考"
+        : "正文";
   return (
     <details
-      data-testid="subagent-thinking-block"
+      data-testid={`subagent-${variant}-block`}
       open={open}
       onToggle={(event) => {
         if (event.currentTarget.open !== open) {
@@ -312,25 +328,30 @@ function SubagentThinking(props: {
       className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
     >
       <summary
-        data-testid="subagent-thinking-toggle"
+        data-testid={`subagent-${variant}-toggle`}
         className="flex cursor-pointer select-none items-center gap-2"
       >
         <DisclosureArrow open={open} />
         <span
-          data-testid="subagent-thinking-summary"
+          data-testid={`subagent-${variant}-summary`}
           className="min-w-0 flex-1 truncate"
         >
-          {streaming === true ? "思考中" : "已思考"}
+          {title}
           {rounds.length > 1 && ` · ${rounds.length} 轮`}
           {summary !== "" && ` · ${summary}`}
         </span>
       </summary>
       <div
-        data-testid="subagent-thinking-content"
-        className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
+        data-testid={`subagent-${variant}-content`}
+        className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg ${
+          variant === "thinking" ? "max-h-48" : "max-h-64"
+        }`}
       >
         {rounds.map((text, index) => (
-          <div key={index} data-testid={`subagent-thinking-round-${index + 1}`}>
+          <div
+            key={index}
+            data-testid={`subagent-${variant}-round-${index + 1}`}
+          >
             {rounds.length > 1 && (
               <p className="mb-1 text-fg-subtle">第 {index + 1} 轮</p>
             )}
@@ -343,62 +364,32 @@ function SubagentThinking(props: {
 }
 
 /**
+ * 子代理思考折叠块（思考档位 03；票 02 起随委派记录落库、票 04 起分轮）：
+ * 与主任务思考块同构——流式运行中默认展开实时可见、结束自动收起、收起后
+ * 以一行摘要回看；与报告文本分离，重启后由快照逐轮重建（旧记录回退
+ * 拼接种单段，无轮边界）。实现为 SubagentRoundsDisclosure 的 variant 薄壳。
+ */
+function SubagentThinking(props: {
+  rounds: string[];
+  streaming?: boolean;
+  subagentId: string;
+}) {
+  return <SubagentRoundsDisclosure {...props} variant="thinking" />;
+}
+
+/**
  * 子代理正文折叠块（ADR 0021 票 04）：与思考折叠同构（流式默认展开、
- * 结束收起、collapse-memory 独立键 subagent-body-{id}），逐轮分段呈现
- * （轮边界 = subagent_messages 行边界）；最终轮即报告轮——完成态报告
- * 块照旧呈现全文，本块是过程回看视角，两者并存不互斥。
+ * 结束收起、collapse-memory 独立键），逐轮分段呈现（轮边界 =
+ * subagent_messages 行边界）；最终轮即报告轮——完成态报告块照旧呈现
+ * 全文，本块是过程回看视角，两者并存不互斥。实现为
+ * SubagentRoundsDisclosure 的 variant 薄壳。
  */
 function SubagentBody(props: {
   rounds: string[];
   streaming?: boolean;
   subagentId: string;
 }) {
-  const { rounds, streaming } = props;
-  const { open, setOpen } = useCollapseState(
-    `subagent-body-${props.subagentId}`,
-    streaming === true
-  );
-  const summary = thinkingSummary(rounds[rounds.length - 1] ?? "");
-  return (
-    <details
-      data-testid="subagent-body-block"
-      open={open}
-      onToggle={(event) => {
-        if (event.currentTarget.open !== open) {
-          setOpen(event.currentTarget.open);
-        }
-      }}
-      className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
-    >
-      <summary
-        data-testid="subagent-body-toggle"
-        className="flex cursor-pointer select-none items-center gap-2"
-      >
-        <DisclosureArrow open={open} />
-        <span
-          data-testid="subagent-body-summary"
-          className="min-w-0 flex-1 truncate"
-        >
-          {streaming === true ? "生成中" : "正文"}
-          {rounds.length > 1 && ` · ${rounds.length} 轮`}
-          {summary !== "" && ` · ${summary}`}
-        </span>
-      </summary>
-      <div
-        data-testid="subagent-body-content"
-        className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
-      >
-        {rounds.map((text, index) => (
-          <div key={index} data-testid={`subagent-body-round-${index + 1}`}>
-            {rounds.length > 1 && (
-              <p className="mb-1 text-fg-subtle">第 {index + 1} 轮</p>
-            )}
-            <p className="mb-2 last:mb-0">{text}</p>
-          </div>
-        ))}
-      </div>
-    </details>
-  );
+  return <SubagentRoundsDisclosure {...props} variant="body" />;
 }
 
 /** 工具清单折叠（行尾耗时：起止对齐全才显示） */
@@ -653,23 +644,15 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
 /* ------------------------------------------------------------------ */
 /* 共享小件（列表行与详情头共用；标记行 SubagentStreamMarker 复用导出） */
 
-/** 状态点：排队灰 / 运行黄脉冲 / 中断黄静态 / 完成绿 / 失败红 */
+/** 状态点：排队灰 / 运行黄脉冲 / 中断黄静态 / 完成绿 / 失败红（配色与脉冲
+ *  的单一来源在 lib/subagent-status，review Repeated Switches 修复） */
 export function StatusDot(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
-  const running = subagent.state === "running";
-  const cls =
-    subagent.state === "done"
-      ? subagent.ok === false
-        ? "bg-danger-fg"
-        : "bg-ok-fg"
-      : subagent.state === "running" || subagent.state === "interrupted"
-        ? "bg-warn-fg"
-        : "bg-fg-subtle";
   return (
     <span
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${cls} ${
-        running ? "animate-pulse" : ""
-      }`}
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClassName(
+        subagent
+      )} ${statusPulses(subagent) ? "animate-pulse" : ""}`}
     />
   );
 }
@@ -689,12 +672,12 @@ export function formatElapsed(
   if (subagent.startedAt === null) return null;
   const started = Date.parse(subagent.startedAt);
   if (Number.isNaN(started)) return null;
-  const end =
-    subagent.state === "done" || subagent.state === "interrupted"
-      ? subagent.endedAt === null
-        ? NaN
-        : Date.parse(subagent.endedAt)
-      : now;
+  // 终态定格口径（done/interrupted）取自 lib/subagent-status 单一来源
+  const end = isTerminalSubagentState(subagent.state)
+    ? subagent.endedAt === null
+      ? NaN
+      : Date.parse(subagent.endedAt)
+    : now;
   if (Number.isNaN(end)) return null;
   const seconds = Math.max(0, Math.floor((end - started) / 1000));
   const minutes = Math.floor(seconds / 60);

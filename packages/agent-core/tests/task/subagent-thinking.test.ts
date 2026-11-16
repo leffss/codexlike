@@ -643,17 +643,21 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
       "调研报告",
       "正文续段",
     ]);
+    // 显式轮键（review 修复）：单轮流式生成 roundIndex=0（与子代理循环
+    // round 计数同源，ui 侧按它归并轮次）
+    expect(subText.map((event) => event.roundIndex)).toEqual([0, 0]);
     const started = events.find((event) => event.type === "subagent-start");
     for (const event of subText) {
       expect(event.subagentId).toBe(
         started?.type === "subagent-start" ? started.subagentId : undefined
       );
     }
-    // 正文与思考分离：subagent-reasoning 只携带思考增量
+    // 正文与思考分离：subagent-reasoning 只携带思考增量（轮键同源）
     const subReasoning = events.filter(
       (event) => event.type === "subagent-reasoning"
     );
     expect(subReasoning.map((event) => event.delta)).toEqual(["子代理先想想"]);
+    expect(subReasoning.map((event) => event.roundIndex)).toEqual([0]);
     // 主任务 assistant 正文不含子代理正文（互不串流）
     expect(
       events

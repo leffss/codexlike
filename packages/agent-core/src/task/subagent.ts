@@ -369,6 +369,10 @@ export function createSubagentOrchestrator(
     /**
      * 轮终态即写（票 02）：本轮正文与思考落一行，任意时刻强杀应用，
      * 已完成轮（含中断/截断轮的部分内容）都已在库；无内容不落空行。
+     *
+     * 轮边界口径的镜像在 ui 侧 appendSubagentTurnDelta（事件增量按
+     * roundIndex 归并成同一套轮）：这里改轮边界（何时清零缓冲、何时
+     * 落行）须同步核对那边与 subagentTurnBoundary 的口径一致。
      */
     function flushRound(): void {
       if (roundText === "" && roundReasoning === "") {
@@ -467,6 +471,9 @@ export function createSubagentOrchestrator(
               type: "subagent-reasoning",
               subagentId: entry.subagentId,
               delta: part.text,
+              // 显式轮键（0 起 = 本轮流式生成序）：ui 侧按它归并轮次，
+              // 与 flushRound 的行边界同源（round 在工具轮后才递增）
+              roundIndex: round,
             });
           } else if (part.type === "text-delta") {
             output += part.text;
@@ -477,6 +484,7 @@ export function createSubagentOrchestrator(
               type: "subagent-text-delta",
               subagentId: entry.subagentId,
               delta: part.text,
+              roundIndex: round,
             });
           } else if (part.type === "tool-call") {
             toolCalls.push({
