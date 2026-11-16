@@ -320,6 +320,19 @@ const activityCases: {
     },
   },
   {
+    name: "排队中（任务并发上限票 03）",
+    label: "排队中",
+    overrides: {
+      activity: {
+        running: false,
+        waitingForUser: false,
+        outcome: null,
+        unread: false,
+        queued: true,
+      },
+    },
+  },
+  {
     name: "失败已读仍保留结果",
     label: "失败",
     overrides: {
@@ -495,6 +508,44 @@ it("等待用户时侧栏图标保持静态，仅真正运行中转圈（反馈3
     createElement(TaskActivityBadge, { task: running, compact: true })
   );
   expect(runningHtml).toContain("animate-spin");
+});
+
+it("排队中徽章静态时钟弱于运行中转圈、强于无状态（任务并发上限票 03）", () => {
+  const queued = task({
+    activity: {
+      running: false,
+      waitingForUser: false,
+      outcome: null,
+      unread: false,
+      queued: true,
+    },
+  });
+  const html = renderToStaticMarkup(
+    createElement(TaskActivityBadge, { task: queued, compact: true })
+  );
+  // 静态时钟：不转圈、非 accent 蓝，muted 色弱于运行中
+  expect(html).not.toContain("animate-spin");
+  expect(html).not.toContain("text-accent");
+  expect(html).toContain("text-fg-muted");
+  // 时钟图标（圆盘 + 指针），尺寸为非运行中的小档
+  expect(html).toMatch(/width="10"/);
+  expect(html).toContain('cx="6" cy="6" r="3.5"');
+
+  // 开跑后（queued 撤销、running 接管）：切回运行中样式（转圈 accent）
+  const started = task({
+    activity: {
+      running: true,
+      waitingForUser: false,
+      outcome: null,
+      unread: false,
+      queued: false,
+    },
+  });
+  const startedHtml = renderToStaticMarkup(
+    createElement(TaskActivityBadge, { task: started, compact: true })
+  );
+  expect(startedHtml).toContain("animate-spin");
+  expect(startedHtml).toContain("text-accent");
 });
 
 it.each([false, true])(
