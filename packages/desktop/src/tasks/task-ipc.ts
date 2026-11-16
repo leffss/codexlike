@@ -11,6 +11,7 @@ import {
 
 import {
   APPROVAL_MODES,
+  DEFAULT_TASK_CONCURRENCY_LIMIT,
   parseThinkingEffort,
   workbenchKey,
   type AgentResourceSnapshot,
@@ -33,6 +34,11 @@ import {
 } from "./input-queue";
 import { registerWorkbenchHandlers } from "./workbench-ipc";
 import { createLiveTasks } from "./live-tasks";
+import {
+  createMemoryTaskQueueStore,
+  createTaskQueueCoordinator,
+  type TaskQueueStore,
+} from "./task-queue";
 import { createTaskManagement } from "./task-management";
 import { createTaskMembership } from "./task-membership";
 import { readMentionAttachments } from "./mentions";
@@ -68,7 +74,16 @@ export function registerTaskHandlers(options: {
   resourcesFor: (record: { workspacePath: string }) => AgentResourceSnapshot;
   /** 输入队列持久化（票 01 / ADR 0013）：同一 SQLite 库的独立连接；缺省内存（单测装配）。 */
   queueStore?: InputQueueStore;
-}): TaskExitRuntime & { startInputQueues(): void } {
+  /**
+   * 任务并发上限 resolver（任务并发上限票 02，ADR 0022）：读主进程执行设置
+   * 内存缓存，逐次调用取最新值（调大即时生效）。缺省默认值 3——生产装配
+   * （main.ts）注入真实 resolver，未注入的既有单测装配按默认口径（并发
+   * 不超过 3 的既有用例行为不变）。
+   */
+  concurrencyLimit?: () => number;
+  /** 任务排队持久化（票 02 内存态；票 05 换真实实现）：缺省内存（单测装配）。 */
+  taskQueueStore?: TaskQueueStore;
+}): TaskExitRuntime & { startInputQueues(): void; pumpTaskQueue(): void } {
   const {
     manager,
     profiles,
@@ -82,6 +97,8 @@ export function registerTaskHandlers(options: {
     worktreeService,
     resourcesFor,
     queueStore = createMemoryInputQueueStore(),
+    concurrencyLimit = () => DEFAULT_TASK_CONCURRENCY_LIMIT,
+    taskQueueStore = createMemoryTaskQueueStore(),
   } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（tasks:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
@@ -124,10 +141,54 @@ export function registerTaskHandlers(options: {
       input.event
     );
     if (!envelope) return;
+    // 任务排队态（票 02）不属于执行现场：信封活动态统一补 queued（单一真相
+    // 是任务排队协调器的快照，live-tasks 不感知应用级排队）。
+    envelope.activity.queued = taskQueue.isQueued(input.taskId);
     const win = getWindow();
     if (win !== null && !win.isDestroyed()) {
       win.webContents.send(IPC.taskEvents, envelope);
     }
+  }
+
+  // 任务排队协调器（任务并发上限票 02，ADR 0022）：执行中任务数（含等待
+  // 用户交互）达到上限时，空闲任务的发送入队，名额释放后 FIFO 自动开跑。
+  // 占坑口径单一真相 = management.execution 的 running 判定（executions
+  // 登记 + 任务状态 + 待回应交互三源或，waiting-user 期间不释放）。
+  const taskQueue = createTaskQueueCoordinator({
+    store: taskQueueStore,
+    limit: concurrencyLimit,
+    executingTaskIds: () =>
+      manager
+        .list()
+        .filter((record) => management.execution(record.id)?.running ?? false)
+        .map((record) => record.id),
+    // 开跑排队任务：走发送主路径的内部消费（跳过用户路径检查与闸门入队，
+    // 满员竞态由 deliverMessage 复查兜底），参数取入队时的快照。
+    start: (entry) => sendInternal(entry.taskId, entry),
+    onChange: (taskId, reason, queue) => {
+      // 排队变更经任务事件信封推送（空闲任务无执行现场也延续水位，与
+      // 输入队列 queue-changed 同构），所有工作台窗口收到同一权威快照。
+      const envelope = liveTasks.acceptQueue(taskId, {
+        type: "task-queue-changed",
+        reason,
+        queue,
+      });
+      if (!envelope) return;
+      envelope.activity.queued = taskQueue.isQueued(taskId);
+      for (const window of getWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(IPC.taskEvents, envelope);
+        }
+      }
+    },
+  });
+
+  /** 活动态单点取数（票 02）：执行/查看状态叠加应用级排队标志。 */
+  function activityOf(taskId: string) {
+    return {
+      ...liveTasks.activity(taskId),
+      queued: taskQueue.isQueued(taskId),
+    };
   }
 
   // 输入队列（票 01 / ADR 0013）：任务忙时 send 入队，执行结束或入队时空闲
@@ -183,7 +244,7 @@ export function registerTaskHandlers(options: {
     waiters.add(release);
     streamWaiters.set(taskId, waiters);
     try {
-      await sendQueued(taskId, entry);
+      await sendInternal(taskId, entry);
     } catch (error) {
       // 启动失败：注销等待（end() 可能已提前释放），条目由协调器保留
       waiters.delete(release);
@@ -208,7 +269,13 @@ export function registerTaskHandlers(options: {
         // 流结束（完成/出错/中断）：唤醒等待本轮的消费循环并尝试取队首（票 01）
         releaseStreamWaiters(taskId);
         // 应用退出中断不等于插话完成：保留用户暂停，不在收尾时触发下一轮。
-        if (!stopping) queues.onIdle(taskId);
+        if (!stopping) {
+          queues.onIdle(taskId);
+          // 名额释放（票 02 / ADR 0022）：任务排队按 FIFO 推进；同时重泵
+          // 各任务输入队列——此前被满员拦下的内部消费（条目保留）在此重试。
+          continueInputQueues();
+          void taskQueue.pump();
+        }
       },
     };
   }
@@ -226,6 +293,8 @@ export function registerTaskHandlers(options: {
     for (const taskId of result?.taskIds ?? []) {
       liveTasks.forget(taskId);
       queueStore.clear(taskId);
+      // 项目移除出队（票 02）：排队条目随之清除，避免开跑重试堵住 FIFO 队列
+      taskQueue.remove(taskId);
       void browserManager?.closeTask(taskId).catch(() => {});
     }
     return result;
@@ -244,7 +313,8 @@ export function registerTaskHandlers(options: {
   ipcMain.handle(IPC.tasks.list, () =>
     manager.list().map((record) => ({
       ...record,
-      activity: liveTasks.activity(record.id),
+      // 活动态含任务排队标志（票 02）：侧栏「排队中」徽章的数据来源
+      activity: activityOf(record.id),
     }))
   );
   ipcMain.handle(IPC.tasks.view, (_e, taskId: unknown) => {
@@ -254,7 +324,12 @@ export function registerTaskHandlers(options: {
     // 输入队列快照（票 01/02，review 重构收拢三元组）：切回任务时队列条原样恢复
     return view === null
       ? null
-      : { ...view, queueState: queueSnapshot(taskId) };
+      : {
+          ...view,
+          // 活动态含任务排队标志（票 02）：任务内排队状态条的数据来源（票 03）
+          activity: activityOf(taskId),
+          queueState: queueSnapshot(taskId),
+        };
   });
   ipcMain.handle(
     IPC.tasks.markViewed,
@@ -468,6 +543,9 @@ export function registerTaskHandlers(options: {
           !manager.messages(id).length
         ) {
           manager.removeUnstarted(id);
+          // 回收未开始的任务时同步出队（票 02）：满员入队后的后续步骤失败
+          // 也会走到这里，残留条目会在开跑重试时永远失败堵住 FIFO 队列。
+          taskQueue.remove(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
               `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式任务，可重试）`,
@@ -519,9 +597,11 @@ export function registerTaskHandlers(options: {
    * 发送核心（review 重构拆分）：用户直发与队列消费共用——参数校验、参数快照、
    * 占位、流式事件泵。来源以具名 source 区分（取代 fromQueue 布尔尾参）：
    * - user：渲染层直发。任务忙时改为入队（票 01）；等待用户交互时明确拒绝；
-   *   暂停期间的直发登记为插话（票 02）。
-   * - queue：队列消费内部发送。不再入队（避免自我吞掉），也不算插话；
-   *   参数取入队时的快照。竞态以启动失败保留条目。
+   *   暂停期间的直发登记为插话（票 02）。满员时经任务并发闸门改入任务
+   *   排队静默返回（任务并发上限票 02）。
+   * - queue：内部消费发送（输入队列消费与任务排队开跑共用，票 02）。不再
+   *   入队（避免自我吞掉），也不算插话；参数取入队时的快照。竞态以启动
+   *   失败保留条目（含撞满员闸门）。
    */
   async function deliverMessage(input: {
     source: "user" | "queue";
@@ -589,7 +669,9 @@ export function registerTaskHandlers(options: {
       if (executionState?.waitingForUser) {
         throw new Error("任务正在等待审批或问答，请先回应后再发送");
       }
-      if (executionState?.running ?? false) {
+      // 排队任务在输入队列语义上视同忙（票 04 / ADR 0022）：排队期间再发的
+      // 消息进入该任务输入队列，开跑后的轮末按序自动发出——防排队期间消息丢失。
+      if ((executionState?.running ?? false) || taskQueue.isQueued(taskId)) {
         queues.enqueue(taskId, {
           text,
           mentionPaths: mentionPaths ?? [],
@@ -610,6 +692,24 @@ export function registerTaskHandlers(options: {
     // await 后复查退出闸门；已到达的异步发送不能在 flush 期间偷启动。
     await resumeAcceptedStart();
     assertOpen();
+    // 全局任务并发闸门（任务并发上限票 02，ADR 0022）：任何执行开始前判定，
+    // 与下方 beginExecution 占坑在同一同步段（无交错窗口，判定后立即占坑）。
+    // 用户直发满员：连同参数快照入任务排队静默返回（排队而非拒绝），
+    // 名额空出后由协调器按 FIFO 以内部消费路径重放；内部消费（输入队列
+    // 消费/排队开跑）撞满员：抛错使条目保留（输入队列条目或排队条目不丢），
+    // 名额释放点（end）会重泵。
+    if (fromUser) {
+      const gated = taskQueue.gate(taskId, {
+        text,
+        mentionPaths: mentionPaths ?? [],
+        providerProfileId: profile.id,
+        thinkingEffort: effortSnapshot,
+        approvalMode: approvalSnapshot as ApprovalMode,
+      });
+      if (gated === "queued") return;
+    } else if (taskQueue.isFull()) {
+      throw new Error("任务并发已满，等待空位后自动重试");
+    }
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
     const { executionId, controller, rollbackLive, end } =
       beginExecution(taskId);
@@ -684,16 +784,32 @@ export function registerTaskHandlers(options: {
     });
   }
 
-  /** 队列消费的内部发送（review 重构）：参数取入队时快照，跳过入队与插话登记。 */
-  function sendQueued(taskId: string, entry: QueuedMessage): Promise<void> {
+  /**
+   * 内部消费的发送（review 重构，票 02 扩展共用）：输入队列消费与任务排队
+   * 开跑共用——参数取入队时快照，跳过用户路径的入队与插话登记；满员竞态
+   * 由闸门的内部消费分支兜底（抛错保留条目）。字段显式映射：快照的
+   * providerProfileId 对应入参 profileId，不能用展开（键名不同会静默
+   * 回退 workbench 保存的偏好）。
+   */
+  function sendInternal(
+    taskId: string,
+    snapshot: Pick<
+      QueuedMessage,
+      | "text"
+      | "mentionPaths"
+      | "providerProfileId"
+      | "thinkingEffort"
+      | "approvalMode"
+    >
+  ): Promise<void> {
     return deliverMessage({
       source: "queue",
       taskId,
-      text: entry.text,
-      profileId: entry.providerProfileId,
-      mentionPaths: entry.mentionPaths,
-      thinkingEffort: entry.thinkingEffort,
-      approvalMode: entry.approvalMode,
+      text: snapshot.text,
+      profileId: snapshot.providerProfileId,
+      mentionPaths: snapshot.mentionPaths,
+      thinkingEffort: snapshot.thinkingEffort,
+      approvalMode: snapshot.approvalMode,
     });
   }
   ipcMain.handle(IPC.tasks.send, (_e, ...args: Parameters<typeof send>) =>
@@ -836,6 +952,9 @@ export function registerTaskHandlers(options: {
       // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
       const result = management.archive(taskId, archived);
       if (archived && result) {
+        // 归档出队（票 02）：排队中的任务一并移出，否则开跑重试会因
+        // assertCanExecute 拒绝已归档而堵住整条 FIFO 队列。
+        taskQueue.remove(taskId);
         void browserManager?.closeTask(taskId).catch(() => {});
       }
       // 归档只整理记录，不触发磁盘回收（包括新模型隔离保留的旧 Worktree）。
@@ -1145,6 +1264,11 @@ export function registerTaskHandlers(options: {
   return {
     /** 主进程服务装配完成后启用恢复；不依赖窗口、view 或渲染层加载。 */
     startInputQueues: continueInputQueues,
+    /**
+     * 任务排队推进通道（票 02）：设置保存回调（main.ts 装配）在上限调大后
+     * 调用——排队任务立即补位开跑；调小时 pump 自然无事可做（只拦新）。
+     */
+    pumpTaskQueue: () => void taskQueue.pump(),
     hasWork: () =>
       starts.size > 0 ||
       tasks.size > 0 ||

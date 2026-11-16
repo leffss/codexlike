@@ -43,6 +43,8 @@ function applyLiveEvent(
     // 重放后按 toolCallId 回接 compact 前的过程富段（轮次/工具/起止时间）
     return mergeSubagentsAfterCompact(initialTranscript(event.history), items);
   if (event.type === "queue-changed") return items;
+  // 任务排队变更（任务并发上限票 02）同为任务状态而非消息增量，不进消息流
+  if (event.type === "task-queue-changed") return items;
   return applyTaskEvent(items, event);
 }
 
@@ -57,7 +59,10 @@ export function receiveLiveEvent(
     envelope.event.type === "user-message" ||
     envelope.event.type === "compact-start" ||
     // 队列是任务状态而非执行增量：空闲修改也按主进程单调水位接续。
-    envelope.event.type === "queue-changed";
+    envelope.event.type === "queue-changed" ||
+    // 任务排队（任务并发上限票 02）同为任务状态：排队中的任务无执行现场
+    //（running=false），不按起点接续会被丢弃——queued 活动态随信封携带。
+    envelope.event.type === "task-queue-changed";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [

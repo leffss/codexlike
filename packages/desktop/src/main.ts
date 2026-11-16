@@ -562,9 +562,17 @@ void app.whenReady().then(async () => {
     profiles: profileStore,
     onSaved: refreshSubagentSettings,
   });
+  // 任务排队推进通道（任务并发上限票 02）：设置保存在 taskRuntime 装配前
+  // 注册，闭包经可变槽位延后绑定——onSaved 时 taskRuntime 必已就绪。
+  let pumpTaskQueue: () => void = () => {};
   registerAgentSettingsHandlers({
     store: agentSettingsStore,
-    onSaved: refreshAgentSettings,
+    onSaved: async () => {
+      await refreshAgentSettings();
+      // 上限调大：排队任务立即补位开跑（ADR 0022 生效语义；调小只拦新，
+      // pump 按新上限判定自然无事可做，不中断运行中的）。
+      pumpTaskQueue();
+    },
   });
   registerTerminalSettingsHandlers({
     store: terminalSettingsStore,
@@ -595,7 +603,12 @@ void app.whenReady().then(async () => {
     worktreeService,
     resourcesFor,
     queueStore,
+    // 任务并发上限（票 02，ADR 0022）：resolver 逐次解析内存缓存，主进程
+    // 发送闸门直接消费（不经 agent-core）——设置保存后刷新缓存并补跑排队
+    //（onSaved 里的 pumpTaskQueue）。
+    concurrencyLimit: () => agentSettings.taskConcurrencyLimit,
   });
+  pumpTaskQueue = taskRuntime.pumpTaskQueue;
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
   // 渲染层文件导出（复制旁的「导出 Markdown」）

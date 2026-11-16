@@ -71,7 +71,9 @@ export function createLiveTasks(manager: TaskManager) {
     if (
       !live ||
       live.executionId !== executionId ||
-      (live.terminalAt > 0 && event.type !== "queue-changed")
+      (live.terminalAt > 0 &&
+        event.type !== "queue-changed" &&
+        event.type !== "task-queue-changed")
     )
       return null;
     // 停止后仅接收清理终态，不能再显示新的正文、工具开始或等待请求。
@@ -88,8 +90,10 @@ export function createLiveTasks(manager: TaskManager) {
         "task-auto-approve-changed",
         "subagent-report",
         "subagent-tool",
-        // 输入队列变更（票 01）：停止期间入队仍要推送队列快照
+        // 输入队列变更（票 01）：停止期间入队仍要推送队列快照；
+        // 任务排队变更（任务并发上限票 02）同为任务状态快照，同口径放行
         "queue-changed",
+        "task-queue-changed",
       ].includes(event.type)
     )
       return null;
@@ -142,10 +146,16 @@ export function createLiveTasks(manager: TaskManager) {
     live.events.push(envelope);
     return envelope;
   }
-  /** 队列修改不等同于执行：空闲/重开后也延续任务水位，不伪造运行态。 */
+  /**
+   * 队列修改不等同于执行：空闲/重开后也延续任务水位，不伪造运行态。
+   * 任务排队变更（任务并发上限票 02）与输入队列变更同口径——排队中的
+   * 任务无执行现场，信封为其延续水位并携带 queued 活动态。
+   */
   function acceptQueue(
     id: string,
-    event: Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>
+    event:
+      | Extract<TaskEventEnvelope["event"], { type: "queue-changed" }>
+      | Extract<TaskEventEnvelope["event"], { type: "task-queue-changed" }>
   ): TaskEventEnvelope | null {
     if (!tasks.has(id)) {
       if (!manager.list().some((record) => record.id === id)) return null;
