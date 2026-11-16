@@ -1,5 +1,5 @@
 import type { SubagentSegment } from "./task-view";
-import { statusText } from "./subagent-status";
+import { statusText, terminalTimeLabel } from "./subagent-status";
 
 /**
  * 子代理导出 Markdown（ADR 0021 票 04）：逐轮正文与思考的结构化全文，
@@ -21,8 +21,8 @@ export function subagentExportMarkdown(subagent: SubagentSegment): string {
     lines.push(`开始：${subagent.startedAt}`);
   }
   if (subagent.endedAt !== null) {
-    const label = subagent.state === "interrupted" ? "中断" : "完成";
-    lines.push(`${label}：${subagent.endedAt}`);
+    // 终态时刻行标签（完成/中断）取自 lib/subagent-status 单一来源
+    lines.push(`${terminalTimeLabel(subagent)}：${subagent.endedAt}`);
   }
   // 逐轮记录：空轮（工具占位）跳过；无思考/正文的轮省略对应小节
   const rounds = (subagent.turns ?? []).filter(

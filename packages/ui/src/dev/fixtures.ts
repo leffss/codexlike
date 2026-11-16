@@ -468,7 +468,8 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
  * 子代理恢复快照样例（票 04，ADR 0021 恢复新路径）：与 MAIN_HISTORY 的
  * spawn 行按委派说明匹配——sub-rec-1 命中 tc-sub-r3（瘦身后新记录：行只带
  * 报告，过程由快照三表重建）；sub-rec-2 无行（运行中被杀：行随轮末回填、
- * 未落），恢复时追加时间线末尾留痕（interrupted 态）。tc-sub-r1 / tc-sub-r2
+ * 未落），恢复时按委派时点插回时间线留痕（interrupted 态；本样例委派时点
+ * 与时间线末尾同刻，位置仍在末尾）。tc-sub-r1 / tc-sub-r2
  * 是本特性前的旧记录（无快照），照旧走 subagentFromToolRecord 反推路径。
  */
 const SUBAGENT_TASK_R3 = "梳理右栏 tab 化的宽度断言链";

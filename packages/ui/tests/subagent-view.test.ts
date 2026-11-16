@@ -323,7 +323,7 @@ describe("task-view 恢复新路径（并行 subagents 快照，ADR 0021）", ()
     });
   });
 
-  it("被中断的委派（无 spawn 行）：interrupted 段追加在时间线末尾，已发生内容完整回看", () => {
+  it("被中断的委派（无 spawn 行）：interrupted 段按委派时点插入（晚于全部条目时在末尾），已发生内容完整回看", () => {
     const items = initialTranscript(
       [
         {
@@ -381,6 +381,170 @@ describe("task-view 恢复新路径（并行 subagents 快照，ADR 0021）", ()
     expect(card.tools[0]).toMatchObject({ toolName: "glob" });
   });
 
+  it("无行快照插回委派时点：排队被杀的委派回到时间线中段，轮标签归委派时的轮", () => {
+    const items = initialTranscript(
+      [
+        {
+          kind: "message",
+          message: {
+            id: "u1",
+            taskId: "task-1",
+            role: "user",
+            content: "第一轮委派",
+            createdAt: "2026-11-14T08:00:00.000Z",
+          },
+        },
+        // 先派发的委派（行与快照命中，段位置由行决定，at 即委派时点）
+        {
+          kind: "tool-call",
+          call: toolCall({
+            id: "delegate-a",
+            toolName: "spawn_subagent",
+            arguments: '{"task":"先派发的委派"}',
+            output: "甲的报告",
+            createdAt: "2026-11-14T08:00:05.000Z",
+          }),
+        },
+        {
+          kind: "message",
+          message: {
+            id: "a2",
+            taskId: "task-1",
+            role: "assistant",
+            content: "收到甲的报告。",
+            createdAt: "2026-11-14T08:01:00.000Z",
+          },
+        },
+        {
+          kind: "message",
+          message: {
+            id: "u2",
+            taskId: "task-1",
+            role: "user",
+            content: "第二轮提问",
+            createdAt: "2026-11-14T08:02:00.000Z",
+          },
+        },
+      ],
+      [
+        snapshot({
+          record: {
+            id: "sa-a",
+            task: "先派发的委派",
+            queuedAt: "2026-11-14T08:00:05.000Z",
+          },
+          messages: [
+            snapshotMessage({ subagentId: "sa-a", content: "甲的报告" }),
+          ],
+        }),
+        // 排队中被杀的委派（第 2 个派发，queuedAt 晚于甲、早于后续正文），无行
+        snapshot({
+          record: {
+            id: "sa-queued-killed",
+            task: "排队中被杀的委派",
+            status: "interrupted",
+            queuedAt: "2026-11-14T08:00:10.000Z",
+            startedAt: null,
+            completedAt: "2026-11-14T08:00:11.000Z",
+          },
+        }),
+      ]
+    );
+    // 时序位置：插在先派发的委派（08:00:05）之后、后续正文（08:01:00）之前，
+    // 不堆在末尾（u2 之后）
+    expect(items.map((item) => item.id)).toEqual([
+      "u1",
+      "sa-a",
+      "sa-queued-killed",
+      "a2",
+      "u2",
+    ]);
+    const inserted = items[2];
+    if (inserted?.kind !== "subagent") throw new Error("应为子代理段");
+    expect(inserted).toMatchObject({
+      id: "sa-queued-killed",
+      state: "interrupted",
+      startedAt: null,
+      report: null,
+    });
+    // 轮标签归插入点之前的最后一个 user 段（委派发生时的轮），seq 全局唯一
+    expect(inserted.turnId).toBe("u1");
+    expect(inserted.seq).not.toBe(items[1]?.seq);
+  });
+
+  it("同文本多委派：行与快照按委派序对齐配对（顺序对齐假设守护，review 显式化）", () => {
+    // 同一轮派两个委派说明完全相同的 spawn_subagent：行与快照两侧都按
+    // 委派时点排序（listToolCalls / listSubagents 同源时钟），文本匹配的
+    // findIndex 首个命中 = 按序配对——甲行配甲快照、乙行配乙快照
+    const items = initialTranscript(
+      [
+        {
+          kind: "tool-call",
+          call: toolCall({
+            id: "delegate-jia",
+            toolName: "spawn_subagent",
+            arguments: '{"task":"调研同文本委派"}',
+            output: "甲的报告",
+            createdAt: "2026-11-14T08:00:01.000Z",
+          }),
+        },
+        {
+          kind: "tool-call",
+          call: toolCall({
+            id: "delegate-yi",
+            toolName: "spawn_subagent",
+            arguments: '{"task":"调研同文本委派"}',
+            output: "乙的报告",
+            createdAt: "2026-11-14T08:00:02.000Z",
+          }),
+        },
+      ],
+      [
+        snapshot({
+          record: {
+            id: "sa-jia",
+            task: "调研同文本委派",
+            queuedAt: "2026-11-14T08:00:01.000Z",
+          },
+          messages: [
+            snapshotMessage({
+              subagentId: "sa-jia",
+              content: "甲的过程正文",
+            }),
+          ],
+        }),
+        snapshot({
+          record: {
+            id: "sa-yi",
+            task: "调研同文本委派",
+            queuedAt: "2026-11-14T08:00:02.000Z",
+          },
+          messages: [
+            snapshotMessage({
+              subagentId: "sa-yi",
+              content: "乙的过程正文",
+            }),
+          ],
+        }),
+      ]
+    );
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      kind: "subagent",
+      id: "sa-jia",
+      toolCallId: "delegate-jia",
+      report: "甲的报告",
+      turns: [{ content: "甲的过程正文" }],
+    });
+    expect(items[1]).toMatchObject({
+      kind: "subagent",
+      id: "sa-yi",
+      toolCallId: "delegate-yi",
+      report: "乙的报告",
+      turns: [{ content: "乙的过程正文" }],
+    });
+  });
+
   it("快照 task 与 spawn 行不匹配（或无快照）：回退 subagentFromToolRecord 旧路径", () => {
     const items = initialTranscript(
       [
@@ -408,7 +572,8 @@ describe("task-view 恢复新路径（并行 subagents 快照，ADR 0021）", ()
       tools: [],
       startedAt: null,
     });
-    // 未匹配的快照不丢：interrupted/排队骨架照旧追加末尾留痕
+    // 未匹配的快照不丢：interrupted/排队骨架按委派时点插入留痕
+    // （本用例委派时点与行同刻，位置在行段之后）
     expect(items[1]).toMatchObject({ kind: "subagent", id: "sa-1" });
   });
 });
@@ -586,6 +751,60 @@ describe("task-view 子代理正文归并（subagent-text-delta）", () => {
       turns: [
         { reasoning: "第一轮思考", content: "第一轮正文" },
         { reasoning: "第二轮思考", content: "最终报告" },
+      ],
+    });
+  });
+
+  it("显式轮键（roundIndex，review 修复）归并与启发式同构；交错轮不拆分、目标轮不足补空轮", () => {
+    let items: MessageSegment[] = [];
+    const apply = (event: TaskEvent) => {
+      items = applyTaskEvent(items, event);
+    };
+    apply({ type: "subagent-queued", subagentId: "sa-1", task: "调研 vitest" });
+    // 第 0 轮：思考 → 正文（与启发式路径同构）
+    apply({
+      type: "subagent-reasoning",
+      subagentId: "sa-1",
+      delta: "第一轮思考",
+      roundIndex: 0,
+    });
+    apply({
+      type: "subagent-text-delta",
+      subagentId: "sa-1",
+      delta: "第一轮正文",
+      roundIndex: 0,
+    });
+    // 工具轮（第 1 轮流式生成）：纯工具轮无增量，roundIndex 直接跳到 2——
+    // 中间目标轮不足以空轮补齐（呈现层过滤空轮，与落库空行不落同构）
+    apply({
+      type: "subagent-text-delta",
+      subagentId: "sa-1",
+      delta: "最终报告",
+      roundIndex: 2,
+    });
+    expect(items[0]).toMatchObject({
+      kind: "subagent",
+      turns: [
+        { reasoning: "第一轮思考", content: "第一轮正文" },
+        { content: "" },
+        { content: "最终报告" },
+      ],
+    });
+
+    // 同轮内正文之后的思考增量（interleaved 输出）：显式轮键按权威轮次
+    // 归入同一轮（启发式会误拆新轮，与落库行边界分叉——消灭双写即为此）
+    items = applyTaskEvent(items, {
+      type: "subagent-reasoning",
+      subagentId: "sa-1",
+      delta: "同轮补思考",
+      roundIndex: 2,
+    });
+    expect(items[0]).toMatchObject({
+      kind: "subagent",
+      turns: [
+        { reasoning: "第一轮思考", content: "第一轮正文" },
+        { content: "" },
+        { reasoning: "同轮补思考", content: "最终报告" },
       ],
     });
   });
