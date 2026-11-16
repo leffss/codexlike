@@ -108,7 +108,10 @@ export interface SubagentsConfig {
  */
 export type SubagentPersistence = Pick<
   TaskPersistence,
-  "insertSubagent" | "updateSubagent"
+  | "insertSubagent"
+  | "updateSubagent"
+  | "insertSubagentMessage"
+  | "insertSubagentToolCall"
 >;
 
 /**
@@ -365,6 +368,28 @@ export function createSubagentOrchestrator(
     let maxToolRounds = DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
     // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
     let reasoning = "";
+    // 本轮正文与思考缓冲（ADR 0021 票 02）：轮终态即写一行 subagent_messages
+    // （轮边界即行边界）；跨轮全文仍照旧累积——报告与 spawn 行 reasoning 拼接不变
+    let roundText = "";
+    let roundReasoning = "";
+
+    /**
+     * 轮终态即写（票 02）：本轮正文与思考落一行，任意时刻强杀应用，
+     * 已完成轮（含中断/截断轮的部分内容）都已在库；无内容不落空行。
+     */
+    function flushRound(): void {
+      if (roundText === "" && roundReasoning === "") {
+        return;
+      }
+      port.persistence.insertSubagentMessage({
+        id: port.generateId(),
+        taskId: port.taskId,
+        subagentId: entry.subagentId,
+        content: roundText,
+        ...(roundReasoning ? { reasoning: roundReasoning } : {}),
+        createdAt: port.now(),
+      });
+    }
     try {
       const snapshot = port.resources?.();
       const execution = snapshot?.createExecution(entry.subagentId);
@@ -422,6 +447,9 @@ export function createSubagentOrchestrator(
           aborted = true;
           break;
         }
+        // 本轮缓冲清零：轮边界 = 一次流式生成（与主任务「一次 sendMessage 一轮」对齐）
+        roundText = "";
+        roundReasoning = "";
         const result = streamText({
           // 全部轮次复用入队时捕获的档位快照（运行中主任务切档不影响本任务）
           model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
@@ -441,6 +469,7 @@ export function createSubagentOrchestrator(
             // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积全文
             // （随终态报告回流落库，票 02）；不进入子代理消息上下文
             reasoning += part.text;
+            roundReasoning += part.text;
             emit({
               type: "subagent-reasoning",
               subagentId: entry.subagentId,
@@ -448,6 +477,14 @@ export function createSubagentOrchestrator(
             });
           } else if (part.type === "text-delta") {
             output += part.text;
+            roundText += part.text;
+            // 正文流式增量（票 02，形态对齐 subagent-reasoning）：
+            // 驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages 落库
+            emit({
+              type: "subagent-text-delta",
+              subagentId: entry.subagentId,
+              delta: part.text,
+            });
           } else if (part.type === "tool-call") {
             toolCalls.push({
               toolCallId: part.toolCallId,
@@ -460,6 +497,11 @@ export function createSubagentOrchestrator(
             aborted = true;
           }
         }
+
+        // 轮终态即写（票 02）：本轮流结束即落一行，先于工具执行与下一轮生成；
+        // abort part 也走本点（AI SDK 将 AbortError 收敛为 abort part 正常结束迭代），
+        // 中断轮已流出的部分内容同样落库
+        flushRound();
 
         if (aborted || toolCalls.length === 0) {
           settled = true;
@@ -514,6 +556,18 @@ export function createSubagentOrchestrator(
             output: executed.output,
             isError: executed.isError,
           };
+          // 完成即写（ADR 0021 票 02）：与主代理 insertToolCall 同点同口径——
+          // output 为工具自身截断后的结果，时间戳取调用发起时刻（base.createdAt）
+          port.persistence.insertSubagentToolCall({
+            id: completed.id,
+            taskId: port.taskId,
+            subagentId: entry.subagentId,
+            toolName: completed.toolName,
+            arguments: completed.arguments,
+            output: completed.output,
+            isError: completed.isError,
+            createdAt: completed.createdAt,
+          });
           emit({
             type: "subagent-tool",
             subagentId: entry.subagentId,

@@ -183,6 +183,43 @@ export interface SubagentRecord {
   completedAt: string | null;
 }
 
+/**
+ * 子代理逐轮消息记录（subagent_messages 表一行，ADR 0021 票 02）：
+ * 一个模型轮（一次流式生成）终态写一行——content 为本轮正文、reasoning 为本轮思考，
+ * 轮边界即行边界；仅为检视与导出，不进入主任务模型上下文（ADR 0021 结构性保证）。
+ */
+export interface SubagentMessageRecord {
+  id: string;
+  taskId: string;
+  /** 归属的子代理（subagents.id） */
+  subagentId: string;
+  /** 本轮正文（流式增量拼接；纯工具轮无正文时不产生行） */
+  content: string;
+  /** 本轮思考；本轮无思考时缺失（读回空值归一为 undefined） */
+  reasoning?: string;
+  /** 轮终态时间（ISO 8601） */
+  createdAt: string;
+}
+
+/**
+ * 子代理工具调用记录（subagent_tool_calls 表一行，ADR 0021 票 02）：
+ * 工具完成即写——output 截断口径同主代理 tool_calls（工具执行结果本身已截断）。
+ */
+export interface SubagentToolCallRecord {
+  id: string;
+  taskId: string;
+  /** 归属的子代理（subagents.id） */
+  subagentId: string;
+  toolName: string;
+  /** JSON 序列化的调用参数（与主代理 ToolCallRecord.arguments 同口径） */
+  arguments: string;
+  /** 截断后的执行输出 */
+  output: string;
+  isError: boolean;
+  /** 完成时刻（ISO 8601） */
+  createdAt: string;
+}
+
 /** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
 export interface CompactResult {
   /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */
@@ -266,6 +303,13 @@ export type TaskEvent =
    * 终态由 subagent-report 一并收敛。
    */
   | { type: "subagent-reasoning"; subagentId: string; delta: string }
+  /**
+   * 子代理正文（报告文本）的流式增量（ADR 0021，票 02，形态对齐 subagent-reasoning）：
+   * 按轮累积驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages
+   * 行落库（逐轮正文与思考，轮边界即行边界），仅为检视与恢复回看；
+   * 不进入主任务模型上下文，终态由 subagent-report 一并收敛。
+   */
+  | { type: "subagent-text-delta"; subagentId: string; delta: string }
   /**
    * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
    * ok=false 表示失败或被中断（report 为中文原因）。
