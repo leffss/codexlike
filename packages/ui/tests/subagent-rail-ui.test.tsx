@@ -182,6 +182,117 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     );
     expect(empty).toContain("（任务描述缺失）");
   });
+
+  it("正文折叠块（票 04）：完成态默认收起、逐轮分段、与思考折叠同构；报告块呈现不变", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-body", {
+            startedAt: "2026-11-14T08:00:02.000Z",
+            endedAt: "2026-11-14T08:00:30.000Z",
+            turns: [
+              { reasoning: "第一轮思考", content: "第一轮正文" },
+              { content: "最终报告：已梳理" },
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 与思考折叠同构：details/summary 结构，完成态默认收起（无 open）
+    const block = html.match(
+      /<details[^>]*data-testid="subagent-body-block"[^>]*>/
+    )?.[0];
+    expect(block).toBeDefined();
+    expect(block).not.toContain('open=""');
+    expect(html).toMatch(/data-testid="subagent-body-toggle"/);
+    // 逐轮分段：轮次标签 + 各轮正文（最终轮即报告轮，正文内含报告文本）
+    expect(html).toMatch(/data-testid="subagent-body-round-1"/);
+    expect(html).toMatch(/data-testid="subagent-body-round-2"/);
+    expect(html).toContain("第一轮正文");
+    // 分轮思考：思考折叠块同样逐轮
+    expect(html).toMatch(/data-testid="subagent-thinking-round-1"/);
+    expect(html).toContain("第一轮思考");
+    // 完成态报告块呈现不变：报告与操作行照旧
+    expect(html).toMatch(/data-testid="subagent-report"/);
+    expect(html).toMatch(/data-testid="subagent-report-actions"/);
+  });
+
+  it("正文折叠块：运行态默认展开流式；collapse-memory 独立键与思考块互不影响", () => {
+    setRememberedOpen("subagent-body-sa-run2", false);
+    setRememberedOpen("subagent-thinking-sa-run2", true);
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-run2", {
+            state: "running",
+            endedAt: null,
+            report: null,
+            ok: null,
+            turns: [{ reasoning: "进行中的思考", content: "流式正文增量" }],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 思考块预置展开记忆生效；正文块独立键：记忆为收起（用户手动收过）
+    const body = html.match(
+      /<details[^>]*data-testid="subagent-body-block"[^>]*>/
+    )?.[0];
+    const thinking = html.match(
+      /<details[^>]*data-testid="subagent-thinking-block"[^>]*>/
+    )?.[0];
+    expect(body).toBeDefined();
+    expect(thinking).toBeDefined();
+    expect(body).not.toContain('open=""');
+    expect(thinking).toContain('open=""');
+    expect(html).toContain("流式正文增量");
+  });
+
+  it("旧记录（无 turns、仅拼接种 reasoning）：思考折叠单段呈现，不渲染正文折叠块", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-legacy", { reasoning: "旧记录拼接的思考" })],
+        focus: null,
+      })
+    );
+    expect(html).toContain("旧记录拼接的思考");
+    expect(html).not.toMatch(/data-testid="subagent-body-block"/);
+    // 旧记录无轮边界：不出现「第 N 轮」分轮标签
+    expect(html).not.toContain("第 1 轮");
+  });
+
+  it("interrupted 委派（票 04）：列表状态点/详情徽章/中断说明；无报告操作行，已发生内容可回看", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-int", {
+            state: "interrupted",
+            endedAt: "2026-11-14T08:00:09.000Z",
+            report: null,
+            ok: false,
+            startedAt: "2026-11-14T08:00:03.000Z",
+            turns: [{ content: "中断前已写出的部分正文" }],
+            tools: [TOOL],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 列表状态点 + 详情徽章（委派说明块头）同文案
+    expect(html).toMatch(
+      /data-testid="subagent-rail-item"[^>]*data-subagent-state="interrupted"/
+    );
+    expect(html.match(/运行中被中断/g)?.length).toBeGreaterThanOrEqual(2);
+    // 中断说明 + 已发生过程内容可回看（正文折叠 + 工具清单）
+    expect(html).toMatch(/data-testid="subagent-interrupted-note"/);
+    expect(html).toMatch(/data-testid="subagent-body-block"/);
+    expect(html).toContain("中断前已写出的部分正文");
+    expect(html).toMatch(/data-testid="subagent-tools"/);
+    // 无报告块与操作行（未产出报告）
+    expect(html).not.toMatch(/data-testid="subagent-report"/);
+    expect(html).not.toMatch(/data-testid="subagent-report-actions"/);
+  });
 });
 
 describe("SubagentStreamMarker（消息流标记行，ADR 0020）", () => {
@@ -197,6 +308,23 @@ describe("SubagentStreamMarker（消息流标记行，ADR 0020）", () => {
     expect(html).toContain("右栏查看 →");
     expect(html).toContain("完成");
     expect(html).not.toContain("报告正文");
+  });
+
+  it("interrupted 标记行（票 04）：状态点与「运行中被中断」状态原位可见", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentStreamMarker, {
+        subagent: subSeg("sa-int", {
+          state: "interrupted",
+          report: null,
+          ok: false,
+          endedAt: "2026-11-14T08:00:09.000Z",
+        }),
+      })
+    );
+    expect(html).toMatch(
+      /data-testid="subagent-stream-marker-toggle"[^>]*data-subagent-state="interrupted"/
+    );
+    expect(html).toContain("运行中被中断");
   });
 
   it("经 MessageStream 渲染：标记行在消息流内（大卡退役）", () => {
@@ -222,6 +350,14 @@ describe("SubagentStreamMarker（消息流标记行，ADR 0020）", () => {
 describe("formatElapsed（已用时定格/跳动基准）", () => {
   it("完成态以 endedAt 定格总耗时", () => {
     expect(formatElapsed(subSeg("sa-1"), 9_999_999)).toBe("00:30");
+  });
+  it("interrupted 终态同样以 endedAt 定格（不随 now 跳动）", () => {
+    const interrupted = subSeg("sa-int", {
+      state: "interrupted",
+      startedAt: "2026-11-12T08:00:00.000Z",
+      endedAt: "2026-11-12T08:00:09.000Z",
+    });
+    expect(formatElapsed(interrupted, 9_999_999)).toBe("00:09");
   });
   it("运行中以传入 now 实时计算；恢复态无 startedAt 不显示", () => {
     const running = subSeg("sa-r", {

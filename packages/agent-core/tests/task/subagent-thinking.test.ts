@@ -587,12 +587,20 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.toolName).toBe("spawn_subagent");
-    // 报告（output）与思考（reasoning）分离；思考全文多段拼接
+    // spawn 行瘦身（票 04 contract 步）：output=最终报告；reasoning 不再拼接
+    // 思考全文——权威记录在 subagent_messages（逐轮思考落库见票 02 用例）
     expect(calls[0]?.output).toBe("调研报告");
-    expect(calls[0]?.reasoning).toBe("子代理的思考全文（第二段）");
+    expect(calls[0]?.reasoning).toBeUndefined();
     // 消息表不含子代理思考（主任务 assistant 正文不混入）
     const messagesJson = JSON.stringify(persistence.listMessages("task-1"));
     expect(messagesJson).not.toContain("子代理的思考全文");
+    // 思考全文的权威落点：subagent_messages 一行（content + reasoning）
+    const rounds = persistence.listSubagentMessages("task-1");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]).toMatchObject({
+      content: "调研报告",
+      reasoning: "子代理的思考全文（第二段）",
+    });
   });
 
   it("子代理正文转为 subagent-text-delta 事件：带 subagentId、与思考及主任务正文分离（票 02）", async () => {
