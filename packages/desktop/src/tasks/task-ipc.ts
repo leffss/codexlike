@@ -204,8 +204,13 @@ export function registerTaskHandlers(options: {
   const queues = createTaskInputQueues({
     store: queueStore,
     // 退出冻结是宿主门控，不是用户暂停；不落盘，也不取下一条。
+    // 排队任务视同忙（票 04 / ADR 0022）：排队期间入队的消息不消费——
+    // 否则名额释放的瞬间（end 先重泵输入队列后推进任务排队）输入队列
+    // 消息会抢在 FIFO 开跑之前执行；开跑（出队且 running）后自然放行。
     isBusy: (taskId) =>
-      exiting || (management.execution(taskId)?.running ?? false),
+      exiting ||
+      (management.execution(taskId)?.running ?? false) ||
+      taskQueue.isQueued(taskId),
     // 队首还在读取凭据/准备发送时也算在途工作，退出需等它复查闸门后排空。
     dispatch: (taskId, entry, onSettled) =>
       track(dispatchQueued(taskId, entry, onSettled)),
@@ -706,7 +711,13 @@ export function registerTaskHandlers(options: {
         thinkingEffort: effortSnapshot,
         approvalMode: approvalSnapshot as ApprovalMode,
       });
-      if (gated === "queued") return;
+      if (gated === "queued") {
+        // 暂停期间的直发被任务排队（票 04：中断排队后的重发等场景）：
+        // 开跑走内部消费路径不经过 beginInterjection，插话意图在此登记，
+        // 开跑轮末经 onIdle 恢复队列消费——与不满员时的直发插话语义一致。
+        if (queues.isPaused(taskId)) queues.beginInterjection(taskId);
+        return;
+      }
     } else if (taskQueue.isFull()) {
       throw new Error("任务并发已满，等待空位后自动重试");
     }
@@ -826,11 +837,23 @@ export function registerTaskHandlers(options: {
       const interrupted = interrupts.interrupt(taskId);
       if (interrupted) {
         liveTasks.stop(taskId);
+      }
+      // 中断排队任务（票 04 / ADR 0022）：立即出队回空闲——已发消息保留，
+      // 名额让给后续排队任务（remove 推送事件链，空位仍由释放点推进）。
+      // 有活跃流时也复查出队：开跑的 await 窗口内任务已执行但尚未出队，
+      // 此时中断必须一并出队，否则下一次 pump 会把刚被中断的任务重跑。
+      const removed = taskQueue.remove(taskId);
+      if (removed) {
+        void taskQueue.pump();
+      }
+      if (interrupted || removed) {
         // 停止路径（票 02）：排队消息存在时置队列暂停——队列原样保留、
-        // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。
+        // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。中断排队
+        // 任务同理：排队期间追加的输入队列消息不因其他任务释放名额而
+        // 自动发出，由用户重新发消息（插话语义）或手动恢复触发。
         queues.pause(taskId);
       }
-      return interrupted;
+      return interrupted || removed;
     }
   );
 
