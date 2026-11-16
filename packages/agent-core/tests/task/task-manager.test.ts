@@ -10,6 +10,7 @@ import type { ThinkingEffort } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createTaskManager } from "../../src/task/manager";
+import type { SubagentStatus } from "../../src/task/types";
 
 const profile: ProviderProfile = {
   id: "profile-1",
@@ -225,6 +226,70 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     expect(restored).not.toBeNull();
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
     persistence.close();
+  });
+
+  it("启动收尾把残留 queued/running 子代理骨架行标记 interrupted，终态行不动且二次重开幂等（ADR 0021）", () => {
+    const dbPath = join(
+      (() => {
+        const dir = mkdtempSync(join(tmpdir(), "codexlike-subagent-recover-"));
+        tempDirs.push(dir);
+        return dir;
+      })(),
+      "codexlike.db"
+    );
+    const persistence1 = createSqliteTaskStore(dbPath);
+    const manager1 = createTaskManager({
+      persistence: persistence1,
+      languageModelFor: () => okModel(),
+    });
+    const task = manager1.create({ workspacePath: "C:\\work\\demo" });
+    // 模拟被杀进程留下的骨架行：queued（排队中被杀）、running（运行中被杀）、
+    // 两条已正常收尾的终态行
+    const insert = (id: string, status: SubagentStatus) =>
+      persistence1.insertSubagent({
+        id,
+        taskId: task.id,
+        task: `委派 ${id}`,
+        status,
+        queuedAt: "2026-11-11T08:00:01.000Z",
+        startedAt: status === "queued" ? null : "2026-11-11T08:00:02.000Z",
+        completedAt:
+          status === "completed" || status === "failed"
+            ? "2026-11-11T08:00:03.000Z"
+            : null,
+      });
+    insert("sub-queued", "queued");
+    insert("sub-running", "running");
+    insert("sub-done", "completed");
+    insert("sub-fail", "failed");
+    persistence1.close();
+
+    // 等价应用重启：新 store + 新 manager，启动收尾补记 interrupted
+    const persistence2 = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: persistence2 });
+    const rows = new Map(
+      persistence2.listSubagents(task.id).map((row) => [row.id, row])
+    );
+    expect(rows.get("sub-queued")?.status).toBe("interrupted");
+    expect(rows.get("sub-queued")?.completedAt).not.toBeNull();
+    expect(rows.get("sub-running")?.status).toBe("interrupted");
+    expect(rows.get("sub-running")?.completedAt).not.toBeNull();
+    // 终态行不受收尾影响（留痕不被改写）
+    expect(rows.get("sub-done")).toMatchObject({ status: "completed" });
+    expect(rows.get("sub-fail")).toMatchObject({ status: "failed" });
+    persistence2.close();
+
+    // 二次重开幂等：interrupted 行不再变化
+    const persistence3 = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: persistence3 });
+    const settled = persistence3
+      .listSubagents(task.id)
+      .filter((row) => row.status === "interrupted");
+    expect(settled.map((row) => row.id).sort()).toEqual([
+      "sub-queued",
+      "sub-running",
+    ]);
+    persistence3.close();
   });
 
   it("transcript：消息与工具调用按时间顺序合并（重启恢复时间线用）", async () => {

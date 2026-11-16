@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createAgentTask } from "../../src/task/agent-task";
+import { createTaskManager } from "../../src/task/manager";
 import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { AgentResourceSnapshot } from "../../src/context/resource-types";
@@ -167,6 +168,8 @@ interface SubagentHarnessOptions {
   resources?: () => AgentResourceSnapshot;
   systemPrompt?: string;
   subTools?: ToolDefinition[];
+  /** 文件库路径（缺省 :memory:；文件库支持关-重开等价重启场景） */
+  dbPath?: string;
 }
 
 /**
@@ -180,7 +183,7 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
     scriptedModel(
       options.sub ?? [{ kind: "text", deltas: ["子代理默认报告"] }]
     );
-  const persistence = createSqliteTaskStore(":memory:");
+  const persistence = createSqliteTaskStore(options.dbPath ?? ":memory:");
   const record = taskRecord(options.workspacePath);
   record.approvalMode = options.approvalMode ?? "assist";
   persistence.insertTask(record);
@@ -1475,5 +1478,266 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(JSON.stringify(task.resourceState)).not.toContain(
       "ALPHA_PRIVATE_BODY"
     );
+  });
+
+  it("委派骨架行 queued 即写并随状态机推进：完成后委派说明与起止时间完整落库（ADR 0021）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-1",
+              toolName: "spawn_subagent",
+              input: { task: "调研骨架行落库并报告" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [{ kind: "text", deltas: ["骨架行报告"] }],
+    });
+    await collect(task.sendMessage({ text: "委派", profile }));
+
+    const rows = persistence.listSubagents("task-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      taskId: "task-1",
+      task: "调研骨架行落库并报告",
+      status: "completed",
+    });
+    // 排队 → 启动 → 完成：三个时间戳严格递增（fakeClock 逐次递增）
+    expect(rows[0]!.queuedAt < rows[0]!.startedAt!).toBe(true);
+    expect(rows[0]!.startedAt! < rows[0]!.completedAt!).toBe(true);
+    persistence.close();
+  });
+
+  it("失败委派骨架行终态为 failed，完成时间随终态落库", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({
+          message: "Incorrect API key provided",
+          url: "https://api.example.com/v1/chat/completions",
+          requestBodyValues: {},
+          statusCode: 401,
+          responseBody: "Unauthorized",
+        });
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "注定失败的任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["子代理失败了"] },
+      ],
+      subModel,
+    });
+    await collect(task.sendMessage({ text: "委派失败场景", profile }));
+
+    const rows = persistence.listSubagents("task-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      task: "注定失败的任务",
+      status: "failed",
+    });
+    expect(rows[0]!.completedAt).not.toBeNull();
+    persistence.close();
+  });
+
+  it("并发满时后到的委派骨架行保持 queued（startedAt 为 null），释放后各自推进到终态", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    // 受控子模型：每个子代理的 doStream 挂起直至测试放行
+    const releases: (() => void)[] = [];
+    let callSeq = 0;
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        const index = callSeq++;
+        const stream = new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            await new Promise<void>((resolve) => {
+              releases[index] = resolve;
+            });
+            controller.enqueue({ type: "text-start", id: "text-1" });
+            controller.enqueue({
+              type: "text-delta",
+              id: "text-1",
+              delta: `子代理 ${index} 的报告`,
+            });
+            controller.enqueue({ type: "text-end", id: "text-1" });
+            controller.enqueue({ type: "finish", ...finishPart() });
+            controller.close();
+          },
+        });
+        return { stream };
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      maxConcurrent: 1,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "第一个任务" },
+            },
+            {
+              toolCallId: "d2",
+              toolName: "spawn_subagent",
+              input: { task: "第二个任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["两份报告都收到"] },
+      ],
+    });
+
+    const events: TaskEvent[] = [];
+    const iterator = task
+      .sendMessage({ text: "并行委派", profile })
+      [Symbol.asyncIterator]();
+    async function drainUntil(
+      predicate: (event: TaskEvent) => boolean
+    ): Promise<void> {
+      for (
+        let head = await iterator.next();
+        !head.done;
+        head = await iterator.next()
+      ) {
+        events.push(head.value);
+        if (predicate(head.value)) {
+          return;
+        }
+      }
+    }
+    await drainUntil(
+      (event) =>
+        event.type === "subagent-queued" &&
+        events.filter((e) => e.type === "subagent-queued").length === 2
+    );
+    // 模型调用发生在 resolveProfile 微任务后，用 waitFor 等第 1 个真实开跑
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(1));
+
+    // 第 1 个开跑（running），第 2 个排队（queued、startedAt 为 null）：
+    // 排队期的「曾委派过」事实已落库（ADR 0021：入队瞬间即写）
+    const byTaskText = new Map(
+      persistence.listSubagents("task-1").map((row) => [row.task, row])
+    );
+    expect(byTaskText.get("第一个任务")).toMatchObject({
+      status: "running",
+    });
+    expect(byTaskText.get("第一个任务")?.startedAt).not.toBeNull();
+    expect(byTaskText.get("第二个任务")).toMatchObject({
+      status: "queued",
+    });
+    expect(byTaskText.get("第二个任务")?.startedAt).toBeNull();
+
+    // 释放第 1 个：第 2 个占位开跑；再释放第 2 个：全部到终态、主任务收尾
+    releases[0]!();
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(2));
+    releases[1]!();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+    }
+    expect(events.at(-1)?.type).toBe("assistant-done");
+    const finalRows = persistence
+      .listSubagents("task-1")
+      .sort((a, b) => (a.queuedAt < b.queuedAt ? -1 : 1));
+    expect(finalRows.map((row) => row.status)).toEqual([
+      "completed",
+      "completed",
+    ]);
+    expect(finalRows.every((row) => row.startedAt && row.completedAt)).toBe(
+      true
+    );
+    persistence.close();
+  });
+
+  it("应用运行中被杀：残留 running 骨架行重开库后由 manager 启动收尾标 interrupted（ADR 0021）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const dbDir = mkdtempSync(join(tmpdir(), "codexlike-kill-"));
+    const dbPath = join(dbDir, "codexlike.db");
+    // gate 子模型挂起直至放行：本用例永不放行，等价应用在委派运行中被杀
+    const gate = new Promise<void>(() => {});
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            await gate;
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      dbPath,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "长调研" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["汇总"] },
+      ],
+    });
+
+    const iterator = task
+      .sendMessage({ text: "委派后应用被杀", profile })
+      [Symbol.asyncIterator]();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      if (head.value.type === "subagent-start") {
+        break;
+      }
+    }
+    // 被杀前：骨架行已随状态机推进到 running（queued 即写 → running）
+    expect(persistence.listSubagents("task-1")).toHaveLength(1);
+    expect(persistence.listSubagents("task-1")[0]).toMatchObject({
+      task: "长调研",
+      status: "running",
+    });
+
+    // 等价进程被杀：直接关库（gate 永不放行，委派悬停在 running）
+    persistence.close();
+
+    // 重开库 + 新 manager：启动收尾把残留 running 行标 interrupted
+    const reopened = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: reopened });
+    expect(reopened.listSubagents("task-1")).toHaveLength(1);
+    expect(reopened.listSubagents("task-1")[0]).toMatchObject({
+      task: "长调研",
+      status: "interrupted",
+    });
+    expect(reopened.listSubagents("task-1")[0]?.completedAt).not.toBeNull();
+    reopened.close();
   });
 });

@@ -156,6 +156,33 @@ export interface CompactRecord {
   createdAt: string;
 }
 
+/**
+ * 子代理骨架状态机（ADR 0021）：`queued → running → completed | failed`；
+ * `interrupted` 是应用重启启动收尾补记的终态（残留 queued/running 行的留痕），
+ * 进程内正常收尾（含随主任务中断后报告回流）不会产生该状态。
+ */
+export type SubagentStatus =
+  "queued" | "running" | "completed" | "failed" | "interrupted";
+
+/**
+ * 子代理骨架记录（subagents 表一行，ADR 0021）：委派「曾存在」的事实与起止时间。
+ * 入队瞬间即写（status=queued），启动更新 running，终态更新状态与完成时间；
+ * 逐轮正文与逐条工具调用在 subagent_messages / subagent_tool_calls（票 02 写入）。
+ */
+export interface SubagentRecord {
+  id: string;
+  taskId: string;
+  /** 委派说明（spawn_subagent 的 task 参数原文） */
+  task: string;
+  status: SubagentStatus;
+  /** 入队时间（ISO 8601）；骨架行随排队瞬间写入 */
+  queuedAt: string;
+  /** 启动时间；queued 阶段为 null */
+  startedAt: string | null;
+  /** 终态时间（completed / failed / interrupted）；未结束为 null */
+  completedAt: string | null;
+}
+
 /** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
 export interface CompactResult {
   /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */

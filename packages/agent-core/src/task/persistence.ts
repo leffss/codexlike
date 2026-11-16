@@ -13,6 +13,7 @@ import { workbenchKey } from "./workbench-state";
 import type {
   CompactRecord,
   ProjectRecord,
+  SubagentRecord,
   TaskRecord,
   StoredMessage,
 } from "./types";
@@ -86,6 +87,15 @@ export interface TaskPersistence {
   insertApproval(taskId: string, commandWord: string): void;
   /** 读取遗留命令首词记录，仅用于兼容与历史检查，不恢复为授权。 */
   listApprovals(taskId: string): string[];
+  /**
+   * 子代理骨架行（ADR 0021，票 01）：入队瞬间插入（status=queued）；
+   * 状态更新见 updateSubagent，按任务列出见 listSubagents。
+   */
+  insertSubagent(record: SubagentRecord): void;
+  /** 只更新给定字段；目标不存在时静默忽略（与 updateTask 同语义） */
+  updateSubagent(id: string, patch: Partial<Omit<SubagentRecord, "id">>): void;
+  /** 指定任务的子代理骨架行，按排队时间正序；未知任务返回空数组 */
+  listSubagents(taskId: string): SubagentRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -163,6 +173,39 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at TEXT NOT NULL,
   PRIMARY KEY (task_id, command_word)
 );
+CREATE TABLE IF NOT EXISTS subagents (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  task TEXT NOT NULL,
+  status TEXT NOT NULL,
+  queued_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_subagents_task_queued
+  ON subagents(task_id, queued_at);
+CREATE TABLE IF NOT EXISTS subagent_messages (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  subagent_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  reasoning TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_messages_subagent
+  ON subagent_messages(task_id, subagent_id, created_at);
+CREATE TABLE IF NOT EXISTS subagent_tool_calls (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  subagent_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  arguments TEXT NOT NULL,
+  output TEXT NOT NULL,
+  is_error INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_tool_calls_subagent
+  ON subagent_tool_calls(task_id, subagent_id, created_at);
 `;
 
 interface TaskRow {
@@ -214,6 +257,16 @@ interface ToolCallRow {
   is_error: number;
   reasoning: string | null;
   created_at: string;
+}
+
+interface SubagentRow {
+  id: string;
+  task_id: string;
+  task: string;
+  status: string;
+  queued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 /**
@@ -349,6 +402,12 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   const listApprovalsStmt = db.prepare(
     "SELECT command_word FROM approvals WHERE task_id = ? ORDER BY created_at, rowid"
   );
+  const insertSubagentStmt = db.prepare(
+    "INSERT INTO subagents (id, task_id, task, status, queued_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentsStmt = db.prepare(
+    "SELECT * FROM subagents WHERE task_id = ? ORDER BY queued_at, rowid"
+  );
 
   function toRecord(row: TaskRow): TaskRecord {
     return {
@@ -467,12 +526,16 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           "INSERT OR IGNORE INTO removed_creation_requests SELECT creation_request_id FROM tasks WHERE project_id = ? AND creation_request_id IS NOT NULL"
         ).run(projectId);
         // 显式关联清理，不依赖各运行时 foreign_keys 默认值，不按目录推导集合。
+        // 子代理三表随任务数据同步清理（ADR 0021：生命周期跟随任务数据）。
         for (const table of [
           "messages",
           "compact_records",
           "tool_calls",
           "interactions",
           "approvals",
+          "subagents",
+          "subagent_messages",
+          "subagent_tool_calls",
         ]) {
           db.prepare(
             `DELETE FROM ${table} WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`
@@ -804,6 +867,69 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         command_word: string;
       }[];
       return rows.map((row) => row.command_word);
+    },
+
+    insertSubagent(record) {
+      insertSubagentStmt.run(
+        record.id,
+        record.taskId,
+        record.task,
+        record.status,
+        record.queuedAt,
+        record.startedAt,
+        record.completedAt
+      );
+    },
+
+    updateSubagent(id, patch) {
+      // 只更新给定字段（状态机推进只触碰状态与时间列），目标不存在静默忽略
+      const columns: string[] = [];
+      const values: (string | number | null)[] = [];
+      if (patch.taskId !== undefined) {
+        columns.push("task_id = ?");
+        values.push(patch.taskId);
+      }
+      if (patch.task !== undefined) {
+        columns.push("task = ?");
+        values.push(patch.task);
+      }
+      if (patch.status !== undefined) {
+        columns.push("status = ?");
+        values.push(patch.status);
+      }
+      if (patch.queuedAt !== undefined) {
+        columns.push("queued_at = ?");
+        values.push(patch.queuedAt);
+      }
+      if (patch.startedAt !== undefined) {
+        columns.push("started_at = ?");
+        values.push(patch.startedAt);
+      }
+      if (patch.completedAt !== undefined) {
+        columns.push("completed_at = ?");
+        values.push(patch.completedAt);
+      }
+      if (columns.length === 0) {
+        return;
+      }
+      db.prepare(`UPDATE subagents SET ${columns.join(", ")} WHERE id = ?`).run(
+        ...values,
+        id
+      );
+    },
+
+    listSubagents(taskId) {
+      return (listSubagentsStmt.all(taskId) as unknown as SubagentRow[]).map(
+        (row) => ({
+          id: row.id,
+          taskId: row.task_id,
+          task: row.task,
+          status: row.status as SubagentRecord["status"],
+          queuedAt: row.queued_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+        })
+      );
     },
 
     close() {
