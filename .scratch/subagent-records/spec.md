@@ -1,6 +1,6 @@
 # Spec: 子代理过程记录独立落库
 
-Status: ready-for-agent
+Status: done
 
 对应 ADR 0021（`docs/adr/0021-subagent-process-records-persisted.md`）；GLOSSARY 词条「子代理记录（Subagent Record）」为术语权威口径。
 
