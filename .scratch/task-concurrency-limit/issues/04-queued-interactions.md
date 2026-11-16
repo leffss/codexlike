@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 排队任务输入框可用，提交的消息进入输入队列而非直接执行
 - [ ] 开跑后输入队列按序自动发出

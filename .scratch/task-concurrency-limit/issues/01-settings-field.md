@@ -4,7 +4,7 @@
 
 **Blocked by:** None（可立即开工）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 设置页执行分区可见「任务并发上限」输入项，默认显示 3
 - [ ] 改动即时保存并持久化，重启后保留
