@@ -27,6 +27,10 @@ import type {
 
 import type { TaskStatusInfo } from "../tasks/status";
 import type { QueueChangeReason, QueuedMessage } from "../tasks/input-queue";
+import type {
+  QueuedTaskStart,
+  TaskQueueChangeReason,
+} from "../tasks/task-queue";
 import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { AgentSettings } from "../execution/agent-settings-store";
@@ -56,6 +60,8 @@ export type { McpServerView, McpServerInput };
 export type { ThemeName };
 // 输入队列（票 01/02）：队列条与事件载荷的公共形状
 export type { QueuedMessage, QueueChangeReason };
+// 任务排队（任务并发上限票 02）：队列条与事件载荷的公共形状
+export type { QueuedTaskStart, TaskQueueChangeReason };
 
 /**
  * 渲染进程 ←→ 主进程 的类型化 IPC 契约。
@@ -235,6 +241,16 @@ export interface TaskEventEnvelope {
         paused: boolean;
         /** 正在发出的条目 id（票 03）：队列快照中置顶锁定显示的条目；省略/null 表示无 */
         sendingId?: string | null;
+      }
+    | {
+        /**
+         * 任务排队变更（任务并发上限票 02 / ADR 0022）：入队 / 出队开跑 / 出队
+         * 移除；queue 为变更后的全局任务排队完整快照（按发起顺序），信封的
+         * activity 同步携带 queued 活动态（侧栏徽章渲染是票 03）。
+         */
+        type: "task-queue-changed";
+        reason: TaskQueueChangeReason;
+        queue: QueuedTaskStart[];
       };
   activity: TaskActivity;
 }
@@ -243,6 +259,12 @@ export interface TaskEventEnvelope {
 export interface TaskActivity {
   /** 仅活动期间用于恢复正确入口；省略表示普通消息执行或空闲。 */
   operation?: "compact";
+  /**
+   * 任务排队中（任务并发上限票 02 / ADR 0022）：空闲任务的发送因全局满员
+   * 进入应用级任务排队、尚未开跑；开跑或出队后撤销。排队不是执行
+   * （running=false），侧栏「排队中」徽章渲染是票 03。
+   */
+  queued?: boolean;
   running: boolean;
   waitingForUser: boolean;
   outcome: "completed" | "failed" | "interrupted" | null;
