@@ -4,13 +4,13 @@
 
 **Blocked by:** 01, 02（要有落库数据才有恢复面）
 
-**Status:** ready-for-agent
+**Status:** done
 
 指针：[spec.md](../spec.md)、[notes.md](../notes.md)、ADR 0021。
 
-- [ ] view 载荷并行 subagents 字段（骨架+消息+工具一次读出）；transcript 联合类型与组装逻辑不动
-- [ ] resume-equivalence：恢复续跑 prompt 与不重启一致，且不含任何子代理过程内容（隔离的结构性守护）
-- [ ] desktop 恢复：并行字段随初始 history 同一次 IPC 发出，不走按需拉取
-- [ ] compact 替换 history 时并行 subagents 字段保留
-- [ ] desktop 重启恢复测试断言完整子代理数据（含 interrupted 骨架）
-- [ ] agent-core、desktop 全绿、typecheck 0、eslint 0 error
+- [x] view 载荷并行 subagents 字段（骨架+消息+工具一次读出）；transcript 联合类型与组装逻辑不动
+- [x] resume-equivalence：恢复续跑 prompt 与不重启一致，且不含任何子代理过程内容（隔离的结构性守护）
+- [x] desktop 恢复：并行字段随初始 history 同一次 IPC 发出，不走按需拉取
+- [x] compact 替换 history 时并行 subagents 字段保留
+- [x] desktop 重启恢复测试断言完整子代理数据（含 interrupted 骨架）
+- [x] agent-core、desktop 全绿、typecheck 0、eslint 0 error

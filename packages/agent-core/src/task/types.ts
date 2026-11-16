@@ -220,6 +220,21 @@ export interface SubagentToolCallRecord {
   createdAt: string;
 }
 
+/**
+ * 子代理恢复快照（ADR 0021 票 03）：一个委派的骨架 + 逐轮消息 + 工具调用归组，
+ * 随 view 载荷与初始 history 同一次 IPC 发给 UI（恢复数据面走并行字段而非
+ * transcript 第五种 kind）——模型上下文组装只读 transcript、不读本快照，
+ * 「子代理过程不进上下文」由此结构性保证（resume-equivalence 测试守护）。
+ */
+export interface SubagentSnapshot {
+  /** 委派骨架：状态机（含重启收尾补记的 interrupted 终态）与起止时间 */
+  record: SubagentRecord;
+  /** 逐轮正文与思考（轮边界即行边界，按写入序） */
+  messages: SubagentMessageRecord[];
+  /** 工具调用清单（完成即写，按写入序） */
+  toolCalls: SubagentToolCallRecord[];
+}
+
 /** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
 export interface CompactResult {
   /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */

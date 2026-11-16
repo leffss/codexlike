@@ -668,6 +668,8 @@ export function taskView(taskId: string): TaskView | null {
     executionId: "exec-1",
     sequence: 24,
     history,
+    // 子代理恢复快照（票 03）：类型兼容暂空——恢复记录样例随票 04 的 ui 重建补齐
+    subagents: [],
     // 子代理运行态样例仅主任务回放
     events: taskId === MAIN_TASK_ID ? SUBAGENT_EVENTS : [],
     pendingInteractions: [],

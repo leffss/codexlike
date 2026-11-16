@@ -292,6 +292,92 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     persistence3.close();
   });
 
+  it("subagents：骨架+逐轮消息+工具调用一次读出并按委派归组；transcript 不读子代理行（ADR 0021 票 03）", () => {
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+
+    // 手工落库两份委派的过程记录（真实路径由子代理循环逐条实时写；
+    // 此处验证恢复数据面的归组语义：骨架按排队序、消息/工具按写入序归属）
+    const insert = (id: string, queuedAt: string) =>
+      persistence.insertSubagent({
+        id,
+        taskId: task.id,
+        task: `委派 ${id}`,
+        status: "completed",
+        queuedAt,
+        startedAt: "2026-11-11T08:00:02.000Z",
+        completedAt: "2026-11-11T08:00:09.000Z",
+      });
+    insert("sub-b", "2026-11-11T08:00:01.000Z");
+    insert("sub-a", "2026-11-11T08:00:05.000Z");
+    const insertMessage = (
+      id: string,
+      subagentId: string,
+      content: string,
+      reasoning?: string
+    ) =>
+      persistence.insertSubagentMessage({
+        id,
+        taskId: task.id,
+        subagentId,
+        content,
+        ...(reasoning ? { reasoning } : {}),
+        createdAt: `2026-11-11T08:00:0${id.at(-1)}.000Z`,
+      });
+    insertMessage("sm1", "sub-b", "第一轮正文", "第一轮思考");
+    insertMessage("sm2", "sub-a", "另一委派的正文");
+    insertMessage("sm3", "sub-b", "第二轮正文");
+    persistence.insertSubagentToolCall({
+      id: "st1",
+      taskId: task.id,
+      subagentId: "sub-b",
+      toolName: "read_file",
+      arguments: "{}",
+      output: "已读",
+      isError: false,
+      createdAt: "2026-11-11T08:00:03.500Z",
+    });
+    persistence.insertSubagentToolCall({
+      id: "st2",
+      taskId: task.id,
+      subagentId: "sub-a",
+      toolName: "run_command",
+      arguments: "{}",
+      output: "已跑",
+      isError: true,
+      createdAt: "2026-11-11T08:00:06.500Z",
+    });
+
+    const subagents = manager.subagents(task.id);
+    // 骨架按排队时间正序（与 listSubagents 同序）
+    expect(subagents.map((snapshot) => snapshot.record.id)).toEqual([
+      "sub-b",
+      "sub-a",
+    ]);
+    expect(subagents[0]?.record).toMatchObject({
+      task: "委派 sub-b",
+      status: "completed",
+      startedAt: "2026-11-11T08:00:02.000Z",
+      completedAt: "2026-11-11T08:00:09.000Z",
+    });
+    // 逐轮消息与工具调用按委派归组、保持写入序（轮边界即行边界）
+    expect(subagents[0]?.messages.map((row) => row.id)).toEqual(["sm1", "sm3"]);
+    expect(subagents[0]?.messages[0]?.reasoning).toBe("第一轮思考");
+    expect(subagents[0]?.messages[1]?.reasoning).toBeUndefined();
+    expect(subagents[0]?.toolCalls.map((row) => row.id)).toEqual(["st1"]);
+    expect(subagents[1]?.messages.map((row) => row.id)).toEqual(["sm2"]);
+    expect(subagents[1]?.toolCalls.map((row) => row.id)).toEqual(["st2"]);
+    expect(subagents[1]?.toolCalls[0]?.isError).toBe(true);
+    // 隔离的结构性守护：时间线（模型上下文组装的数据来源）不含子代理过程行
+    expect(manager.transcript(task.id)).toEqual([]);
+    expect(manager.subagents("nope")).toEqual([]);
+    persistence.close();
+  });
+
   it("transcript：消息与工具调用按时间顺序合并（重启恢复时间线用）", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const manager = createTaskManager({
