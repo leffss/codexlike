@@ -10,7 +10,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "pnpm --filter @codexlike/agent-core run build && vitest run"
   },
   "dependencies": {
     "@codexlike/agent-core": "workspace:*",

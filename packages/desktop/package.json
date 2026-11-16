@@ -18,7 +18,7 @@
     "dist": "pnpm run predist && electron-builder --win --projectDir .dist-vendor",
     "predist": "node scripts/dist.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "pnpm --filter @codexlike/agent-core run build && vitest run",
     "test:e2e": "node e2e/smoke.mjs",
     "test:e2e:acceptance": "node e2e/acceptance.mjs",
     "test:e2e:commands": "node e2e/commands.mjs",
