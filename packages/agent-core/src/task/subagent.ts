@@ -43,6 +43,7 @@ import type {
 import { decideApproval, type ApprovalMode } from "./approval";
 import { DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS } from "./execution-settings";
 import { describeModelError, isAbortLike } from "./errors";
+import type { TaskPersistence } from "./persistence";
 import type { TaskEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
@@ -102,6 +103,15 @@ export interface SubagentsConfig {
 }
 
 /**
+ * 子代理记录持久化通道（ADR 0021）：宿主任务注入，编排器只写子代理表——
+ * 票 01 为骨架行（入队即写 + 状态机推进），票 02 扩逐轮正文与逐条工具调用。
+ */
+export type SubagentPersistence = Pick<
+  TaskPersistence,
+  "insertSubagent" | "updateSubagent"
+>;
+
+/**
  * 任务（agent-task）向编排器提供的端口：审批状态、审批等待注册与事件出口。
  * 子代理与主任务共享冻结的审批模式与交互路由；任务授权不改变本轮
  * ToolContext 的文件访问边界。自动批准留痕经 requestInteraction 的
@@ -110,6 +120,11 @@ export interface SubagentsConfig {
 export interface SubagentHostPort {
   taskId: string;
   workspacePath: string;
+  /**
+   * 子代理骨架行持久化通道（ADR 0021）：「曾委派过」的事实从入队起落库，
+   * 排队中被杀也有痕；启动更新 running、终态更新状态与完成时间。
+   */
+  persistence: SubagentPersistence;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
   /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主任务正文。 */
@@ -251,6 +266,10 @@ export function createSubagentOrchestrator(
         return;
       }
       next.state = "running";
+      port.persistence.updateSubagent(next.subagentId, {
+        status: "running",
+        startedAt: port.now(),
+      });
       emit({
         type: "subagent-start",
         subagentId: next.subagentId,
@@ -543,6 +562,13 @@ export function createSubagentOrchestrator(
     entry.reasoning = reasoning;
     entry.state = "done";
     fallbackProfiles.delete(entry.subagentId);
+    // 骨架行终态更新（ADR 0021）：状态与完成时间随报告回流一并落库；
+    // 进程内中断（随主任务 abort）同样走到这里——报告已回流即为终态，
+    // interrupted 只属于重启收尾补记（残留 queued/running 行）
+    port.persistence.updateSubagent(entry.subagentId, {
+      status: isError ? "failed" : "completed",
+      completedAt: port.now(),
+    });
     emit({
       type: "subagent-report",
       subagentId: entry.subagentId,
@@ -605,6 +631,17 @@ export function createSubagentOrchestrator(
       if (context.profile !== undefined) {
         fallbackProfiles.set(subagentId, context.profile);
       }
+      // 骨架行 queued 即写（ADR 0021）：入队瞬间插入，排队中被杀的委派
+      // 也留有「曾委派过」的事实与委派说明；启动/终态只做状态更新
+      port.persistence.insertSubagent({
+        id: subagentId,
+        taskId: port.taskId,
+        task,
+        status: "queued",
+        queuedAt: port.now(),
+        startedAt: null,
+        completedAt: null,
+      });
       emit({ type: "subagent-queued", subagentId, task });
       // 立即尝试占位开跑；并发上限满则留在 FIFO 队列（前一个结束时推进）
       startQueued(context.signal);
