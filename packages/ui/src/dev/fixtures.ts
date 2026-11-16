@@ -13,7 +13,11 @@ import type {
   TaskResourcesView,
   ToolCallRecord,
 } from "@codexlike/agent-core";
-import type { TaskListItem, TaskView } from "@codexlike/desktop/ipc";
+import type {
+  TaskEventEnvelope,
+  TaskListItem,
+  TaskView,
+} from "@codexlike/desktop/ipc";
 
 const T0 = "2026-11-13T09:12:00.000Z";
 const T1 = "2026-11-13T09:13:30.000Z";
@@ -311,6 +315,143 @@ const APPROVAL_INTERACTION: InteractionRecord = {
   cancelReason: null,
 };
 
+/**
+ * 子代理样例事件（工单 13 事件形状）：sub-live-1 运行中（排队→开跑→
+ * 读文件完成→grep 进行中→思考流）；sub-live-2 已完成（事件全链走完，
+ * 带嵌套工具清单与报告——恢复态 history 记录重建的完成卡没有工具
+ * 清单，这里补齐该形态）。右栏「子代理」tab（ADR 0020）消费。
+ */
+function subEnvelope(
+  sequence: number,
+  event: TaskEventEnvelope["event"]
+): TaskEventEnvelope {
+  return {
+    taskId: MAIN_TASK_ID,
+    executionId: "exec-1",
+    sequence,
+    event,
+    activity: {
+      running: true,
+      waitingForUser: false,
+      outcome: null,
+      unread: false,
+    },
+  };
+}
+
+const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
+  subEnvelope(1, {
+    type: "subagent-queued",
+    subagentId: "sub-live-1",
+    task: "梳理 MessageStream 段渲染分派与折叠记忆约定",
+  }),
+  subEnvelope(2, {
+    type: "subagent-start",
+    subagentId: "sub-live-1",
+    task: "梳理 MessageStream 段渲染分派与折叠记忆约定",
+    toolCallId: "tc-sub-live-1",
+  }),
+  subEnvelope(3, {
+    type: "subagent-tool",
+    subagentId: "sub-live-1",
+    phase: "call",
+    call: toolCall(
+      "tc-sub1-rf",
+      "read_file",
+      { path: "packages/ui/src/components/MessageStream.tsx" },
+      "",
+      T3
+    ),
+  }),
+  subEnvelope(4, {
+    type: "subagent-tool",
+    subagentId: "sub-live-1",
+    phase: "result",
+    call: toolCall(
+      "tc-sub1-rf",
+      "read_file",
+      { path: "packages/ui/src/components/MessageStream.tsx" },
+      '…（617 行，节选）function SegmentView(props) { if (segment.kind === "subagent") return <SubagentStreamMarker subagent={segment} />; … }',
+      T3
+    ),
+  }),
+  subEnvelope(5, {
+    type: "subagent-tool",
+    subagentId: "sub-live-1",
+    phase: "call",
+    call: toolCall(
+      "tc-sub1-gr",
+      "grep",
+      { pattern: "useCollapseState", path: "packages/ui/src/components" },
+      "",
+      T3
+    ),
+  }),
+  subEnvelope(6, {
+    type: "subagent-reasoning",
+    subagentId: "sub-live-1",
+    delta:
+      "段分派集中在 SegmentView：subagent 段渲染右栏标记行，正文走 SubagentRailPanel。",
+  }),
+  subEnvelope(7, {
+    type: "subagent-reasoning",
+    subagentId: "sub-live-1",
+    delta:
+      "折叠记忆统一用任务作用域键前缀 subagent-，切换任务不丢。继续查 grep 结果。",
+  }),
+  subEnvelope(8, {
+    type: "subagent-start",
+    subagentId: "sub-live-2",
+    task: "盘点布局相关 e2e 断言清单",
+    toolCallId: "tc-sub-live-2",
+  }),
+  subEnvelope(9, {
+    type: "subagent-tool",
+    subagentId: "sub-live-2",
+    phase: "call",
+    call: toolCall(
+      "tc-sub2-gr",
+      "grep",
+      { pattern: "rail-panel", path: "e2e" },
+      "",
+      T3
+    ),
+  }),
+  subEnvelope(10, {
+    type: "subagent-tool",
+    subagentId: "sub-live-2",
+    phase: "result",
+    call: toolCall(
+      "tc-sub2-gr",
+      "grep",
+      { pattern: "rail-panel", path: "e2e" },
+      "width-tiers.spec.ts:41  acceptance.spec.ts:88  changes.spec.ts:12",
+      T3
+    ),
+  }),
+  subEnvelope(11, {
+    type: "subagent-reasoning",
+    subagentId: "sub-live-2",
+    delta:
+      "布局几何断言集中在 width-tiers 与 acceptance 两个 spec，共 3 处直接引用 rail-panel。",
+  }),
+  subEnvelope(12, {
+    type: "subagent-report",
+    subagentId: "sub-live-2",
+    task: "盘点布局相关 e2e 断言清单",
+    report: [
+      "布局相关 e2e 断言共 3 处直接依赖右栏 `rail-panel` testid：",
+      "",
+      "- `width-tiers.spec.ts:41`——右栏推窄几何（400 默认宽 + 行宽夹取）",
+      "- `acceptance.spec.ts:88`——tab 互斥与开关状态同步",
+      "- `changes.spec.ts:12`——文件清单与 diff 路径行",
+      "",
+      "消息流 480 保底断言不直接引用右栏节点，改动消息流内子代理呈现不会影响它。",
+    ].join("\n"),
+    ok: true,
+  }),
+];
+
 const MAIN_HISTORY = [
   {
     kind: "message" as const,
@@ -373,6 +514,35 @@ const MAIN_HISTORY = [
       T1
     ),
   },
+  /* 子代理样例：恢复态完成记录——
+     subagentFromToolRecord 重建（task 取 arguments.task、报告即 output） */
+  {
+    kind: "tool-call" as const,
+    call: {
+      ...toolCall(
+        "tc-sub-r1",
+        "spawn_subagent",
+        { task: "调研 WorkspacePage 分区结构与警告条实现" },
+        [
+          "## 分区结构调研结论",
+          "",
+          "中列自上而下共 5 层，纵向占用问题集中在上面 3 层：",
+          "",
+          "1. **标题栏**：`window-titlebar` 一整行仅放品牌名与窗口控制，左 60% 空间闲置；",
+          "2. **任务头行 + workspace-info**：两行合计 ~96px，任务名与路径摘要可合并进标题栏；",
+          "3. **警告条区**：最多 5 条（保存错误 / profile 不可用 / 上下文告警 / 共享提示 / 自动批准状态）同时堆叠，票03 已改右下角浮层；",
+          "4. **消息流**：`flex-1` 主区，内容宽度由 `contentWidthClass` 约束；",
+          "5. **输入区 / 交互面板**：与消息列同宽（票05 不变量）。",
+          "",
+          "建议：标题栏改任务上下文行（面包屑：任务名 › 项目 › worktree 徽章），",
+          "workspace-info 缩为徽章，5 类提示走 `ToastHost` 浮层不占布局行。",
+        ].join("\n"),
+        T1
+      ),
+      reasoning:
+        "用户反馈纵向太挤。先读 WorkspacePage 主结构确认分区，再逐项判断哪些可以合并或下沉。警告条已有浮层方案（票03），剩下标题栏与 workspace-info 是主要压缩点。",
+    },
+  },
   /* 工作计划样例：第 2 版，调研收官进入方案设计 */
   {
     kind: "tool-call" as const,
@@ -403,6 +573,17 @@ const MAIN_HISTORY = [
       "msg-a2",
       "现状确认完毕，布局方案要点如下：\n\n1. **标题栏 → 任务上下文行**：左侧「任务名 › 项目 › worktree 徽章」面包屑，右侧全局搜索 + 主题/设置/窗口控制；无任务时退回品牌展示。\n2. **workspace-info 整行取消**：路径摘要缩进标题栏徽章，完整路径与目录选择移入点击弹层。\n3. **警告条收纳**：保存错误 / profile 不可用 / 上下文告警 / 共享提示 / 自动批准状态合并为单条状态胶囊，多条时计数展开。\n4. **右栏 tab 化**：「规范与技能」「改动」共享一个 rail，tab 切换不再叠加抢高度。",
       T1
+    ),
+  },
+  /* 子代理样例：失败委派（ok=false，报告为中文失败原因） */
+  {
+    kind: "tool-call" as const,
+    call: toolCall(
+      "tc-sub-r2",
+      "spawn_subagent",
+      { task: "盘点旧布局的 e2e 断言依赖" },
+      "子代理执行失败：模型 API 返回 429 Too Many Requests（已按指数退避重试 2 次），本轮委派未完成，可重新发起。",
+      T2
     ),
   },
   { kind: "interaction" as const, interaction: APPROVAL_INTERACTION },
@@ -487,7 +668,8 @@ export function taskView(taskId: string): TaskView | null {
     executionId: "exec-1",
     sequence: 24,
     history,
-    events: [],
+    // 子代理运行态样例仅主任务回放
+    events: taskId === MAIN_TASK_ID ? SUBAGENT_EVENTS : [],
     pendingInteractions: [],
     activity: task.activity ?? {
       running: false,

@@ -187,7 +187,7 @@ async function main() {
     await window.getByTestId("new-standalone-task-item").click();
     await send(window, "子代理任务");
     await until(() => held.has("child"), "子代理模型未启动");
-    await window.getByTestId("subagent-card").waitFor();
+    await window.getByTestId("subagent-stream-marker-toggle").waitFor();
     await window.getByTestId("new-task").click();
     await window.getByTestId("new-standalone-task-item").click();
     await send(window, "长历史");
@@ -393,7 +393,7 @@ async function main() {
       );
     }
     await select(window, "子代理任务");
-    await window.getByTestId("subagent-card").waitFor();
+    await window.getByTestId("subagent-stream-marker-toggle").waitFor();
     await delay(300);
     assert(model.requestCount() === count, "新进程及查看旧历史没有模型请求");
     assert(

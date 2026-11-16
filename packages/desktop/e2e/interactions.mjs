@@ -746,8 +746,9 @@ async function queueScenario() {
       await expectFront(window, queued[0], "主代理");
       await pendingCount(window, taskId, 3);
       assert(
-        (await window.getByTestId("subagent-card").count()) === 2,
-        "切回恢复两张子代理卡"
+        (await window.getByTestId("subagent-stream-marker-toggle").count()) ===
+          2,
+        "切回恢复两条子代理标记行"
       );
       assert(
         !existsSync(join(homeDir, "workspace", "queue-approved.txt")),

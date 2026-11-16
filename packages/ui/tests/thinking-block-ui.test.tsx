@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
-import { SubagentCard } from "../src/components/SubagentCard";
+import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import type {
   MessageSegment,
@@ -92,7 +92,7 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
   });
 });
 
-describe("子代理卡内思考块：与主任务思考块同构", () => {
+describe("子代理详情内思考块：与主任务思考块同构（ADR 0020 右栏详情）", () => {
   function subagent(state: "running" | "done", id: string): SubagentSegment {
     return {
       kind: "subagent",
@@ -112,21 +112,24 @@ describe("子代理卡内思考块：与主任务思考块同构", () => {
     };
   }
 
-  it("运行中默认展开：open 属性，卡内不内联转圈", () => {
-    const html = renderToStaticMarkup(
-      createElement(SubagentCard, { subagent: subagent("running", "sa-run") })
+  function railMarkup(state: "running" | "done", id: string): string {
+    return renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subagent(state, id)],
+        focus: null,
+      })
     );
+  }
+
+  it("运行中默认展开：open 属性，详情内不内联转圈", () => {
+    const html = railMarkup("running", "sa-run");
     const block = blockMarkup(html, "subagent-thinking-block");
     expect(block).toContain('open=""');
     expect(html).not.toContain('data-testid="subagent-thinking-indicator"');
   });
 
   it("完成后默认收起：无 open 属性，摘要行显示首行摘要", () => {
-    // 卡片报告区默认收起：预置展开记忆让 done 态内容渲染出来
-    setRememberedOpen("subagent-sa-done", true);
-    const html = renderToStaticMarkup(
-      createElement(SubagentCard, { subagent: subagent("done", "sa-done") })
-    );
+    const html = railMarkup("done", "sa-done");
     const block = blockMarkup(html, "subagent-thinking-block");
     expect(block).not.toContain('open=""');
     expect(html).not.toContain('data-testid="subagent-thinking-indicator"');

@@ -24,6 +24,8 @@ import {
   SnapshotSwitcher,
   type SnapshotKey,
 } from "./ResourceSnapshotSummary";
+import { SubagentRailPanelBody, type SubagentFocus } from "./SubagentRailPanel";
+import type { SubagentSegment } from "../lib/task-view";
 
 const MonacoDiff = lazy(() => import("./MonacoDiff"));
 
@@ -33,10 +35,12 @@ const MonacoDiff = lazy(() => import("./MonacoDiff"));
  * 打开时把消息流推窄（并列而非覆盖），中缝可拖拽调宽。
  *
  * 结构（自上而下）：
- * - tab 行：两个独立描边按钮（对标标题栏开关样式），单屏互斥切换；
+ * - tab 行：三个独立描边按钮（对标标题栏开关样式），单屏互斥切换；
  * - 改动 tab：当前分支行（行尾「刷新」）→ 变更文件清单 → 选中文件
  *   diff（Monaco 懒加载）→ 提交动作组（GitActions）；
- * - 规范与技能 tab：三档快照 chips（本轮/上轮/下轮预览）+ 密排摘要。
+ * - 规范与技能 tab：三档快照 chips（本轮/上轮/下轮预览）+ 密排摘要；
+ * - 子代理 tab（ADR 0020）：主从分栏——子代理列表 → 选中者报告与
+ *   进度详情（消息流只留单行标记，正文全部收纳于此）。
  *
  * 开合由标题栏「右栏开关」驱动（props.open，默认关闭）；关闭时本组件
  * 不渲染任何节点，但组件保持挂载——git 状态 hook 照常轮换，标题栏
@@ -92,10 +96,16 @@ export function RailPanel(props: {
   onRefreshResources: () => void;
   /** 未提交变更数上报（非 git / 无任务为 null）：标题栏开关角标消费 */
   onChangesCount: (count: number | null) => void;
+  /** 子代理段（ADR 0020）：子代理 tab 的数据来源（消息段中过滤） */
+  subagents: SubagentSegment[];
+  /** 定位信号（消息流标记行点击）：切到子代理 tab 并选中对应子代理 */
+  subagentFocus: SubagentFocus | null;
 }) {
   const taskId = props.taskId;
   const hasTask = taskId !== null;
-  const [tab, setTab] = useState<"changes" | "resources">("changes");
+  const [tab, setTab] = useState<"changes" | "resources" | "subagents">(
+    "changes"
+  );
   const [selected, setSelected] = useState<GitFileChange | null>(null);
   const [snapshot, setSnapshot] = useState<SnapshotKey>("preview");
 
@@ -166,6 +176,18 @@ export function RailPanel(props: {
   useEffect(() => {
     setSelected(null);
   }, [taskId]);
+
+  // 消息流标记行点击定位（ADR 0020）：切到子代理 tab（开右栏由
+  // WorkspacePage 侧完成；选中与滚动到项在 SubagentRailPanelBody 内）
+  const subagentFocus = props.subagentFocus;
+  useEffect(() => {
+    if (subagentFocus !== null) setTab("subagents");
+  }, [subagentFocus]);
+
+  // tab 徽章：运行中/排队中的子代理数（已完成不计数，title 说明语义）
+  const runningSubagents = props.subagents.filter(
+    (item) => item.state === "running" || item.state === "queued"
+  ).length;
 
   // 打开瞬间把记忆宽度夹到当前容器上限（窄窗口下 400 默认宽会把正文
   // 压穿 480 最小宽；上限优先——右栏跟随容器收窄保布局不溢出）
@@ -262,6 +284,29 @@ export function RailPanel(props: {
             }`}
           >
             规范与技能
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "subagents"}
+            data-testid="rail-tab-subagents"
+            onClick={() => setTab("subagents")}
+            className={`shrink-0 rounded border px-2 py-1.5 text-xs ${
+              tab === "subagents"
+                ? "border-accent text-accent"
+                : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
+            }`}
+          >
+            子代理
+            {runningSubagents > 0 && (
+              <span
+                data-testid="subagent-rail-badge"
+                title={`${runningSubagents} 个子代理运行中或排队（不含已完成）`}
+                className="ml-1 rounded-full bg-warn-bg px-1.5 py-0.5 text-xs text-warn-fg"
+              >
+                {runningSubagents}
+              </span>
+            )}
           </button>
         </div>
         {tab === "changes" ? (
@@ -372,6 +417,18 @@ export function RailPanel(props: {
                 />
               </div>
             )}
+          </div>
+        ) : tab === "subagents" ? (
+          <div
+            data-testid="subagents-panel"
+            role="tabpanel"
+            aria-label="子代理"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <SubagentRailPanelBody
+              subagents={props.subagents}
+              focus={props.subagentFocus}
+            />
           </div>
         ) : (
           <div

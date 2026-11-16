@@ -47,6 +47,7 @@ import {
 import { contextWarningMessage } from "../lib/context-warning";
 
 import { RailPanel } from "../components/RailPanel";
+import type { SubagentFocus } from "../components/SubagentRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -67,6 +68,7 @@ import {
   appendLocalSegment,
   mergeInteractions,
   type MessageSegment,
+  type SubagentSegment,
 } from "../lib/task-view";
 import {
   formatTaskStatus,
@@ -254,6 +256,23 @@ export function WorkspacePage(props: {
     currentId === null
       ? messages
       : mergeInteractions(messages, workspaceState.records(currentId));
+  // 子代理段（ADR 0020）：右栏「子代理」tab 的数据来源（消息段过滤）
+  const subagentSegments = useMemo(
+    () =>
+      displayMessages.filter(
+        (item): item is SubagentSegment => item.kind === "subagent"
+      ),
+    [displayMessages]
+  );
+  // 标记行点击定位信号（seq 单调递增：同 id 重复点击也重新定位）
+  const subagentFocusSeqRef = useRef(0);
+  const [subagentFocus, setSubagentFocus] = useState<SubagentFocus | null>(
+    null
+  );
+  const openSubagentFromStream = useCallback((subagentId: string) => {
+    setRailOpen(true);
+    setSubagentFocus({ id: subagentId, seq: ++subagentFocusSeqRef.current });
+  }, []);
   // 新建、加载与已有任务始终使用同一档位；滚动条宽度由消息流实际测量。
   const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
@@ -1635,6 +1654,7 @@ export function WorkspacePage(props: {
                 contentWidthClass={contentWidthClass}
                 followSignal={followSignal}
                 taskTitle={current?.title ?? null}
+                onOpenSubagent={openSubagentFromStream}
                 emptyHint={
                   profiles.length === 0 ? (
                     <button
@@ -1834,6 +1854,8 @@ export function WorkspacePage(props: {
               resourcesError={resourcesError}
               onRefreshResources={refreshResourcesForView}
               onChangesCount={setChangesCount}
+              subagents={subagentSegments}
+              subagentFocus={subagentFocus}
             />
           </div>
         </div>

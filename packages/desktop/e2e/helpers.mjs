@@ -149,6 +149,12 @@ export async function projectMenuAction(
  * 打开检视右栏（ADR 0018）并切到指定 tab：标题栏「右栏开关」唯一开合
  * 入口（幂等——已展开不再点），tab 切换走右栏自带描边按钮。
  */
+const RAIL_PANEL_TESTIDS = {
+  changes: "changes-panel",
+  resources: "resources-panel",
+  subagents: "subagents-panel",
+};
+
 export async function openRailPanel(window, tab = "changes") {
   const toggle = window.getByTestId("resources-toggle");
   if ((await toggle.getAttribute("aria-expanded")) !== "true") {
@@ -156,8 +162,20 @@ export async function openRailPanel(window, tab = "changes") {
   }
   await window.getByTestId(`rail-tab-${tab}`).click();
   await window
-    .getByTestId(tab === "changes" ? "changes-panel" : "resources-panel")
+    .getByTestId(RAIL_PANEL_TESTIDS[tab] ?? "changes-panel")
     .waitFor();
+}
+
+/**
+ * 打开右栏「子代理」tab 并定位（ADR 0020）：点击消息流标记行一步到位
+ * （开右栏 + 切 tab + 列表选中对应子代理；子代理 id 运行时生成，标记
+ * 行与列表项一一对应，点哪行定位哪个）。返回面板体 locator（报告与
+ * 操作行断言的容器）。
+ */
+export async function openSubagentDetail(window) {
+  await window.getByTestId("subagent-stream-marker-toggle").first().click();
+  await window.getByTestId("subagents-panel-body").waitFor();
+  return window.getByTestId("subagents-panel-body");
 }
 
 /** 关闭检视右栏（幂等——已关闭不再点）。 */

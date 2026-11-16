@@ -9,7 +9,7 @@
 // 3) 运行中切走再切回：慢速 reasoning 流式期间切到新任务再切回，
 //    思考段唯一且内容完整（不重复、不丢失），随后收尾。
 // 4) closeApp → 重启（同 homeDir）→ 打开任务 A：thinking-block 可展开回看、
-//    子代理卡内 subagent-thinking-block 不空白；打开任务 B：无空思考块。
+//    子代理详情 subagent-thinking-block 不空白；打开任务 B：无空思考块。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  openSubagentDetail,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -128,7 +129,9 @@ async function main() {
     // ---- 场景 1b：同任务委派子代理（子代理思考 + 报告）----
     await window.getByTestId("composer-input").fill(A_DELEGATE);
     await window.getByTestId("composer-send").click();
-    await window.getByTestId("subagent-card").waitFor({ timeout: 20_000 });
+    await window
+      .getByTestId("subagent-stream-marker-toggle")
+      .waitFor({ timeout: 20_000 });
     await window
       .getByTestId("message-assistant")
       .filter({ hasText: "委派已收尾" })
@@ -228,11 +231,9 @@ async function main() {
       (await window.getByTestId("thinking-block").count()) === 2,
       `重启后思考段数量应为 2，实际 ${await window.getByTestId("thinking-block").count()}`
     );
-    // 子代理卡内思考折叠块不空白（票 04：卡完成自动收起一次，先展开卡）
-    const subagentCard = window.getByTestId("subagent-card").first();
-    await subagentCard.waitFor({ timeout: 20_000 });
-    await window.getByTestId("subagent-toggle").first().click();
-    const subThinking = subagentCard.getByTestId("subagent-thinking-block");
+    // 子代理详情思考折叠块不空白（ADR 0020 右栏详情；先打开定位）
+    const subagentPanel = await openSubagentDetail(window);
+    const subThinking = subagentPanel.getByTestId("subagent-thinking-block");
     await subThinking.waitFor({ timeout: 10_000 });
     await subThinking.getByTestId("subagent-thinking-toggle").click();
     const subText = await subThinking
@@ -242,7 +243,7 @@ async function main() {
       subText !== null && subText.includes("子代理重启前的思考"),
       `重启后子代理思考为空白：${subText ?? "(空)"}`
     );
-    const reportText = await subagentCard
+    const reportText = await subagentPanel
       .getByTestId("subagent-report")
       .textContent();
     assert(
@@ -266,7 +267,8 @@ async function main() {
       "旧任务不应产生思考块"
     );
     assert(
-      (await window.getByTestId("subagent-card").count()) === 0 &&
+      (await window.getByTestId("subagent-stream-marker-toggle").count()) ===
+        0 &&
         (await window.getByTestId("subagent-thinking-block").count()) === 0,
       "旧任务不应产生子代理思考块"
     );

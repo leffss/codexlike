@@ -15,6 +15,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  openSubagentDetail,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -139,20 +140,23 @@ async function main() {
     await composer.fill(MAIN_TASK);
     await composer.press("Enter");
 
-    // 4) 嵌套卡片：委派后子代理建卡（运行中窗口短，attach 即证明建卡）→
-    //    子代理卡完成自动收起一次（票 04 语义不变）；过程段平铺常驻（ADR 0015），
-    //    等主轮最终正文后直接回看完成态卡与报告
-    const subagentCard = window.getByTestId("subagent-card");
-    await subagentCard.waitFor({ timeout: 20_000 });
+    // 4) 子代理正文迁右栏（ADR 0020）：委派后消息流建标记行（运行中窗口
+    //    短，attach 即证明建卡）；等主轮最终正文后标记行转完成态，点击
+    //    打开右栏「子代理」tab 定位详情，报告直接可读（无需展开）
+    await window
+      .getByTestId("subagent-stream-marker-toggle")
+      .waitFor({ timeout: 20_000 });
     await window
       .getByTestId("message-assistant")
       .getByText("子代理的报告已汇总。")
       .waitFor({ timeout: 20_000 });
     await window
-      .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
+      .locator(
+        '[data-testid="subagent-stream-marker-toggle"][data-subagent-state="done"]'
+      )
       .waitFor({ timeout: 20_000 });
-    await window.getByTestId("subagent-toggle").click();
-    const reportText = await window
+    const subagentPanel = await openSubagentDetail(window);
+    const reportText = await subagentPanel
       .getByTestId("subagent-report")
       .textContent();
     assert(
@@ -256,8 +260,8 @@ async function main() {
     );
     console.log("[e2e] 报告回流主任务上下文（第二轮请求体验证）");
 
-    // 7) 重启应用：嵌套卡片恢复（报告随 spawn_subagent 调用记录持久化）。
-    // 票 04：完成的轮默认收起折叠区、子代理卡完成自动收起——先展开再断言
+    // 7) 重启应用：标记行与右栏详情恢复（报告随 spawn_subagent 调用记录
+    //    持久化；ADR 0020 恢复态完成记录在右栏直接可读）
     await closeApp(app);
     const { app: relaunchedApp, window: relaunchedWindow } = await launchApp({
       homeDir,
@@ -273,10 +277,12 @@ async function main() {
       .first()
       .waitFor({ timeout: 10_000 });
     await relaunchedWindow
-      .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
+      .locator(
+        '[data-testid="subagent-stream-marker-toggle"][data-subagent-state="done"]'
+      )
       .waitFor({ timeout: 15_000 });
-    await relaunchedWindow.getByTestId("subagent-toggle").click();
-    const restoredReport = await relaunchedWindow
+    const restoredPanel = await openSubagentDetail(relaunchedWindow);
+    const restoredReport = await restoredPanel
       .getByTestId("subagent-report")
       .textContent();
     assert(

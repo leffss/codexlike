@@ -48,7 +48,7 @@ import { useTickingNow } from "../lib/use-ticking-now";
 import { AssistantActions } from "./AssistantActions";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
-import { SubagentCard } from "./SubagentCard";
+import { SubagentStreamMarker } from "./SubagentStreamMarker";
 import { ToolCallCard } from "./ToolCallCard";
 import { PlanMarkerRow } from "./WorkPlanCard";
 
@@ -94,6 +94,8 @@ export function MessageStream(props: {
   followSignal?: number;
   /** 当前任务标题：最终正文「导出为 Markdown」的默认文件名来源 */
   taskTitle?: string | null;
+  /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位选中 */
+  onOpenSubagent?: (subagentId: string) => void;
 }) {
   const now = useLocalDay();
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
@@ -324,6 +326,7 @@ export function MessageStream(props: {
                   questionDraft={props.questionDraft}
                   taskTitle={props.taskTitle}
                   planIndexById={planIndexById}
+                  onOpenSubagent={props.onOpenSubagent}
                 />
               ))}
               {props.compacting === true && (
@@ -408,6 +411,8 @@ function TurnGroupItem(props: {
   taskTitle?: string | null;
   /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
   planIndexById?: Map<string, number>;
+  /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
+  onOpenSubagent?: (subagentId: string) => void;
 }) {
   const { turn } = props;
   const failed = turn.segments.some((segment) => segment.kind === "error");
@@ -449,6 +454,7 @@ function TurnGroupItem(props: {
             questionDraft={props.questionDraft}
             taskTitle={props.taskTitle}
             planIndexById={props.planIndexById}
+            onOpenSubagent={props.onOpenSubagent}
           />
         ))}
       </ol>
@@ -472,6 +478,8 @@ function ToolSequenceView(props: {
   taskTitle?: string | null;
   /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
   planIndexById?: Map<string, number>;
+  /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
+  onOpenSubagent?: (subagentId: string) => void;
 }) {
   const { item } = props;
   if (item.kind === "passthrough") {
@@ -484,6 +492,7 @@ function ToolSequenceView(props: {
         failed={props.failed}
         questionDraft={props.questionDraft}
         taskTitle={props.taskTitle}
+        onOpenSubagent={props.onOpenSubagent}
       />
     );
   }
@@ -583,6 +592,8 @@ function SegmentView(props: {
   failed?: boolean;
   questionDraft?: (requestId: string) => SavedQuestionDraft | undefined;
   taskTitle?: string | null;
+  /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
+  onOpenSubagent?: (subagentId: string) => void;
 }) {
   const { segment } = props;
   if (segment.kind === "tool-call") {
@@ -597,7 +608,10 @@ function SegmentView(props: {
     );
   }
   if (segment.kind === "subagent") {
-    return <SubagentCard subagent={segment} />;
+    // 子代理正文迁右栏（ADR 0020）：流内只留单行标记，点击开右栏定位
+    return (
+      <SubagentStreamMarker subagent={segment} onOpen={props.onOpenSubagent} />
+    );
   }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;

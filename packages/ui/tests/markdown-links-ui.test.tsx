@@ -3,8 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
-import { SubagentCard } from "../src/components/SubagentCard";
-import { setRememberedOpen } from "../src/lib/collapse-memory";
+import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
 import type { MessageSegment, SubagentSegment } from "../src/lib/task-view";
 
 /** 静态渲染接缝：验证三个真实入口的链接语义，不替代桌面 E2E 点击验证。 */
@@ -12,6 +11,7 @@ const entries = ["assistant", "compact-summary", "subagent"] as const;
 
 function render(entry: (typeof entries)[number], content: string): string {
   if (entry === "subagent") {
+    // 子代理正文迁右栏（ADR 0020）：报告在右栏详情直接渲染（无需展开记忆）
     const subagent: SubagentSegment = {
       kind: "subagent",
       id: "markdown-links-subagent",
@@ -27,8 +27,12 @@ function render(entry: (typeof entries)[number], content: string): string {
       ok: true,
       tools: [],
     };
-    setRememberedOpen(`subagent-${subagent.id}`, true);
-    return renderToStaticMarkup(createElement(SubagentCard, { subagent }));
+    return renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subagent],
+        focus: null,
+      })
+    );
   }
   const segment: MessageSegment = {
     kind: entry,

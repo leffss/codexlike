@@ -17,6 +17,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  openSubagentDetail,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -195,15 +196,19 @@ async function main() {
       "[e2e] 主/子请求 body：high 档继承、快照不受运行中切档影响、思考不回传"
     );
 
-    // 6) SubagentCard 思考折叠块：完成态下默认收起 → 展开 → 与报告互不混入。
-    // 子代理卡完成自动收起一次（票 04 语义不变）；过程段平铺常驻（ADR 0015），
-    // 主轮完成后子代理卡直接可交互，折叠交互断言本身不变
+    // 6) 子代理详情思考折叠块（ADR 0020 右栏）：完成态下默认收起 → 展开 →
+    //    与报告互不混入。过程段平铺常驻（ADR 0015），主轮完成后标记行
+    //    转完成态，点击打开右栏详情，折叠交互断言本身不变
     await window.getByTestId("composer-send").waitFor({ timeout: 20_000 });
     await window
-      .locator('[data-testid="subagent-card"][data-subagent-state="done"]')
+      .locator(
+        '[data-testid="subagent-stream-marker-toggle"][data-subagent-state="done"]'
+      )
       .waitFor({ timeout: 20_000 });
-    await window.getByTestId("subagent-toggle").click();
-    const thinkingBlock = window.getByTestId("subagent-thinking-block").first();
+    const subagentPanel = await openSubagentDetail(window);
+    const thinkingBlock = subagentPanel
+      .getByTestId("subagent-thinking-block")
+      .first();
     await thinkingBlock.waitFor({ timeout: 10_000 });
     const thinkingContent = thinkingBlock.getByTestId(
       "subagent-thinking-content"
@@ -222,7 +227,7 @@ async function main() {
         !thinkingText.includes(REPORT_TEXT),
       `子代理思考内容不完整或混入报告：${thinkingText ?? "(空)"}`
     );
-    const reportText = await window
+    const reportText = await subagentPanel
       .getByTestId("subagent-report")
       .textContent();
     assert(
@@ -238,7 +243,7 @@ async function main() {
       !(await thinkingContent.isVisible()),
       "点击收起后子代理思考内容应不可见"
     );
-    console.log("[e2e] SubagentCard 思考流：折叠展示、与报告互不混入");
+    console.log("[e2e] 子代理详情思考流：折叠展示、与报告互不混入");
 
     // 7) 下一条消息采用新档位 off（证明切档真实生效，只是不影响已触发任务）
     await window.getByTestId("composer-input").fill("新档位验证消息");
