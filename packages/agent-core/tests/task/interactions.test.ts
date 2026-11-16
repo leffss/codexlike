@@ -379,8 +379,14 @@ describe("用户交互公开 seam", () => {
         const prompt = JSON.stringify(options.prompt);
         if (options.prompt.some((m) => m.role === "tool"))
           return stream("完成");
+        // toolCallId 逐子代理唯一（真实 provider 跨对话生成唯一 id）：
+        // 票 02 起工具完成即写 subagent_tool_calls，复用 id 会撞行主键
         return stream(
-          prompt.includes("问答") ? [ask] : [call("sub-a"), call("sub-b")]
+          prompt.includes("问答")
+            ? [ask]
+            : prompt.includes("写入一")
+              ? [call("sub-a1"), call("sub-b1")]
+              : [call("sub-a2"), call("sub-b2")]
         );
       },
     });
@@ -1434,16 +1440,18 @@ describe("用户交互公开 seam", () => {
         const key = isApproval ? "a" : "b";
         const step = counts.get(key) ?? 0;
         counts.set(key, step + 1);
+        // toolCallId 逐子代理唯一（真实 provider 跨对话生成唯一 id）：
+        // 票 02 起工具完成即写 subagent_tool_calls，复用 id 会撞行主键
         return stream(
           step === 0
             ? [
                 isApproval
                   ? {
-                      toolCallId: "same-model-id",
+                      toolCallId: "approval-sub-call",
                       toolName: "write",
                       input: {},
                     }
-                  : { ...ask, toolCallId: "same-model-id" },
+                  : { ...ask, toolCallId: "questions-sub-call" },
               ]
             : "报告不复述答案"
         );
@@ -1475,7 +1483,9 @@ describe("用户交互公开 seam", () => {
         requests.push(event.interaction);
         if (request.source.kind === "subagent") {
           expect(slowDone).toBe(false);
-          expect(request.toolCallId).toBe("same-model-id");
+          expect(request.toolCallId).toMatch(
+            /^(approval-sub-call|questions-sub-call)$/
+          );
           expect(request.source.task).toMatch(/任务/);
           if (requests.length === 2) {
             expect(task.pendingInteractions).toHaveLength(2);

@@ -13,7 +13,9 @@ import { workbenchKey } from "./workbench-state";
 import type {
   CompactRecord,
   ProjectRecord,
+  SubagentMessageRecord,
   SubagentRecord,
+  SubagentToolCallRecord,
   TaskRecord,
   StoredMessage,
 } from "./types";
@@ -96,6 +98,20 @@ export interface TaskPersistence {
   updateSubagent(id: string, patch: Partial<Omit<SubagentRecord, "id">>): void;
   /** 指定任务的子代理骨架行，按排队时间正序；未知任务返回空数组 */
   listSubagents(taskId: string): SubagentRecord[];
+  /**
+   * 子代理逐轮消息（ADR 0021，票 02）：轮终态即写一行（正文 + 思考，轮边界即行边界）；
+   * 按任务列出见 listSubagentMessages（恢复数据面经并行字段一次性读出，票 03）。
+   */
+  insertSubagentMessage(record: SubagentMessageRecord): void;
+  /** 指定任务的子代理逐轮消息，按写入时间正序；未知任务返回空数组 */
+  listSubagentMessages(taskId: string): SubagentMessageRecord[];
+  /**
+   * 子代理工具调用（ADR 0021，票 02）：完成即写一行（output 截断口径同主代理
+   * insertToolCall）；按任务列出见 listSubagentToolCalls。
+   */
+  insertSubagentToolCall(record: SubagentToolCallRecord): void;
+  /** 指定任务的子代理工具调用，按写入时间正序；未知任务返回空数组 */
+  listSubagentToolCalls(taskId: string): SubagentToolCallRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -269,6 +285,26 @@ interface SubagentRow {
   completed_at: string | null;
 }
 
+interface SubagentMessageRow {
+  id: string;
+  task_id: string;
+  subagent_id: string;
+  content: string;
+  reasoning: string | null;
+  created_at: string;
+}
+
+interface SubagentToolCallRow {
+  id: string;
+  task_id: string;
+  subagent_id: string;
+  tool_name: string;
+  arguments: string;
+  output: string;
+  is_error: number;
+  created_at: string;
+}
+
 /**
  * 基于 node:sqlite（Node 22.13+ / Electron 45 内置，无原生编译依赖）的任务存储。
  * 单条语句写入即单个事务（SQLite 语义），断电安全。
@@ -407,6 +443,18 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   );
   const listSubagentsStmt = db.prepare(
     "SELECT * FROM subagents WHERE task_id = ? ORDER BY queued_at, rowid"
+  );
+  const insertSubagentMessageStmt = db.prepare(
+    "INSERT INTO subagent_messages (id, task_id, subagent_id, content, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentMessagesStmt = db.prepare(
+    "SELECT * FROM subagent_messages WHERE task_id = ? ORDER BY created_at, rowid"
+  );
+  const insertSubagentToolCallStmt = db.prepare(
+    "INSERT INTO subagent_tool_calls (id, task_id, subagent_id, tool_name, arguments, output, is_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentToolCallsStmt = db.prepare(
+    "SELECT * FROM subagent_tool_calls WHERE task_id = ? ORDER BY created_at, rowid"
   );
 
   function toRecord(row: TaskRow): TaskRecord {
@@ -930,6 +978,61 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           completedAt: row.completed_at,
         })
       );
+    },
+
+    insertSubagentMessage(record) {
+      insertSubagentMessageStmt.run(
+        record.id,
+        record.taskId,
+        record.subagentId,
+        record.content,
+        record.reasoning || null,
+        record.createdAt
+      );
+    },
+
+    listSubagentMessages(taskId) {
+      return (
+        listSubagentMessagesStmt.all(taskId) as unknown as SubagentMessageRow[]
+      ).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        subagentId: row.subagent_id,
+        content: row.content,
+        // 空串归一为缺失（与 messages.reasoning 口径一致，不产生空思考段）
+        ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+        createdAt: row.created_at,
+      }));
+    },
+
+    insertSubagentToolCall(record) {
+      insertSubagentToolCallStmt.run(
+        record.id,
+        record.taskId,
+        record.subagentId,
+        record.toolName,
+        record.arguments,
+        record.output,
+        record.isError ? 1 : 0,
+        record.createdAt
+      );
+    },
+
+    listSubagentToolCalls(taskId) {
+      return (
+        listSubagentToolCallsStmt.all(
+          taskId
+        ) as unknown as SubagentToolCallRow[]
+      ).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        subagentId: row.subagent_id,
+        toolName: row.tool_name,
+        arguments: row.arguments,
+        output: row.output,
+        isError: row.is_error === 1,
+        createdAt: row.created_at,
+      }));
     },
 
     close() {

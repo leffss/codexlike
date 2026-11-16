@@ -625,6 +625,11 @@ export function applyTaskEvent(
           : item
       );
 
+    case "subagent-text-delta":
+      // 子代理正文流式增量（ADR 0021 票 02 已发射）：右栏「正文」折叠块的
+      // 逐轮流式呈现属后续票（ui 恢复回看 + 正文块），此处先保持类型穷尽
+      return items;
+
     case "subagent-report":
       return replaceSegment(items, event.subagentId, (item) =>
         item.kind === "subagent"
