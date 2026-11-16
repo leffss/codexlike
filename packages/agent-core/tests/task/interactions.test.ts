@@ -1189,7 +1189,7 @@ describe("用户交互公开 seam", () => {
     persistence.close();
   });
 
-  it("问答参数拒绝未知字段、超限与重复 ID，合法最大 8题×8选项可等待", async () => {
+  it("问答参数拒绝未知字段、超限、重复 ID 与必填字段缺失，合法最大 8题×8选项可等待", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const bad: unknown[] = [
       { questions: [] },
@@ -1212,7 +1212,67 @@ describe("用户交互公开 seam", () => {
           options: [{ id: "a", label: "a", description: "x".repeat(1001) }],
         },
         { ...questions[0], options: [{ id: "a", label: "a", extra: "x" }] },
+        { ...questions[0], id: undefined },
+        { ...questions[0], header: undefined },
+        { ...questions[0], question: undefined },
+        { ...questions[0], multiSelect: undefined },
+        { ...questions[0], options: undefined },
+        { ...questions[0], options: [{ id: "a" }] },
+        { ...questions[0], options: [{ id: "a", description: "无 label" }] },
       ].map((question) => ({ questions: [question] })),
+      // 2026-11-16 实跑日志原文：模型首轮丢 question / 丢选项 label，报错后重试才成功——按原文入列锁住拒绝语义
+      {
+        questions: [
+          {
+            id: "next_step",
+            header: "下一步",
+            multiSelect: false,
+            options: [
+              {
+                id: "start_grill",
+                description:
+                  "先初始化 git 仓库并做首次提交，然后立即开始逐轮访谈，把「现代化的 blog」磨成可实现的规格",
+              },
+              { id: "grill_only", description: "先进入访谈，git 的事后面再说" },
+              {
+                id: "already_clear",
+                description:
+                  "跳过访谈，告诉我你的技术栈和功能清单，我按主流程后半段直接实施",
+              },
+              {
+                id: "explain_more",
+                description: "上面推荐的流程还有不清楚的地方",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        questions: [
+          {
+            id: "seam",
+            header: "测试缝隙",
+            multiSelect: false,
+            question: "验收测试挂在哪一层？",
+            options: [
+              {
+                id: "build_output",
+                description:
+                  "唯一缝隙：astro build + 对产出 HTML 的断言（路由/分组/草稿/主题脚本）。不测组件内部。",
+              },
+              {
+                id: "build_plus_schema",
+                description:
+                  "构建产物层之外，再加一层 frontmatter zod schema 的单元测试。",
+              },
+              {
+                id: "no_tests",
+                description: "spec 里只写手动验收标准，不设自动化测试。",
+              },
+            ],
+          },
+        ],
+      },
     ];
     const maximum = Array.from({ length: 8 }, (_, index) => ({
       ...questions[0]!,
