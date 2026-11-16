@@ -43,6 +43,7 @@ import type {
 import { decideApproval, type ApprovalMode } from "./approval";
 import { DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS } from "./execution-settings";
 import { describeModelError, isAbortLike } from "./errors";
+import type { TaskPersistence } from "./persistence";
 import type { TaskEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
@@ -102,6 +103,18 @@ export interface SubagentsConfig {
 }
 
 /**
+ * 子代理记录持久化通道（ADR 0021）：宿主任务注入，编排器只写子代理表——
+ * 票 01 为骨架行（入队即写 + 状态机推进），票 02 扩逐轮正文与逐条工具调用。
+ */
+export type SubagentPersistence = Pick<
+  TaskPersistence,
+  | "insertSubagent"
+  | "updateSubagent"
+  | "insertSubagentMessage"
+  | "insertSubagentToolCall"
+>;
+
+/**
  * 任务（agent-task）向编排器提供的端口：审批状态、审批等待注册与事件出口。
  * 子代理与主任务共享冻结的审批模式与交互路由；任务授权不改变本轮
  * ToolContext 的文件访问边界。自动批准留痕经 requestInteraction 的
@@ -110,6 +123,11 @@ export interface SubagentsConfig {
 export interface SubagentHostPort {
   taskId: string;
   workspacePath: string;
+  /**
+   * 子代理骨架行持久化通道（ADR 0021）：「曾委派过」的事实从入队起落库，
+   * 排队中被杀也有痕；启动更新 running、终态更新状态与完成时间。
+   */
+  persistence: SubagentPersistence;
   /** 读取所属主执行在发送时固定的审批模式，不读取下次发送偏好。 */
   approvalMode(): ApprovalMode;
   /** 本轮目录/规范快照；正文激活状态由子代理独立创建，绝不复制主任务正文。 */
@@ -159,12 +177,6 @@ interface SubagentEntry {
   /** 最终报告（成功）或中文失败/中断原因 */
   output: string;
   isError: boolean;
-  /**
-   * 思考过程全文（票 02）：与报告分离累积，随 spawn_subagent 延迟 tool-result
-   * 一并回流落库（tool_calls.reasoning 列），仅为恢复后展示；
-   * 不回填模型（回填内容只有 output）。
-   */
-  reasoning: string;
 }
 
 export interface SubagentOrchestrator {
@@ -251,6 +263,10 @@ export function createSubagentOrchestrator(
         return;
       }
       next.state = "running";
+      port.persistence.updateSubagent(next.subagentId, {
+        status: "running",
+        startedAt: port.now(),
+      });
       emit({
         type: "subagent-start",
         subagentId: next.subagentId,
@@ -344,8 +360,33 @@ export function createSubagentOrchestrator(
     // 工具轮次上限（执行设置 ADR 0017）：运行开始快照，声明在 try 外供截断标记
     // 使用（标记在终态区，不在 try 作用域内）；解析失败按默认值兜底
     let maxToolRounds = DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
-    // 思考与报告分离累积（票 02）：终态随 entry 一并回流（resultFor）
-    let reasoning = "";
+    // 本轮正文与思考缓冲（ADR 0021 票 02）：轮终态即写一行 subagent_messages
+    // （轮边界即行边界）——思考的权威记录即在此表；spawn 行不再拼接
+    // （票 04 contract 步：双份存储无消费者）
+    let roundText = "";
+    let roundReasoning = "";
+
+    /**
+     * 轮终态即写（票 02）：本轮正文与思考落一行，任意时刻强杀应用，
+     * 已完成轮（含中断/截断轮的部分内容）都已在库；无内容不落空行。
+     *
+     * 轮边界口径的镜像在 ui 侧 appendSubagentTurnDelta（事件增量按
+     * roundIndex 归并成同一套轮）：这里改轮边界（何时清零缓冲、何时
+     * 落行）须同步核对那边与 subagentTurnBoundary 的口径一致。
+     */
+    function flushRound(): void {
+      if (roundText === "" && roundReasoning === "") {
+        return;
+      }
+      port.persistence.insertSubagentMessage({
+        id: port.generateId(),
+        taskId: port.taskId,
+        subagentId: entry.subagentId,
+        content: roundText,
+        ...(roundReasoning ? { reasoning: roundReasoning } : {}),
+        createdAt: port.now(),
+      });
+    }
     try {
       const snapshot = port.resources?.();
       const execution = snapshot?.createExecution(entry.subagentId);
@@ -403,6 +444,9 @@ export function createSubagentOrchestrator(
           aborted = true;
           break;
         }
+        // 本轮缓冲清零：轮边界 = 一次流式生成（与主任务「一次 sendMessage 一轮」对齐）
+        roundText = "";
+        roundReasoning = "";
         const result = streamText({
           // 全部轮次复用入队时捕获的档位快照（运行中主任务切档不影响本任务）
           model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
@@ -419,16 +463,29 @@ export function createSubagentOrchestrator(
         }[] = [];
         for await (const part of result.fullStream) {
           if (part.type === "reasoning-delta") {
-            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积全文
-            // （随终态报告回流落库，票 02）；不进入子代理消息上下文
-            reasoning += part.text;
+            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积进本轮
+            // 缓冲（轮终态随 subagent_messages 落库，票 02）；不进入子代理
+            // 消息上下文，也不随 spawn 行回流（票 04 contract 步）
+            roundReasoning += part.text;
             emit({
               type: "subagent-reasoning",
               subagentId: entry.subagentId,
               delta: part.text,
+              // 显式轮键（0 起 = 本轮流式生成序）：ui 侧按它归并轮次，
+              // 与 flushRound 的行边界同源（round 在工具轮后才递增）
+              roundIndex: round,
             });
           } else if (part.type === "text-delta") {
             output += part.text;
+            roundText += part.text;
+            // 正文流式增量（票 02，形态对齐 subagent-reasoning）：
+            // 驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages 落库
+            emit({
+              type: "subagent-text-delta",
+              subagentId: entry.subagentId,
+              delta: part.text,
+              roundIndex: round,
+            });
           } else if (part.type === "tool-call") {
             toolCalls.push({
               toolCallId: part.toolCallId,
@@ -441,6 +498,11 @@ export function createSubagentOrchestrator(
             aborted = true;
           }
         }
+
+        // 轮终态即写（票 02）：本轮流结束即落一行，先于工具执行与下一轮生成；
+        // abort part 也走本点（AI SDK 将 AbortError 收敛为 abort part 正常结束迭代），
+        // 中断轮已流出的部分内容同样落库
+        flushRound();
 
         if (aborted || toolCalls.length === 0) {
           settled = true;
@@ -495,6 +557,18 @@ export function createSubagentOrchestrator(
             output: executed.output,
             isError: executed.isError,
           };
+          // 完成即写（ADR 0021 票 02）：与主代理 insertToolCall 同点同口径——
+          // output 为工具自身截断后的结果，时间戳取调用发起时刻（base.createdAt）
+          port.persistence.insertSubagentToolCall({
+            id: completed.id,
+            taskId: port.taskId,
+            subagentId: entry.subagentId,
+            toolName: completed.toolName,
+            arguments: completed.arguments,
+            output: completed.output,
+            isError: completed.isError,
+            createdAt: completed.createdAt,
+          });
           emit({
             type: "subagent-tool",
             subagentId: entry.subagentId,
@@ -540,9 +614,15 @@ export function createSubagentOrchestrator(
 
     entry.output = output;
     entry.isError = isError;
-    entry.reasoning = reasoning;
     entry.state = "done";
     fallbackProfiles.delete(entry.subagentId);
+    // 骨架行终态更新（ADR 0021）：状态与完成时间随报告回流一并落库；
+    // 进程内中断（随主任务 abort）同样走到这里——报告已回流即为终态，
+    // interrupted 只属于重启收尾补记（残留 queued/running 行）
+    port.persistence.updateSubagent(entry.subagentId, {
+      status: isError ? "failed" : "completed",
+      completedAt: port.now(),
+    });
     emit({
       type: "subagent-report",
       subagentId: entry.subagentId,
@@ -599,12 +679,22 @@ export function createSubagentOrchestrator(
         thinkingEffort: context.thinkingEffort ?? "auto",
         output: "",
         isError: false,
-        reasoning: "",
       };
       entries.set(subagentId, entry);
       if (context.profile !== undefined) {
         fallbackProfiles.set(subagentId, context.profile);
       }
+      // 骨架行 queued 即写（ADR 0021）：入队瞬间插入，排队中被杀的委派
+      // 也留有「曾委派过」的事实与委派说明；启动/终态只做状态更新
+      port.persistence.insertSubagent({
+        id: subagentId,
+        taskId: port.taskId,
+        task,
+        status: "queued",
+        queuedAt: port.now(),
+        startedAt: null,
+        completedAt: null,
+      });
       emit({ type: "subagent-queued", subagentId, task });
       // 立即尝试占位开跑；并发上限满则留在 FIFO 队列（前一个结束时推进）
       startQueued(context.signal);
@@ -626,12 +716,12 @@ export function createSubagentOrchestrator(
     resultFor(toolCallId) {
       for (const entry of entries.values()) {
         if (entry.toolCallId === toolCallId && entry.state === "done") {
-          // 思考全文随报告一并回流（票 02）：任务侧落库进 tool_calls.reasoning 列；
-          // 回填模型的仍只有 output
+          // spawn 行瘦身（票 04 contract 步，ADR 0021）：回填的只有最终报告
+          // （tool result 自包含性不变）；思考全文的权威记录在子代理侧
+          // subagent_messages，不再随 spawn 行拼接（双份存储无消费者）
           return {
             output: entry.output,
             isError: entry.isError,
-            ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
           };
         }
       }

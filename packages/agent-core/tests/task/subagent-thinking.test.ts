@@ -587,12 +587,90 @@ describe("子代理 reasoning 流（fullStream → subagent-reasoning 事件）"
     const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.toolName).toBe("spawn_subagent");
-    // 报告（output）与思考（reasoning）分离；思考全文多段拼接
+    // spawn 行瘦身（票 04 contract 步）：output=最终报告；reasoning 不再拼接
+    // 思考全文——权威记录在 subagent_messages（逐轮思考落库见票 02 用例）
     expect(calls[0]?.output).toBe("调研报告");
-    expect(calls[0]?.reasoning).toBe("子代理的思考全文（第二段）");
+    expect(calls[0]?.reasoning).toBeUndefined();
     // 消息表不含子代理思考（主任务 assistant 正文不混入）
     const messagesJson = JSON.stringify(persistence.listMessages("task-1"));
     expect(messagesJson).not.toContain("子代理的思考全文");
+    // 思考全文的权威落点：subagent_messages 一行（content + reasoning）
+    const rounds = persistence.listSubagentMessages("task-1");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]).toMatchObject({
+      content: "调研报告",
+      reasoning: "子代理的思考全文（第二段）",
+    });
+  });
+
+  it("子代理正文转为 subagent-text-delta 事件：带 subagentId、与思考及主任务正文分离（票 02）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const { task } = makeSubagentThinkingTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "reasoning-tool",
+          reasoning: ["主任务自己的思考"],
+          calls: [
+            {
+              toolCallId: "delegate-1",
+              toolName: "spawn_subagent",
+              input: { task: "调研测试框架" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["委派结果已收到"] },
+      ],
+      sub: [
+        {
+          kind: "reasoning-text",
+          reasoning: ["子代理先想想"],
+          text: ["调研报告", "正文续段"],
+        },
+      ],
+    });
+
+    const events = await collect(
+      task.sendMessage({ text: "帮我调研", profile, thinkingEffort: "high" })
+    );
+
+    // 子代理正文：独立事件类型 subagent-text-delta、增量有序、subagentId 正确
+    const subText = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-text-delta" }> =>
+        event.type === "subagent-text-delta"
+    );
+    expect(subText.map((event) => event.delta)).toEqual([
+      "调研报告",
+      "正文续段",
+    ]);
+    // 显式轮键（review 修复）：单轮流式生成 roundIndex=0（与子代理循环
+    // round 计数同源，ui 侧按它归并轮次）
+    expect(subText.map((event) => event.roundIndex)).toEqual([0, 0]);
+    const started = events.find((event) => event.type === "subagent-start");
+    for (const event of subText) {
+      expect(event.subagentId).toBe(
+        started?.type === "subagent-start" ? started.subagentId : undefined
+      );
+    }
+    // 正文与思考分离：subagent-reasoning 只携带思考增量（轮键同源）
+    const subReasoning = events.filter(
+      (event) => event.type === "subagent-reasoning"
+    );
+    expect(subReasoning.map((event) => event.delta)).toEqual(["子代理先想想"]);
+    expect(subReasoning.map((event) => event.roundIndex)).toEqual([0]);
+    // 主任务 assistant 正文不含子代理正文（互不串流）
+    expect(
+      events
+        .filter((event) => event.type === "assistant-delta")
+        .every((event) => !event.delta.includes("调研报告"))
+    ).toBe(true);
+    // 正文流不改变报告回流语义：报告 = 正文拼接
+    const report = events.find(
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
+        event.type === "subagent-report"
+    );
+    expect(report?.report).toBe("调研报告正文续段");
+    expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
   it("主任务中断联动取消：只有思考尚无正文的子代理也能终止，已流出 reasoning 保留且收敛", async () => {

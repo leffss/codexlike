@@ -6,7 +6,13 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createSqliteTaskStore } from "../../src/task/persistence";
-import type { TaskRecord, StoredMessage } from "../../src/task/types";
+import type {
+  SubagentMessageRecord,
+  SubagentRecord,
+  SubagentToolCallRecord,
+  TaskRecord,
+  StoredMessage,
+} from "../../src/task/types";
 
 /** 最小合法任务记录（固定时间戳避免测试不稳定） */
 function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
@@ -716,6 +722,293 @@ describe("TaskPersistence compact 落库（工单 08）", () => {
     // 重开验证：目录由 store 自建，库文件落在嵌套路径且可读回
     const reopened = createSqliteTaskStore(dbPath);
     expect(reopened.listMessages("task-1")).toHaveLength(1);
+    reopened.close();
+  });
+});
+
+describe("TaskPersistence 子代理骨架表（ADR 0021，票 01）", () => {
+  /** 最小合法子代理骨架行（queued 即写的入队瞬间形状） */
+  function subagentRow(
+    overrides: Partial<SubagentRecord> = {}
+  ): SubagentRecord {
+    return {
+      id: "sub-1",
+      taskId: "task-1",
+      task: "调研本仓库的测试框架并总结",
+      status: "queued",
+      queuedAt: "2026-11-10T08:00:01.000Z",
+      startedAt: null,
+      completedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("骨架行插入读回往返：insertSubagent 原样读回，updateSubagent 状态补丁生效（内存库）", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord());
+    store.insertSubagent(subagentRow());
+    expect(store.listSubagents("task-1")).toEqual([subagentRow()]);
+    expect(store.listSubagents("nope")).toEqual([]);
+
+    // 状态机推进（编排器写点）：queued → running → 终态，只更新给定字段
+    store.updateSubagent("sub-1", {
+      status: "running",
+      startedAt: "2026-11-10T08:00:02.000Z",
+    });
+    store.updateSubagent("sub-1", {
+      status: "completed",
+      completedAt: "2026-11-10T08:00:03.000Z",
+    });
+    expect(store.listSubagents("task-1")).toEqual([
+      subagentRow({
+        status: "completed",
+        startedAt: "2026-11-10T08:00:02.000Z",
+        completedAt: "2026-11-10T08:00:03.000Z",
+      }),
+    ]);
+    // 目标不存在时静默忽略（与 updateTask 同语义）
+    store.updateSubagent("missing", { status: "running" });
+    expect(store.listSubagents("task-1")).toHaveLength(1);
+    store.close();
+  });
+
+  it("骨架行按任务列出、排队时间正序；文件库关-重开完整恢复（等价应用重启）", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    store.insertSubagent(
+      subagentRow({ id: "sub-2", queuedAt: "2026-11-10T08:00:02.000Z" })
+    );
+    store.insertSubagent(
+      subagentRow({
+        id: "sub-1",
+        queuedAt: "2026-11-10T08:00:01.000Z",
+        status: "running",
+        startedAt: "2026-11-10T08:00:03.000Z",
+      })
+    );
+    store.close();
+
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(reopened.listSubagents("task-1").map((row) => row.id)).toEqual([
+      "sub-1",
+      "sub-2",
+    ]);
+    expect(reopened.listSubagents("task-1")[0]).toEqual(
+      subagentRow({
+        id: "sub-1",
+        queuedAt: "2026-11-10T08:00:01.000Z",
+        status: "running",
+        startedAt: "2026-11-10T08:00:03.000Z",
+      })
+    );
+    reopened.close();
+  });
+
+  it("旧库（无子代理三表）打开时幂等补建，旧行可读且新写入正常", () => {
+    const dbPath = tempDbPath();
+    // 票 01 之前的生产库形状：无 subagents / subagent_messages / subagent_tool_calls
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO tasks VALUES ('legacy-1', '旧任务', 'C:\\work\\old', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO messages VALUES ('m1', 'legacy-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteTaskStore(dbPath);
+    // 旧行可读：旧任务与旧消息不受补建影响
+    expect(store.listMessages("legacy-1").map((m) => m.content)).toEqual([
+      "旧消息",
+    ]);
+    expect(store.listSubagents("legacy-1")).toEqual([]);
+    // 补建后可按新 schema 写入骨架行
+    store.insertSubagent(
+      subagentRow({
+        id: "new-sub",
+        taskId: "legacy-1",
+        status: "interrupted",
+        completedAt: "2026-11-10T09:00:00.000Z",
+      })
+    );
+    expect(store.listSubagents("legacy-1")[0]?.status).toBe("interrupted");
+    store.close();
+
+    // 三张子代理表都已补建（另两张票 01 只建表不写入，验证表存在即可）
+    const verify = new DatabaseSync(dbPath);
+    const tables = verify
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as { name: string }[];
+    const names = new Set(tables.map((row) => row.name));
+    expect(names.has("subagents")).toBe(true);
+    expect(names.has("subagent_messages")).toBe(true);
+    expect(names.has("subagent_tool_calls")).toBe(true);
+    verify.close();
+  });
+
+  it("removeProject 清理任务数据时子代理三表行同步清理，无孤儿行", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertProject({
+      id: "proj-1",
+      name: "项目",
+      workspacePath: "C:\\work\\proj",
+      createdAt: "2026-11-10T08:00:00.000Z",
+    });
+    store.insertTask(
+      taskRecord({
+        id: "task-proj",
+        projectId: "proj-1",
+        workspacePath: "C:\\work\\proj",
+      })
+    );
+    store.insertTask(
+      taskRecord({ id: "task-free", workspacePath: "C:\\work\\free" })
+    );
+    store.insertSubagent(subagentRow({ id: "sub-proj", taskId: "task-proj" }));
+    store.insertSubagent(subagentRow({ id: "sub-free", taskId: "task-free" }));
+    // 另两张表票 01 尚无写入方，用原生 SQL 模拟票 02 落下的过程行
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      INSERT INTO subagent_messages (id, task_id, subagent_id, content, reasoning, created_at)
+        VALUES ('sm-1', 'task-proj', 'sub-proj', '正文', '思考', '2026-11-10T08:00:02.000Z');
+      INSERT INTO subagent_tool_calls (id, task_id, subagent_id, tool_name, arguments, output, is_error, created_at)
+        VALUES ('st-1', 'task-proj', 'sub-proj', 'read_file', '{}', '内容', 0, '2026-11-10T08:00:03.000Z');
+    `);
+    raw.close();
+
+    store.removeProject("proj-1");
+    expect(store.listSubagents("task-proj")).toEqual([]);
+    // 独立任务的骨架行不受影响
+    expect(store.listSubagents("task-free").map((row) => row.id)).toEqual([
+      "sub-free",
+    ]);
+    const verify = new DatabaseSync(dbPath);
+    const orphans = verify
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM subagent_messages WHERE task_id = 'task-proj') AS messages, (SELECT COUNT(*) FROM subagent_tool_calls WHERE task_id = 'task-proj') AS tool_calls"
+      )
+      .all() as { messages: number; tool_calls: number }[];
+    expect(orphans[0]).toEqual({ messages: 0, tool_calls: 0 });
+    verify.close();
+    store.close();
+  });
+});
+
+describe("TaskPersistence 子代理过程表（ADR 0021，票 02）", () => {
+  /** 最小合法逐轮消息行（轮终态写入的形状：正文 + 思考 + 双归属） */
+  function subagentMessageRow(
+    overrides: Partial<SubagentMessageRecord> = {}
+  ): SubagentMessageRecord {
+    return {
+      id: "sm-1",
+      taskId: "task-1",
+      subagentId: "sub-1",
+      content: "第一轮正文",
+      reasoning: "第一轮思考",
+      createdAt: "2026-11-10T08:00:02.000Z",
+      ...overrides,
+    };
+  }
+
+  /** 最小合法工具调用行（工具完成即写的形状：截断口径同主代理 tool_calls） */
+  function subagentToolCallRow(
+    overrides: Partial<SubagentToolCallRecord> = {}
+  ): SubagentToolCallRecord {
+    return {
+      id: "st-1",
+      taskId: "task-1",
+      subagentId: "sub-1",
+      toolName: "read_file",
+      arguments: '{"path":"a.txt"}',
+      output: "文件内容",
+      isError: false,
+      createdAt: "2026-11-10T08:00:03.000Z",
+      ...overrides,
+    };
+  }
+
+  it("逐轮消息与逐条工具调用插入读回往返：reasoning 缺失归一，未知任务空数组", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord());
+    store.insertSubagentMessage(subagentMessageRow());
+    store.insertSubagentMessage(
+      subagentMessageRow({
+        id: "sm-2",
+        reasoning: undefined,
+        content: "第二轮正文",
+        createdAt: "2026-11-10T08:00:04.000Z",
+      })
+    );
+    store.insertSubagentToolCall(subagentToolCallRow({ isError: true }));
+    expect(store.listSubagentMessages("task-1")).toEqual([
+      subagentMessageRow(),
+      subagentMessageRow({
+        id: "sm-2",
+        reasoning: undefined,
+        content: "第二轮正文",
+        createdAt: "2026-11-10T08:00:04.000Z",
+      }),
+    ]);
+    // reasoning 列为空时读回不产生空思考段（与 messages.reasoning 归一口径一致）
+    expect(store.listSubagentMessages("task-1")[1]?.reasoning).toBeUndefined();
+    expect(store.listSubagentToolCalls("task-1")).toEqual([
+      subagentToolCallRow({ isError: true }),
+    ]);
+    expect(store.listSubagentMessages("nope")).toEqual([]);
+    expect(store.listSubagentToolCalls("nope")).toEqual([]);
+    store.close();
+  });
+
+  it("过程行按任务列出、写入时间正序；文件库关-重开完整恢复（等价应用重启）", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    store.insertSubagentMessage(
+      subagentMessageRow({ id: "sm-b", createdAt: "2026-11-10T08:00:09.000Z" })
+    );
+    store.insertSubagentMessage(
+      subagentMessageRow({
+        id: "sm-a",
+        subagentId: "sub-2",
+        createdAt: "2026-11-10T08:00:05.000Z",
+      })
+    );
+    store.insertSubagentToolCall(
+      subagentToolCallRow({ id: "st-b", createdAt: "2026-11-10T08:00:08.000Z" })
+    );
+    store.insertSubagentToolCall(
+      subagentToolCallRow({
+        id: "st-a",
+        subagentId: "sub-2",
+        createdAt: "2026-11-10T08:00:06.000Z",
+      })
+    );
+    store.close();
+
+    const reopened = createSqliteTaskStore(dbPath);
+    // 同任务内按写入时间正序、行 id 保序（时间戳并列时按 rowid）
+    expect(
+      reopened.listSubagentMessages("task-1").map((row) => row.id)
+    ).toEqual(["sm-a", "sm-b"]);
+    expect(
+      reopened.listSubagentToolCalls("task-1").map((row) => row.id)
+    ).toEqual(["st-a", "st-b"]);
+    // 双归属齐读：跨子代理的行各自携带 subagentId
+    expect(
+      new Set(
+        reopened.listSubagentMessages("task-1").map((row) => row.subagentId)
+      )
+    ).toEqual(new Set(["sub-1", "sub-2"]));
     reopened.close();
   });
 });

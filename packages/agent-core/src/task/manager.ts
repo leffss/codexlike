@@ -24,6 +24,7 @@ import type { SubagentsConfig } from "./subagent";
 import type {
   CompactRecord,
   ProjectRecord,
+  SubagentSnapshot,
   TaskRecord,
   StoredMessage,
   TranscriptItem,
@@ -129,6 +130,12 @@ export interface TaskManager {
   ): import("../interaction/types").InteractionRecord[];
   /** 指定任务的时间线：消息与工具调用按发生顺序合并（UI 渲染与恢复用） */
   transcript(taskId: string): TranscriptItem[];
+  /**
+   * 子代理恢复快照（ADR 0021 票 03）：骨架+逐轮消息+工具调用一次读出、
+   * 按委派归组（含重启收尾补记的 interrupted 骨架）。恢复数据面经 view
+   * 载荷的并行字段发给 UI；模型上下文组装不读这里（与 transcript 分离）。
+   */
+  subagents(taskId: string): SubagentSnapshot[];
   /** 惰性恢复任务对象；不存在返回 null；同 id 返回缓存实例 */
   get(taskId: string): AgentTask | null;
   /** 只读缓存实例的运行/最近一轮摘要；未实例化任务返回空状态。 */
@@ -174,6 +181,17 @@ export function createTaskManager(
           resolvedAt: now(),
           cancelReason: "应用已重启，原执行已结束",
         });
+    }
+    // 子代理骨架行收尾（ADR 0021，与 pending 交互收尾同款思路）：残留
+    // queued/running 的委派随原进程一起消失，补记 interrupted 终态留痕
+    // （排队中被杀的委派也有「曾委派过」的事实）；终态行不再改写。
+    for (const subagent of persistence.listSubagents(task.id)) {
+      if (subagent.status === "queued" || subagent.status === "running") {
+        persistence.updateSubagent(subagent.id, {
+          status: "interrupted",
+          completedAt: now(),
+        });
+      }
     }
     if (unfinished) {
       // 只恢复历史中断点，不构建模型或重放工具。复用 aborted 消息，二次重开幂等。
@@ -405,6 +423,20 @@ export function createTaskManager(
             : 0
       );
       return items;
+    },
+
+    subagents(taskId) {
+      const records = persistence.listSubagents(taskId);
+      if (records.length === 0) return [];
+      // 三表一次读出后按委派归组：骨架定序（排队时间正序），
+      // 消息/工具行按写入序落进各自委派（双归属列 task_id + subagent_id）
+      const messages = persistence.listSubagentMessages(taskId);
+      const toolCalls = persistence.listSubagentToolCalls(taskId);
+      return records.map((record) => ({
+        record,
+        messages: messages.filter((row) => row.subagentId === record.id),
+        toolCalls: toolCalls.filter((row) => row.subagentId === record.id),
+      }));
     },
 
     get(taskId) {

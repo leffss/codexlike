@@ -10,6 +10,7 @@ import type { ThinkingEffort } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createTaskManager } from "../../src/task/manager";
+import type { SubagentStatus } from "../../src/task/types";
 
 const profile: ProviderProfile = {
   id: "profile-1",
@@ -224,6 +225,156 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
     const restored = manager2.get(task.id);
     expect(restored).not.toBeNull();
     expect(persistence.listTasks().at(0)?.status).toBe("idle");
+    persistence.close();
+  });
+
+  it("启动收尾把残留 queued/running 子代理骨架行标记 interrupted，终态行不动且二次重开幂等（ADR 0021）", () => {
+    const dbPath = join(
+      (() => {
+        const dir = mkdtempSync(join(tmpdir(), "codexlike-subagent-recover-"));
+        tempDirs.push(dir);
+        return dir;
+      })(),
+      "codexlike.db"
+    );
+    const persistence1 = createSqliteTaskStore(dbPath);
+    const manager1 = createTaskManager({
+      persistence: persistence1,
+      languageModelFor: () => okModel(),
+    });
+    const task = manager1.create({ workspacePath: "C:\\work\\demo" });
+    // 模拟被杀进程留下的骨架行：queued（排队中被杀）、running（运行中被杀）、
+    // 两条已正常收尾的终态行
+    const insert = (id: string, status: SubagentStatus) =>
+      persistence1.insertSubagent({
+        id,
+        taskId: task.id,
+        task: `委派 ${id}`,
+        status,
+        queuedAt: "2026-11-11T08:00:01.000Z",
+        startedAt: status === "queued" ? null : "2026-11-11T08:00:02.000Z",
+        completedAt:
+          status === "completed" || status === "failed"
+            ? "2026-11-11T08:00:03.000Z"
+            : null,
+      });
+    insert("sub-queued", "queued");
+    insert("sub-running", "running");
+    insert("sub-done", "completed");
+    insert("sub-fail", "failed");
+    persistence1.close();
+
+    // 等价应用重启：新 store + 新 manager，启动收尾补记 interrupted
+    const persistence2 = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: persistence2 });
+    const rows = new Map(
+      persistence2.listSubagents(task.id).map((row) => [row.id, row])
+    );
+    expect(rows.get("sub-queued")?.status).toBe("interrupted");
+    expect(rows.get("sub-queued")?.completedAt).not.toBeNull();
+    expect(rows.get("sub-running")?.status).toBe("interrupted");
+    expect(rows.get("sub-running")?.completedAt).not.toBeNull();
+    // 终态行不受收尾影响（留痕不被改写）
+    expect(rows.get("sub-done")).toMatchObject({ status: "completed" });
+    expect(rows.get("sub-fail")).toMatchObject({ status: "failed" });
+    persistence2.close();
+
+    // 二次重开幂等：interrupted 行不再变化
+    const persistence3 = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: persistence3 });
+    const settled = persistence3
+      .listSubagents(task.id)
+      .filter((row) => row.status === "interrupted");
+    expect(settled.map((row) => row.id).sort()).toEqual([
+      "sub-queued",
+      "sub-running",
+    ]);
+    persistence3.close();
+  });
+
+  it("subagents：骨架+逐轮消息+工具调用一次读出并按委派归组；transcript 不读子代理行（ADR 0021 票 03）", () => {
+    const persistence = createSqliteTaskStore(":memory:");
+    const manager = createTaskManager({
+      persistence,
+      languageModelFor: () => okModel(),
+    });
+    const task = manager.create({ workspacePath: "C:\\work\\demo" });
+
+    // 手工落库两份委派的过程记录（真实路径由子代理循环逐条实时写；
+    // 此处验证恢复数据面的归组语义：骨架按排队序、消息/工具按写入序归属）
+    const insert = (id: string, queuedAt: string) =>
+      persistence.insertSubagent({
+        id,
+        taskId: task.id,
+        task: `委派 ${id}`,
+        status: "completed",
+        queuedAt,
+        startedAt: "2026-11-11T08:00:02.000Z",
+        completedAt: "2026-11-11T08:00:09.000Z",
+      });
+    insert("sub-b", "2026-11-11T08:00:01.000Z");
+    insert("sub-a", "2026-11-11T08:00:05.000Z");
+    const insertMessage = (
+      id: string,
+      subagentId: string,
+      content: string,
+      reasoning?: string
+    ) =>
+      persistence.insertSubagentMessage({
+        id,
+        taskId: task.id,
+        subagentId,
+        content,
+        ...(reasoning ? { reasoning } : {}),
+        createdAt: `2026-11-11T08:00:0${id.at(-1)}.000Z`,
+      });
+    insertMessage("sm1", "sub-b", "第一轮正文", "第一轮思考");
+    insertMessage("sm2", "sub-a", "另一委派的正文");
+    insertMessage("sm3", "sub-b", "第二轮正文");
+    persistence.insertSubagentToolCall({
+      id: "st1",
+      taskId: task.id,
+      subagentId: "sub-b",
+      toolName: "read_file",
+      arguments: "{}",
+      output: "已读",
+      isError: false,
+      createdAt: "2026-11-11T08:00:03.500Z",
+    });
+    persistence.insertSubagentToolCall({
+      id: "st2",
+      taskId: task.id,
+      subagentId: "sub-a",
+      toolName: "run_command",
+      arguments: "{}",
+      output: "已跑",
+      isError: true,
+      createdAt: "2026-11-11T08:00:06.500Z",
+    });
+
+    const subagents = manager.subagents(task.id);
+    // 骨架按排队时间正序（与 listSubagents 同序）
+    expect(subagents.map((snapshot) => snapshot.record.id)).toEqual([
+      "sub-b",
+      "sub-a",
+    ]);
+    expect(subagents[0]?.record).toMatchObject({
+      task: "委派 sub-b",
+      status: "completed",
+      startedAt: "2026-11-11T08:00:02.000Z",
+      completedAt: "2026-11-11T08:00:09.000Z",
+    });
+    // 逐轮消息与工具调用按委派归组、保持写入序（轮边界即行边界）
+    expect(subagents[0]?.messages.map((row) => row.id)).toEqual(["sm1", "sm3"]);
+    expect(subagents[0]?.messages[0]?.reasoning).toBe("第一轮思考");
+    expect(subagents[0]?.messages[1]?.reasoning).toBeUndefined();
+    expect(subagents[0]?.toolCalls.map((row) => row.id)).toEqual(["st1"]);
+    expect(subagents[1]?.messages.map((row) => row.id)).toEqual(["sm2"]);
+    expect(subagents[1]?.toolCalls.map((row) => row.id)).toEqual(["st2"]);
+    expect(subagents[1]?.toolCalls[0]?.isError).toBe(true);
+    // 隔离的结构性守护：时间线（模型上下文组装的数据来源）不含子代理过程行
+    expect(manager.transcript(task.id)).toEqual([]);
+    expect(manager.subagents("nope")).toEqual([]);
     persistence.close();
   });
 

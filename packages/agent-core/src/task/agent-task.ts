@@ -419,6 +419,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     orchestrator = createSubagentOrchestrator(options.subagents, {
       taskId: record.id,
       workspacePath: record.workspacePath,
+      persistence,
       approvalMode: () => approvalMode,
       resources: () => currentResources,
       requestInteraction,

@@ -156,6 +156,85 @@ export interface CompactRecord {
   createdAt: string;
 }
 
+/**
+ * 子代理骨架状态机（ADR 0021）：`queued → running → completed | failed`；
+ * `interrupted` 是应用重启启动收尾补记的终态（残留 queued/running 行的留痕），
+ * 进程内正常收尾（含随主任务中断后报告回流）不会产生该状态。
+ */
+export type SubagentStatus =
+  "queued" | "running" | "completed" | "failed" | "interrupted";
+
+/**
+ * 子代理骨架记录（subagents 表一行，ADR 0021）：委派「曾存在」的事实与起止时间。
+ * 入队瞬间即写（status=queued），启动更新 running，终态更新状态与完成时间；
+ * 逐轮正文与逐条工具调用在 subagent_messages / subagent_tool_calls（票 02 写入）。
+ */
+export interface SubagentRecord {
+  id: string;
+  taskId: string;
+  /** 委派说明（spawn_subagent 的 task 参数原文） */
+  task: string;
+  status: SubagentStatus;
+  /** 入队时间（ISO 8601）；骨架行随排队瞬间写入 */
+  queuedAt: string;
+  /** 启动时间；queued 阶段为 null */
+  startedAt: string | null;
+  /** 终态时间（completed / failed / interrupted）；未结束为 null */
+  completedAt: string | null;
+}
+
+/**
+ * 子代理逐轮消息记录（subagent_messages 表一行，ADR 0021 票 02）：
+ * 一个模型轮（一次流式生成）终态写一行——content 为本轮正文、reasoning 为本轮思考，
+ * 轮边界即行边界；仅为检视与导出，不进入主任务模型上下文（ADR 0021 结构性保证）。
+ */
+export interface SubagentMessageRecord {
+  id: string;
+  taskId: string;
+  /** 归属的子代理（subagents.id） */
+  subagentId: string;
+  /** 本轮正文（流式增量拼接；纯工具轮无正文时不产生行） */
+  content: string;
+  /** 本轮思考；本轮无思考时缺失（读回空值归一为 undefined） */
+  reasoning?: string;
+  /** 轮终态时间（ISO 8601） */
+  createdAt: string;
+}
+
+/**
+ * 子代理工具调用记录（subagent_tool_calls 表一行，ADR 0021 票 02）：
+ * 工具完成即写——output 截断口径同主代理 tool_calls（工具执行结果本身已截断）。
+ */
+export interface SubagentToolCallRecord {
+  id: string;
+  taskId: string;
+  /** 归属的子代理（subagents.id） */
+  subagentId: string;
+  toolName: string;
+  /** JSON 序列化的调用参数（与主代理 ToolCallRecord.arguments 同口径） */
+  arguments: string;
+  /** 截断后的执行输出 */
+  output: string;
+  isError: boolean;
+  /** 完成时刻（ISO 8601） */
+  createdAt: string;
+}
+
+/**
+ * 子代理恢复快照（ADR 0021 票 03）：一个委派的骨架 + 逐轮消息 + 工具调用归组，
+ * 随 view 载荷与初始 history 同一次 IPC 发给 UI（恢复数据面走并行字段而非
+ * transcript 第五种 kind）——模型上下文组装只读 transcript、不读本快照，
+ * 「子代理过程不进上下文」由此结构性保证（resume-equivalence 测试守护）。
+ */
+export interface SubagentSnapshot {
+  /** 委派骨架：状态机（含重启收尾补记的 interrupted 终态）与起止时间 */
+  record: SubagentRecord;
+  /** 逐轮正文与思考（轮边界即行边界，按写入序） */
+  messages: SubagentMessageRecord[];
+  /** 工具调用清单（完成即写，按写入序） */
+  toolCalls: SubagentToolCallRecord[];
+}
+
 /** /compact 的返回：压缩结果概要（IPC 转发渲染层展示用） */
 export interface CompactResult {
   /** 落库后的摘要消息（compact-summary 角色，消息流渲染为摘要卡片） */
@@ -234,11 +313,35 @@ export type TaskEvent =
   /**
    * 子代理思考过程的流式增量（GLOSSARY「思考档位」，思考档位 03）：
    * 与报告文本分离，按 subagentId 归属各自的嵌套卡片（并发不串流）；
-   * 随终态报告写入 spawn_subagent 工具记录的 reasoning 列（票 02，
-   * 仅为恢复后展示）；不回传请求历史（provider 层剥离），
+   * 思考全文的权威记录在子代理侧 subagent_messages（票 04 起 spawn 行
+   * 不再拼接）；不回传请求历史（provider 层剥离），
    * 终态由 subagent-report 一并收敛。
    */
-  | { type: "subagent-reasoning"; subagentId: string; delta: string }
+  | {
+      type: "subagent-reasoning";
+      subagentId: string;
+      delta: string;
+      /**
+       * 显式轮键（review 修复：消灭 ui 侧轮边界双写启发式）：本次增量
+       * 属于子代理第几轮流式生成（0 起，与 subagent 循环 round 计数同源）。
+       * 可选字段：ui 读到时按它归并轮次，缺失（构造点未升级）时回退
+       * 增量启发式（见 ui appendSubagentTurnDelta，两处口径互为镜像）。
+       */
+      roundIndex?: number;
+    }
+  /**
+   * 子代理正文（报告文本）的流式增量（ADR 0021，票 02，形态对齐 subagent-reasoning）：
+   * 按轮累积驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages
+   * 行落库（逐轮正文与思考，轮边界即行边界），仅为检视与恢复回看；
+   * 不进入主任务模型上下文，终态由 subagent-report 一并收敛。
+   * roundIndex 同 subagent-reasoning（显式轮键，缺失回退启发式）。
+   */
+  | {
+      type: "subagent-text-delta";
+      subagentId: string;
+      delta: string;
+      roundIndex?: number;
+    }
   /**
    * 子代理结束：report 为最终文本报告（回流为 spawn_subagent 的工具结果）；
    * ok=false 表示失败或被中断（report 为中文原因）。

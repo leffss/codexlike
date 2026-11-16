@@ -13,6 +13,9 @@ import { workbenchKey } from "./workbench-state";
 import type {
   CompactRecord,
   ProjectRecord,
+  SubagentMessageRecord,
+  SubagentRecord,
+  SubagentToolCallRecord,
   TaskRecord,
   StoredMessage,
 } from "./types";
@@ -86,6 +89,36 @@ export interface TaskPersistence {
   insertApproval(taskId: string, commandWord: string): void;
   /** 读取遗留命令首词记录，仅用于兼容与历史检查，不恢复为授权。 */
   listApprovals(taskId: string): string[];
+  /**
+   * 子代理骨架行（ADR 0021，票 01）：入队瞬间插入（status=queued）；
+   * 状态更新见 updateSubagent，按任务列出见 listSubagents。
+   */
+  insertSubagent(record: SubagentRecord): void;
+  /**
+   * 只更新状态机推进触碰的列（status / startedAt / completedAt）；
+   * 归属与委派说明（taskId / task / queuedAt）建行后不变，不提供更新。
+   * 目标不存在时静默忽略（与 updateTask 同语义）。
+   */
+  updateSubagent(
+    id: string,
+    patch: Partial<Pick<SubagentRecord, "status" | "startedAt" | "completedAt">>
+  ): void;
+  /** 指定任务的子代理骨架行，按排队时间正序；未知任务返回空数组 */
+  listSubagents(taskId: string): SubagentRecord[];
+  /**
+   * 子代理逐轮消息（ADR 0021，票 02）：轮终态即写一行（正文 + 思考，轮边界即行边界）；
+   * 按任务列出见 listSubagentMessages（恢复数据面经并行字段一次性读出，票 03）。
+   */
+  insertSubagentMessage(record: SubagentMessageRecord): void;
+  /** 指定任务的子代理逐轮消息，按写入时间正序；未知任务返回空数组 */
+  listSubagentMessages(taskId: string): SubagentMessageRecord[];
+  /**
+   * 子代理工具调用（ADR 0021，票 02）：完成即写一行（output 截断口径同主代理
+   * insertToolCall）；按任务列出见 listSubagentToolCalls。
+   */
+  insertSubagentToolCall(record: SubagentToolCallRecord): void;
+  /** 指定任务的子代理工具调用，按写入时间正序；未知任务返回空数组 */
+  listSubagentToolCalls(taskId: string): SubagentToolCallRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -163,6 +196,39 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at TEXT NOT NULL,
   PRIMARY KEY (task_id, command_word)
 );
+CREATE TABLE IF NOT EXISTS subagents (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  task TEXT NOT NULL,
+  status TEXT NOT NULL,
+  queued_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_subagents_task_queued
+  ON subagents(task_id, queued_at);
+CREATE TABLE IF NOT EXISTS subagent_messages (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  subagent_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  reasoning TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_messages_subagent
+  ON subagent_messages(task_id, subagent_id, created_at);
+CREATE TABLE IF NOT EXISTS subagent_tool_calls (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  subagent_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  arguments TEXT NOT NULL,
+  output TEXT NOT NULL,
+  is_error INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_tool_calls_subagent
+  ON subagent_tool_calls(task_id, subagent_id, created_at);
 `;
 
 interface TaskRow {
@@ -213,6 +279,36 @@ interface ToolCallRow {
   output: string;
   is_error: number;
   reasoning: string | null;
+  created_at: string;
+}
+
+interface SubagentRow {
+  id: string;
+  task_id: string;
+  task: string;
+  status: string;
+  queued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+interface SubagentMessageRow {
+  id: string;
+  task_id: string;
+  subagent_id: string;
+  content: string;
+  reasoning: string | null;
+  created_at: string;
+}
+
+interface SubagentToolCallRow {
+  id: string;
+  task_id: string;
+  subagent_id: string;
+  tool_name: string;
+  arguments: string;
+  output: string;
+  is_error: number;
   created_at: string;
 }
 
@@ -349,6 +445,24 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   const listApprovalsStmt = db.prepare(
     "SELECT command_word FROM approvals WHERE task_id = ? ORDER BY created_at, rowid"
   );
+  const insertSubagentStmt = db.prepare(
+    "INSERT INTO subagents (id, task_id, task, status, queued_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentsStmt = db.prepare(
+    "SELECT * FROM subagents WHERE task_id = ? ORDER BY queued_at, rowid"
+  );
+  const insertSubagentMessageStmt = db.prepare(
+    "INSERT INTO subagent_messages (id, task_id, subagent_id, content, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentMessagesStmt = db.prepare(
+    "SELECT * FROM subagent_messages WHERE task_id = ? ORDER BY created_at, rowid"
+  );
+  const insertSubagentToolCallStmt = db.prepare(
+    "INSERT INTO subagent_tool_calls (id, task_id, subagent_id, tool_name, arguments, output, is_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listSubagentToolCallsStmt = db.prepare(
+    "SELECT * FROM subagent_tool_calls WHERE task_id = ? ORDER BY created_at, rowid"
+  );
 
   function toRecord(row: TaskRow): TaskRecord {
     return {
@@ -467,12 +581,16 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           "INSERT OR IGNORE INTO removed_creation_requests SELECT creation_request_id FROM tasks WHERE project_id = ? AND creation_request_id IS NOT NULL"
         ).run(projectId);
         // 显式关联清理，不依赖各运行时 foreign_keys 默认值，不按目录推导集合。
+        // 子代理三表随任务数据同步清理（ADR 0021：生命周期跟随任务数据）。
         for (const table of [
           "messages",
           "compact_records",
           "tool_calls",
           "interactions",
           "approvals",
+          "subagents",
+          "subagent_messages",
+          "subagent_tool_calls",
         ]) {
           db.prepare(
             `DELETE FROM ${table} WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`
@@ -804,6 +922,112 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         command_word: string;
       }[];
       return rows.map((row) => row.command_word);
+    },
+
+    insertSubagent(record) {
+      insertSubagentStmt.run(
+        record.id,
+        record.taskId,
+        record.task,
+        record.status,
+        record.queuedAt,
+        record.startedAt,
+        record.completedAt
+      );
+    },
+
+    updateSubagent(id, patch) {
+      // 只更新状态机推进的列（status/startedAt/completedAt），目标不存在静默忽略
+      const columns: string[] = [];
+      const values: (string | number | null)[] = [];
+      if (patch.status !== undefined) {
+        columns.push("status = ?");
+        values.push(patch.status);
+      }
+      if (patch.startedAt !== undefined) {
+        columns.push("started_at = ?");
+        values.push(patch.startedAt);
+      }
+      if (patch.completedAt !== undefined) {
+        columns.push("completed_at = ?");
+        values.push(patch.completedAt);
+      }
+      if (columns.length === 0) {
+        return;
+      }
+      db.prepare(`UPDATE subagents SET ${columns.join(", ")} WHERE id = ?`).run(
+        ...values,
+        id
+      );
+    },
+
+    listSubagents(taskId) {
+      return (listSubagentsStmt.all(taskId) as unknown as SubagentRow[]).map(
+        (row) => ({
+          id: row.id,
+          taskId: row.task_id,
+          task: row.task,
+          status: row.status as SubagentRecord["status"],
+          queuedAt: row.queued_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+        })
+      );
+    },
+
+    insertSubagentMessage(record) {
+      insertSubagentMessageStmt.run(
+        record.id,
+        record.taskId,
+        record.subagentId,
+        record.content,
+        record.reasoning || null,
+        record.createdAt
+      );
+    },
+
+    listSubagentMessages(taskId) {
+      return (
+        listSubagentMessagesStmt.all(taskId) as unknown as SubagentMessageRow[]
+      ).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        subagentId: row.subagent_id,
+        content: row.content,
+        // 空串归一为缺失（与 messages.reasoning 口径一致，不产生空思考段）
+        ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+        createdAt: row.created_at,
+      }));
+    },
+
+    insertSubagentToolCall(record) {
+      insertSubagentToolCallStmt.run(
+        record.id,
+        record.taskId,
+        record.subagentId,
+        record.toolName,
+        record.arguments,
+        record.output,
+        record.isError ? 1 : 0,
+        record.createdAt
+      );
+    },
+
+    listSubagentToolCalls(taskId) {
+      return (
+        listSubagentToolCallsStmt.all(
+          taskId
+        ) as unknown as SubagentToolCallRow[]
+      ).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        subagentId: row.subagent_id,
+        toolName: row.tool_name,
+        arguments: row.arguments,
+        output: row.output,
+        isError: row.is_error === 1,
+        createdAt: row.created_at,
+      }));
     },
 
     close() {

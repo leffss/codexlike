@@ -1,6 +1,6 @@
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { APICallError } from "ai";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createAgentTask } from "../../src/task/agent-task";
+import { createTaskManager } from "../../src/task/manager";
 import type { TaskEvent, TaskRecord } from "../../src/task/types";
 import { createBuiltinTools } from "../../src/tools/builtin";
 import type { AgentResourceSnapshot } from "../../src/context/resource-types";
@@ -110,12 +111,74 @@ function toolCallRound(
   return { stream };
 }
 
+/** 思考 + 工具调用轮流式（子代理模型先思考、出正文再调工具） */
+function reasoningToolTextRound(
+  reasoning: string[],
+  text: string[],
+  toolCalls: { toolCallId: string; toolName: string; input: unknown }[]
+) {
+  return new ReadableStream<LanguageModelV4StreamPart>({
+    start(controller) {
+      controller.enqueue({ type: "reasoning-start", id: "rs-1" });
+      for (const delta of reasoning) {
+        controller.enqueue({ type: "reasoning-delta", id: "rs-1", delta });
+      }
+      controller.enqueue({ type: "reasoning-end", id: "rs-1" });
+      controller.enqueue({ type: "text-start", id: "text-1" });
+      for (const delta of text) {
+        controller.enqueue({ type: "text-delta", id: "text-1", delta });
+      }
+      controller.enqueue({ type: "text-end", id: "text-1" });
+      for (const call of toolCalls) {
+        controller.enqueue({
+          type: "tool-call",
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          input: JSON.stringify(call.input),
+        });
+      }
+      controller.enqueue({ type: "finish", ...finishPart("tool-calls") });
+      controller.close();
+    },
+  });
+}
+
+/** 思考 + 文本轮流式 */
+function reasoningTextRoundStream(
+  reasoning: string[],
+  text: string[]
+): ReadableStream<LanguageModelV4StreamPart> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue({ type: "reasoning-start", id: "rs-1" });
+      for (const delta of reasoning) {
+        controller.enqueue({ type: "reasoning-delta", id: "rs-1", delta });
+      }
+      controller.enqueue({ type: "reasoning-end", id: "rs-1" });
+      controller.enqueue({ type: "text-start", id: "text-1" });
+      for (const delta of text) {
+        controller.enqueue({ type: "text-delta", id: "text-1", delta });
+      }
+      controller.enqueue({ type: "text-end", id: "text-1" });
+      controller.enqueue({ type: "finish", ...finishPart() });
+      controller.close();
+    },
+  });
+}
+
 type ScriptedStep =
   | { kind: "text"; deltas: string[] }
   | {
       kind: "tool";
       calls: { toolCallId: string; toolName: string; input: unknown }[];
-    };
+    }
+  | {
+      kind: "reasoning-tool-text";
+      reasoning: string[];
+      text: string[];
+      calls: { toolCallId: string; toolName: string; input: unknown }[];
+    }
+  | { kind: "reasoning-text"; reasoning: string[]; text: string[] };
 
 function scriptedModel(steps: ScriptedStep[]) {
   let call = 0;
@@ -125,6 +188,16 @@ function scriptedModel(steps: ScriptedStep[]) {
       if (step.kind === "tool") {
         return toolCallRound(step.calls);
       }
+      if (step.kind === "reasoning-tool-text") {
+        return {
+          stream: reasoningToolTextRound(step.reasoning, step.text, step.calls),
+        };
+      }
+      if (step.kind === "reasoning-text") {
+        return {
+          stream: reasoningTextRoundStream(step.reasoning, step.text),
+        };
+      }
       return { stream: textRound(step.deltas) };
     },
   });
@@ -133,6 +206,23 @@ function scriptedModel(steps: ScriptedStep[]) {
 function fakeClock() {
   let tick = 0;
   return () => `2026-11-11T08:00:${String(++tick).padStart(2, "0")}.000Z`;
+}
+
+/**
+ * 每轮都调用指定工具的循环子模型（轮次上限用例）：toolCallId 逐轮唯一——
+ * 真实 provider 生成的调用 id 唯一，票 02 起每轮完成即写 subagent_tool_calls，
+ * 复用同一 id 会撞行主键（脚本失真，非产品行为）。
+ */
+function toolLoopModel(toolCallIds: (seq: number) => string, toolName: string) {
+  let seq = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      seq += 1;
+      return toolCallRound([
+        { toolCallId: toolCallIds(seq), toolName, input: {} },
+      ]);
+    },
+  });
 }
 
 async function collect(
@@ -167,6 +257,8 @@ interface SubagentHarnessOptions {
   resources?: () => AgentResourceSnapshot;
   systemPrompt?: string;
   subTools?: ToolDefinition[];
+  /** 文件库路径（缺省 :memory:；文件库支持关-重开等价重启场景） */
+  dbPath?: string;
 }
 
 /**
@@ -180,7 +272,7 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
     scriptedModel(
       options.sub ?? [{ kind: "text", deltas: ["子代理默认报告"] }]
     );
-  const persistence = createSqliteTaskStore(":memory:");
+  const persistence = createSqliteTaskStore(options.dbPath ?? ":memory:");
   const record = taskRecord(options.workspacePath);
   record.approvalMode = options.approvalMode ?? "assist";
   persistence.insertTask(record);
@@ -644,8 +736,10 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
 
   it("子代理轮次上限（200）：截断报告带标记回流，不伪造成完成", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    // 子模型每轮都调未注册工具：错误结果回填后继续下一轮，直到撞轮次上限
     const { task, persistence, subModel } = makeSubagentTask({
       workspacePath: workspace,
+      subModel: toolLoopModel((seq) => `loop-${seq}`, "nope"),
       main: [
         {
           kind: "tool",
@@ -658,13 +752,6 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
           ],
         },
         { kind: "text", deltas: ["收到报告"] },
-      ],
-      // 子模型每轮都调未注册工具：错误结果回填后继续下一轮，直到撞轮次上限
-      sub: [
-        {
-          kind: "tool",
-          calls: [{ toolCallId: "loop-1", toolName: "nope", input: {} }],
-        },
       ],
     });
 
@@ -689,6 +776,8 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
     const { task, persistence, subModel } = makeSubagentTask({
       workspacePath: workspace,
+      // 子模型每轮都调未注册工具：错误结果回填后继续下一轮，直到撞注入的上限
+      subModel: toolLoopModel((seq) => `loop-${seq}`, "nope"),
       main: [
         {
           kind: "tool",
@@ -701,13 +790,6 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
           ],
         },
         { kind: "text", deltas: ["收到报告"] },
-      ],
-      // 子模型每轮都调未注册工具：错误结果回填后继续下一轮，直到撞注入的上限
-      sub: [
-        {
-          kind: "tool",
-          calls: [{ toolCallId: "loop-1", toolName: "nope", input: {} }],
-        },
       ],
       // 注入低值 2（执行设置 resolver 范式）：复杂委派上限随用户配置缩放
       toolRoundsLimit: () => 2,
@@ -739,6 +821,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     let reads = 0;
     const { task, persistence, subModel } = makeSubagentTask({
       workspacePath: workspace,
+      subModel: toolLoopModel((seq) => `loop-${seq}`, "nope"),
       main: [
         {
           kind: "tool",
@@ -751,12 +834,6 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
           ],
         },
         { kind: "text", deltas: ["收到报告"] },
-      ],
-      sub: [
-        {
-          kind: "tool",
-          calls: [{ toolCallId: "loop-1", toolName: "nope", input: {} }],
-        },
       ],
       toolRoundsLimit: () => ((reads += 1) === 1 ? 2 : 999),
     });
@@ -1475,5 +1552,731 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(JSON.stringify(task.resourceState)).not.toContain(
       "ALPHA_PRIVATE_BODY"
     );
+  });
+
+  it("委派骨架行 queued 即写并随状态机推进：完成后委派说明与起止时间完整落库（ADR 0021）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-1",
+              toolName: "spawn_subagent",
+              input: { task: "调研骨架行落库并报告" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [{ kind: "text", deltas: ["骨架行报告"] }],
+    });
+    await collect(task.sendMessage({ text: "委派", profile }));
+
+    const rows = persistence.listSubagents("task-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      taskId: "task-1",
+      task: "调研骨架行落库并报告",
+      status: "completed",
+    });
+    // 排队 → 启动 → 完成：三个时间戳严格递增（fakeClock 逐次递增）
+    expect(rows[0]!.queuedAt < rows[0]!.startedAt!).toBe(true);
+    expect(rows[0]!.startedAt! < rows[0]!.completedAt!).toBe(true);
+    persistence.close();
+  });
+
+  it("失败委派骨架行终态为 failed，完成时间随终态落库", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({
+          message: "Incorrect API key provided",
+          url: "https://api.example.com/v1/chat/completions",
+          requestBodyValues: {},
+          statusCode: 401,
+          responseBody: "Unauthorized",
+        });
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "注定失败的任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["子代理失败了"] },
+      ],
+      subModel,
+    });
+    await collect(task.sendMessage({ text: "委派失败场景", profile }));
+
+    const rows = persistence.listSubagents("task-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      task: "注定失败的任务",
+      status: "failed",
+    });
+    expect(rows[0]!.completedAt).not.toBeNull();
+    persistence.close();
+  });
+
+  it("并发满时后到的委派骨架行保持 queued（startedAt 为 null），释放后各自推进到终态", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    // 受控子模型：每个子代理的 doStream 挂起直至测试放行
+    const releases: (() => void)[] = [];
+    let callSeq = 0;
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => {
+        const index = callSeq++;
+        const stream = new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            await new Promise<void>((resolve) => {
+              releases[index] = resolve;
+            });
+            controller.enqueue({ type: "text-start", id: "text-1" });
+            controller.enqueue({
+              type: "text-delta",
+              id: "text-1",
+              delta: `子代理 ${index} 的报告`,
+            });
+            controller.enqueue({ type: "text-end", id: "text-1" });
+            controller.enqueue({ type: "finish", ...finishPart() });
+            controller.close();
+          },
+        });
+        return { stream };
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      maxConcurrent: 1,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "第一个任务" },
+            },
+            {
+              toolCallId: "d2",
+              toolName: "spawn_subagent",
+              input: { task: "第二个任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["两份报告都收到"] },
+      ],
+    });
+
+    const events: TaskEvent[] = [];
+    const iterator = task
+      .sendMessage({ text: "并行委派", profile })
+      [Symbol.asyncIterator]();
+    async function drainUntil(
+      predicate: (event: TaskEvent) => boolean
+    ): Promise<void> {
+      for (
+        let head = await iterator.next();
+        !head.done;
+        head = await iterator.next()
+      ) {
+        events.push(head.value);
+        if (predicate(head.value)) {
+          return;
+        }
+      }
+    }
+    await drainUntil(
+      (event) =>
+        event.type === "subagent-queued" &&
+        events.filter((e) => e.type === "subagent-queued").length === 2
+    );
+    // 模型调用发生在 resolveProfile 微任务后，用 waitFor 等第 1 个真实开跑
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(1));
+
+    // 第 1 个开跑（running），第 2 个排队（queued、startedAt 为 null）：
+    // 排队期的「曾委派过」事实已落库（ADR 0021：入队瞬间即写）
+    const byTaskText = new Map(
+      persistence.listSubagents("task-1").map((row) => [row.task, row])
+    );
+    expect(byTaskText.get("第一个任务")).toMatchObject({
+      status: "running",
+    });
+    expect(byTaskText.get("第一个任务")?.startedAt).not.toBeNull();
+    expect(byTaskText.get("第二个任务")).toMatchObject({
+      status: "queued",
+    });
+    expect(byTaskText.get("第二个任务")?.startedAt).toBeNull();
+
+    // 释放第 1 个：第 2 个占位开跑；再释放第 2 个：全部到终态、主任务收尾
+    releases[0]!();
+    await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(2));
+    releases[1]!();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+    }
+    expect(events.at(-1)?.type).toBe("assistant-done");
+    const finalRows = persistence
+      .listSubagents("task-1")
+      .sort((a, b) => (a.queuedAt < b.queuedAt ? -1 : 1));
+    expect(finalRows.map((row) => row.status)).toEqual([
+      "completed",
+      "completed",
+    ]);
+    expect(finalRows.every((row) => row.startedAt && row.completedAt)).toBe(
+      true
+    );
+    persistence.close();
+  });
+
+  it("应用运行中被杀：残留 running 骨架行重开库后由 manager 启动收尾标 interrupted（ADR 0021）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const dbDir = mkdtempSync(join(tmpdir(), "codexlike-kill-"));
+    const dbPath = join(dbDir, "codexlike.db");
+    // gate 子模型挂起直至放行：本用例永不放行，等价应用在委派运行中被杀
+    const gate = new Promise<void>(() => {});
+    const subModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          async start(controller) {
+            await gate;
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      dbPath,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "长调研" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["汇总"] },
+      ],
+    });
+
+    const iterator = task
+      .sendMessage({ text: "委派后应用被杀", profile })
+      [Symbol.asyncIterator]();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      if (head.value.type === "subagent-start") {
+        break;
+      }
+    }
+    // 被杀前：骨架行已随状态机推进到 running（queued 即写 → running）
+    expect(persistence.listSubagents("task-1")).toHaveLength(1);
+    expect(persistence.listSubagents("task-1")[0]).toMatchObject({
+      task: "长调研",
+      status: "running",
+    });
+
+    // 等价进程被杀：直接关库（gate 永不放行，委派悬停在 running）
+    persistence.close();
+
+    // 重开库 + 新 manager：启动收尾把残留 running 行标 interrupted
+    const reopened = createSqliteTaskStore(dbPath);
+    createTaskManager({ persistence: reopened });
+    expect(reopened.listSubagents("task-1")).toHaveLength(1);
+    expect(reopened.listSubagents("task-1")[0]).toMatchObject({
+      task: "长调研",
+      status: "interrupted",
+    });
+    expect(reopened.listSubagents("task-1")[0]?.completedAt).not.toBeNull();
+    reopened.close();
+  });
+
+  it("子代理工具调用完成即写 subagent_tool_calls：名称/参数/结果/成败与双归属齐备，不混入主表（ADR 0021 票 02）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    writeFileSync(join(workspace, "note.txt"), "子代理要读的文件内容");
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-1",
+              toolName: "spawn_subagent",
+              input: { task: "读 note.txt 并报告" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-read",
+              toolName: "read_file",
+              input: { path: "note.txt" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["读到了文件内容"] },
+      ],
+    });
+
+    const events = await collect(
+      task.sendMessage({ text: "委派读文件", profile })
+    );
+
+    // 归属锚点：subagent-start 事件的 subagentId 是过程行的归属键
+    const started = events.find(
+      (event): event is Extract<TaskEvent, { type: "subagent-start" }> =>
+        event.type === "subagent-start"
+    );
+    expect(started).toBeDefined();
+
+    const rows = persistence.listSubagentToolCalls("task-1");
+    expect(rows).toHaveLength(1);
+    // 完成即写：一次 read_file 一行，结果为工具自身截断后的输出（与主代理同口径）
+    expect(rows[0]).toMatchObject({
+      id: "sub-read",
+      taskId: "task-1",
+      subagentId: started?.subagentId,
+      toolName: "read_file",
+      arguments: '{"path":"note.txt"}',
+      output: expect.stringContaining("子代理要读的文件内容"),
+      isError: false,
+    });
+    expect(typeof rows[0]?.createdAt).toBe("string");
+    // 子代理过程行不混入主任务 tool_calls（主表只有 spawn_subagent 一行）
+    const mainCalls = persistence.listToolCalls("task-1");
+    expect(mainCalls.map((call) => call.toolName)).toEqual(["spawn_subagent"]);
+    persistence.close();
+  });
+
+  it("轮终态写逐轮正文与思考（票 02）：轮边界即行边界、纯工具轮不产生空行、spawn 行瘦身只回填报告", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    writeFileSync(join(workspace, "note.txt"), "轮终态用例的文件内容");
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-1",
+              toolName: "spawn_subagent",
+              input: { task: "多轮调研" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [
+        // 第 1 轮：思考 + 正文 + 工具（轮终态写第 1 行）
+        {
+          kind: "reasoning-tool-text",
+          reasoning: ["第一轮思考"],
+          text: ["第一轮正文。"],
+          calls: [
+            {
+              toolCallId: "sub-read-1",
+              toolName: "read_file",
+              input: { path: "note.txt" },
+            },
+          ],
+        },
+        // 第 2 轮：纯工具轮（无正文无思考，不产生空行）
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-read-2",
+              toolName: "read_file",
+              input: { path: "note.txt" },
+            },
+          ],
+        },
+        // 第 3 轮（最终轮）：思考 + 报告正文（轮终态写第 2 行）
+        {
+          kind: "reasoning-text",
+          reasoning: ["第二轮思考"],
+          text: ["最终报告正文。"],
+        },
+      ],
+    });
+
+    const events = await collect(
+      task.sendMessage({ text: "委派多轮调研", profile })
+    );
+
+    const started = events.find(
+      (event): event is Extract<TaskEvent, { type: "subagent-start" }> =>
+        event.type === "subagent-start"
+    );
+    expect(started).toBeDefined();
+
+    // 逐轮正文与思考：一行一轮（轮边界可辨），纯工具轮不落空行
+    const rounds = persistence.listSubagentMessages("task-1");
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0]).toMatchObject({
+      taskId: "task-1",
+      subagentId: started?.subagentId,
+      content: "第一轮正文。",
+      reasoning: "第一轮思考",
+    });
+    expect(rounds[1]).toMatchObject({
+      subagentId: started?.subagentId,
+      content: "最终报告正文。",
+      reasoning: "第二轮思考",
+    });
+    // 时间戳随轮递增（fakeClock 单调），双归属齐备
+    expect(rounds[0]!.createdAt < rounds[1]!.createdAt).toBe(true);
+    // 显式轮键（review 修复）：第 1 轮 0、纯工具轮后第 3 轮 2——与
+    // flushRound 的行边界同源（ui 侧按它归并轮次，消灭双写启发式）
+    const subTextDeltas = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-text-delta" }> =>
+        event.type === "subagent-text-delta"
+    );
+    expect(subTextDeltas.map((event) => event.roundIndex)).toEqual([0, 2]);
+    const subReasonings = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-reasoning" }> =>
+        event.type === "subagent-reasoning"
+    );
+    expect(subReasonings.map((event) => event.roundIndex)).toEqual([0, 2]);
+    // 逐条工具调用：两次 read_file 各一行（完成即写）
+    expect(
+      persistence.listSubagentToolCalls("task-1").map((row) => row.id)
+    ).toEqual(["sub-read-1", "sub-read-2"]);
+    // spawn_subagent 行瘦身（票 04 contract 步）：output=最终报告（回填模型
+    // 的只有 output），reasoning 不再拼接思考全文——权威记录在子代理侧三表
+    const spawn = persistence
+      .listToolCalls("task-1")
+      .find((call) => call.toolName === "spawn_subagent");
+    expect(spawn?.output).toBe("第一轮正文。最终报告正文。");
+    expect(spawn?.reasoning).toBeUndefined();
+    persistence.close();
+  });
+
+  it("主任务中断时点：已完成轮与中断轮已流出的部分内容都已在库（票 02，任意时刻强杀不丢）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    writeFileSync(join(workspace, "note.txt"), "中断时点用例的文件内容");
+    // 子模型：第 1 轮完整（思考+正文+工具），第 2 轮流出部分思考与正文后挂起，
+    // abort 到达时以 AbortError 终止（模拟真实 provider 流对 abortSignal 的响应）
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let firstRound = true;
+    const subModel = new MockLanguageModelV4({
+      doStream: async (options) => {
+        if (firstRound) {
+          firstRound = false;
+          return {
+            stream: reasoningToolTextRound(
+              ["第一轮思考"],
+              ["第一轮正文。"],
+              [
+                {
+                  toolCallId: "before-abort-read",
+                  toolName: "read_file",
+                  input: { path: "note.txt" },
+                },
+              ]
+            ),
+          };
+        }
+        return {
+          stream: new ReadableStream<LanguageModelV4StreamPart>({
+            async start(controller) {
+              const onAbort = () =>
+                controller.error(new DOMException("Aborted", "AbortError"));
+              const signal = options.abortSignal;
+              if (signal?.aborted) {
+                onAbort();
+                return;
+              }
+              signal?.addEventListener("abort", onAbort, { once: true });
+              controller.enqueue({ type: "reasoning-start", id: "rs-1" });
+              controller.enqueue({
+                type: "reasoning-delta",
+                id: "rs-1",
+                delta: "中断轮思考",
+              });
+              controller.enqueue({ type: "reasoning-end", id: "rs-1" });
+              controller.enqueue({ type: "text-start", id: "text-1" });
+              controller.enqueue({
+                type: "text-delta",
+                id: "text-1",
+                delta: "中断轮已流出的正文",
+              });
+              controller.enqueue({ type: "text-end", id: "text-1" });
+              await gate;
+              signal?.removeEventListener("abort", onAbort);
+              controller.enqueue({ type: "finish", ...finishPart() });
+              controller.close();
+            },
+          }),
+        };
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d1",
+              toolName: "spawn_subagent",
+              input: { task: "长调研" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["汇总"] },
+      ],
+    });
+
+    const controller = new AbortController();
+    const events: TaskEvent[] = [];
+    const iterator = task
+      .sendMessage({
+        text: "委派后中断",
+        profile,
+        signal: controller.signal,
+      })
+      [Symbol.asyncIterator]();
+
+    // 推进到第 2 轮部分内容已流出（中断轮正文事件即证据）
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+      if (
+        head.value.type === "subagent-text-delta" &&
+        head.value.delta === "中断轮已流出的正文"
+      ) {
+        break;
+      }
+    }
+
+    // 强杀等价中断：此刻第 1 轮的轮行与工具行应已落库（完成即写、轮终态即写）
+    const atKill = persistence.listSubagentMessages("task-1");
+    expect(atKill).toHaveLength(1);
+    expect(atKill[0]).toMatchObject({
+      content: "第一轮正文。",
+      reasoning: "第一轮思考",
+    });
+    expect(
+      persistence.listSubagentToolCalls("task-1").map((row) => row.id)
+    ).toEqual(["before-abort-read"]);
+
+    // 进程内中断（随主任务 abort）：委派走正常终态，中断轮部分内容补写入库
+    controller.abort();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+    }
+    releaseGate();
+
+    expect(events.at(-1)?.type).toBe("assistant-aborted");
+    const rounds = persistence.listSubagentMessages("task-1");
+    expect(rounds).toHaveLength(2);
+    expect(rounds[1]).toMatchObject({
+      content: "中断轮已流出的正文",
+      reasoning: "中断轮思考",
+    });
+    expect(rounds[0]!.createdAt < rounds[1]!.createdAt).toBe(true);
+    // 中断轮部分正文保留为报告（既有语义不变），主任务以中断态收尾
+    const report = events.find(
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
+        event.type === "subagent-report"
+    );
+    expect(report?.report).toContain("中断轮已流出的正文");
+    persistence.close();
+  });
+
+  it("并发多子代理受控挂起：逐轮正文与逐条工具调用的归属互不串联（票 02）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    writeFileSync(join(workspace, "note.txt"), "并发归属用例的文件内容");
+    // 受控子模型：两个子代理并发（maxConcurrent=2），各自第 1 轮完成（思考+正文+工具）
+    // 后在第 2 轮挂起；挂起期间断言各自过程行的归属互不混入
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const finishedFirstRound = new Set<string>();
+    const subModel = new MockLanguageModelV4({
+      doStream: async (options) => {
+        const prompt = JSON.stringify(options.prompt);
+        const isA = prompt.includes("并发任务甲");
+        const worker = isA ? "并发任务甲" : "并发任务乙";
+        if (!finishedFirstRound.has(worker)) {
+          finishedFirstRound.add(worker);
+          return {
+            stream: reasoningToolTextRound(
+              [`${worker}的思考`],
+              [`${worker}的第一轮正文。`],
+              [
+                {
+                  toolCallId: isA ? "read-a" : "read-b",
+                  toolName: "read_file",
+                  input: { path: "note.txt" },
+                },
+              ]
+            ),
+          };
+        }
+        return {
+          stream: new ReadableStream<LanguageModelV4StreamPart>({
+            async start(controller) {
+              const onAbort = () =>
+                controller.error(new DOMException("Aborted", "AbortError"));
+              const signal = options.abortSignal;
+              if (signal?.aborted) {
+                onAbort();
+                return;
+              }
+              signal?.addEventListener("abort", onAbort, { once: true });
+              await gate;
+              signal?.removeEventListener("abort", onAbort);
+              controller.enqueue({ type: "text-start", id: "text-1" });
+              controller.enqueue({
+                type: "text-delta",
+                id: "text-1",
+                delta: `${worker}的最终报告`,
+              });
+              controller.enqueue({ type: "text-end", id: "text-1" });
+              controller.enqueue({ type: "finish", ...finishPart() });
+              controller.close();
+            },
+          }),
+        };
+      },
+    });
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      maxConcurrent: 2,
+      subModel,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "d-a",
+              toolName: "spawn_subagent",
+              input: { task: "并发任务甲" },
+            },
+            {
+              toolCallId: "d-b",
+              toolName: "spawn_subagent",
+              input: { task: "并发任务乙" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["两份报告都收到"] },
+      ],
+    });
+
+    const events: TaskEvent[] = [];
+    const iterator = task
+      .sendMessage({ text: "并行委派两件事", profile })
+      [Symbol.asyncIterator]();
+    // 推进到两个子代理的第 1 轮工具都完成（完成即写，行已在库）
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+      if (
+        events.filter(
+          (event) => event.type === "subagent-tool" && event.phase === "result"
+        ).length === 2
+      ) {
+        break;
+      }
+    }
+
+    // 挂起期间（等价强杀时点）：骨架行两条，过程行各自归属、互不串联
+    const skeletons = persistence.listSubagents("task-1");
+    expect(skeletons).toHaveLength(2);
+    const idByTask = new Map(skeletons.map((row) => [row.task, row.id]));
+    const roundsAtHang = persistence.listSubagentMessages("task-1");
+    expect(roundsAtHang).toHaveLength(2);
+    for (const row of roundsAtHang) {
+      const owner = row.content.startsWith("并发任务甲")
+        ? "并发任务甲"
+        : "并发任务乙";
+      expect(row.subagentId).toBe(idByTask.get(owner));
+      expect(row.reasoning).toBe(`${owner}的思考`);
+      expect(row.taskId).toBe("task-1");
+    }
+    expect(new Set(roundsAtHang.map((row) => row.subagentId)).size).toBe(2);
+    const toolRowsAtHang = persistence.listSubagentToolCalls("task-1");
+    expect(toolRowsAtHang.map((row) => row.id)).toEqual(["read-a", "read-b"]);
+    const readA = toolRowsAtHang.find((row) => row.id === "read-a");
+    const readB = toolRowsAtHang.find((row) => row.id === "read-b");
+    expect(readA?.subagentId).toBe(idByTask.get("并发任务甲"));
+    expect(readB?.subagentId).toBe(idByTask.get("并发任务乙"));
+
+    // 放行收尾：最终轮正文各归其主，两子代理各两行，主任务正常结束
+    releaseGate();
+    for (
+      let head = await iterator.next();
+      !head.done;
+      head = await iterator.next()
+    ) {
+      events.push(head.value);
+    }
+    expect(events.at(-1)?.type).toBe("assistant-done");
+    const finalRounds = persistence.listSubagentMessages("task-1");
+    expect(finalRounds).toHaveLength(4);
+    // 按归属分组（不用 Map.groupBy：tsconfig lib 未含 es2024）
+    const roundsBySubagent = new Map<string, typeof finalRounds>();
+    for (const row of finalRounds) {
+      const group = roundsBySubagent.get(row.subagentId) ?? [];
+      group.push(row);
+      roundsBySubagent.set(row.subagentId, group);
+    }
+    for (const [subagentId, group] of roundsBySubagent) {
+      expect(group).toHaveLength(2);
+      const owner = group[0]!.content.startsWith("并发任务甲")
+        ? "并发任务甲"
+        : "并发任务乙";
+      expect(group.every((row) => row.content.startsWith(owner))).toBe(true);
+      expect(subagentId).toBe(idByTask.get(owner));
+    }
+    persistence.close();
   });
 });
