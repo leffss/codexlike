@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import { codexlikeBranchName } from "@codexlike/agent-core";
+import { taskBranchName } from "@codexlike/agent-core";
 
 /**
  * git 提交动作组（右栏「改动」tab 底部，prototype/panels-redesign 变体 A
  * 折叠；原 ChangesPanel footer 的行为与 testid 原样转正）：
- * 一键创建分支（codexlike/<任务名>）+ 模型生成提交消息（可编辑）+ 提交。
+ * 一键创建分支（`taskBranchName` 生成 `类型/<slug>`）+ 模型生成提交消息（可编辑）+ 提交。
  * 提交成功后经 onCommitted 通知宿主刷新 git 状态。
  */
 export function GitActions(props: {
@@ -101,11 +101,9 @@ export function GitActions(props: {
         onClick={() => void createBranch()}
         disabled={branchBusy || disabled}
         className="w-full rounded border border-line px-3 py-1.5 text-sm text-fg hover:border-accent hover:text-accent disabled:opacity-50"
-        title={`创建并切换到分支 ${codexlikeBranchName(props.taskTitle)}`}
+        title={`创建并切换到分支 ${taskBranchName(props.taskTitle)}`}
       >
-        {branchBusy
-          ? "创建中…"
-          : `创建分支 ${codexlikeBranchName(props.taskTitle)}`}
+        {branchBusy ? "创建中…" : `创建分支 ${taskBranchName(props.taskTitle)}`}
       </button>
       {branchFeedback !== null && (
         <p data-testid="changes-branch-feedback" className="text-xs text-ok-fg">

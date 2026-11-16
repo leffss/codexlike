@@ -1,34 +1,49 @@
 import { describe, expect, it } from "vitest";
 
-import { codexlikeBranchName } from "../../src/git/branch-name";
+import { taskBranchName } from "../../src/git/branch-name";
 
-describe("codexlikeBranchName（任务名 → codexlike/<任务名> 分支名）", () => {
-  it("常规标题原样保留（中文合法）", () => {
-    expect(codexlikeBranchName("修复登录")).toBe("codexlike/修复登录");
-  });
-
-  it("git 分支非法字符替换为连字符（空格、~^:?*[\\ 等）", () => {
-    expect(codexlikeBranchName("修复 登录 bug")).toBe(
-      "codexlike/修复-登录-bug"
+describe("taskBranchName（任务标题 → 类型/slug 分支名）", () => {
+  it("类型前缀启发：bug/缺陷/故障 → bug，修/fix/错误 → fix，其余 feature", () => {
+    expect(taskBranchName("修复 login 页面 bug")).toBe("bug/login-bug");
+    expect(taskBranchName("Fix timeout on upload")).toBe(
+      "fix/fix-timeout-on-upload"
     );
-    expect(codexlikeBranchName("feat: add x?")).toBe("codexlike/feat-add-x");
+    expect(taskBranchName("修复超时")).toBe("fix/task");
+    expect(taskBranchName("Add login page")).toBe("feature/add-login-page");
+    expect(taskBranchName("新增登录")).toBe("feature/task");
   });
 
-  it("空标题或全非法字符：回退 task", () => {
-    expect(codexlikeBranchName("")).toBe("codexlike/task");
-    expect(codexlikeBranchName("???")).toBe("codexlike/task");
+  it("不含中文：中文等非 ASCII 成组替换为单个连字符，全中文回退 task", () => {
+    expect(taskBranchName("重构 login 模块")).toBe("feature/login");
+    // 「登录」剥除后 slug 只剩英文词 bug；slug 不剥类型关键词（简单优先）
+    expect(taskBranchName("修复 登录 bug")).toBe("bug/bug");
+    expect(taskBranchName("纯中文标题")).toBe("feature/task");
+    expect(taskBranchName("")).toBe("feature/task");
+    expect(taskBranchName("？？？")).toBe("feature/task");
   });
 
-  it("不以 . 结尾（git 分支名约束），压缩重复分隔符", () => {
-    expect(codexlikeBranchName("重构..清理")).toBe("codexlike/重构-清理");
-    expect(codexlikeBranchName("结尾点.")).toBe("codexlike/结尾点");
-    expect(codexlikeBranchName("多个   空格")).toBe("codexlike/多个-空格");
+  it("git 非法字符与分隔符清理：空格/波浪号/冒号成组折叠，首尾连字符去除，统一小写", () => {
+    expect(taskBranchName("fix: add x?")).toBe("fix/fix-add-x");
+    expect(taskBranchName("  spaced   out  ")).toBe("feature/spaced-out");
+    expect(taskBranchName("UPPER Case")).toBe("feature/upper-case");
+    expect(taskBranchName("snake_case_name")).toBe("feature/snake-case-name");
   });
 
-  it("超长标题截断到 48 字符以内（不含 codexlike/ 前缀）", () => {
-    const long = "这是一个非常长的任务标题".repeat(20);
-    const name = codexlikeBranchName(long);
-    expect(name.startsWith("codexlike/")).toBe(true);
-    expect(name.length).toBeLessThanOrEqual("codexlike/".length + 48);
+  it("整体长度 ≤50（含前缀与斜杠），前缀越长 slug 上限越紧", () => {
+    const long = "a very long task title that keeps going and going and going";
+    expect(taskBranchName(long).length).toBeLessThanOrEqual(50);
+    expect(taskBranchName(long)).toBe(taskBranchName(long).replace(/-+$/, ""));
+    // fix/ 4 字符 → slug ≤46（标题里的 fix 词不剥）；feature/ 8 字符 → slug ≤42
+    expect(taskBranchName(`fix ${"x".repeat(60)}`)).toBe(
+      "fix/fix-" + "x".repeat(42)
+    );
+    // 「修」命中 fix 关键词且剥除后不占 slug
+    expect(taskBranchName(`修${"x".repeat(60)}`)).toBe("fix/" + "x".repeat(46));
+    expect(taskBranchName("y".repeat(60))).toBe("feature/" + "y".repeat(42));
+  });
+
+  it("UUID 入参（worktree 会话分支）：原样保留为 feature/<uuid>", () => {
+    const uuid = "1b671a64-40d5-491e-99b0-da01ff1f3341";
+    expect(taskBranchName(uuid)).toBe(`feature/${uuid}`);
   });
 });

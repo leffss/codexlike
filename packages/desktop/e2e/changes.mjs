@@ -1,6 +1,6 @@
 // E2E（工单 05：改动面板 + git 集成）：真实 Electron 应用走完整 git 链路——
 // git repo 工作区（预置基线提交）→ 建任务 → 消息驱动 write_file 产生真实变更
-// → 改动面板列出「新增」文件 → 点开 Monaco 双栏 diff → 一键创建 codexlike/<任务名> 分支
+// → 改动面板列出「新增」文件 → 点开 Monaco 双栏 diff → 一键创建任务分支（类型/<slug>）
 // → 模型生成提交消息（可编辑）→ 一键提交 → 面板刷新干净 + git 命令行侧验证落库
 // → 再开非 git 工作区任务，断言面板降级提示不报错。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:changes（先全仓 build）。
@@ -144,7 +144,7 @@ async function main() {
       .waitFor({ timeout: 30_000 });
     console.log("[e2e] Monaco 双栏 diff 渲染（原/新两侧）");
 
-    // 4) 一键创建分支 codexlike/<任务名> → 成功反馈
+    // 4) 一键创建任务分支（类型/<slug>）→ 成功反馈
     await panel.getByTestId("changes-create-branch").click();
     await panel
       .getByTestId("changes-branch-feedback")
@@ -159,7 +159,7 @@ async function main() {
     // 等面板刷新后徽标真正切到新分支（refresh 异步完成前仍是旧值）
     await panel
       .getByTestId("changes-branch")
-      .filter({ hasText: /^codexlike\// })
+      .filter({ hasText: /^feature\// })
       .waitFor({ timeout: 10_000 });
     const branchShown = await panel.getByTestId("changes-branch").textContent();
     console.log(`[e2e] 一键创建分支：${branchShown}`);

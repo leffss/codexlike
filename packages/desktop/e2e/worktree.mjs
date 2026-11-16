@@ -126,7 +126,7 @@ async function main() {
     await window.getByTestId("composer-input").fill("隔离写入");
     assert(!existsSync(join(homeDir, "worktrees")), "首次发送前不得创建副本");
     assert(
-      git(repo, "branch", "--list", "codexlike/*").trim() === "",
+      git(repo, "branch", "--list", "feature/*").trim() === "",
       "首次发送前不得创建分支"
     );
     assert(
@@ -158,7 +158,7 @@ async function main() {
     assert(!existsSync(join(repo, "wt-e2e.txt")), "主仓库不受影响");
     assert(
       readFileSync(join(worktreePath, "terminal-branch.txt"), "utf8").trim() ===
-        `codexlike/${ids[0]}`,
+        `feature/${ids[0]}`,
       "终端命令也在隔离分支执行"
     );
     assert(
@@ -167,7 +167,7 @@ async function main() {
     );
     assert(
       git(worktreePath, "branch", "--show-current").trim() ===
-        `codexlike/${ids[0]}`,
+        `feature/${ids[0]}`,
       "独立分支"
     );
     // 正式任务的路径/模式收进标题栏徽章（票01）：弹层读完整工作区

@@ -174,6 +174,6 @@ export type {
   GitService,
   GitStatus,
 } from "./git/git-service";
-// 任务名 → codexlike/<任务名> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
-export { codexlikeBranchName } from "./git/branch-name";
+// 任务名 → 类型/<slug> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
+export { taskBranchName } from "./git/branch-name";
 export { buildCommitMessagePrompt } from "./git/commit-message";

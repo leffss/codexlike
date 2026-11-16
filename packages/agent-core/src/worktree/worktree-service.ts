@@ -13,15 +13,16 @@ import { createHash } from "node:crypto";
 
 import { simpleGit } from "simple-git";
 
-import { codexlikeBranchName } from "../git/branch-name";
+import { taskBranchName } from "../git/branch-name";
 import { resolveInWorkspace } from "../tools/workspace";
 
 /**
  * 托管 Worktree 管理（spec「git 集成与托管 Worktree」；GLOSSARY「托管 Worktree」）。
  * worktree 模式的任务在 `<CODEXLIKE_HOME>/worktrees/<任务id>` 检出隔离副本
- * （独立分支 `codexlike/<任务id>`），任务的全部文件与终端操作发生在副本内。
+ * （独立分支 `taskBranchName(任务id)` 生成，UUID 得 `feature/<任务id>`），
+ * 任务的全部文件与终端操作发生在副本内。
  *
- * 分支名 sanitize 复用工单 05 的 `codexlikeBranchName`（任务 id 实际为 UUID，天然合法，
+ * 分支名 sanitize 复用工单 05 的 `taskBranchName`（任务 id 实际为 UUID，天然合法，
  * 但接口不假设调用方只传 UUID）。依赖 Node 运行时，经 `./node` 出口暴露。
  */
 
@@ -31,7 +32,7 @@ export const WORKTREE_INCLUDE_FILE = ".worktreeinclude";
 export interface ManagedWorktree {
   /** worktree 检出目录（任务的 workspacePath 指向这里） */
   path: string;
-  /** 独立分支名（codexlike/<任务id>） */
+  /** 独立分支名（taskBranchName(任务id)，UUID 入参得 feature/<任务id>） */
   branch: string;
   /** 实际复制进副本的 `.worktreeinclude` 条目（相对工作区的 POSIX 路径） */
   copiedFiles: string[];
@@ -96,7 +97,7 @@ export function createWorktreeService(options: {
           );
         return { line, source: resolveInWorkspace(workspacePath, line) };
       });
-      const branch = codexlikeBranchName(taskId);
+      const branch = taskBranchName(taskId);
       let head: string;
       try {
         head = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim();

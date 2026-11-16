@@ -49,7 +49,7 @@ export interface GitService {
    */
   diffFile(path: string, oldPath?: string): Promise<GitFileDiff>;
   /**
-   * 创建（或切换到已存在的）`codexlike/<任务名>` 分支。
+   * 创建（或切换到已存在的）任务分支（`taskBranchName` 生成 `类型/<slug>`）。
    * 创建成功 created=true；分支已存在则切换过去（created=false），可重复调用。
    */
   createTaskBranch(name: string): Promise<GitBranchResult>;

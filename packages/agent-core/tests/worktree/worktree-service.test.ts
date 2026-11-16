@@ -74,7 +74,7 @@ describe("worktree 创建", () => {
         })
       ).rejects.toThrow();
       expect(existsSync(join(home, "worktrees", "retry-copy"))).toBe(false);
-      expect(git(repo, "branch", "--list", "codexlike/retry-copy").trim()).toBe(
+      expect(git(repo, "branch", "--list", "feature/retry-copy").trim()).toBe(
         ""
       );
       expect(readFileSync(join(repo, "config", "local.env"), "utf8")).toBe(
@@ -115,8 +115,8 @@ describe("worktree 创建", () => {
           "utf8"
         )
       ).toBe("未提交成果");
-      expect(git(repo, "branch", "--list", "codexlike/keep-0").trim()).toBe(
-        "+ codexlike/keep-0"
+      expect(git(repo, "branch", "--list", "feature/keep-0").trim()).toBe(
+        "+ feature/keep-0"
       );
     }
   );
@@ -148,12 +148,12 @@ describe("worktree 创建", () => {
       service.createForTask({ taskId: "exists", workspacePath: repo })
     ).rejects.toThrow();
     expect(readFileSync(join(existing, "keep.txt"), "utf8")).toBe("已有成果");
-    git(repo, "branch", "codexlike/collision");
+    git(repo, "branch", "feature/collision");
     await expect(
       service.createForTask({ taskId: "collision", workspacePath: repo })
     ).rejects.toThrow();
-    expect(git(repo, "branch", "--list", "codexlike/collision").trim()).toBe(
-      "codexlike/collision"
+    expect(git(repo, "branch", "--list", "feature/collision").trim()).toBe(
+      "feature/collision"
     );
     const result = await service.createForTask({
       taskId: "keep-changes",
@@ -213,7 +213,7 @@ describe("worktree 创建", () => {
           workspacePath: repo,
         })
       ).branch
-    ).toBe("codexlike/unborn");
+    ).toBe("feature/unborn");
   });
 
   it("在约定目录创建 worktree 与独立分支，检出当前 HEAD 内容", async () => {
@@ -232,7 +232,7 @@ describe("worktree 创建", () => {
     });
 
     expect(info.path).toBe(join(home, "worktrees", "task-abc"));
-    expect(info.branch).toBe("codexlike/task-abc");
+    expect(info.branch).toBe("feature/task-abc");
     // worktree 真实存在且检出 HEAD 内容
     expect(existsSync(join(info.path, "README.md"))).toBe(true);
     expect(readFileSync(join(info.path, "tracked.txt"), "utf8")).toBe(
@@ -240,12 +240,12 @@ describe("worktree 创建", () => {
     );
     // worktree 当前分支即独立分支；主仓库仍在 main
     expect(git(info.path, "branch", "--show-current").trim()).toBe(
-      "codexlike/task-abc"
+      "feature/task-abc"
     );
     expect(git(repo, "branch", "--show-current").trim()).toBe("main");
     // 主仓库分支列表中包含该独立分支（`+` = 分支被检出于其他 worktree，正是预期）
-    expect(git(repo, "branch", "--list", "codexlike/task-abc").trim()).toBe(
-      "+ codexlike/task-abc"
+    expect(git(repo, "branch", "--list", "feature/task-abc").trim()).toBe(
+      "+ feature/task-abc"
     );
   });
 

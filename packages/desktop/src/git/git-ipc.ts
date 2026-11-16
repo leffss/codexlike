@@ -1,5 +1,5 @@
 import {
-  codexlikeBranchName,
+  taskBranchName,
   createGitService,
   createLanguageModelFromProfile,
   generateCommitMessage,
@@ -86,10 +86,10 @@ export function registerGitHandlers(options: {
     IPC.git.createBranch,
     async (_e: IpcMainInvokeEvent, taskId: unknown) => {
       const record = findTask(taskId);
-      // 分支名由任务名生成（codexlike/<任务名>，sanitize 在 agent-core 纯函数）
+      // 分支名由任务名生成（类型/<slug>，中文剥除+长度上限，sanitize 在 agent-core 纯函数）
       try {
         return await createGitService(record.workspacePath).createTaskBranch(
-          codexlikeBranchName(record.title)
+          taskBranchName(record.title)
         );
       } catch (error) {
         throw new Error(

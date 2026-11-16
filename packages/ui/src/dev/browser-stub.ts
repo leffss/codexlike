@@ -177,7 +177,7 @@ function installBrowserStub(): void {
       }),
       createBranch: async () => ({
         created: true,
-        branch: "codexlike/dev-preview",
+        branch: "feature/dev-preview",
       }),
       generateCommitMessage: async () =>
         "dev 预览样例提交消息（可编辑；Electron 下走真实模型）",

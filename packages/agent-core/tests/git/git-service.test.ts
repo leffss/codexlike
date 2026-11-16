@@ -159,31 +159,31 @@ describe("git 服务：diffFile（单文件新旧两侧内容）", () => {
   });
 });
 
-describe("git 服务：createTaskBranch（codexlike/<任务名> 分支）", () => {
+describe("git 服务：createTaskBranch（类型/<slug> 任务分支）", () => {
   it("创建并切换到新分支，created=true", async () => {
     const repo = makeRepo();
     const service = createGitService(repo);
-    const result = await service.createTaskBranch("codexlike/修复登录");
-    expect(result).toEqual({ branch: "codexlike/修复登录", created: true });
-    expect((await service.status()).branch).toBe("codexlike/修复登录");
+    const result = await service.createTaskBranch("feature/fix-login");
+    expect(result).toEqual({ branch: "feature/fix-login", created: true });
+    expect((await service.status()).branch).toBe("feature/fix-login");
   });
 
   it("分支已存在：切换过去并返回 created=false（可重复点击）", async () => {
     const repo = makeRepo();
     const service = createGitService(repo);
-    await service.createTaskBranch("codexlike/修复登录");
+    await service.createTaskBranch("feature/fix-login");
     // 切回 main 制造「分支已存在」场景
     git(repo, "checkout", "main");
-    const result = await service.createTaskBranch("codexlike/修复登录");
-    expect(result).toEqual({ branch: "codexlike/修复登录", created: false });
-    expect((await service.status()).branch).toBe("codexlike/修复登录");
+    const result = await service.createTaskBranch("feature/fix-login");
+    expect(result).toEqual({ branch: "feature/fix-login", created: false });
+    expect((await service.status()).branch).toBe("feature/fix-login");
   });
 
   it("非 git 目录：中文报错不崩溃", async () => {
     const plain = mkdtempSync(join(tmpdir(), "codexlike-nogit3-"));
     repos.push(plain);
     await expect(
-      createGitService(plain).createTaskBranch("codexlike/x")
+      createGitService(plain).createTaskBranch("feature/x")
     ).rejects.toThrow("当前工作区不是 git 仓库");
   });
 });
@@ -214,14 +214,14 @@ describe("git 服务：commitAll（一键提交全部变更）", () => {
     expect(result.reason).toContain("没有可提交的变更");
   });
 
-  it("提交落在当前分支（如 codexlike/* 任务分支）", async () => {
+  it("提交落在当前分支（如 feature/* 任务分支）", async () => {
     const repo = makeRepo();
     const service = createGitService(repo);
-    await service.createTaskBranch("codexlike/任务一");
+    await service.createTaskBranch("feature/task-one");
     writeFileSync(join(repo, "work.txt"), "工作成果");
     await service.commitAll("任务分支上的提交");
     expect(git(repo, "branch", "--contains", "HEAD").trim()).toBe(
-      "* codexlike/任务一"
+      "* feature/task-one"
     );
   });
 });

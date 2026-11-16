@@ -195,7 +195,7 @@ export const IPC = {
     status: "git:status",
     /** 单文件 diff（新旧两侧全文，Monaco 双栏渲染） */
     diff: "git:diff",
-    /** 一键创建 codexlike/<任务名> 分支（分支名由任务名生成） */
+    /** 一键创建任务分支（`taskBranchName` 由任务名生成 `类型/<slug>`，中文剥除、≤50 字符） */
     createBranch: "git:create-branch",
     /** 由模型按任务内容生成提交消息草稿（一次不发工具的请求） */
     commitMessage: "git:commit-message",
@@ -605,7 +605,7 @@ export interface CodexLikeApi {
     status(taskId: string): Promise<GitStatus>;
     /** 单文件改动（新旧两侧全文）；oldPath 为重命名场景的原路径 */
     diff(taskId: string, path: string, oldPath?: string): Promise<GitFileDiff>;
-    /** 创建（或切换到已存在的）codexlike/<任务名> 分支 */
+    /** 创建（或切换到已存在的）任务分支 */
     createBranch(taskId: string): Promise<GitBranchResult>;
     /** 模型按任务内容生成提交消息草稿（可编辑后提交）；失败抛中文异常 */
     generateCommitMessage(

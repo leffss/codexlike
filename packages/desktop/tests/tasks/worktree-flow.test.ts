@@ -278,7 +278,7 @@ it("首条消息启动失败撤销本次 Worktree 和分支，同一草稿可重
   await expect(invoke("tasks:start", request)).rejects.toThrow();
   expect(await invoke("tasks:list")).toEqual([]);
   expect(readdirSync(join(app.home, "worktrees"))).toEqual([]);
-  expect(git(app.repo, "branch", "--list", "codexlike/*").trim()).toBe("");
+  expect(git(app.repo, "branch", "--list", "feature/*").trim()).toBe("");
   expect(readFileSync(join(app.repo, "tracked.txt"), "utf8")).toBe("来源内容");
   const record = await invoke("tasks:start", {
     ...request,
@@ -294,7 +294,7 @@ it("项目首次发送才创建独立 Worktree，双击幂等、来源与实际�
   const project = await invoke("projects:add", app.repo);
   expect(await invoke("tasks:list")).toEqual([]);
   expect(existsSync(join(app.home, "worktrees"))).toBe(false);
-  expect(git(app.repo, "branch", "--list", "codexlike/*").trim()).toBe("");
+  expect(git(app.repo, "branch", "--list", "feature/*").trim()).toBe("");
   const request = {
     requestId: "worktree-draft",
     projectId: project.id,
@@ -313,7 +313,7 @@ it("项目首次发送才创建独立 Worktree，双击幂等、来源与实际�
     workspacePath: join(app.home, "worktrees", record.id),
   });
   expect(git(record.workspacePath, "branch", "--show-current").trim()).toBe(
-    `codexlike/${record.id}`
+    `feature/${record.id}`
   );
   expect(git(app.repo, "branch", "--show-current").trim()).toBe("main");
   writeFileSync(join(record.workspacePath, "tracked.txt"), "隔离修改");
