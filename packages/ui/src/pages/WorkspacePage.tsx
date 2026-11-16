@@ -50,6 +50,7 @@ import { RailPanel } from "../components/RailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
+import { WorkPlanCardFromSegments } from "../components/WorkPlanCard";
 import {
   type TitlebarContext,
   type TitlebarTask,
@@ -1646,6 +1647,21 @@ export function WorkspacePage(props: {
                   ) : undefined
                 }
               />
+              {/* 工作计划进度折叠卡（GLOSSARY「工作计划」，ADR 0019，原型
+                  变体 C 转正）：位于消息正文与消息队列/输入框（或交互面板）
+                  之间——取代退役的 fixed 悬浮进度环徽章（ADR 0016）。宽度
+                  对齐正文列：左右 padding 对齐消息流滚动容器的 px-4（右缘再
+                  补滚动槽宽），contentWidthClass 的居中基准与消息列、输入区
+                  完全一致（同下方自动批准卡先例）。无计划时渲染 null 不占
+                  布局行。 */}
+              <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
+                <div className={contentWidthClass}>
+                  <WorkPlanCardFromSegments
+                    items={displayMessages}
+                    taskId={currentId}
+                  />
+                </div>
+              </div>
               {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
                *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
                *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），

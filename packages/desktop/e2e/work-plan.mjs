@@ -1,8 +1,9 @@
-// E2E 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 C 定稿）：
-// 1) 模型调 update_plan → 悬浮进度环徽章出现（N/M 计数 + 进度环，
-//    aria 携带当前步骤），流内调用处只留一行极简标记，不渲染通用工具卡；
+// E2E 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016 派生层 + ADR 0019 呈现）：
+// 1) 模型调 update_plan → 正文与输入区之间的进度折叠卡出现（百分比徽章 +
+//    N/M 计数 + 收起态预览当前/下一步，aria 携带当前步骤），流内调用处只留
+//    一行极简标记，不渲染通用工具卡；
 // 2) 相邻两次 update_plan 不折叠成工具组（分组排除），标记行逐次累计；
-// 3) 徽章随最新调用全量替换（计数/全部完成态），点击展开完整步骤面板
+// 3) 卡随最新调用全量替换（计数/全部完成态），点击展开完整步骤清单
 //    （完成项删除线）；
 // 4) 工具结果（中文统计摘要）回传模型，下一轮请求体可查。
 // 运行：pnpm test:e2e:work-plan（先 pnpm build）。
@@ -99,28 +100,42 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
-    // ---- 场景 1：首次 update_plan → 常驻计划条 + 单条流内标记 ----
+    // ---- 场景 1：首次 update_plan → 进度折叠卡 + 单条流内标记 ----
     await window.getByTestId("composer-input").fill("列个计划");
     await window.getByTestId("composer-send").click();
-    await window.getByTestId("plan-banner").waitFor({ timeout: 30_000 });
+    await window.getByTestId("plan-card").waitFor({ timeout: 30_000 });
     await window
       .getByTestId("message-assistant")
       .getByText("计划已建立")
       .waitFor({ timeout: 30_000 });
     assert(
-      (await window.getByTestId("plan-banner-count").textContent()) === "1/3",
-      "徽章计数应为 1/3"
+      (await window.getByTestId("plan-card-count").textContent()) === "1/3",
+      "卡计数应为 1/3"
     );
-    const badgeLabel = await window
-      .getByTestId("plan-banner-toggle")
+    assert(
+      (await window.getByTestId("plan-card-percent").textContent()) === "33%",
+      "卡百分比徽章应为 33%"
+    );
+    assert(
+      (await window.getByTestId("plan-card-current").textContent()) ===
+        "梳理分区清单",
+      "收起态应预览当前步骤"
+    );
+    assert(
+      (await window.getByTestId("plan-card-next").textContent()) ===
+        "下一步：输出布局方案",
+      "收起态应预览下一步"
+    );
+    const cardLabel = await window
+      .getByTestId("plan-card-toggle")
       .getAttribute("aria-label");
     assert(
-      badgeLabel !== null && badgeLabel.includes("梳理分区清单"),
-      `徽章 aria 应携带当前步骤：${badgeLabel ?? "(空)"}`
+      cardLabel !== null && cardLabel.includes("梳理分区清单"),
+      `卡 aria 应携带当前步骤：${cardLabel ?? "(空)"}`
     );
     assert(
-      (await window.getByTestId("plan-badge-ring").count()) === 1,
-      "徽章应带进度环"
+      (await window.getByTestId("plan-card-panel").count()) === 0,
+      "默认收起：完整步骤清单不渲染"
     );
     assert(
       (await window.getByTestId("plan-marker-row").count()) === 1,
@@ -132,7 +147,7 @@ async function main() {
         .count()) === 0,
       "update_plan 不得渲染通用工具卡"
     );
-    console.log("[e2e] 首次更新：悬浮徽章 + 流内单条标记（无工具卡）");
+    console.log("[e2e] 首次更新：进度折叠卡 + 流内单条标记（无工具卡）");
 
     // ---- 场景 2：相邻两次更新 → 分组排除 + 全量替换 + 结果回传 ----
     await window.getByTestId("composer-input").fill("推进计划到完成");
@@ -150,34 +165,34 @@ async function main() {
       "相邻 update_plan 不得折叠成工具组"
     );
     assert(
-      (await window.getByTestId("plan-banner-count").textContent()) === "3/3",
-      "徽章应随最新调用全量替换为 3/3"
+      (await window.getByTestId("plan-card-count").textContent()) === "3/3",
+      "卡应随最新调用全量替换为 3/3"
     );
     const summaryLabel = await window
-      .getByTestId("plan-banner-toggle")
+      .getByTestId("plan-card-toggle")
       .getAttribute("aria-label");
     assert(
       summaryLabel !== null && summaryLabel.includes("全部完成"),
-      `全部完成后徽章 aria 应显示「全部完成」：${summaryLabel ?? "(空)"}`
+      `全部完成后卡 aria 应显示「全部完成」：${summaryLabel ?? "(空)"}`
     );
     const planResult = toolResult(seenBodies.at(-1) ?? "", "plan-c3");
     assert(
       typeof planResult === "string" && planResult.includes("工作计划已更新"),
       `工具结果（中文统计摘要）应回传模型：${planResult ?? "(未找到)"}`
     );
-    console.log("[e2e] 相邻更新分组排除、徽章全量替换、统计结果回传");
+    console.log("[e2e] 相邻更新分组排除、卡全量替换、统计结果回传");
 
-    // ---- 场景 3：展开常驻条 → 完整步骤面板（完成项删除线） ----
-    await window.getByTestId("plan-banner-toggle").click();
-    await window.getByTestId("plan-banner-panel").waitFor();
+    // ---- 场景 3：展开折叠卡 → 完整步骤清单（完成项删除线） ----
+    await window.getByTestId("plan-card-toggle").click();
+    await window.getByTestId("plan-card-panel").waitFor();
     assert(
-      (await window.getByTestId("plan-banner-panel").textContent())?.includes(
+      (await window.getByTestId("plan-card-panel").textContent())?.includes(
         "调研布局代码"
       ) === true,
-      "展开面板应显示完整步骤列表"
+      "展开清单应显示完整步骤列表"
     );
     const lineThroughCount = await window.evaluate(() => {
-      const panel = document.querySelector('[data-testid="plan-banner-panel"]');
+      const panel = document.querySelector('[data-testid="plan-card-panel"]');
       if (panel === null) return 0;
       return [...panel.querySelectorAll("span")].filter((span) =>
         span.className.includes("line-through")

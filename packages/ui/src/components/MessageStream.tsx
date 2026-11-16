@@ -50,7 +50,7 @@ import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentCard } from "./SubagentCard";
 import { ToolCallCard } from "./ToolCallCard";
-import { PlanMarkerRow, WorkPlanBannerFromSegments } from "./WorkPlanBanner";
+import { PlanMarkerRow } from "./WorkPlanCard";
 
 /** 登记的用户输入意图有效期：覆盖 scroll 事件滞后一帧的竞争窗口 */
 const INTENT_TTL_MS = 500;
@@ -301,13 +301,8 @@ export function MessageStream(props: {
         {/* min-h-full 弹性列：空流态（新任务发送瞬间尚无用户段）也能把
             运行指示压到可视区左下角；有消息时紧跟在消息列表之后 */}
         <div className="flex min-h-full flex-col">
-          {/* 工作计划悬浮徽章（GLOSSARY「工作计划」，ADR 0016）：当前计划
-              由段序列派生，fixed 悬浮默认页垂直中央+消息区左缘（可拖动/
-              记忆/右键复位）；无计划时渲染 null */}
-          <WorkPlanBannerFromSegments
-            items={props.items}
-            taskId={props.taskId}
-          />
+          {/* 工作计划进度折叠卡已迁往 WorkspacePage 中列（ADR 0019）：
+              挂消息流与输入区之间，本组件只留流内极简标记行 */}
           {props.items.length === 0 && props.compacting !== true ? (
             <div
               data-testid="message-empty"

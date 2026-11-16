@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
+import { WorkPlanCardFromSegments } from "../src/components/WorkPlanCard";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import {
   activeStep,
@@ -14,9 +15,9 @@ import {
 import type { MessageSegment, ToolCallSegment } from "../src/lib/task-view";
 
 /**
- * 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016，原型 C 定稿）：
+ * 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016 派生层 + ADR 0019 呈现）：
  * 派生层纯函数（参数解析 / 快照收集 / 当前计划 / 派生量）与呈现层
- * （悬浮进度环徽章 + 流内标记行 + 连续工具分组排除）。
+ * （进度折叠卡 + 流内标记行 + 连续工具分组排除）。
  * Seam：renderToStaticMarkup（存在性与收起态默认值；开合交互由
  * collapse-memory 承载，静态渲染断言首帧 + setRememberedOpen 预置记忆）。
  */
@@ -82,6 +83,15 @@ const SEVEN_STEPS = [
 
 function streamOf(items: MessageSegment[], taskId = "s1"): string {
   return renderToStaticMarkup(createElement(MessageStream, { items, taskId }));
+}
+
+function cardOf(taskId: string): string {
+  return renderToStaticMarkup(
+    createElement(WorkPlanCardFromSegments, {
+      items: [userSeg("u1", "t1"), planSeg("p1", "t1", SEVEN_STEPS, taskId)],
+      taskId,
+    })
+  );
 }
 
 beforeEach(() => {
@@ -152,61 +162,65 @@ describe("plan-view 派生层纯函数", () => {
   });
 });
 
-describe("工作计划呈现（悬浮徽章 + 标记行，ADR 0016）", () => {
-  it("有计划时渲染悬浮徽章：进度环 + N/M 计数，fixed 悬浮脱离布局流，aria 携带当前步骤，默认收起无面板", () => {
-    const html = streamOf([
-      userSeg("u1", "t1"),
-      planSeg("p1", "t1", SEVEN_STEPS),
-      textSeg("a1", "t1"),
-    ]);
-    expect(html).toContain('data-testid="plan-banner"');
-    expect(html).toContain('data-testid="plan-banner-count"');
+describe("工作计划呈现（进度折叠卡 + 标记行，ADR 0019）", () => {
+  it("有计划时渲染折叠卡：百分比徽章 + N/M 计数 + 收起态预览当前/下一步，aria 携带当前步骤，默认收起无清单", () => {
+    const html = cardOf("s1");
+    expect(html).toContain('data-testid="plan-card"');
+    expect(html).toContain('data-testid="plan-card-percent"');
+    expect(html).toContain("71%");
+    expect(html).toContain('data-testid="plan-card-count"');
     expect(html).toContain("5/7");
-    // 收起态当前步骤进 aria-label（视觉上徽章只有环 + 计数）
+    // 收起态预览：当前步骤与下一步直接可读（变体 C 胜出点）
+    expect(html).toContain('data-testid="plan-card-current"');
+    expect(html).toContain("右栏两面板改 tab 切换");
+    expect(html).toContain('data-testid="plan-card-next"');
+    expect(html).toContain("下一步：布局变体原型与回归测试");
+    // aria 汇总（当前步骤对读屏可见）
     expect(html).toContain("当前：右栏两面板改 tab 切换");
-    expect(html).toContain('data-testid="plan-badge-ring"');
-    expect(html).toContain('role="progressbar"');
-    // fixed 悬浮脱离布局流（原型 C 定稿：不再 sticky 全宽吸附）
-    expect(html).toContain("pointer-events-none fixed");
-    // 默认收起：完整步骤面板不渲染（当前状态由进度环 + 计数承载）
-    expect(html).not.toContain('data-testid="plan-banner-panel"');
+    // 默认收起：完整步骤清单不渲染
+    expect(html).not.toContain('data-testid="plan-card-panel"');
     // 全量参数 JSON 不进呈现层（对用户无阅读价值）
     expect(html).not.toContain('data-testid="tool-call-card"');
   });
 
-  it("展开态（预置开合记忆）：完整步骤面板渲染，完成项删除线、进行中不删除线", () => {
-    const items = [
-      userSeg("u1", "t1"),
-      planSeg("p1", "t1", SEVEN_STEPS, "s2"),
-      textSeg("a1", "t1"),
-    ];
-    const html = renderToStaticMarkup(
-      createElement(MessageStream, { items, taskId: "s2" })
-    );
+  it("展开态（预置开合记忆）：完整步骤清单渲染，完成项删除线", () => {
+    const collapsed = cardOf("s2");
     // 预置展开记忆后重新渲染（SSR 下无法点击，直接验证记忆通道）
-    setRememberedOpen("plan-banner-s2", true);
-    const openHtml = renderToStaticMarkup(
-      createElement(MessageStream, { items, taskId: "s2" })
-    );
-    expect(html).not.toContain('data-testid="plan-banner-panel"');
-    expect(openHtml).toContain('data-testid="plan-banner-panel"');
+    setRememberedOpen("plan-card-s2", true);
+    const openHtml = cardOf("s2");
+    expect(collapsed).not.toContain('data-testid="plan-card-panel"');
+    expect(openHtml).toContain('data-testid="plan-card-panel"');
     expect(openHtml).toContain("调研现有布局代码");
     expect(openHtml).toContain("line-through");
     expect(openHtml.match(/line-through/g)?.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("全部完成态：aria-label 显示「全部完成」且不再带当前步骤", () => {
+  it("全部完成态：收起态只留「全部完成」一行，aria 不再带当前步骤", () => {
     const allDone = SEVEN_STEPS.map((step) => ({
       ...step,
       status: "completed",
     }));
-    const html = streamOf(
-      [userSeg("u1", "t1"), planSeg("p1", "t1", allDone), textSeg("a1", "t1")],
-      "s3"
+    const html = renderToStaticMarkup(
+      createElement(WorkPlanCardFromSegments, {
+        items: [userSeg("u1", "t1"), planSeg("p1", "t1", allDone, "s3")],
+        taskId: "s3",
+      })
     );
-    expect(html).toContain("工作计划 7/7，全部完成");
+    expect(html).toContain('data-testid="plan-card-done"');
+    expect(html).toContain("全部完成");
     expect(html).toContain("7/7");
+    expect(html).not.toContain('data-testid="plan-card-current"');
     expect(html).not.toContain("当前：");
+  });
+
+  it("卡不在消息流内渲染（ADR 0019 槽位迁往 WorkspacePage 中列），流内只留标记行", () => {
+    const html = streamOf([
+      userSeg("u1", "t1"),
+      planSeg("p1", "t1", SEVEN_STEPS),
+      textSeg("a1", "t1"),
+    ]);
+    expect(html).not.toContain('data-testid="plan-card"');
+    expect(html).toContain('data-testid="plan-marker-row"');
   });
 
   it("流内标记行：每次 update_plan 一行（计划更新 N + N/M + 当时步骤），相邻两次不成工具组", () => {
@@ -229,10 +243,19 @@ describe("工作计划呈现（悬浮徽章 + 标记行，ADR 0016）", () => {
     expect(html).not.toContain('data-testid="tool-call-group"');
   });
 
-  it("无计划时：常驻条与标记行都不渲染", () => {
-    const html = streamOf([userSeg("u1", "t1"), textSeg("a1", "t1")], "s5");
-    expect(html).not.toContain('data-testid="plan-banner"');
-    expect(html).not.toContain('data-testid="plan-marker-row"');
+  it("无计划时：卡与标记行都不渲染", () => {
+    const streamHtml = streamOf(
+      [userSeg("u1", "t1"), textSeg("a1", "t1")],
+      "s5"
+    );
+    expect(streamHtml).not.toContain('data-testid="plan-marker-row"');
+    const cardHtml = renderToStaticMarkup(
+      createElement(WorkPlanCardFromSegments, {
+        items: [userSeg("u1", "t1"), textSeg("a1", "t1")],
+        taskId: "s5",
+      })
+    );
+    expect(cardHtml).toBe("");
   });
 
   it("运行中的 update_plan 段也走标记行（不进组、不渲染工具卡）", () => {
