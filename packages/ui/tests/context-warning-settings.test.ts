@@ -31,6 +31,7 @@ function settingsOf(percent: number): AgentSettings {
     contextWarningThresholdPercent: percent,
     mcpCallTimeoutSeconds: 30,
     mcpConnectTimeoutSeconds: 15,
+    taskConcurrencyLimit: 3,
   };
 }
 

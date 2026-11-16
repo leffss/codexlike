@@ -468,7 +468,9 @@ void app.whenReady().then(async () => {
 
   // 执行设置（ADR 0017，GLOSSARY「执行设置」）：内存缓存注入 createTaskManager
   // （逐次解析），主任务在回合开始时快照读取——设置页保存后对下一个回合生效，
-  // 进行中回合不受中途调小影响（无需重启任务）
+  // 进行中回合不受中途调小影响（无需重启任务）。其中任务并发上限（任务并发
+  // 上限票 01，GLOSSARY「任务并发上限」）不经 agent-core，由主进程任务发送
+  // 闸门直接读缓存消费（ADR 0022）
   const agentSettingsStore = createAgentSettingsStore({ dir: dataDir() });
   let agentSettings = await agentSettingsStore.get();
   const refreshAgentSettings = async () => {

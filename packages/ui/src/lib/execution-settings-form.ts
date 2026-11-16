@@ -8,10 +8,13 @@ import {
   DEFAULT_MAX_TOOL_ROUNDS,
   DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
   DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_TASK_CONCURRENCY_LIMIT,
   MCP_CALL_TIMEOUT_SECONDS_MAX,
   MCP_CALL_TIMEOUT_SECONDS_MIN,
   MCP_CONNECT_TIMEOUT_SECONDS_MAX,
   MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+  TASK_CONCURRENCY_LIMIT_MAX,
+  TASK_CONCURRENCY_LIMIT_MIN,
   TOOL_ROUNDS_MAX,
   TOOL_ROUNDS_MIN,
 } from "@codexlike/agent-core";
@@ -110,6 +113,23 @@ export function parseMcpConnectTimeoutInput(
     text,
     MCP_CONNECT_TIMEOUT_SECONDS_MIN,
     MCP_CONNECT_TIMEOUT_SECONDS_MAX,
+    fallback
+  );
+}
+
+/**
+ * 任务并发上限解析（任务并发上限票 01，GLOSSARY「任务并发上限」）：合法范围
+ * 1–8，默认 DEFAULT_TASK_CONCURRENCY_LIMIT；desktop 主进程发送闸门消费，
+ * 改动对队列即时生效（调大补跑排队、调小不中断运行中）。
+ */
+export function parseTaskConcurrencyLimitInput(
+  text: string,
+  fallback: number = DEFAULT_TASK_CONCURRENCY_LIMIT
+): number {
+  return parseIntInRange(
+    text,
+    TASK_CONCURRENCY_LIMIT_MIN,
+    TASK_CONCURRENCY_LIMIT_MAX,
     fallback
   );
 }
