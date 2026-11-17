@@ -199,6 +199,21 @@ describe("summarizeToolCall（工具卡片参数摘要）", () => {
     ).toBe("工作计划已更新（共 1 项：1 已完成、0 进行中、0 待办）");
   });
 
+  it("update_plan：steps 含非法 status 项时 N = 三态之和（与 agent-core 防御口径一致）", () => {
+    // 非法 status 项不计入 N：不随 steps.length 虚高（口径收口 plan-view）
+    expect(
+      summarizeToolCall(
+        "update_plan",
+        JSON.stringify({
+          steps: [
+            { content: "合法项", status: "completed" },
+            { content: "非法状态项", status: "done" },
+          ],
+        })
+      )
+    ).toBe("工作计划已更新（共 1 项：1 已完成、0 进行中、0 待办）");
+  });
+
   it("update_plan：steps 非数组时回退压缩 JSON 摘要（不输出误导统计）", () => {
     expect(summarizeToolCall("update_plan", '{"steps":"x"}')).toBe(
       '{"steps":"x"}'

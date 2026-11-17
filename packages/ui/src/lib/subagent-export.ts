@@ -1,38 +1,28 @@
 import type { SubagentSegment } from "./task-view";
 import { statusText, terminalTimeLabel } from "./subagent-status";
-import { collectSubagentPlanSnapshots, type PlanStepStatus } from "./plan-view";
-
-/** 计划项三态的导出行前缀（呈现层既有三态用语：已完成 / 进行中 / 待办） */
-const STEP_STATUS_LABELS: Record<PlanStepStatus, string> = {
-  completed: "已完成",
-  in_progress: "进行中",
-  pending: "待办",
-};
+import {
+  STEP_STATUS_LABELS,
+  collectSubagentPlanSnapshots,
+  planSummaryLine,
+} from "./plan-view";
 
 /**
  * 工作计划终态段（票 03，ADR 0023）：终态快照复用票 02 收集薄壳从
  * subagent.tools 派生（最后一次 update_plan 的完整清单，全量替换语义），
- * 统计行与 agent-core 工具执行输出同口径；中断回看最后快照与计划卡语义
- * 一致（无 report 时段照出）。无计划（无 update_plan 或解析为空）返回
- * 空数组——段整体省略。
+ * 统计行与 agent-core 工具执行输出同口径（三态计数与格式串收口
+ * plan-view 单一来源）；中断回看最后快照与计划卡语义一致（无 report
+ * 时段照出）。无计划（无 update_plan 或解析为空）返回空数组——段整体
+ * 省略。
  */
 function planSectionLines(subagent: SubagentSegment): string[] {
   const steps =
     collectSubagentPlanSnapshots(subagent.tools).at(-1)?.steps ?? [];
   if (steps.length === 0) return [];
-  const counts: Record<PlanStepStatus, number> = {
-    completed: 0,
-    in_progress: 0,
-    pending: 0,
-  };
-  steps.forEach((step) => {
-    counts[step.status] += 1;
-  });
   return [
     "",
     "## 工作计划",
     "",
-    `共 ${steps.length} 项：${counts.completed} 已完成、${counts.in_progress} 进行中、${counts.pending} 待办`,
+    planSummaryLine(steps),
     "",
     ...steps.map(
       (step) => `- ${STEP_STATUS_LABELS[step.status]}：${step.content}`

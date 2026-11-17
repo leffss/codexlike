@@ -3,15 +3,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
-import { WorkPlanCardFromSegments } from "../src/components/WorkPlanCard";
+import {
+  WorkPlanCard,
+  WorkPlanCardFromSegments,
+} from "../src/components/WorkPlanCard";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import {
+  STEP_STATUS_LABELS,
   activeStep,
   collectPlanSnapshots,
   collectSubagentPlanSnapshots,
   completedCount,
   currentPlan,
   parsePlanSteps,
+  planStatusCounts,
+  planSummaryLine,
 } from "../src/lib/plan-view";
 import type {
   MessageSegment,
@@ -211,6 +217,38 @@ describe("plan-view 派生层纯函数", () => {
     expect(collectSubagentPlanSnapshots([])).toEqual([]);
   });
 
+  it("planStatusCounts / planSummaryLine：三态计数与统计行单一来源（票 03 收口），N = 三态之和与 agent-core 执行输出同口径", () => {
+    // 合法清单：统计行与收口前 tool-summary / subagent-export 两处手写
+    // 格式串逐字符一致（文案锁定，agent-core 工具执行输出同口径）
+    expect(
+      planSummaryLine(parsePlanSteps(JSON.stringify({ steps: SEVEN_STEPS })))
+    ).toBe("共 7 项：5 已完成、1 进行中、1 待办");
+    // 原始数组宽容口径：非对象项 / 非法 status 项不计入任何桶，
+    // N = 三态之和（不随 steps.length 虚高，与核心侧防御口径一致）
+    expect(
+      planSummaryLine([
+        { content: "一", status: "completed" },
+        { content: "二", status: "done" },
+        "不是对象",
+        null,
+      ])
+    ).toBe("共 1 项：1 已完成、0 进行中、0 待办");
+    expect(
+      planStatusCounts([
+        { status: "pending" },
+        { status: "pending" },
+        { status: "in_progress" },
+        { status: "unknown" },
+      ])
+    ).toEqual({ completed: 0, in_progress: 1, pending: 2 });
+    // 三态呈现用语（导出行前缀同源）：已完成 / 进行中 / 待办
+    expect(STEP_STATUS_LABELS).toEqual({
+      completed: "已完成",
+      in_progress: "进行中",
+      pending: "待办",
+    });
+  });
+
   it("completedCount / activeStep：in_progress 优先，其次第一个未完成，兜底末项", () => {
     expect(
       completedCount(parsePlanSteps(JSON.stringify({ steps: SEVEN_STEPS })))
@@ -278,6 +316,33 @@ describe("工作计划呈现（进度折叠卡 + 标记行，ADR 0019）", () =>
     expect(html).toContain("7/7");
     expect(html).not.toContain('data-testid="plan-card-current"');
     expect(html).not.toContain("当前：");
+  });
+
+  it("WorkPlanCard 作用域二选一（scope 判别联合）：主任务键 plan-card-<taskId>、子代理键 subagent-plan-card-<subagentId>", () => {
+    const snapshots = [
+      {
+        segmentId: "p1",
+        steps: parsePlanSteps(JSON.stringify({ steps: SEVEN_STEPS })),
+      },
+    ];
+    // 主任务作用域：预置 plan-card-<taskId> 展开记忆生效
+    setRememberedOpen("plan-card-scope-task", true);
+    const taskHtml = renderToStaticMarkup(
+      createElement(WorkPlanCard, {
+        items: snapshots,
+        scope: { taskId: "scope-task" },
+      })
+    );
+    expect(taskHtml).toContain('data-testid="plan-card-panel"');
+    // 子代理作用域：预置 subagent-plan-card-<subagentId> 展开记忆生效
+    setRememberedOpen("subagent-plan-card-scope-sub", true);
+    const subHtml = renderToStaticMarkup(
+      createElement(WorkPlanCard, {
+        items: snapshots,
+        scope: { subagentId: "scope-sub" },
+      })
+    );
+    expect(subHtml).toContain('data-testid="plan-card-panel"');
   });
 
   it("卡不在消息流内渲染（ADR 0019 槽位迁往 WorkspacePage 中列），流内只留标记行", () => {
