@@ -174,6 +174,37 @@ describe("summarizeToolCall（工具卡片参数摘要）", () => {
     );
   });
 
+  it("update_plan：中文统计摘要与工具执行输出同口径（票 03）", () => {
+    // 期望值 = agent-core update-plan 工具执行输出的确切措辞（同口径）
+    expect(
+      summarizeToolCall(
+        "update_plan",
+        JSON.stringify({
+          steps: [
+            { content: "调研现有布局", status: "completed" },
+            { content: "实现摘要分支", status: "in_progress" },
+            { content: "补导出终态段", status: "pending" },
+          ],
+        })
+      )
+    ).toBe("工作计划已更新（共 3 项：1 已完成、1 进行中、1 待办）");
+    // 全部完成 / 空桶组合照常统计
+    expect(
+      summarizeToolCall(
+        "update_plan",
+        JSON.stringify({
+          steps: [{ content: "唯一一步", status: "completed" }],
+        })
+      )
+    ).toBe("工作计划已更新（共 1 项：1 已完成、0 进行中、0 待办）");
+  });
+
+  it("update_plan：steps 非数组时回退压缩 JSON 摘要（不输出误导统计）", () => {
+    expect(summarizeToolCall("update_plan", '{"steps":"x"}')).toBe(
+      '{"steps":"x"}'
+    );
+  });
+
   it("浏览器五件工具给出人可读摘要", () => {
     expect(
       summarizeToolCall(
