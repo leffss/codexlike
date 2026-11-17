@@ -25,6 +25,19 @@ export function assert(condition, message) {
 export const NARROW_WIDTH = 1100;
 
 /**
+ * 模型选择器复合键（票 02，ADR 0024 二元组；review 修复 5 收敛）：
+ * 与 ui 侧 model-options 的 `${profileId}::${model}` 编码同构——e2e 是
+ * 独立 .mjs，不跨包导入 ui 内部常量，此处是 e2e 侧唯一拼接来源，
+ * 场景不再手写 `::` 复合键字面量（含 `${testId}-option-` 定位的原始值）。
+ */
+export const MODEL_VALUE_SEPARATOR = "::";
+
+/** (profileId, 模型名) → 选择器/选项 value */
+export function modelOptionValue(profileId, model) {
+  return `${profileId}${MODEL_VALUE_SEPARATOR}${model}`;
+}
+
+/**
  * 标题栏工作区徽章弹层三连（审查修复 3 抽取，票01）：点开徽章，读取弹层
  * 内的完整工作区路径与来源目录（无来源目录行时 origin 为 null），Escape
  * 关闭。文本断言（includes / === / 真实存在）由调用方按各自场景完成。

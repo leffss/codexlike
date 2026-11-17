@@ -28,6 +28,17 @@ export interface ProviderProfile {
 /** 设置页表单输入（无 `id`，`id` 由存储层生成） */
 export type ProviderProfileInput = Omit<ProviderProfile, "id">;
 
+/**
+ * 解析后的模型二元组（ADR 0024：任务/子代理的模型选择粒度）：
+ * profile 为完整 Provider Profile，model 为该 Profile 模型列表内的具体
+ * 模型名（经 resolveModelOf 归一）——主任务 sendMessage/compact 与子代理
+ * SubagentsConfig.resolveModel 均以此形状流转，消费点不再各自内联。
+ */
+export interface ResolvedModel {
+  profile: ProviderProfile;
+  model: string;
+}
+
 /** 按字段给出中文错误消息；空对象表示校验通过 */
 export type ProviderProfileErrors = Partial<
   Record<

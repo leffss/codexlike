@@ -5,7 +5,8 @@
  * - 独立上下文：固定系统指令 + 任务描述，不含主任务历史；
  * - 完整工具集但剔除 spawn_subagent（防递归，有测试）；update_plan 与
  *   questionsTool 同款每次运行强制并入，策略静态注入系统提示（ADR 0023）；
- * - 模型用全局子代理配置（SubagentsConfig.resolveProfile；null = 同主模型）；
+ * - 模型用全局子代理配置（SubagentsConfig.resolveModel 返回 (Profile, 模型)
+ *   二元组；null = 跟随主任务当前所用模型，同 Profile 同模型）；
  * - 单任务并发上限（默认 3，设置页可配）：超出的委派 FIFO 排队；
  * - 子代理工具调用同样过当前审批模式（readonly 下子代理同样只读，
  *   suggest 下的命令经主任务审批链路暂停等待用户）；
@@ -33,7 +34,10 @@ import type {
   CreateLanguageModelOptions,
   ThinkingEffort,
 } from "../provider/language-model";
-import type { ProviderProfile } from "../provider/provider-profile";
+import type {
+  ProviderProfile,
+  ResolvedModel,
+} from "../provider/provider-profile";
 import {
   createUpdatePlanTool,
   PLAN_USAGE_POLICY,
@@ -114,11 +118,11 @@ export interface SubagentsConfig {
   modelMaxRetries?: () => number;
   /**
    * 子代理模型解析（票 02，ADR 0024 模型级）：设置页选到具体 (Profile, 模型)
-   * 时返回该二元组（model 已由宿主用 resolveModelOf 归一）；null = 同主模型
-   * ——跟随主任务当前所用模型（同 Profile 同模型，取本次 sendMessage 归一
-   * 后的二元组）。异步以允许宿主读取加密存储的 Profile。
+   * 时返回 ResolvedModel 二元组（model 已由宿主用 resolveModelOf 归一）；
+   * null = 同主模型——跟随主任务当前所用模型（同 Profile 同模型，取本次
+   * sendMessage 归一后的二元组）。异步以允许宿主读取加密存储的 Profile。
    */
-  resolveModel(): Promise<{ profile: ProviderProfile; model: string } | null>;
+  resolveModel(): Promise<ResolvedModel | null>;
 }
 
 /**
@@ -258,10 +262,7 @@ export function createSubagentOrchestrator(
 
   const entries = new Map<string, SubagentEntry>();
   /** 「同主模型」回退二元组：spawn 时暂存本次 sendMessage 的 (profile, model) */
-  const fallbackModels = new Map<
-    string,
-    { profile: ProviderProfile; model: string }
-  >();
+  const fallbackModels = new Map<string, ResolvedModel>();
 
   function hasPending(): boolean {
     for (const entry of entries.values()) {

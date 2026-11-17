@@ -7,6 +7,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  modelOptionValue,
   projectAction,
   startMockProvider,
 } from "./helpers.mjs";
@@ -126,12 +127,13 @@ async function main() {
     await selectComposerOption(
       window,
       "profile-select",
-      `${secondProfileId}::second-model`
+      modelOptionValue(secondProfileId, "second-model")
     );
     assert(
       (await window
         .getByTestId("profile-select")
-        .getAttribute("data-value")) === `${secondProfileId}::second-model`,
+        .getAttribute("data-value")) ===
+        modelOptionValue(secondProfileId, "second-model"),
       "鼠标切换模型提交 (Profile, 模型) 复合值"
     );
     await window.getByTestId("composer-input").fill("正式任务未发送输入");
@@ -215,7 +217,7 @@ async function main() {
         document
           .querySelector('[data-testid="profile-select"]')
           ?.getAttribute("data-value") === value,
-      `${secondProfileId}::second-model`
+      modelOptionValue(secondProfileId, "second-model")
     );
     assert(
       (await window.getByTestId("profile-select").textContent()).includes(
@@ -252,7 +254,7 @@ async function main() {
         document
           .querySelector('[data-testid="profile-select"]')
           ?.getAttribute("data-value") === value,
-      `${defaultProfileId}::persistent-model`
+      modelOptionValue(defaultProfileId, "persistent-model")
     );
     assert(
       (await window.getByTestId("profile-select").textContent()).includes(

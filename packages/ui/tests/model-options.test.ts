@@ -4,6 +4,8 @@ import {
   composerModelOptions,
   modelOptionValue,
   parseModelOptionValue,
+  subagentFollowModelValue,
+  subagentSettingsOfValue,
 } from "../src/lib/model-options";
 import type { ProviderProfile } from "@codexlike/agent-core";
 
@@ -93,5 +95,36 @@ describe("composerModelOptions（选择器平铺与兜底态）", () => {
       options.some((option) => option.label === "已保存的模型不可用")
     ).toBe(false);
     expect(options.some((option) => option.value === "p1::glm-4.7")).toBe(true);
+  });
+});
+
+describe("子代理分区占位与保存归一（review 修复 1，ADR 0024）", () => {
+  it("model 为 null：回显跟随占位（空 model 位复合键），不落成具体模型", () => {
+    // 设置页 load 侧：settings.model === null → subagentFollowModelValue
+    expect(subagentFollowModelValue("p1")).toBe("p1::");
+  });
+
+  it("null → 打开设置 → 不改 → 保存：存储仍为 null（保留 providerProfileId）", () => {
+    // 回显值未经用户改选直接走保存归一：model 保持 null，不被写死成
+    // Profile 第一项（Profile 重排序后子代理仍跟随主任务当前所用模型）
+    const echo = subagentFollowModelValue("p1");
+    expect(subagentSettingsOfValue(echo)).toEqual({
+      providerProfileId: "p1",
+      model: null,
+    });
+  });
+
+  it("用户主动选具体模型：复合键原样通过", () => {
+    expect(subagentSettingsOfValue("p1::glm-4.6")).toEqual({
+      providerProfileId: "p1",
+      model: "glm-4.6",
+    });
+  });
+
+  it("选「同主模型」（value 空串）：providerProfileId 与 model 一并 null", () => {
+    expect(subagentSettingsOfValue("")).toEqual({
+      providerProfileId: null,
+      model: null,
+    });
   });
 });
