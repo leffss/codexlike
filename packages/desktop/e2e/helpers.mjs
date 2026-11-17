@@ -178,6 +178,20 @@ export async function openSubagentDetail(window) {
   return window.getByTestId("subagents-panel-body");
 }
 
+/**
+ * 收起右栏子代理完整列表浮层（Escape，面板标准键盘出口，选中态保持）：
+ * 标记行点击的 focus 定位会自动展开浮层，其遮罩与列表盖住详情区拦截
+ * 点击——详情内点击类断言先收浮层；列表行（subagent-rail-item）只在
+ * 浮层展开时渲染，依赖它的断言先做完再收起。幂等：浮层未展开时不操作。
+ */
+export async function collapseSubagentList(window) {
+  const list = window.getByTestId("subagent-rail-list");
+  if ((await list.count()) > 0) {
+    await window.keyboard.press("Escape");
+    await list.waitFor({ state: "hidden" });
+  }
+}
+
 /** 关闭检视右栏（幂等——已关闭不再点）。 */
 export async function closeRailPanel(window) {
   const toggle = window.getByTestId("resources-toggle");

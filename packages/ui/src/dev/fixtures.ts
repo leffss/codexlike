@@ -318,9 +318,10 @@ const APPROVAL_INTERACTION: InteractionRecord = {
 
 /**
  * 子代理样例事件（工单 13 事件形状）：sub-live-1 运行中（排队→开跑→
- * 读文件完成→grep 进行中→思考流）；sub-live-2 已完成（事件全链走完，
- * 带嵌套工具清单与报告——恢复态 history 记录重建的完成卡没有工具
- * 清单，这里补齐该形态）。右栏「子代理」tab（ADR 0020）消费。
+ * 读文件完成→grep 进行中→update_plan 中间态→思考流）；sub-live-2 已完成
+ * （事件全链走完，带嵌套工具清单与报告——恢复态 history 记录重建的完成卡
+ * 没有工具清单，这里补齐该形态；无 update_plan = 详情无计划卡的对照）。
+ * 右栏「子代理」tab（ADR 0020）消费。
  */
 function subEnvelope(
   sequence: number,
@@ -462,6 +463,44 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
     ].join("\n"),
     ok: true,
   }),
+  // 子代理 update_plan 样例（ADR 0023）：sub-live-1 运行中的计划中间态
+  // （1 完成 + 1 进行中 + 1 待办）——详情底部计划卡实时呈现该快照
+  subEnvelope(15, {
+    type: "subagent-tool",
+    subagentId: "sub-live-1",
+    phase: "call",
+    call: toolCall(
+      "tc-sub1-plan",
+      "update_plan",
+      {
+        steps: [
+          { content: "盘点 MessageStream 段分派分支", status: "completed" },
+          { content: "梳理各折叠块的记忆键约定", status: "in_progress" },
+          { content: "输出梳理结论", status: "pending" },
+        ],
+      },
+      "",
+      T3
+    ),
+  }),
+  subEnvelope(16, {
+    type: "subagent-tool",
+    subagentId: "sub-live-1",
+    phase: "result",
+    call: toolCall(
+      "tc-sub1-plan",
+      "update_plan",
+      {
+        steps: [
+          { content: "盘点 MessageStream 段分派分支", status: "completed" },
+          { content: "梳理各折叠块的记忆键约定", status: "in_progress" },
+          { content: "输出梳理结论", status: "pending" },
+        ],
+      },
+      "工作计划已更新（共 3 项：1 已完成、1 进行中、1 待办）",
+      T3
+    ),
+  }),
 ];
 
 /**
@@ -471,6 +510,9 @@ const SUBAGENT_EVENTS: TaskEventEnvelope[] = [
  * 未落），恢复时按委派时点插回时间线留痕（interrupted 态；本样例委派时点
  * 与时间线末尾同刻，位置仍在末尾）。tc-sub-r1 / tc-sub-r2
  * 是本特性前的旧记录（无快照），照旧走 subagentFromToolRecord 反推路径。
+ * 子代理 update_plan 样例（ADR 0023）：sub-rec-1 工具调用序列含建计划与
+ * 终态两行（详情底部计划卡回看终态 3/3）；sub-rec-2 只有调研工具（已中断
+ * 子代理无计划卡，与「无计划不渲染」形态对照）。
  */
 const SUBAGENT_TASK_R3 = "梳理右栏 tab 化的宽度断言链";
 
@@ -510,6 +552,18 @@ const SUBAGENTS: SubagentSnapshot[] = [
       },
     ],
     toolCalls: [
+      // 开工先建完整计划（PLAN_USAGE_POLICY），步骤推进后全量替换为终态
+      {
+        id: "st-r3-plan-1",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        toolName: "update_plan",
+        arguments:
+          '{"steps":[{"content":"收集 clampRailWidth 与三档宽度断言","status":"in_progress"},{"content":"核对 tab 互斥断言与宽度链关系","status":"pending"},{"content":"归纳宽度断言链结论","status":"pending"}]}',
+        output: "工作计划已更新（共 3 项：0 已完成、1 进行中、2 待办）",
+        isError: false,
+        createdAt: T2,
+      },
       {
         id: "st-r3-1",
         taskId: MAIN_TASK_ID,
@@ -529,6 +583,17 @@ const SUBAGENTS: SubagentSnapshot[] = [
         output: "…（约 120 行）三档断言：默认 400、拖宽夹 640、收窄夹 320…",
         isError: false,
         createdAt: T2,
+      },
+      {
+        id: "st-r3-plan-2",
+        taskId: MAIN_TASK_ID,
+        subagentId: "sub-rec-1",
+        toolName: "update_plan",
+        arguments:
+          '{"steps":[{"content":"收集 clampRailWidth 与三档宽度断言","status":"completed"},{"content":"核对 tab 互斥断言与宽度链关系","status":"completed"},{"content":"归纳宽度断言链结论","status":"completed"}]}',
+        output: "工作计划已更新（共 3 项：3 已完成、0 进行中、0 待办）",
+        isError: false,
+        createdAt: T3,
       },
     ],
   },
