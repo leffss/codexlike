@@ -32,6 +32,10 @@ E2E 场景默认从发送首条消息开始驱动（mock provider 便于造轮�
 
 断言翻转或语义变更时，测试名同步改为描述当前行为——审查者按「测试名描述的是当前断言还是历史断言」检查（2026-11-16 subagent-records：spawn 行瘦身后断言已翻转为 `reasoning` undefined，测试名仍写「照旧拼接全文」，两轴 review 交叉点名）。
 
+## vi.hoisted 不引用 import 绑定
+
+`vi.mock` 工厂与 `vi.hoisted` 工厂都提升到 import 初始化之前执行，内部不得引用文件顶部 import 的任何绑定——`class FakeTray extends EventEmitter` 启动即 `ReferenceError: Cannot access '__vi_import_0__' before initialization`。hoisted 里的 fake 类自包含（手写迷你 emitter，只实现被测路径用到的方法；依赖重的改参数注入），import 绑定只在 hoisted 之外的模块代码里使用（2026-11-18 托盘轮 FakeTray 踩坑）。
+
 ## 拆分提交（partial-staged）
 
 同一文件混两批改动、只提交其中一批时，lint-staged 在「恢复未暂存改动」一步失败并整体 revert——工具边界，不是格式问题。流程：对 staged 内容先跑 `prettier --check` 确认格式，再 `git commit --no-verify`；能整文件提交就拆开两批先后提交，避免 partial-staged（2026-11-11 项目侧栏拆分提交踩此坑）。

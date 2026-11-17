@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { runTool } from "@codexlike/agent-core/node";
 import type { ToolDefinition } from "@codexlike/agent-core";
@@ -23,6 +23,10 @@ const FIXTURE = join(
   "fixtures",
   "fake-mcp-server.mjs"
 );
+
+// spawn 密集用例（每个用例起停 fake-mcp-server 子进程）在 pre-commit 全量
+// 钩子的并发负载下实测超 5s 默认值（单独跑 ~2.5s），放宽到 15s（retro 2026-11-18）
+vi.setConfig({ testTimeout: 15_000 });
 
 const fakeSafeStorage = {
   isEncryptionAvailable: async () => true,
