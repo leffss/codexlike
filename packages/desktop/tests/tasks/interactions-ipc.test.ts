@@ -180,7 +180,7 @@ describe("统一用户交互 IPC", () => {
           name: "Mock",
           baseURL: `http://127.0.0.1:${port}/v1`,
           apiKey: "test",
-          model: "mock",
+          models: ["mock"],
         },
         signal: controller.signal,
       })
@@ -318,7 +318,7 @@ describe("统一用户交互 IPC", () => {
           name: "Mock",
           baseURL: `http://127.0.0.1:${mockPort}/v1`,
           apiKey: "test",
-          model: "mock",
+          models: ["mock"],
         },
         signal: controller.signal,
       })

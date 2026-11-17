@@ -74,7 +74,7 @@ import {
 } from "../lib/task-view";
 import {
   formatTaskStatus,
-  matchProfilesForModelSwitch,
+  matchModelsForModelSwitch,
   planSlashCommand,
 } from "../lib/slash-command-actions";
 
@@ -203,16 +203,15 @@ export function WorkspacePage(props: {
   const draft =
     draftProjectId === undefined
       ? null
-      : workspaceState.newDraft(draftProjectId, profiles[0]?.id ?? "");
+      : workspaceState.newDraft(
+          draftProjectId,
+          profiles[0]?.id ?? "",
+          profiles[0]?.models[0] ?? ""
+        );
   const creating = draft?.busy ?? false;
   const preferences =
     currentId === null ? null : workspaceState.preferences(currentId);
-  const selectedProfileId = preferences?.providerProfileId ?? "";
   const thinkingEffort = preferences?.thinkingEffort ?? "auto";
-  function setSelectedProfileId(providerProfileId: string) {
-    if (currentId !== null)
-      workspaceState.setPreferences(currentId, { providerProfileId });
-  }
   function setThinkingEffort(thinkingEffort: ThinkingEffort) {
     if (currentId !== null)
       workspaceState.setPreferences(currentId, { thinkingEffort });
@@ -259,6 +258,15 @@ export function WorkspacePage(props: {
   currentIdRef.current = currentId;
   /** 当前任务记录（审批模式选择器 / 改动面板 / 顶栏共用；tasks 列表随事件刷新） */
   const current = tasks.find((task) => task.id === currentId) ?? null;
+  // 任务记住的模型（票 02）：优先「对下一条生效」的偏好，缺省回退任务记录
+  // （重启/切回后未改选时沿用上次实际发送所用的二元组，spec 用户故事 7）
+  const selectedProfileId =
+    preferences?.providerProfileId || current?.providerProfileId || "";
+  const selectedModel = preferences?.model || current?.model || "";
+  function setSelectedModel(providerProfileId: string, model: string) {
+    if (currentId !== null)
+      workspaceState.setPreferences(currentId, { providerProfileId, model });
+  }
   const pending = currentId === null ? [] : workspaceState.pending(currentId);
   const interaction = pending[0];
   /**
@@ -785,7 +793,11 @@ export function WorkspacePage(props: {
     setLoading(true);
     try {
       await workspaceState.flush();
-      await workspaceState.loadNewDraft(projectId, profiles[0]?.id ?? "");
+      await workspaceState.loadNewDraft(
+        projectId,
+        profiles[0]?.id ?? "",
+        profiles[0]?.models[0] ?? ""
+      );
     } catch (error) {
       if (taskRequestRef.current === request) {
         setLoading(false);
@@ -851,6 +863,7 @@ export function WorkspacePage(props: {
       text,
       mentionPaths,
       providerProfileId: draft.providerProfileId || undefined,
+      model: draft.model || undefined,
       thinkingEffort: draft.thinkingEffort,
       approvalMode: draft.approvalMode,
     };
@@ -896,7 +909,8 @@ export function WorkspacePage(props: {
         selectedProfileId,
         mentionPaths.length === 0 ? undefined : mentionPaths,
         thinkingEffort,
-        preferences?.approvalMode
+        preferences?.approvalMode,
+        selectedModel || undefined
       );
       if (workspaceState.composer(currentId) === composerSnapshot)
         workspaceState.setComposer(currentId, "");
@@ -1184,7 +1198,8 @@ export function WorkspacePage(props: {
         try {
           const result = await window.codexlike.tasks.compact(
             current!.id,
-            selectedProfileId
+            selectedProfileId,
+            selectedModel || undefined
           );
           // 历史与运行状态由同序号终态事件更新；IPC回包只提供本地命令反馈。
           if (!compactIsCurrent()) return;
@@ -1213,11 +1228,12 @@ export function WorkspacePage(props: {
         return;
       }
       case "select-model": {
-        const match = matchProfilesForModelSwitch(action.query, profiles);
+        // /model 同选择器平铺「Profile · 模型」（票 02）：关键词可匹配到具体模型
+        const match = matchModelsForModelSwitch(action.query, profiles);
         if (match.kind === "unique") {
-          setSelectedProfileId(match.profile.id);
+          setSelectedModel(match.profile.id, match.model);
           pushLocalStatus(
-            `模型已切换：${match.profile.name} · ${match.profile.model}（对下一条消息生效）`
+            `模型已切换：${match.profile.name} · ${match.model}（对下一条消息生效）`
           );
         } else {
           pushLocalStatus(
@@ -1226,7 +1242,8 @@ export function WorkspacePage(props: {
                 ? "当前可选模型（用 /model 关键词 切换）："
                 : `「${action.query}」匹配多个模型，请更精确地指定：`,
               ...match.candidates.map(
-                (profile) => `- ${profile.name} · ${profile.model}`
+                (candidate) =>
+                  `- ${candidate.profile.name} · ${candidate.model}`
               ),
             ].join("\n")
           );
@@ -1853,12 +1870,14 @@ export function WorkspacePage(props: {
                   selectedProfileId={
                     draft?.providerProfileId ?? selectedProfileId
                   }
-                  onSelectProfile={(id) =>
+                  selectedModel={draft ? draft.model : selectedModel || null}
+                  onSelectModel={(profileId, model) =>
                     draft
                       ? workspaceState.editNewDraft(draft.projectId, {
-                          providerProfileId: id,
+                          providerProfileId: profileId,
+                          model,
                         })
-                      : setSelectedProfileId(id)
+                      : setSelectedModel(profileId, model)
                   }
                   onSend={handleSubmit}
                   contentWidthClass={contentWidthClass}

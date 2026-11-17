@@ -30,6 +30,7 @@ import {
   type ThinkingEffort,
 } from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
+import { resolveModelOf } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
 import type {
   ToolCallRecord,
@@ -60,6 +61,7 @@ import {
 import {
   DEFAULT_COMPACT_KEEP_ROUNDS,
   DEFAULT_MAX_TOOL_ROUNDS,
+  DEFAULT_MODEL_MAX_RETRIES,
 } from "./execution-settings";
 import type {
   CompactRecord,
@@ -74,6 +76,13 @@ import type {
 export interface SendMessageOptions {
   text: string;
   profile: ProviderProfile;
+  /**
+   * 本条消息使用的具体模型（票 02，ADR 0024 二元组）：经 resolveModelOf
+   * 归一——缺省（新建任务默认）或已从 Profile 列表删除（存量记录失效）
+   * 回退列表第一项；归一结果随任务落库（TaskRecord.model）并传给
+   * languageModelFor（options.model）。本回合（含工具多轮）全程复用。
+   */
+  model?: string;
   /** @引用 的工作区文件；内容附加进本条消息的模型上下文（落库与回显保持原文） */
   mentions?: MentionAttachment[];
   /**
@@ -142,6 +151,16 @@ export interface CreateAgentTaskOptions {
    * 1–10），agent-core 不重复校验。
    */
   compactKeepRounds?: () => number;
+  /**
+   * 模型请求重试次数的逐次解析取值函数（GLOSSARY「执行设置」，ADR 0024
+   * 「重试不做 failover」；先例为 toolRoundsLimit 的 resolver 范式，agent-core
+   * 不依赖任何存储实现）。作用于任务的全部模型请求：对话每个回合（sendMessage）
+   * 开始时读取一次并快照（进行中回合不受中途调整影响，下一次发送按当时值重新
+   * 解析），compact 每次执行时读取（无「进行中」状态，下次压缩立即采用新值）。
+   * 未注入用 DEFAULT_MODEL_MAX_RETRIES（=2，与 SDK 默认一致）；宿主保证返回
+   * 合法值（设置层校验 0–10），agent-core 不重复校验。
+   */
+  modelMaxRetries?: () => number;
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 时间与 id 生成注入（测试用固定值） */
@@ -196,6 +215,8 @@ export interface AgentTask {
    */
   compact(options: {
     profile: ProviderProfile;
+    /** 压缩所用模型（票 02 二元组）；缺省/失效回退 Profile 列表第一项 */
+    model?: string;
     signal?: AbortSignal;
   }): Promise<CompactResult>;
 }
@@ -501,6 +522,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     async *sendMessage({
       text,
       profile,
+      model: requestedModel,
       mentions,
       thinkingEffort,
       approvalMode: requestedApprovalMode,
@@ -509,6 +531,10 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       if (busy) {
         throw new Error("上一条消息仍在回复中，请等待完成后再发送");
       }
+      // 任务级模型解析（票 02）：本条消息的二元组在此归一——缺省与失效
+      // （已从 Profile 列表删除）一律回退列表第一项（ADR 0024，无「默认
+      // 模型」跟随概念），本回合全部轮次与子代理「同主模型」回退均用它。
+      const model = resolveModelOf(profile, requestedModel);
       // 思考档位快照（spec「生效边界」）：发送入口一次性固定，未传等价 auto；
       // 枚举外的值在此拒绝——不把伪造控制值发往服务端（与 provider 工厂同一校验）
       const effort = parseThinkingEffort(thinkingEffort);
@@ -516,6 +542,11 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       // 不受中途调小影响，下一次发送按当时值重新解析；未注入用默认 200
       const toolRoundsLimit =
         options.toolRoundsLimit?.() ?? DEFAULT_MAX_TOOL_ROUNDS;
+      // 模型请求重试次数快照（GLOSSARY「执行设置」，ADR 0024）：回合开始时读取
+      // 一次——本回合全部 streamText（含工具多轮）与失败文案用同一值；进行中
+      // 回合不受中途调整影响，下一次发送按当时值重新解析
+      const modelMaxRetries =
+        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
       // 每次发送冻结主执行及其子代理的权限与模型，偏好修改只用于下次发送。
       approvalMode = requestedApprovalMode ?? nextApprovalMode;
       profile = { ...profile };
@@ -566,10 +597,10 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             ? toModelTools([...toolsByName.values()])
             : undefined;
 
-        // 模型选择对本次及后续消息生效，落库
+        // 模型选择对本次及后续消息生效，落库（二元组：Profile + 归一后的具体模型）
         persistence.updateTask(record.id, {
           providerProfileId: profile.id,
-          model: profile.model,
+          model,
           status: "streaming",
           updatedAt: now(),
         });
@@ -613,11 +644,13 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             }
             // 档位快照逐轮复用：本条消息的全部工具往返都构造自同一档位
             const result = streamText({
-              model: modelFor(profile, { thinkingEffort: effort }),
+              model: modelFor(profile, { thinkingEffort: effort, model }),
               system: turnSystemPrompt === "" ? undefined : turnSystemPrompt,
               messages: pending,
               abortSignal: signal,
               tools: modelTools,
+              // 重试次数（执行设置）：回合开始快照，本回合全部轮次复用
+              maxRetries: modelMaxRetries,
             });
 
             const toolCalls: {
@@ -762,8 +795,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                         toolCallId: call.toolCallId,
                         signal,
                         profile,
-                        // 档位快照随 profile 同一通道转发（spawn_subagent 入队捕获）
+                        // 档位快照与模型随 profile 同一通道转发（spawn_subagent 入队捕获）
                         thinkingEffort: effort,
+                        model,
                       })
                     );
                     output = executed.output;
@@ -779,6 +813,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                       signal,
                       profile,
                       thinkingEffort: effort,
+                      model,
                     })
                   );
                   output = executed.output;
@@ -855,11 +890,12 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             aborted = true;
           } else {
             // 错误路径：中文提示落库并广播；不进入对话上下文，任务可继续使用
+            // （重试耗尽文案携带回合开始快照的重试次数配置值，ADR 0024）
             const errorMessage: StoredMessage = {
               id: generateId(),
               taskId: record.id,
               role: "error",
-              content: describeModelError(error),
+              content: describeModelError(error, modelMaxRetries),
               createdAt: now(),
             };
             persistence.insertMessage(errorMessage);
@@ -916,14 +952,21 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       }
     },
 
-    async compact({ profile, signal }) {
+    async compact({ profile, model: requestedModel, signal }) {
       if (busy) {
         throw new Error("任务正在回复或压缩中，请等待完成后再操作");
       }
+      // 任务级模型解析（票 02）：与 sendMessage 同一归一语义（缺省/失效回退
+      // 列表第一项）；压缩用任务当前所选模型，落库记录与 sendMessage 一致
+      const model = resolveModelOf(profile, requestedModel);
       // 保留轮数逐次读取（执行设置票 03，ADR 0017）：compact 无「进行中」状态，
       // 每次执行读取一次——设置页保存后对下一次 /compact 立即生效
       const keepRounds =
         options.compactKeepRounds?.() ?? DEFAULT_COMPACT_KEEP_ROUNDS;
+      // 重试次数同样逐次读取（GLOSSARY「执行设置」，ADR 0024）：本次压缩的
+      // generateText 与失败提示共用；下一次压缩按当时值重新解析
+      const modelMaxRetries =
+        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
       const keptStart = keptRoundsStart(context, keepRounds);
       if (keptStart === 0) {
         throw new Error(
@@ -941,10 +984,13 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         let summary = "";
         try {
           const result = await generateText({
-            // compact 是辅助调用：不附加档位控制参数（空对象 = 服务端默认行为）
-            model: modelFor(profile, {}),
+            // compact 是辅助调用：不附加档位控制参数（空对象 = 服务端默认行为）；
+            // model 携带任务当前所选模型（票 02 二元组）
+            model: modelFor(profile, { model }),
             system: COMPACT_SYSTEM_PROMPT,
             abortSignal: signal,
+            // 重试次数（执行设置）：本次压缩逐次读取的配置值
+            maxRetries: modelMaxRetries,
             prompt: [
               {
                 role: "user",
@@ -955,7 +1001,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           signal?.throwIfAborted();
           summary = result.text.trim();
         } catch (error) {
-          throw new Error(describeModelError(error), { cause: error });
+          throw new Error(describeModelError(error, modelMaxRetries), {
+            cause: error,
+          });
         }
         if (summary === "") {
           throw new Error("压缩失败：模型返回了空摘要，请重试");
@@ -1006,7 +1054,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         );
         persistence.updateTask(record.id, {
           providerProfileId: profile.id,
-          model: profile.model,
+          model,
           updatedAt: now(),
         });
         return {

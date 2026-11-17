@@ -76,11 +76,11 @@ async function setup() {
     resourcesFor,
     tools: createBuiltinTools(),
     // 生产装配同款（main.ts）：子代理工具集 = 任务工具集，模型回退当前任务所选
-    // Profile（resolveProfile 返回 null = 同主模型，即 mock 端点）
+    // 二元组（resolveModel 返回 null = 同主模型，即 mock 端点）
     subagents: {
       tools: createBuiltinTools(),
       settings: () => ({ maxConcurrent: 3 }),
-      resolveProfile: async () => null,
+      resolveModel: async () => null,
     },
   });
   const profiles = createProfileStore({
@@ -139,7 +139,7 @@ async function setup() {
   });
   const profile = await profiles.create({
     name: "恢复模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });

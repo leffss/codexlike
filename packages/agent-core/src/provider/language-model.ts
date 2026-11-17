@@ -2,6 +2,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 
 import type { ProviderProfile } from "./provider-profile";
+import { firstModelOf } from "./provider-profile";
 
 /** 逐条消息的思考档位；缺省保留服务端默认行为。 */
 export type ThinkingEffort = "auto" | "low" | "medium" | "high" | "off";
@@ -42,6 +43,12 @@ export interface CreateLanguageModelOptions {
    */
   fetch?: typeof globalThis.fetch;
   thinkingEffort?: ThinkingEffort;
+  /**
+   * 任务所选的具体模型（票 02，ADR 0024 二元组）：缺省回退 Profile 列表
+   * 第一项（未显式选模型任务的兼容语义）。调用方（agent-task 发送入口）
+   * 已用 resolveModelOf 归一，此处不做列表校验——直接收到即用。
+   */
+  model?: string;
 }
 
 /**
@@ -68,7 +75,9 @@ export function createLanguageModelFromProfile(
     fetch: options.fetch,
   });
   return wrapLanguageModel({
-    model: provider.chatModel(profile.model),
+    // 任务级模型选择（票 02）：options.model 携带任务所选模型；缺省（未显式
+    // 选模型的既有调用方）回退 Profile 列表第一项（ADR 0024 兼容语义）
+    model: provider.chatModel(options.model ?? firstModelOf(profile)),
     middleware: {
       specificationVersion: "v4",
       transformParams: async ({ params }) => ({

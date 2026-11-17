@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   name: "测试",
   baseURL: "https://example.com/v1",
   apiKey: "test",
-  model: "test",
+  models: ["test"],
 };
 const questions = [
   {
@@ -398,7 +398,10 @@ describe("用户交互公开 seam", () => {
         tools: [write],
         languageModelFor: () => sub,
         settings: () => ({ maxConcurrent: 3 }),
-        resolveProfile: async () => profile,
+        resolveModel: async () => ({
+          profile,
+          model: profile.models[0]!,
+        }),
       },
     });
     const task = manager.create({
@@ -775,7 +778,10 @@ describe("用户交互公开 seam", () => {
         tools: [],
         languageModelFor: () => sub,
         settings: () => ({ maxConcurrent: 1 }),
-        resolveProfile: async () => profile,
+        resolveModel: async () => ({
+          profile,
+          model: profile.models[0]!,
+        }),
       },
     });
     const task = manager.create({ workspacePath: "C:/work" });
@@ -851,7 +857,10 @@ describe("用户交互公开 seam", () => {
         tools: [],
         languageModelFor: () => sub,
         settings: () => ({ maxConcurrent: 2 }),
-        resolveProfile: async () => profile,
+        resolveModel: async () => ({
+          profile,
+          model: profile.models[0]!,
+        }),
       },
     });
     const task = manager.create({ workspacePath: "C:/work" });
@@ -1525,7 +1534,10 @@ describe("用户交互公开 seam", () => {
         tools: [writeTool],
         languageModelFor: () => sub,
         settings: () => ({ maxConcurrent: 2 }),
-        resolveProfile: async () => profile,
+        resolveModel: async () => ({
+          profile,
+          model: profile.models[0]!,
+        }),
       },
     });
     const task = manager.create({ workspacePath: "C:/work" });

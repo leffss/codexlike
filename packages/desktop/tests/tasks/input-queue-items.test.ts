@@ -18,6 +18,7 @@ const input = {
   text: "第一条",
   mentionPaths: ["docs/a.md"],
   providerProfileId: "profile-1",
+  model: null,
   thinkingEffort: "low" as const,
   approvalMode: "ask" as const,
 };
@@ -120,6 +121,7 @@ describe.each(["memory", "sqlite"] as const)("队列条目操作（%s）", (kind
       text: "第一条（修订）",
       mentionPaths: ["docs/b.md"],
       providerProfileId: "profile-1",
+      model: null,
       thinkingEffort: "low",
       approvalMode: "ask",
     });

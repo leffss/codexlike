@@ -17,6 +17,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  modelOptionValue,
   NARROW_WIDTH,
   prepareDraft,
   startMockProvider,
@@ -190,7 +191,7 @@ async function main() {
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
     await profileForm.getByLabel("API Key").fill("sk-e2e");
-    await profileForm.getByLabel("模型").fill("mock-model");
+    await profileForm.getByLabel("模型 1").fill("mock-model");
     await window
       .locator("form")
       .getByRole("button", { name: /保存|创建/ })
@@ -202,7 +203,7 @@ async function main() {
     await profileForm.getByLabel("名称").fill(longProfileName);
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
     await profileForm.getByLabel("API Key").fill("sk-e2e-long");
-    await profileForm.getByLabel("模型").fill(longModelName);
+    await profileForm.getByLabel("模型 1").fill(longModelName);
     await profileForm.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText(longProfileName, { exact: true }).waitFor();
     const profiles = await window.evaluate(() =>
@@ -213,7 +214,11 @@ async function main() {
     assert(mockProfileId && longProfileId, "普通及长名称模型均已创建");
     await window.getByTestId("settings-back").click();
     await prepareDraft(window);
-    await selectComposerOption(window, "profile-select", mockProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      modelOptionValue(mockProfileId, "mock-model")
+    );
 
     const effortSelect = window.getByTestId("thinking-effort-select");
     const profileMenu = window.getByTestId("profile-select-listbox");
@@ -248,44 +253,54 @@ async function main() {
       await profileSelect.evaluate((el) => el === document.activeElement),
       "Escape 关闭模型菜单并保留触发器焦点"
     );
-    await selectComposerOption(window, "profile-select", longProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      modelOptionValue(longProfileId, longModelName)
+    );
     assert(
-      (await profileSelect.getAttribute("data-value")) === longProfileId &&
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(longProfileId, longModelName) &&
         (await profileSelect.textContent()).includes(longProfileName) &&
         (await profileSelect.textContent()).includes(longModelName),
-      "鼠标提交模型 ID，触发器保留完整名称文本"
+      "鼠标提交 (Profile, 模型) 复合值，触发器保留完整名称文本"
     );
     await profileSelect.press("ArrowUp");
     await profileSelect.press("Home");
     assert(
-      (await profileSelect.getAttribute("data-value")) === longProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(longProfileId, longModelName),
       "模型键盘导航不提前提交"
     );
     await profileSelect.press("Enter");
     await profileMenu.waitFor({ state: "hidden" });
     assert(
-      (await profileSelect.getAttribute("data-value")) === mockProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(mockProfileId, "mock-model"),
       "Home + Enter 提交首个模型"
     );
     await profileSelect.press("Space");
     await profileSelect.press("End");
     await profileSelect.press("Space");
     assert(
-      (await profileSelect.getAttribute("data-value")) === longProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(longProfileId, longModelName),
       "End + Space 提交末个模型"
     );
     await profileSelect.press("ArrowDown");
     await profileSelect.press("ArrowUp");
     await profileSelect.press("Enter");
     assert(
-      (await profileSelect.getAttribute("data-value")) === mockProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(mockProfileId, "mock-model"),
       "方向键可切回前一个模型"
     );
     await profileSelect.press("Enter");
     await profileSelect.press("ArrowDown");
     await profileSelect.press("Escape");
     assert(
-      (await profileSelect.getAttribute("data-value")) === mockProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(mockProfileId, "mock-model"),
       "Escape 取消未提交的模型导航"
     );
     await profileSelect.click();
@@ -435,8 +450,8 @@ async function main() {
       );
       const selections = [
         ...EFFORT_BODIES.map(([effort]) => ["thinking-effort-select", effort]),
-        ["profile-select", mockProfileId],
-        ["profile-select", longProfileId],
+        ["profile-select", modelOptionValue(mockProfileId, "mock-model")],
+        ["profile-select", modelOptionValue(longProfileId, longModelName)],
       ];
       for (const [testId, value] of selections) {
         await selectComposerOption(window, testId, value);
@@ -491,7 +506,8 @@ async function main() {
         selected: true,
       });
       assert(
-        (await selectedProfile.getAttribute("data-value")) === longProfileId &&
+        (await selectedProfile.getAttribute("data-value")) ===
+          modelOptionValue(longProfileId, longModelName) &&
           (await selectedProfile.textContent()).includes(longProfileName) &&
           (await selectedProfile.textContent()).includes(longModelName),
         "模型选中态与完整长名称跟随受控值"
@@ -579,7 +595,7 @@ async function main() {
       await profileMenu.waitFor();
       await assertMenuBounds(profileMenu);
       const longOption = profileMenu.getByTestId(
-        `profile-select-option-${longProfileId}`
+        `profile-select-option-${modelOptionValue(longProfileId, longModelName)}`
       );
       assert(
         (await profileSelect.getAttribute("aria-activedescendant")) ===
@@ -688,7 +704,11 @@ async function main() {
       );
     }
     await assertToolbarBounds(window);
-    await selectComposerOption(window, "profile-select", mockProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      modelOptionValue(mockProfileId, "mock-model")
+    );
     assert(seenBodies.length === 0, "模型与思考选择、主题切换不自动发送请求");
     await selectComposerOption(window, "thinking-effort-select", "auto");
     // 默认自动，无任务时已被禁用、建任务后可用
@@ -857,7 +877,11 @@ async function main() {
 
     // 删除正式任务已保存的模型，不应悄悄回退到首个可用 Profile。
     await window.getByTestId("composer-send").waitFor();
-    await selectComposerOption(window, "profile-select", longProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      modelOptionValue(longProfileId, longModelName)
+    );
     await window.getByTestId("settings-open").click();
     const profileRow = window.locator("li").filter({
       has: window.getByText(longProfileName, { exact: true }),
@@ -870,12 +894,18 @@ async function main() {
       .getByText("已保存的模型不可用", { exact: true })
       .waitFor();
     assert(
-      (await profileSelect.getAttribute("data-value")) === longProfileId,
-      "失效模型占位保留已保存的 Profile ID"
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(longProfileId, longModelName),
+      "失效模型占位保留已保存的 (Profile, 模型) 复合值"
     );
-    await selectComposerOption(window, "profile-select", mockProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      modelOptionValue(mockProfileId, "mock-model")
+    );
     assert(
-      (await profileSelect.getAttribute("data-value")) === mockProfileId,
+      (await profileSelect.getAttribute("data-value")) ===
+        modelOptionValue(mockProfileId, "mock-model"),
       "失效模型仍可通过菜单显式改选可用模型"
     );
     assert(seenBodies.length === 9, "删除和重选模型不额外发送请求");

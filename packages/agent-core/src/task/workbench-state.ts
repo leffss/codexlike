@@ -7,6 +7,12 @@ export type WorkbenchTarget =
 
 export interface TaskPreferences {
   providerProfileId: string;
+  /**
+   * 对下一条消息生效的具体模型（票 02，ADR 0024 二元组）：与
+   * providerProfileId 成对。可选字段——旧持久化数据无此值（undefined
+   * 等价未显式选择，发送时由 agent-core 回退 Profile 列表第一项）。
+   */
+  model?: string;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;
 }

@@ -108,6 +108,21 @@ export const MCP_CONNECT_TIMEOUT_SECONDS_MIN = 5;
 export const MCP_CONNECT_TIMEOUT_SECONDS_MAX = 120;
 
 /**
+ * 模型请求重试次数默认值（GLOSSARY「执行设置」，ADR 0024「重试不做 failover」）：
+ * 数值与 Vercel AI SDK 内置默认一致（2 次、指数退避）——设置项只是把 SDK 默认
+ * 透出为用户可调（网络不稳时调大更耐受，调试时设 0 快速失败），默认行为不变。
+ * 消费点：对话 streamText、compact generateText、子代理 streamText 全部模型请求。
+ */
+export const DEFAULT_MODEL_MAX_RETRIES = 2;
+
+/**
+ * 模型请求重试次数的设置层合法范围（设置页/存储校验用，agent-core 不重复校验）：
+ * 下界 0 允许完全关闭重试（调试快速失败），上界 10 封顶防网络差时空转过久。
+ */
+export const MODEL_MAX_RETRIES_MIN = 0;
+export const MODEL_MAX_RETRIES_MAX = 10;
+
+/**
  * 任务并发上限默认值（GLOSSARY「任务并发上限」，ADR 0022）：同时处于执行中的
  * 任务个数上限（执行中含等待用户交互）。消费点在 desktop 主进程发送闸门，
  * agent-core 不消费也不注入（无全局任务并发概念）——常量放此处仅取

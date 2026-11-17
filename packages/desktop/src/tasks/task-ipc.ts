@@ -26,6 +26,7 @@ import {
 
 import type { ProfileStore } from "../profiles/profile-store";
 import type { TaskExitRuntime } from "../lifecycle/application-exit";
+import { normalizeModelInput } from "../shared/model-value";
 import { createInterruptRegistry } from "./interrupt-registry";
 import {
   createMemoryInputQueueStore,
@@ -544,7 +545,9 @@ export function registerTaskHandlers(options: {
           request.text,
           profile.id,
           request.mentionPaths,
-          effort
+          effort,
+          undefined,
+          request.model
         );
         workbench.started(
           request.projectId,
@@ -552,6 +555,7 @@ export function registerTaskHandlers(options: {
           task.id,
           {
             providerProfileId: profile.id,
+            model: request.model,
             thinkingEffort: effort,
             approvalMode: approval,
           },
@@ -632,6 +636,7 @@ export function registerTaskHandlers(options: {
     taskId: unknown;
     text: unknown;
     profileId?: unknown;
+    model?: unknown;
     mentionPaths?: unknown;
     thinkingEffort?: unknown;
     approvalMode?: unknown;
@@ -648,12 +653,20 @@ export function registerTaskHandlers(options: {
     const saved = manager.readWorkbench(workbenchKey({ kind: "task", taskId }));
     const { approvalMode } = input;
     let profileId = input.profileId;
+    let model = input.model;
     let thinkingEffort = input.thinkingEffort;
     profileId ??= saved?.value.preferences.providerProfileId;
+    model ??= saved?.value.preferences.model ?? null;
     thinkingEffort ??= saved?.value.preferences.thinkingEffort;
     if (typeof profileId !== "string" || profileId === "") {
       throw new Error("请先选择模型（Provider Profile）");
     }
+    if (model !== null && model !== undefined && typeof model !== "string") {
+      throw new Error("send：model 必须是字符串");
+    }
+    // 归一后的具体模型名（null = 未选具体模型，解析时回退 Profile 列表
+    // 第一项）；与子代理设置保存、compact 的 IPC 边界共用同一口径
+    const modelName = normalizeModelInput(model);
     if (
       input.mentionPaths !== undefined &&
       (!Array.isArray(input.mentionPaths) ||
@@ -700,6 +713,7 @@ export function registerTaskHandlers(options: {
           text,
           mentionPaths: mentionPaths ?? [],
           providerProfileId: profile.id,
+          model: modelName,
           thinkingEffort: effortSnapshot,
           approvalMode: approvalSnapshot as ApprovalMode,
         });
@@ -727,6 +741,7 @@ export function registerTaskHandlers(options: {
         text,
         mentionPaths: mentionPaths ?? [],
         providerProfileId: profile.id,
+        model: modelName,
         thinkingEffort: effortSnapshot,
         approvalMode: approvalSnapshot as ApprovalMode,
       });
@@ -756,6 +771,7 @@ export function registerTaskHandlers(options: {
       const execution = task.sendMessage({
         text,
         profile,
+        model: modelName ?? undefined,
         mentions,
         thinkingEffort: effortSnapshot,
         approvalMode: approvalSnapshot as ApprovalMode,
@@ -801,13 +817,15 @@ export function registerTaskHandlers(options: {
     profileId?: unknown,
     mentionPaths?: unknown,
     thinkingEffort?: unknown,
-    approvalMode?: unknown
+    approvalMode?: unknown,
+    model?: unknown
   ) {
     await deliverMessage({
       source: "user",
       taskId,
       text,
       profileId,
+      model,
       mentionPaths,
       thinkingEffort,
       approvalMode,
@@ -828,6 +846,7 @@ export function registerTaskHandlers(options: {
       | "text"
       | "mentionPaths"
       | "providerProfileId"
+      | "model"
       | "thinkingEffort"
       | "approvalMode"
     >
@@ -837,6 +856,7 @@ export function registerTaskHandlers(options: {
       taskId,
       text: snapshot.text,
       profileId: snapshot.providerProfileId,
+      model: snapshot.model,
       mentionPaths: snapshot.mentionPaths,
       thinkingEffort: snapshot.thinkingEffort,
       approvalMode: snapshot.approvalMode,
@@ -1133,7 +1153,12 @@ export function registerTaskHandlers(options: {
 
   ipcMain.handle(
     IPC.tasks.compact,
-    (_e: IpcMainInvokeEvent, taskId: unknown, profileId: unknown) =>
+    (
+      _e: IpcMainInvokeEvent,
+      taskId: unknown,
+      profileId: unknown,
+      model?: unknown
+    ) =>
       track(
         (async () => {
           assertOpen();
@@ -1142,6 +1167,13 @@ export function registerTaskHandlers(options: {
           }
           if (profileId === "") {
             throw new Error("请先选择模型（Provider Profile）");
+          }
+          if (
+            model !== null &&
+            model !== undefined &&
+            typeof model !== "string"
+          ) {
+            throw new Error("compact：model 必须是字符串");
           }
           const task = manager.get(taskId);
           if (task === null) {
@@ -1160,6 +1192,10 @@ export function registerTaskHandlers(options: {
           try {
             const result = await task.compact({
               profile,
+              // 归一口径与 send/子代理设置保存共用（review 修复 2）；
+              // compact 缺省形态落 undefined（sendMessage/compact 各自的
+              // 可选参语义，归一后同为「回退 Profile 列表第一项」）
+              model: normalizeModelInput(model) ?? undefined,
               signal: controller.signal,
             });
             emit({

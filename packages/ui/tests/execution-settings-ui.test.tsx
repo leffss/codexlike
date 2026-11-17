@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCompactKeepRoundsInput,
   parseContextWarningPercentInput,
+  parseModelMaxRetriesInput,
   parseTaskConcurrencyLimitInput,
   parseToolRoundsInput,
 } from "../src/lib/execution-settings-form";
@@ -14,9 +15,11 @@ import { ExecutionSettingsBody, SettingsPage } from "../src/pages/SettingsPage";
  * 执行设置分区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
  * 校验为纯函数（合法整数生效，非法/越界输入回退默认）；分区渲染为
  * 静态标记断言——文案遵循 GLOSSARY 术语（「工具轮次」，不用「回合」）。
- * 五项参数（执行设置票 01/02/03 + 任务并发上限票 01）：主任务与子代理工具
- * 轮次上限（10–1000，默认 200）、压缩保留对话轮数（1–10，默认 3）、上下文
- * 告警阈值（百分比呈现，50–95、默认 80）、任务并发上限（1–8，默认 3）。
+ * 六项参数（执行设置票 01/02/03 + 任务并发上限票 01 + 模型请求重试票 03）：
+ * 主任务与子代理工具轮次上限（10–1000，默认 200）、压缩保留对话轮数（1–10，
+ * 默认 3）、上下文告警阈值（百分比呈现，50–95、默认 80）、任务并发上限
+ * （1–8，默认 3）、模型请求重试次数（0–10，默认 2，0 合法 = 关闭重试，
+ * ADR 0024「重试不做 failover」）。
  */
 describe("执行设置输入解析（parseToolRoundsInput）", () => {
   it("范围内的整数原样生效；边界 10 与 1000 合法", () => {
@@ -82,6 +85,19 @@ describe("执行设置输入解析（任务并发上限票 01）", () => {
   });
 });
 
+describe("执行设置输入解析（模型请求重试票 03）", () => {
+  it("重试次数：0–10 的整数生效（0 合法 = 关闭重试，与并发上限的 0 拒绝相对）；非法/越界回退默认 2", () => {
+    expect(parseModelMaxRetriesInput("2")).toBe(2);
+    expect(parseModelMaxRetriesInput("5")).toBe(5);
+    expect(parseModelMaxRetriesInput("0")).toBe(0);
+    expect(parseModelMaxRetriesInput("10")).toBe(10);
+    expect(parseModelMaxRetriesInput(" 7 ")).toBe(7);
+    for (const bad of ["-1", "11", "1.5", "abc", "", "99"]) {
+      expect(parseModelMaxRetriesInput(bad)).toBe(2);
+    }
+  });
+});
+
 describe("执行设置分区渲染", () => {
   function renderBody(overrides?: {
     maxToolRounds?: string;
@@ -89,6 +105,7 @@ describe("执行设置分区渲染", () => {
     compactKeepRounds?: string;
     contextWarningThresholdPercent?: string;
     taskConcurrencyLimit?: string;
+    modelMaxRetries?: string;
   }) {
     return renderToStaticMarkup(
       createElement(ExecutionSettingsBody, {
@@ -98,11 +115,13 @@ describe("执行设置分区渲染", () => {
         contextWarningThresholdPercent:
           overrides?.contextWarningThresholdPercent ?? "65",
         taskConcurrencyLimit: overrides?.taskConcurrencyLimit ?? "6",
+        modelMaxRetries: overrides?.modelMaxRetries ?? "4",
         onInput: () => {},
         onSubagentInput: () => {},
         onCompactKeepInput: () => {},
         onContextWarningInput: () => {},
         onTaskConcurrencyInput: () => {},
+        onModelRetriesInput: () => {},
         onSave: () => {},
         saving: false,
         message: "",
@@ -176,7 +195,20 @@ describe("执行设置分区渲染", () => {
     expect(html).toContain("排队");
   });
 
-  it("表单体：五项并存各一个输入（执行设置票 01/02/03 + 任务并发上限票 01 累计）", () => {
+  it("表单体：模型请求重试次数项（模型请求重试票 03）范围 0–10 与当前值，说明文案提快速失败", () => {
+    const html = renderBody({ modelMaxRetries: "4" });
+    expect(html).toContain("模型请求重试次数");
+    expect(html).toContain('data-testid="execution-model-retries-input"');
+    expect(html).toContain('value="4"');
+    expect(html).toContain('min="0"');
+    expect(html).toContain('max="10"');
+    expect(html.match(/execution-model-retries-input/g)).toHaveLength(1);
+    // 说明文案：0 = 关闭重试的调试语义与默认值（GLOSSARY「执行设置」）
+    expect(html).toContain("0");
+    expect(html).toContain("快速失败");
+  });
+
+  it("表单体：六项并存各一个输入（执行设置票 01/02/03 + 任务并发上限票 01 + 模型请求重试票 03 累计）", () => {
     const html = renderBody();
     for (const testid of [
       "execution-tool-rounds-input",
@@ -184,6 +216,7 @@ describe("执行设置分区渲染", () => {
       "execution-compact-keep-input",
       "execution-context-warning-input",
       "execution-task-concurrency-input",
+      "execution-model-retries-input",
     ]) {
       expect(html.match(new RegExp(testid, "g"))).toHaveLength(1);
     }
@@ -197,11 +230,13 @@ describe("执行设置分区渲染", () => {
         compactKeepRounds: "3",
         contextWarningThresholdPercent: "80",
         taskConcurrencyLimit: "3",
+        modelMaxRetries: "2",
         onInput: () => {},
         onSubagentInput: () => {},
         onCompactKeepInput: () => {},
         onContextWarningInput: () => {},
         onTaskConcurrencyInput: () => {},
+        onModelRetriesInput: () => {},
         onSave: () => {},
         saving: false,
         message: "已保存",
@@ -219,11 +254,13 @@ describe("执行设置分区渲染", () => {
         compactKeepRounds: "3",
         contextWarningThresholdPercent: "80",
         taskConcurrencyLimit: "3",
+        modelMaxRetries: "2",
         onInput: () => {},
         onSubagentInput: () => {},
         onCompactKeepInput: () => {},
         onContextWarningInput: () => {},
         onTaskConcurrencyInput: () => {},
+        onModelRetriesInput: () => {},
         onSave: () => {},
         saving: false,
         message: "保存失败",

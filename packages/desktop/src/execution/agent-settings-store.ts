@@ -11,11 +11,14 @@ import {
   DEFAULT_MAX_TOOL_ROUNDS,
   DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
   DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MODEL_MAX_RETRIES,
   DEFAULT_TASK_CONCURRENCY_LIMIT,
   MCP_CALL_TIMEOUT_SECONDS_MAX,
   MCP_CALL_TIMEOUT_SECONDS_MIN,
   MCP_CONNECT_TIMEOUT_SECONDS_MAX,
   MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+  MODEL_MAX_RETRIES_MAX,
+  MODEL_MAX_RETRIES_MIN,
   TASK_CONCURRENCY_LIMIT_MAX,
   TASK_CONCURRENCY_LIMIT_MIN,
   TOOL_ROUNDS_MAX,
@@ -27,12 +30,14 @@ import { readJsonFile, writeJsonFile } from "../storage/json-file";
 /**
  * 执行设置存储（ADR 0017，GLOSSARY「执行设置」）：agent 执行参数的用户设置，
  * 独立文件 `~/.codexlike/agent-settings.json` 持久化（与现有各设置文件同形态）。
- * 七项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
+ * 八项参数：主任务与子代理工具轮次上限（执行设置票 01/02）、压缩保留对话轮数
  * 与上下文告警阈值（票 03）、MCP 工具调用超时与连接超时（票 07，秒存储与终端
- * 超时同构）、任务并发上限（任务并发上限票 01，GLOSSARY「任务并发上限」）——
- * 前六项经内存缓存以 resolver 注入 agent-core（轮次上限回合/运行开始快照消费，
- * compact、告警阈值与 MCP 超时逐次读取），任务并发上限由 desktop 主进程发送
- * 闸门消费（不经 agent-core，ADR 0022），设置页保存后生效。
+ * 超时同构）、任务并发上限（任务并发上限票 01，GLOSSARY「任务并发上限」）、
+ * 模型请求重试次数（模型请求重试票 03，ADR 0024「重试不做 failover」）——
+ * 轮次/重试五项经内存缓存以 resolver 注入 agent-core（轮次上限回合/运行开始
+ * 快照消费，重试对话同快照、compact 与子代理开始时读取，compact、告警阈值
+ * 与 MCP 超时逐次读取），任务并发上限由 desktop 主进程发送闸门消费
+ * （不经 agent-core，ADR 0022），设置页保存后生效。
  * 各项语义独立，故独立字段、独立校验消息。
  */
 export interface AgentSettings {
@@ -66,11 +71,18 @@ export interface AgentSettings {
    * 闸门消费，改动对队列即时生效（调大补跑排队、调小不中断运行中）
    */
   taskConcurrencyLimit: number;
+  /**
+   * 模型请求重试次数（0–10，默认 2；模型请求重试票 03，ADR 0024）：作用于
+   * 对话、compact、子代理全部模型请求（Vercel AI SDK maxRetries 的透出）；
+   * 0 = 完全关闭重试（调试快速失败）。改动对后续执行生效：已开始的执行用
+   * 开始时的值（对话回合/子代理运行开始快照，compact 逐次读取）
+   */
+  modelMaxRetries: number;
 }
 
 export interface AgentSettingsStore {
   get(): Promise<AgentSettings>;
-  /** 保存设置（七项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
+  /** 保存设置（八项各自范围与整数校验；非法输入拒绝，UI 侧先回退默认） */
   set(input: AgentSettings): Promise<AgentSettings>;
 }
 
@@ -178,6 +190,12 @@ export function parseAgentSettingsInput(input: unknown): AgentSettings {
       TASK_CONCURRENCY_LIMIT_MAX,
       "任务并发上限"
     ),
+    modelMaxRetries: validateIntInRange(
+      record["modelMaxRetries"],
+      MODEL_MAX_RETRIES_MIN,
+      MODEL_MAX_RETRIES_MAX,
+      "模型请求重试次数"
+    ),
   };
 }
 
@@ -239,6 +257,13 @@ export function createAgentSettingsStore(options: {
         TASK_CONCURRENCY_LIMIT_MAX,
         DEFAULT_TASK_CONCURRENCY_LIMIT
       ),
+      // 旧格式文件（模型请求重试票 03 之前只有七项）：缺字段按默认补齐
+      modelMaxRetries: resolveIntInRange(
+        parsed.modelMaxRetries,
+        MODEL_MAX_RETRIES_MIN,
+        MODEL_MAX_RETRIES_MAX,
+        DEFAULT_MODEL_MAX_RETRIES
+      ),
     };
   }
 
@@ -292,6 +317,12 @@ export function createAgentSettingsStore(options: {
         TASK_CONCURRENCY_LIMIT_MAX,
         "任务并发上限"
       );
+      const modelMaxRetries = validateIntInRange(
+        input.modelMaxRetries,
+        MODEL_MAX_RETRIES_MIN,
+        MODEL_MAX_RETRIES_MAX,
+        "模型请求重试次数"
+      );
       const next: AgentSettings = {
         maxToolRounds,
         maxSubagentToolRounds,
@@ -300,6 +331,7 @@ export function createAgentSettingsStore(options: {
         mcpCallTimeoutSeconds,
         mcpConnectTimeoutSeconds,
         taskConcurrencyLimit,
+        modelMaxRetries,
       };
       writeJsonFile(filePath, next);
       return next;

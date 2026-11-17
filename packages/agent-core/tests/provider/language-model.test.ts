@@ -28,7 +28,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7", "glm-4.6"],
 };
 
 /** 记录请求并返回最小 chat.completion 成功响应的 fetch 替身 */
@@ -67,14 +67,14 @@ function streamResponse() {
     id: "chatcmpl-stream",
     object: "chat.completion.chunk",
     created: 0,
-    model: profile.model,
+    model: profile.models[0],
     choices: [{ index: 0, delta, finish_reason: null }],
   }));
   const end = {
     id: "chatcmpl-stream",
     object: "chat.completion.chunk",
     created: 0,
-    model: profile.model,
+    model: profile.models[0],
     choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
   };
   return new Response(
@@ -305,6 +305,31 @@ describe("createLanguageModelFromProfile（OpenAI 兼容 provider 构造）", ()
     expect(String(url)).toBe(
       "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     );
+  });
+
+  it("多模型 Profile 缺省时请求 model 字段取列表第一项（未显式选模型任务的兼容语义）", async () => {
+    const fetchSpy = createFetchSpy();
+
+    const model = createLanguageModelFromProfile(profile, {
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+    });
+    await generateText({ model, prompt: "你好" });
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.model).toBe("glm-4.7");
+  });
+
+  it("options.model 指定任务所选模型时请求体 model 字段用该值（票 02 二元组）", async () => {
+    const fetchSpy = createFetchSpy();
+
+    const model = createLanguageModelFromProfile(profile, {
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+      model: "glm-4.6",
+    });
+    await generateText({ model, prompt: "你好" });
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.model).toBe("glm-4.6");
   });
 
   it("请求携带 Authorization: Bearer <apiKey>", async () => {

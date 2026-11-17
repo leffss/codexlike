@@ -22,6 +22,7 @@ import {
   createSqliteTaskStore,
   createTavilySearchSource,
   createWorktreeService,
+  resolveModelOf,
   validateProviderProfile,
   type SearchSource,
 } from "@codexlike/agent-core/node";
@@ -76,6 +77,7 @@ import {
 import { createAgentSettingsStore } from "./execution/agent-settings-store";
 import { registerAgentSettingsHandlers } from "./execution/agent-settings-ipc";
 import { IPC } from "./shared/ipc";
+import { normalizeModelInput } from "./shared/model-value";
 import { createMcpStore } from "./mcp/mcp-store";
 import { createMcpService } from "./mcp/mcp-service";
 import { registerMcpHandlers } from "./mcp/mcp-ipc";
@@ -220,10 +222,8 @@ function assertValidInput(input: unknown) {
   if (typeof input !== "object" || input === null) {
     throw new Error("Provider Profile 输入不合法");
   }
-  const { name, baseURL, apiKey, model, contextWindowTokens } = input as Record<
-    string,
-    unknown
-  >;
+  const { name, baseURL, apiKey, models, contextWindowTokens } =
+    input as Record<string, unknown>;
   // 上下文窗口为可选数字（表单空串/未填 → undefined，走默认 128k）
   const windowTokens =
     contextWindowTokens === undefined ||
@@ -231,11 +231,14 @@ function assertValidInput(input: unknown) {
     contextWindowTokens === ""
       ? undefined
       : Number(contextWindowTokens);
+  // 模型列表：非数组宽容为空列表，交给校验报「请至少添加一个模型」
   const parsed = {
     name: String(name ?? ""),
     baseURL: String(baseURL ?? ""),
     apiKey: String(apiKey ?? ""),
-    model: String(model ?? ""),
+    models: Array.isArray(models)
+      ? models.map((model) => String(model ?? ""))
+      : [],
     ...(windowTokens !== undefined
       ? { contextWindowTokens: windowTokens }
       : {}),
@@ -282,9 +285,10 @@ function registerSearchSettingsHandlers(
 }
 
 /**
- * 注册子代理全局设置的 IPC 指令（工单 13）。
+ * 注册子代理全局设置的 IPC 指令（工单 13；票 02 升级模型级）。
  * 设置经内存缓存注入 SubagentsConfig（逐次解析），保存后对下一次委派即时生效；
- * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验）。
+ * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验），
+ * model 非 null 时必须在该 Profile 的模型列表内（null = 未选具体模型，解析时回退第一项）。
  */ function registerSubagentSettingsHandlers(options: {
   store: SubagentSettingsStore;
   profiles: ProfileStore;
@@ -298,7 +302,7 @@ function registerSearchSettingsHandlers(
       if (typeof input !== "object" || input === null) {
         throw new Error("子代理设置输入不合法");
       }
-      const { providerProfileId, maxConcurrent } = input as Record<
+      const { providerProfileId, model, maxConcurrent } = input as Record<
         string,
         unknown
       >;
@@ -306,19 +310,31 @@ function registerSearchSettingsHandlers(
         providerProfileId === null || providerProfileId === ""
           ? null
           : String(providerProfileId);
+      if (model !== null && model !== undefined && typeof model !== "string") {
+        throw new Error("子代理模型（model）必须是字符串或 null");
+      }
+      // 归一后的具体模型名（null = 未选具体模型）；与 send/compact 的
+      // IPC 边界共用 normalizeModelInput 单一口径（review 修复 2）
+      const modelName = normalizeModelInput(model);
       return (async () => {
         if (profileId !== null) {
-          const exists = (await profiles.list()).some(
+          const profile = (await profiles.list()).find(
             (p) => p.id === profileId
           );
-          if (!exists) {
+          if (!profile) {
             throw new Error(
               "所选 Provider Profile 不存在，请重新选择子代理模型"
+            );
+          }
+          if (modelName !== null && !profile.models.includes(modelName)) {
+            throw new Error(
+              "所选模型不在该 Provider Profile 的模型列表中，请重新选择"
             );
           }
         }
         const settings = await store.set({
           providerProfileId: profileId,
+          model: modelName,
           maxConcurrent: Number(maxConcurrent),
         });
         await onSaved(settings);
@@ -519,6 +535,10 @@ void app.whenReady().then(async () => {
     // /compact 保留轮数（执行设置票 03，ADR 0017）：resolver 逐次解析内存缓存，
     // agent-core 在每次 compact 执行时读取（无回合快照）——改动对下一次压缩生效
     compactKeepRounds: () => agentSettings.compactKeepRounds,
+    // 模型请求重试次数（模型请求重试票 03，ADR 0024）：resolver 逐次解析内存
+    // 缓存，对话回合开始快照、compact 逐次读取——改动对后续执行生效，进行中
+    // 执行不受影响
+    modelMaxRetries: () => agentSettings.modelMaxRetries,
     subagents: {
       // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
@@ -527,16 +547,24 @@ void app.whenReady().then(async () => {
       // 子代理工具轮次上限（执行设置票 02，ADR 0017）：resolver 逐次解析内存缓存，
       // 子代理开始运行时快照——设置改动即时落盘，下一次委派按新值执行
       toolRoundsLimit: () => agentSettings.maxSubagentToolRounds,
-      // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
-      resolveProfile: async () => {
-        const profileId = subagentSettings.providerProfileId;
-        if (profileId === null) {
+      // 子代理模型请求重试（模型请求重试票 03，ADR 0024）：与主任务同一全局
+      // 设置，子代理开始运行时快照（与轮次上限同一快照点）
+      modelMaxRetries: () => agentSettings.modelMaxRetries,
+      // 子代理模型（票 02 模型级）：设置页选到的 (Profile, 具体模型)；
+      // null = 同主模型（跟随主任务当前所用模型，同 Profile 同模型）。
+      // model 未配置或已从列表删除时回退该 Profile 列表第一项（resolveModelOf）
+      resolveModel: async () => {
+        const { providerProfileId, model } = subagentSettings;
+        if (providerProfileId === null) {
           return null;
         }
         const found = (await profileStore.list()).find(
-          (p) => p.id === profileId
+          (p) => p.id === providerProfileId
         );
-        return found ?? null;
+        if (!found) {
+          return null;
+        }
+        return { profile: found, model: resolveModelOf(found, model) };
       },
     },
   });

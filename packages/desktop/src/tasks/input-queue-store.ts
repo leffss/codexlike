@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS input_queue (
   text TEXT NOT NULL,
   mention_paths TEXT,
   provider_profile_id TEXT NOT NULL,
+  model TEXT,
   thinking_effort TEXT NOT NULL,
   approval_mode TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -41,6 +42,7 @@ interface QueueRow {
   text: string;
   mention_paths: string | null;
   provider_profile_id: string;
+  model: string | null;
   thinking_effort: string;
   approval_mode: string;
   created_at: string;
@@ -63,6 +65,8 @@ function toQueuedMessage(row: QueueRow): QueuedMessage {
     text: row.text,
     mentionPaths,
     providerProfileId: row.provider_profile_id,
+    // 存量行无 model 列值（票 02 前入队）：NULL 读回 null = 未显式选模型
+    model: row.model,
     thinkingEffort: row.thinking_effort as QueuedMessage["thinkingEffort"],
     approvalMode: row.approval_mode as QueuedMessage["approvalMode"],
     createdAt: row.created_at,
@@ -73,8 +77,14 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec(QUEUE_SCHEMA);
+  // 存量库升级（票 02）：补 model 列；已存在（新库或已升级）时忽略重复列错误
+  try {
+    db.exec("ALTER TABLE input_queue ADD COLUMN model TEXT");
+  } catch {
+    // 列已存在
+  }
   const appendStmt = db.prepare(
-    "INSERT INTO input_queue (id, task_id, position, text, mention_paths, provider_profile_id, thinking_effort, approval_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO input_queue (id, task_id, position, text, mention_paths, provider_profile_id, model, thinking_effort, approval_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listStmt = db.prepare(
     "SELECT * FROM input_queue WHERE task_id = ? ORDER BY position, rowid"
@@ -121,6 +131,7 @@ export function createSqliteInputQueueStore(dbPath: string): InputQueueStore {
         entry.text,
         JSON.stringify(entry.mentionPaths),
         entry.providerProfileId,
+        entry.model,
         entry.thinkingEffort,
         entry.approvalMode,
         entry.createdAt

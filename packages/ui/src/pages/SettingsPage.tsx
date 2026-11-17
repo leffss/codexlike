@@ -2,15 +2,24 @@ import { useEffect, useState } from "react";
 
 import {
   DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
+  resolveModelOf,
   type ProviderProfile,
 } from "@codexlike/agent-core";
 import type { TerminalSettings } from "@codexlike/desktop/ipc";
+
+import {
+  modelOptionValue,
+  parseModelOptionValue,
+  subagentFollowModelValue,
+  subagentSettingsOfValue,
+} from "../lib/model-options";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
 import {
   parseCompactKeepRoundsInput,
   parseContextWarningPercentInput,
+  parseModelMaxRetriesInput,
   parseTaskConcurrencyLimitInput,
   parseToolRoundsInput,
 } from "../lib/execution-settings-form";
@@ -86,7 +95,7 @@ export function SettingsPage() {
                       name: editingProfile.name,
                       baseURL: editingProfile.baseURL,
                       apiKey: editingProfile.apiKey,
-                      model: editingProfile.model,
+                      models: editingProfile.models,
                     }}
                     submitLabel="保存修改"
                     onCancel={() => setEditing(null)}
@@ -107,7 +116,7 @@ export function SettingsPage() {
                       {profile.name}
                     </p>
                     <p className="truncate text-xs text-fg-muted">
-                      {profile.baseURL} · {profile.model}
+                      {profile.baseURL} · {profile.models.join("、")}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1">
@@ -224,10 +233,11 @@ function ThemeSettingsSection() {
  * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
  * agent 执行参数——主任务工具轮次上限（票 01）、子代理工具轮次上限（票 02）、
  * 压缩保留轮数与上下文告警阈值（票 03）、任务并发上限（任务并发上限票 01，
- * GLOSSARY「任务并发上限」），同构输入、独立可调。
- * 改动即时保存；轮次上限用开始时的值（回合/运行开始快照），保留轮数与告警
- * 阈值无「进行中」状态逐次读取（保留轮数对下一次 /compact 生效、阈值即时生效）；
- * 任务并发上限由 desktop 主进程发送闸门消费，改动对队列即时生效。
+ * GLOSSARY「任务并发上限」）、模型请求重试次数（模型请求重试票 03，ADR 0024
+ * 「重试不做 failover」），同构输入、独立可调。
+ * 改动即时保存；轮次上限与重试次数用开始时的值（回合/运行开始快照），保留轮数
+ * 无「进行中」状态逐次读取（对下一次 /compact 生效）、阈值即时生效；任务并发
+ * 上限由 desktop 主进程发送闸门消费，改动对队列即时生效。
  */
 export function ExecutionSettingsBody(props: {
   /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
@@ -236,11 +246,13 @@ export function ExecutionSettingsBody(props: {
   compactKeepRounds: string;
   contextWarningThresholdPercent: string;
   taskConcurrencyLimit: string;
+  modelMaxRetries: string;
   onInput: (value: string) => void;
   onSubagentInput: (value: string) => void;
   onCompactKeepInput: (value: string) => void;
   onContextWarningInput: (value: string) => void;
   onTaskConcurrencyInput: (value: string) => void;
+  onModelRetriesInput: (value: string) => void;
   onSave: () => void;
   saving: boolean;
   message: string;
@@ -341,6 +353,24 @@ export function ExecutionSettingsBody(props: {
         </span>
       </label>
 
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        模型请求重试次数（0-10）
+        <input
+          type="number"
+          min={0}
+          max={10}
+          step={1}
+          data-testid="execution-model-retries-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.modelMaxRetries}
+          onChange={(e) => props.onModelRetriesInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          模型请求失败后的自动重试次数（默认 2），作用于对话、压缩与子代理的
+          全部模型请求；设为 0 关闭重试，调试时快速失败。
+        </span>
+      </label>
+
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -372,6 +402,7 @@ function ExecutionSettingsSection() {
   const [contextWarningThresholdPercent, setContextWarningThresholdPercent] =
     useState("80");
   const [taskConcurrencyLimit, setTaskConcurrencyLimit] = useState("3");
+  const [modelMaxRetries, setModelMaxRetries] = useState("2");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -387,6 +418,7 @@ function ExecutionSettingsSection() {
         String(settings.contextWarningThresholdPercent)
       );
       setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
+      setModelMaxRetries(String(settings.modelMaxRetries));
       setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -403,8 +435,8 @@ function ExecutionSettingsSection() {
     setMessage("");
     try {
       // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
-      // 五项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
-      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 七字段整体形状），
+      // 六项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
+      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 八字段整体形状），
       // 避免用装载快照覆盖 MCP 分区的并发保存。
       const current = await window.codexlike.agentSettings.get();
       const settings = await window.codexlike.agentSettings.set({
@@ -419,6 +451,7 @@ function ExecutionSettingsSection() {
         ),
         taskConcurrencyLimit:
           parseTaskConcurrencyLimitInput(taskConcurrencyLimit),
+        modelMaxRetries: parseModelMaxRetriesInput(modelMaxRetries),
         mcpCallTimeoutSeconds: current.mcpCallTimeoutSeconds,
         mcpConnectTimeoutSeconds: current.mcpConnectTimeoutSeconds,
       });
@@ -429,8 +462,9 @@ function ExecutionSettingsSection() {
         String(settings.contextWarningThresholdPercent)
       );
       setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
+      setModelMaxRetries(String(settings.modelMaxRetries));
       setMessage(
-        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%、任务并发上限 ${settings.taskConcurrencyLimit}`
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%、任务并发上限 ${settings.taskConcurrencyLimit}、模型请求重试次数 ${settings.modelMaxRetries}`
       );
       setMessageError(false);
     } catch (error) {
@@ -458,11 +492,13 @@ function ExecutionSettingsSection() {
           compactKeepRounds={compactKeepRounds}
           contextWarningThresholdPercent={contextWarningThresholdPercent}
           taskConcurrencyLimit={taskConcurrencyLimit}
+          modelMaxRetries={modelMaxRetries}
           onInput={setMaxToolRounds}
           onSubagentInput={setMaxSubagentToolRounds}
           onCompactKeepInput={setCompactKeepRounds}
           onContextWarningInput={setContextWarningThresholdPercent}
           onTaskConcurrencyInput={setTaskConcurrencyLimit}
+          onModelRetriesInput={setModelMaxRetries}
           onSave={() => void save()}
           saving={saving}
           message={message}
@@ -630,13 +666,15 @@ function TerminalSettingsSection() {
 }
 
 /**
- * 子代理全局配置区（工单 13，GLOSSARY「子代理」）：
- * 子代理模型（Provider Profile 引用；默认同主模型）+ 并发上限（默认 3，1-8）。
- * 保存后对后续任务/下一次委派即时生效（主进程逐次解析内存缓存）。
+ * 子代理全局配置区（工单 13，GLOSSARY「子代理」；票 02 升级模型级）：
+ * 子代理模型可选到具体「Profile · 模型」（默认同主模型 = 跟随主任务当前
+ * 所用模型）+ 并发上限（默认 3，1-8）。保存后对后续任务/下一次委派即时
+ * 生效（主进程逐次解析内存缓存）。
  */
 function SubagentSettingsSection() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
-  const [providerProfileId, setProviderProfileId] = useState<string>("");
+  /** 复合值：`${profileId}::${model}`；空 model 位 = 跟随占位；空串 = 同主模型 */
+  const [modelValue, setModelValue] = useState<string>("");
   const [maxConcurrent, setMaxConcurrent] = useState("3");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -650,11 +688,25 @@ function SubagentSettingsSection() {
         window.codexlike.subagentSettings.get(),
       ]);
       setProfiles(profileList);
-      // 空串 = 同主模型（默认）；引用的 Profile 已删除时回落为同主模型
-      const valid =
-        settings.providerProfileId !== null &&
-        profileList.some((p) => p.id === settings.providerProfileId);
-      setProviderProfileId(valid ? settings.providerProfileId! : "");
+      // 引用的 Profile 已删除时回落为同主模型；model 为 null（未选具体
+      // 模型）回显「跟随」占位而不落成具体模型（review 修复 1：未改选
+      // 保存保留 null，子代理继续跟随主任务当前所用模型）；模型记录失效
+      // （已从列表删除）回退该 Profile 列表第一项（resolveModelOf 同语义）
+      const profile = profileList.find(
+        (p) => p.id === settings.providerProfileId
+      );
+      if (profile) {
+        setModelValue(
+          settings.model === null
+            ? subagentFollowModelValue(profile.id)
+            : modelOptionValue(
+                profile.id,
+                resolveModelOf(profile, settings.model)
+              )
+        );
+      } else {
+        setModelValue("");
+      }
       setMaxConcurrent(String(settings.maxConcurrent));
       setLoaded(true);
     } catch (error) {
@@ -667,12 +719,22 @@ function SubagentSettingsSection() {
     void refresh();
   }, []);
 
+  // 跟随占位项（review 修复 1）：当前选中值为空 model 位复合键时才渲染
+  // 显式占位（已选 Profile、未选具体模型）；选了具体模型或「同主模型」后消失
+  const followParsed = parseModelOptionValue(modelValue);
+  const followProfile =
+    followParsed?.model === ""
+      ? profiles.find((p) => p.id === followParsed.profileId)
+      : undefined;
+
   async function save() {
     setSaving(true);
     setMessage("");
     try {
+      const parsed = subagentSettingsOfValue(modelValue);
       const settings = await window.codexlike.subagentSettings.set({
-        providerProfileId: providerProfileId === "" ? null : providerProfileId,
+        providerProfileId: parsed.providerProfileId,
+        model: parsed.model,
         maxConcurrent: Number(maxConcurrent),
       });
       setMaxConcurrent(String(settings.maxConcurrent));
@@ -707,15 +769,25 @@ function SubagentSettingsSection() {
             <select
               data-testid="subagent-profile-select"
               className="rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
-              value={providerProfileId}
-              onChange={(e) => setProviderProfileId(e.target.value)}
+              value={modelValue}
+              onChange={(e) => setModelValue(e.target.value)}
             >
-              <option value="">同主模型（每次委派沿用当前任务所选模型）</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name} · {profile.model}
+              <option value="">同主模型（跟随主任务当前使用的模型）</option>
+              {followProfile !== undefined && (
+                <option value={modelValue}>
+                  {followProfile.name} · 跟随主任务模型（未选具体模型）
                 </option>
-              ))}
+              )}
+              {profiles.flatMap((profile) =>
+                profile.models.map((model) => (
+                  <option
+                    key={modelOptionValue(profile.id, model)}
+                    value={modelOptionValue(profile.id, model)}
+                  >
+                    {profile.name} · {model}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 

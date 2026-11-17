@@ -131,6 +131,28 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     ]);
   });
 
+  it("任务记录的 (providerProfileId, model) 二元组跨重启存取一致（票 02）", () => {
+    const path = tempDbPath();
+    const first = createSqliteTaskStore(path);
+    first.insertTask(
+      taskRecord({
+        providerProfileId: "profile-1",
+        model: "glm-4.6",
+      })
+    );
+    first.updateTask("task-1", {
+      providerProfileId: "profile-1",
+      model: "glm-4.6",
+    });
+    first.close();
+
+    const reopened = createSqliteTaskStore(path);
+    const stored = reopened.listTasks().find((s) => s.id === "task-1");
+    expect(stored?.providerProfileId).toBe("profile-1");
+    expect(stored?.model).toBe("glm-4.6");
+    reopened.close();
+  });
+
   it("同一路径重开 store（等价应用重启）数据完整恢复", () => {
     const dbPath = tempDbPath();
 

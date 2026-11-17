@@ -1,6 +1,7 @@
 import {
   fuzzyMatch,
   type ProviderProfile,
+  type ResolvedModel,
   type SlashCommandName,
 } from "@codexlike/agent-core";
 
@@ -47,27 +48,42 @@ export function planSlashCommand(
   }
 }
 
-/** /model 关键词匹配：在 name + model 文本上模糊匹配 */
-export type ModelSwitchMatch =
-  | { kind: "unique"; profile: ProviderProfile }
-  | { kind: "ambiguous"; candidates: ProviderProfile[] };
+/**
+ * /model 关键词匹配（票 02 模型级）：在「Profile 名 模型名」上模糊匹配。
+ * 候选形状复用 agent-core 的 ResolvedModel 二元组（review 修复 3 收敛，
+ * 与 SubagentsConfig.resolveModel 等消费点同一形状，不再本地自定义）。
+ */
+export type ModelSwitchCandidate = ResolvedModel;
 
-export function matchProfilesForModelSwitch(
+export type ModelSwitchMatch =
+  | ({ kind: "unique" } & ModelSwitchCandidate)
+  | { kind: "ambiguous"; candidates: ModelSwitchCandidate[] };
+
+/** 平铺全部 (Profile, 模型) 组合，顺序 = Profile 顺序 × 模型列表顺序 */
+function flattenModels(
+  profiles: readonly ProviderProfile[]
+): ModelSwitchCandidate[] {
+  return profiles.flatMap((profile) =>
+    profile.models.map((model) => ({ profile, model }))
+  );
+}
+
+export function matchModelsForModelSwitch(
   query: string,
   profiles: readonly ProviderProfile[]
 ): ModelSwitchMatch {
-  const matched = fuzzyMatch(
-    query,
-    profiles,
-    (profile) => `${profile.name} ${profile.model}`
+  const flat = flattenModels(profiles);
+  const matched = fuzzyMatch(query, flat, ({ profile, model }) =>
+    `${profile.name} ${model}`.toLowerCase()
   );
   if (matched.length === 1) {
-    return { kind: "unique", profile: matched[0]! };
+    const { profile, model } = matched[0]!;
+    return { kind: "unique", profile, model };
   }
   // 多个命中：列出命中的候选；零命中（拼写误差）：列出全部供用户选择
   return {
     kind: "ambiguous",
-    candidates: matched.length === 0 ? [...profiles] : matched,
+    candidates: matched.length === 0 ? flat : matched,
   };
 }
 

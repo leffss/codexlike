@@ -17,7 +17,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 function okModel() {
@@ -123,9 +123,11 @@ describe("createTaskManager（任务创建 / 列表 / 恢复）", () => {
       // 只驱动流走完
     }
 
-    // 双参工厂拿到档位快照：签名与 agent-task / subagent 的注入点对齐，
-    // 注入方不再因 TS 参数逆变静默丢弃 thinkingEffort
-    expect(factoryOptions).toEqual([{ thinkingEffort: "high" }]);
+    // 双参工厂拿到档位快照与归一后的任务模型（票 02 二元组）：签名与
+    // agent-task / subagent 的注入点对齐，注入方不再因 TS 参数逆变静默丢弃
+    expect(factoryOptions).toEqual([
+      { thinkingEffort: "high", model: profile.models[0] },
+    ]);
     persistence.close();
   });
 

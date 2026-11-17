@@ -46,7 +46,7 @@ async function setupSettings(window, port) {
   await profileForm.getByLabel("名称").fill("Mock");
   await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
   await profileForm.getByLabel("API Key").fill("sk-e2e");
-  await profileForm.getByLabel("模型").fill("mock-model");
+  await profileForm.getByLabel("模型 1").fill("mock-model");
   await window
     .locator("form")
     .getByRole("button", { name: /保存|创建/ })

@@ -22,6 +22,11 @@ import {
   handleMenuKey,
   type ComposerMenuState,
 } from "../lib/composer-menu";
+import {
+  composerModelOptions,
+  modelOptionValue,
+  parseModelOptionValue,
+} from "../lib/model-options";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
 import { QueueBar } from "./QueueBar";
@@ -103,7 +108,13 @@ export function MessageComposer(props: {
   onDraftChange?: (text: string) => void;
   profiles: ProviderProfile[];
   selectedProfileId: string;
-  onSelectProfile: (id: string) => void;
+  /**
+   * 当前所选具体模型（票 02，ADR 0024 二元组）：null/undefined = 未显式选
+   * （旧任务恢复前的显示回退、新建默认），选择器选中态落在 Profile 第一项。
+   */
+  selectedModel?: string | null;
+  /** 选中「Profile · 模型」组合（票 02 平铺选择） */
+  onSelectModel: (profileId: string, model: string) => void;
   onSend: (text: string) => void;
   /** 受控草稿由父级在发送确认后清空，失败则保留输入。 */
   clearOnSend?: boolean;
@@ -494,31 +505,39 @@ export function MessageComposer(props: {
               <ComposerSelect
                 testId="profile-select"
                 label="模型"
-                value={props.selectedProfileId}
+                value={
+                  // 选中值：未显式选模型时显示所选 Profile 第一项（回退预览）；
+                  // 保存组合失效（Profile/模型被删）时 options 里的不可用项承接；
+                  // 无 Profile（全部被删）落在「未配置模型」占位
+                  props.profiles.length === 0
+                    ? ""
+                    : props.selectedModel
+                      ? modelOptionValue(
+                          props.selectedProfileId,
+                          props.selectedModel
+                        )
+                      : props.selectedProfileId === ""
+                        ? ""
+                        : modelOptionValue(
+                            props.selectedProfileId,
+                            props.profiles.find(
+                              (profile) =>
+                                profile.id === props.selectedProfileId
+                            )?.models[0] ?? ""
+                          )
+                }
                 disabled={props.readOnly}
-                options={[
-                  ...(props.profiles.length === 0
-                    ? [{ value: "", label: "未配置模型", title: "未配置模型" }]
-                    : []),
-                  ...(props.selectedProfileId &&
-                  !props.profiles.some(
-                    (profile) => profile.id === props.selectedProfileId
-                  )
-                    ? [
-                        {
-                          value: props.selectedProfileId,
-                          label: "已保存的模型不可用",
-                          title: "已保存的模型不可用，请重新选择模型",
-                        },
-                      ]
-                    : []),
-                  ...props.profiles.map((profile) => ({
-                    value: profile.id,
-                    label: `${profile.name} · ${profile.model}`,
-                    title: `${profile.name} · ${profile.model}（对下一条消息生效）`,
-                  })),
-                ]}
-                onSelect={props.onSelectProfile}
+                options={composerModelOptions(
+                  props.profiles,
+                  props.selectedProfileId,
+                  props.selectedModel
+                )}
+                onSelect={(value) => {
+                  const parsed = parseModelOptionValue(value);
+                  if (parsed) {
+                    props.onSelectModel(parsed.profileId, parsed.model);
+                  }
+                }}
                 className="min-w-0 max-w-56 shrink"
               />
               {/* 无任务禁用；运行中允许改选，只对下一条消息生效。 */}

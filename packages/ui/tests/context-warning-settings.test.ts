@@ -32,6 +32,7 @@ function settingsOf(percent: number): AgentSettings {
     mcpCallTimeoutSeconds: 30,
     mcpConnectTimeoutSeconds: 15,
     taskConcurrencyLimit: 3,
+    modelMaxRetries: 2,
   };
 }
 

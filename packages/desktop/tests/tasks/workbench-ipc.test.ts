@@ -193,7 +193,7 @@ async function provider(
   });
   const profile = await app.profiles.create({
     name: "默认模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
@@ -805,7 +805,7 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
   const model = await provider(app, true);
   const other = await app.profiles.create({
     name: "另一个模型",
-    model: "next-model",
+    models: ["next-model"],
     apiKey: "other-secret",
     baseURL: model.profile.baseURL,
   });

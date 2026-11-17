@@ -82,7 +82,7 @@ async function main() {
     await profileForm.getByLabel("名称").fill("Mock");
     await profileForm.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
     await profileForm.getByLabel("API Key").fill("sk-e2e");
-    await profileForm.getByLabel("模型").fill("mock-model");
+    await profileForm.getByLabel("模型 1").fill("mock-model");
     // 设置页现在有两个「保存」按钮（Profile 表单与搜索源区），限定在表单内点击
     await window
       .locator("form")

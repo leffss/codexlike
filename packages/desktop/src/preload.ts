@@ -31,7 +31,8 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
       providerProfileId,
       mentionPaths,
       thinkingEffort,
-      approvalMode
+      approvalMode,
+      model
     ) =>
       ipcRenderer.invoke(
         channels.send,
@@ -40,7 +41,8 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
         providerProfileId,
         mentionPaths,
         thinkingEffort,
-        approvalMode
+        approvalMode,
+        model
       ),
     interrupt: (taskId) => ipcRenderer.invoke(channels.interrupt, taskId),
     queueResume: (taskId) => ipcRenderer.invoke(channels.queueResume, taskId),
@@ -66,8 +68,8 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
     resources: (taskId) => ipcRenderer.invoke(channels.resources, taskId),
     draftResources: (workspacePath) =>
       ipcRenderer.invoke(channels.draftResources, workspacePath),
-    compact: (taskId, providerProfileId) =>
-      ipcRenderer.invoke(channels.compact, taskId, providerProfileId),
+    compact: (taskId, providerProfileId, model) =>
+      ipcRenderer.invoke(channels.compact, taskId, providerProfileId, model),
     workspaceFiles: (taskId) =>
       ipcRenderer.invoke(channels.workspaceFiles, taskId),
     toolImage: (taskId, toolCallId) =>

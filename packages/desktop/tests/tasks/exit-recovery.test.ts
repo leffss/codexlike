@@ -98,7 +98,7 @@ async function setup() {
   });
   const profile = await profiles.create({
     name: "退出模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });

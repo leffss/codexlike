@@ -11,8 +11,13 @@ export type {
   ProviderProfile,
   ProviderProfileErrors,
   ProviderProfileInput,
+  ResolvedModel,
 } from "./provider/provider-profile";
-export { validateProviderProfile } from "./provider/provider-profile";
+export {
+  validateProviderProfile,
+  firstModelOf,
+  resolveModelOf,
+} from "./provider/provider-profile";
 
 export type {
   CreateLanguageModelOptions,
@@ -75,9 +80,12 @@ export {
   DEFAULT_MAX_TOOL_ROUNDS,
   DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
   DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MODEL_MAX_RETRIES,
   DEFAULT_TASK_CONCURRENCY_LIMIT,
   MAX_COMMAND_TIMEOUT_SECONDS_MAX,
   MAX_COMMAND_TIMEOUT_SECONDS_MIN,
+  MODEL_MAX_RETRIES_MAX,
+  MODEL_MAX_RETRIES_MIN,
   MCP_CALL_TIMEOUT_SECONDS_MAX,
   MCP_CALL_TIMEOUT_SECONDS_MIN,
   MCP_CONNECT_TIMEOUT_SECONDS_MAX,

@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 function taskRecord(): TaskRecord {
@@ -191,7 +191,7 @@ describe("AgentTask.compact（手动压缩）", () => {
         }),
     });
     await task.compact({ profile });
-    expect(body.model).toBe(profile.model);
+    expect(body.model).toBe(profile.models[0]);
     expect(body).not.toHaveProperty("thinking");
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("tools");
