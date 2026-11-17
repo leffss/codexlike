@@ -8,18 +8,20 @@ import { createAgentSettingsStore } from "../../src/execution/agent-settings-sto
 /**
  * 执行设置存储（ADR 0017，GLOSSARY「执行设置」）：`~/.codexlike/agent-settings.json`
  * 独立文件持久化，与现有各设置文件同形态（自研 JSON 读写、损坏按默认值处理）。
- * 七项参数（执行设置票 01/02/03/07 + 任务并发上限票 01）：主任务与子代理工具
- * 轮次上限（默认 200、范围 10–1000，相互独立可调）、压缩保留对话轮数（默认 3、
- * 范围 1–10）、上下文告警阈值（整数百分比呈现与存储，默认 80、范围 50–95）、
- * MCP 工具调用超时（默认 30、范围 5–300 秒）与 MCP 连接超时（默认 15、范围
- * 5–120 秒）、任务并发上限（默认 3、范围 1–8，GLOSSARY「任务并发上限」）。
+ * 八项参数（执行设置票 01/02/03/07 + 任务并发上限票 01 + 模型请求重试票 03）：
+ * 主任务与子代理工具轮次上限（默认 200、范围 10–1000，相互独立可调）、压缩保留
+ * 对话轮数（默认 3、范围 1–10）、上下文告警阈值（整数百分比呈现与存储，默认 80、
+ * 范围 50–95）、MCP 工具调用超时（默认 30、范围 5–300 秒）与 MCP 连接超时
+ * （默认 15、范围 5–120 秒）、任务并发上限（默认 3、范围 1–8，GLOSSARY
+ * 「任务并发上限」）、模型请求重试次数（默认 2、范围 0–10，0 = 关闭重试，
+ * ADR 0024「重试不做 failover」）。
  */
 describe("agent-settings-store", () => {
   function makeDir() {
     return mkdtempSync(join(tmpdir(), "codexlike-agent-settings-"));
   }
 
-  it("默认值：未配置时七项均为默认值，不落文件", async () => {
+  it("默认值：未配置时八项均为默认值，不落文件", async () => {
     const dir = makeDir();
     const store = createAgentSettingsStore({ dir });
     expect(await store.get()).toEqual({
@@ -30,10 +32,11 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
   });
 
-  it("set/get 往返：七项独立持久化，重启（新 store 实例）后恢复", async () => {
+  it("set/get 往返：八项独立持久化，重启（新 store 实例）后恢复", async () => {
     const dir = makeDir();
     const store = createAgentSettingsStore({ dir });
     const saved = await store.set({
@@ -44,6 +47,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
     expect(saved).toEqual({
       maxToolRounds: 500,
@@ -53,6 +57,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
 
     // 等价重启：同目录新实例读回
@@ -65,6 +70,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
 
     // 落盘为普通 JSON（无敏感内容，无需加密）
@@ -79,6 +85,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
   });
 
@@ -95,6 +102,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("主任务工具轮次上限");
     }
@@ -107,6 +115,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法
     expect(
@@ -119,6 +128,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).maxToolRounds
     ).toBe(10);
@@ -132,6 +142,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).maxToolRounds
     ).toBe(1000);
@@ -150,6 +161,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("子代理工具轮次上限");
     }
@@ -162,6 +174,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法，两项互不影响
     const saved = await store.set({
@@ -172,6 +185,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     expect(saved.maxSubagentToolRounds).toBe(10);
     expect(saved.maxToolRounds).toBe(200);
@@ -185,6 +199,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).maxSubagentToolRounds
     ).toBe(1000);
@@ -203,6 +218,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("压缩保留对话轮数");
     }
@@ -215,6 +231,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法
     expect(
@@ -227,6 +244,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).compactKeepRounds
     ).toBe(1);
@@ -240,6 +258,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).compactKeepRounds
     ).toBe(10);
@@ -258,6 +277,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("上下文告警阈值");
     }
@@ -270,6 +290,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法
     expect(
@@ -282,6 +303,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).contextWarningThresholdPercent
     ).toBe(50);
@@ -295,6 +317,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).contextWarningThresholdPercent
     ).toBe(95);
@@ -313,6 +336,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: bad,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("MCP 工具调用超时");
     }
@@ -325,6 +349,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法
     expect(
@@ -337,6 +362,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 5,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).mcpCallTimeoutSeconds
     ).toBe(5);
@@ -350,6 +376,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 300,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).mcpCallTimeoutSeconds
     ).toBe(300);
@@ -368,6 +395,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: bad,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("MCP 连接超时");
     }
@@ -380,6 +408,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法，与调用超时相互独立
     const saved = await store.set({
@@ -390,6 +419,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 5,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     expect(saved.mcpConnectTimeoutSeconds).toBe(5);
     expect(saved.mcpCallTimeoutSeconds).toBe(30);
@@ -403,6 +433,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 120,
           taskConcurrencyLimit: 3,
+          modelMaxRetries: 2,
         })
       ).mcpConnectTimeoutSeconds
     ).toBe(120);
@@ -421,6 +452,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: bad,
+          modelMaxRetries: 2,
         })
       ).rejects.toThrow("任务并发上限");
     }
@@ -433,6 +465,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 边界值合法，与其余六项相互独立
     const saved = await store.set({
@@ -443,6 +476,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 1,
+      modelMaxRetries: 2,
     });
     expect(saved.taskConcurrencyLimit).toBe(1);
     expect(
@@ -455,12 +489,69 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 30,
           mcpConnectTimeoutSeconds: 15,
           taskConcurrencyLimit: 8,
+          modelMaxRetries: 2,
         })
       ).taskConcurrencyLimit
     ).toBe(8);
   });
 
-  it("损坏/非法 JSON 文件：七项均按默认值处理（不抛错）", async () => {
+  it("set 校验模型请求重试次数（模型请求重试票 03）：0–10 的整数；-1、11、1.5、NaN 拒绝且不落盘，0 边界合法（关闭重试）", async () => {
+    const dir = makeDir();
+    const store = createAgentSettingsStore({ dir });
+    for (const bad of [-1, 11, 1.5, Number.NaN]) {
+      await expect(
+        store.set({
+          maxToolRounds: 200,
+          maxSubagentToolRounds: 200,
+          compactKeepRounds: 3,
+          contextWarningThresholdPercent: 80,
+          mcpCallTimeoutSeconds: 30,
+          mcpConnectTimeoutSeconds: 15,
+          taskConcurrencyLimit: 3,
+          modelMaxRetries: bad,
+        })
+      ).rejects.toThrow("模型请求重试次数");
+    }
+    // 整体拒绝：其余项合法值也不落盘
+    expect(await createAgentSettingsStore({ dir }).get()).toEqual({
+      maxToolRounds: 200,
+      maxSubagentToolRounds: 200,
+      compactKeepRounds: 3,
+      contextWarningThresholdPercent: 80,
+      mcpCallTimeoutSeconds: 30,
+      mcpConnectTimeoutSeconds: 15,
+      taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
+    });
+    // 边界值合法：0 = 完全关闭重试（调试快速失败），10 = 上限
+    const zero = await store.set({
+      maxToolRounds: 200,
+      maxSubagentToolRounds: 200,
+      compactKeepRounds: 3,
+      contextWarningThresholdPercent: 80,
+      mcpCallTimeoutSeconds: 30,
+      mcpConnectTimeoutSeconds: 15,
+      taskConcurrencyLimit: 3,
+      modelMaxRetries: 0,
+    });
+    expect(zero.modelMaxRetries).toBe(0);
+    expect(
+      (
+        await store.set({
+          maxToolRounds: 200,
+          maxSubagentToolRounds: 200,
+          compactKeepRounds: 3,
+          contextWarningThresholdPercent: 80,
+          mcpCallTimeoutSeconds: 30,
+          mcpConnectTimeoutSeconds: 15,
+          taskConcurrencyLimit: 3,
+          modelMaxRetries: 10,
+        })
+      ).modelMaxRetries
+    ).toBe(10);
+  });
+
+  it("损坏/非法 JSON 文件：八项均按默认值处理（不抛错）", async () => {
     const dir = makeDir();
     writeFileSync(join(dir, "agent-settings.json"), "{oops", "utf8");
     const store = createAgentSettingsStore({ dir });
@@ -472,6 +563,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
   });
 
@@ -490,6 +582,7 @@ describe("agent-settings-store", () => {
           mcpCallTimeoutSeconds: 2,
           mcpConnectTimeoutSeconds: 500,
           taskConcurrencyLimit: 0,
+          modelMaxRetries: 99,
         }),
         "utf8"
       );
@@ -502,6 +595,7 @@ describe("agent-settings-store", () => {
         mcpCallTimeoutSeconds: 30,
         mcpConnectTimeoutSeconds: 15,
         taskConcurrencyLimit: 3,
+        modelMaxRetries: 2,
       });
     }
     // 旧格式文件（票 01/02 只有轮次两项）：后续各项按默认补齐，轮次项保留
@@ -519,6 +613,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 票 07 之前的格式（四字段）：MCP 两项按默认补齐，其余保留
     writeFileSync(
@@ -539,6 +634,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 任务并发上限票 01 之前的格式（六字段）：并发上限按默认补齐，其余保留
     writeFileSync(
@@ -561,6 +657,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 90,
       mcpConnectTimeoutSeconds: 45,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
     // 合法新值保留、非法旧值回退可并存（逐项收敛）
     writeFileSync(
@@ -573,6 +670,7 @@ describe("agent-settings-store", () => {
         mcpCallTimeoutSeconds: 90,
         mcpConnectTimeoutSeconds: 45,
         taskConcurrencyLimit: 6,
+        modelMaxRetries: 6,
       }),
       "utf8"
     );
@@ -584,6 +682,7 @@ describe("agent-settings-store", () => {
       mcpCallTimeoutSeconds: 90,
       mcpConnectTimeoutSeconds: 45,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
     rmSync(dir, { recursive: true, force: true });
   });

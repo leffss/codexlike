@@ -47,9 +47,10 @@ afterEach(() => {
  * 执行设置 IPC 链路（ADR 0017）：get/set 频道与现有设置频道同构——
  * 主进程 handler 持有 store（内存缓存由 main.ts 装配层的 onSaved 刷新），
  * 渲染端经 preload 暴露的 agentSettings 命名空间转发同名 channel。
- * 七项参数（执行设置票 01/02/03/07 + 任务并发上限票 01）：主任务与子代理
- * 工具轮次上限、压缩保留对话轮数、上下文告警阈值、MCP 工具调用超时与连接
- * 超时（秒）、任务并发上限（1–8，默认 3）。
+ * 八项参数（执行设置票 01/02/03/07 + 任务并发上限票 01 + 模型请求重试票 03）：
+ * 主任务与子代理工具轮次上限、压缩保留对话轮数、上下文告警阈值、MCP 工具调用
+ * 超时与连接超时（秒）、任务并发上限（1–8，默认 3）、模型请求重试次数
+ * （0–10，默认 2，0 = 关闭重试）。
  */
 describe("agent-settings IPC", () => {
   function setup() {
@@ -91,6 +92,7 @@ describe("agent-settings IPC", () => {
       mcpCallTimeoutSeconds: 30,
       mcpConnectTimeoutSeconds: 15,
       taskConcurrencyLimit: 3,
+      modelMaxRetries: 2,
     });
 
     // set：合法值返回保存结果、落盘（经 store）并通知装配层刷新内存缓存
@@ -103,6 +105,7 @@ describe("agent-settings IPC", () => {
         mcpCallTimeoutSeconds: 120,
         mcpConnectTimeoutSeconds: 60,
         taskConcurrencyLimit: 6,
+        modelMaxRetries: 6,
       })
     ).resolves.toEqual({
       maxToolRounds: 500,
@@ -112,6 +115,7 @@ describe("agent-settings IPC", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
     expect(saved).toEqual([
       {
@@ -122,6 +126,7 @@ describe("agent-settings IPC", () => {
         mcpCallTimeoutSeconds: 120,
         mcpConnectTimeoutSeconds: 60,
         taskConcurrencyLimit: 6,
+        modelMaxRetries: 6,
       },
     ]);
     await expect(
@@ -134,6 +139,7 @@ describe("agent-settings IPC", () => {
       mcpCallTimeoutSeconds: 120,
       mcpConnectTimeoutSeconds: 60,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
   });
 
@@ -273,6 +279,7 @@ describe("agent-settings IPC", () => {
         mcpCallTimeoutSeconds: 30,
         mcpConnectTimeoutSeconds: 15,
         taskConcurrencyLimit: 0,
+        modelMaxRetries: 2,
       })
     ).rejects.toThrow("任务并发上限");
     await expect(
@@ -284,8 +291,34 @@ describe("agent-settings IPC", () => {
         mcpCallTimeoutSeconds: 30,
         mcpConnectTimeoutSeconds: 15,
         taskConcurrencyLimit: "3",
+        modelMaxRetries: 2,
       })
     ).rejects.toThrow("任务并发上限");
+    // 模型请求重试票 03：越界（0–10 外）与字符串数字同样拒绝
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
+        taskConcurrencyLimit: 3,
+        modelMaxRetries: 11,
+      })
+    ).rejects.toThrow("模型请求重试次数");
+    await expect(
+      invokeSet({
+        maxToolRounds: 200,
+        maxSubagentToolRounds: 200,
+        compactKeepRounds: 3,
+        contextWarningThresholdPercent: 80,
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
+        taskConcurrencyLimit: 3,
+        modelMaxRetries: "2",
+      })
+    ).rejects.toThrow("模型请求重试次数");
     // 非对象输入（同步抛出，同子代理 handler 先例）
     expect(() => bridge.handlers.get(IPC.agentSettings.set)!({}, 42)).toThrow(
       "输入不合法"
@@ -309,6 +342,7 @@ describe("agent-settings IPC", () => {
       mcpCallTimeoutSeconds: 90,
       mcpConnectTimeoutSeconds: 45,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
     expect(bridge.invoke).toHaveBeenLastCalledWith(IPC.agentSettings.set, {
       maxToolRounds: 300,
@@ -318,6 +352,7 @@ describe("agent-settings IPC", () => {
       mcpCallTimeoutSeconds: 90,
       mcpConnectTimeoutSeconds: 45,
       taskConcurrencyLimit: 6,
+      modelMaxRetries: 6,
     });
   });
 });

@@ -8,11 +8,14 @@ import {
   DEFAULT_MAX_TOOL_ROUNDS,
   DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
   DEFAULT_MCP_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MODEL_MAX_RETRIES,
   DEFAULT_TASK_CONCURRENCY_LIMIT,
   MCP_CALL_TIMEOUT_SECONDS_MAX,
   MCP_CALL_TIMEOUT_SECONDS_MIN,
   MCP_CONNECT_TIMEOUT_SECONDS_MAX,
   MCP_CONNECT_TIMEOUT_SECONDS_MIN,
+  MODEL_MAX_RETRIES_MAX,
+  MODEL_MAX_RETRIES_MIN,
   TASK_CONCURRENCY_LIMIT_MAX,
   TASK_CONCURRENCY_LIMIT_MIN,
   TOOL_ROUNDS_MAX,
@@ -33,6 +36,11 @@ function parseIntInRange(
   max: number,
   fallback: number
 ): number {
+  // 空串/纯空白先行回退：Number("") 归一为 0，当下界为 0 的设置项（模型请求
+  // 重试次数）会把「清空输入框」静默变成合法 0——先挡掉保证空输入一律回退默认
+  if (text.trim() === "") {
+    return fallback;
+  }
   const num = Number(text);
   if (!Number.isInteger(num) || num < min || num > max) {
     return fallback;
@@ -130,6 +138,24 @@ export function parseTaskConcurrencyLimitInput(
     text,
     TASK_CONCURRENCY_LIMIT_MIN,
     TASK_CONCURRENCY_LIMIT_MAX,
+    fallback
+  );
+}
+
+/**
+ * 模型请求重试次数解析（模型请求重试票 03，ADR 0024「重试不做 failover」）：
+ * 合法范围 0–10（0 合法 = 完全关闭重试，调试快速失败），默认
+ * DEFAULT_MODEL_MAX_RETRIES（=2，与 SDK 默认一致）；作用于对话、compact、
+ * 子代理全部模型请求，对话回合/子代理运行开始快照，compact 逐次读取。
+ */
+export function parseModelMaxRetriesInput(
+  text: string,
+  fallback: number = DEFAULT_MODEL_MAX_RETRIES
+): number {
+  return parseIntInRange(
+    text,
+    MODEL_MAX_RETRIES_MIN,
+    MODEL_MAX_RETRIES_MAX,
     fallback
   );
 }

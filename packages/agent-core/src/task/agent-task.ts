@@ -61,6 +61,7 @@ import {
 import {
   DEFAULT_COMPACT_KEEP_ROUNDS,
   DEFAULT_MAX_TOOL_ROUNDS,
+  DEFAULT_MODEL_MAX_RETRIES,
 } from "./execution-settings";
 import type {
   CompactRecord,
@@ -143,6 +144,16 @@ export interface CreateAgentTaskOptions {
    * 1–10），agent-core 不重复校验。
    */
   compactKeepRounds?: () => number;
+  /**
+   * 模型请求重试次数的逐次解析取值函数（GLOSSARY「执行设置」，ADR 0024
+   * 「重试不做 failover」；先例为 toolRoundsLimit 的 resolver 范式，agent-core
+   * 不依赖任何存储实现）。作用于任务的全部模型请求：对话每个回合（sendMessage）
+   * 开始时读取一次并快照（进行中回合不受中途调整影响，下一次发送按当时值重新
+   * 解析），compact 每次执行时读取（无「进行中」状态，下次压缩立即采用新值）。
+   * 未注入用 DEFAULT_MODEL_MAX_RETRIES（=2，与 SDK 默认一致）；宿主保证返回
+   * 合法值（设置层校验 0–10），agent-core 不重复校验。
+   */
+  modelMaxRetries?: () => number;
   /** 初始审批模式（缺省用 record.approvalMode） */
   approvalMode?: ApprovalMode;
   /** 时间与 id 生成注入（测试用固定值） */
@@ -517,6 +528,11 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       // 不受中途调小影响，下一次发送按当时值重新解析；未注入用默认 200
       const toolRoundsLimit =
         options.toolRoundsLimit?.() ?? DEFAULT_MAX_TOOL_ROUNDS;
+      // 模型请求重试次数快照（GLOSSARY「执行设置」，ADR 0024）：回合开始时读取
+      // 一次——本回合全部 streamText（含工具多轮）与失败文案用同一值；进行中
+      // 回合不受中途调整影响，下一次发送按当时值重新解析
+      const modelMaxRetries =
+        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
       // 每次发送冻结主执行及其子代理的权限与模型，偏好修改只用于下次发送。
       approvalMode = requestedApprovalMode ?? nextApprovalMode;
       profile = { ...profile };
@@ -619,6 +635,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               messages: pending,
               abortSignal: signal,
               tools: modelTools,
+              // 重试次数（执行设置）：回合开始快照，本回合全部轮次复用
+              maxRetries: modelMaxRetries,
             });
 
             const toolCalls: {
@@ -856,11 +874,12 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             aborted = true;
           } else {
             // 错误路径：中文提示落库并广播；不进入对话上下文，任务可继续使用
+            // （重试耗尽文案携带回合开始快照的重试次数配置值，ADR 0024）
             const errorMessage: StoredMessage = {
               id: generateId(),
               taskId: record.id,
               role: "error",
-              content: describeModelError(error),
+              content: describeModelError(error, modelMaxRetries),
               createdAt: now(),
             };
             persistence.insertMessage(errorMessage);
@@ -925,6 +944,10 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       // 每次执行读取一次——设置页保存后对下一次 /compact 立即生效
       const keepRounds =
         options.compactKeepRounds?.() ?? DEFAULT_COMPACT_KEEP_ROUNDS;
+      // 重试次数同样逐次读取（GLOSSARY「执行设置」，ADR 0024）：本次压缩的
+      // generateText 与失败提示共用；下一次压缩按当时值重新解析
+      const modelMaxRetries =
+        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
       const keptStart = keptRoundsStart(context, keepRounds);
       if (keptStart === 0) {
         throw new Error(
@@ -946,6 +969,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             model: modelFor(profile, {}),
             system: COMPACT_SYSTEM_PROMPT,
             abortSignal: signal,
+            // 重试次数（执行设置）：本次压缩逐次读取的配置值
+            maxRetries: modelMaxRetries,
             prompt: [
               {
                 role: "user",
@@ -956,7 +981,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           signal?.throwIfAborted();
           summary = result.text.trim();
         } catch (error) {
-          throw new Error(describeModelError(error), { cause: error });
+          throw new Error(describeModelError(error, modelMaxRetries), {
+            cause: error,
+          });
         }
         if (summary === "") {
           throw new Error("压缩失败：模型返回了空摘要，请重试");
