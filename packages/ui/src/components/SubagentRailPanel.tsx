@@ -115,14 +115,13 @@ export function SubagentRailPanelBody(props: {
       data-testid="subagents-panel-body"
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      {/* 摘要行：总数 + 进行中/异常计数（非零渲染），常驻「一眼知全局」。
-          relative z-30：浮层展开时仍在其上层可见——收起把手不消失 */}
+      {/* 摘要行：总数 + 进行中/异常计数（非零渲染），常驻「一眼知全局」 */}
       <button
         type="button"
         data-testid="subagent-rail-summary"
         onClick={() => setListOpen(!listOpen)}
         aria-expanded={listOpen}
-        className="relative z-30 flex w-full shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-1.5 text-left hover:bg-hover"
+        className="flex w-full shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 text-left hover:bg-hover"
       >
         <span className="text-xs text-fg-subtle">
           子代理 {subagents.length} 个
@@ -163,58 +162,63 @@ export function SubagentRailPanelBody(props: {
           <Elapsed subagent={selected} />
         </button>
       )}
-      {/* 浮层完整列表：遮罩 + 列表（absolute 覆盖，点选即选中并收起）。
-          覆盖感：投影/描边/圆角与面板拉开层次 + 轻遮罩压暗底层（主题
-          --overlay 降浓度——模态级 45% 对右栏内小浮层过重）（原型评审
-          反馈「像内联列表」的修复） */}
-      {listOpen && (
-        <>
-          <button
-            type="button"
-            aria-label="收起列表"
-            onClick={() => setListOpen(false)}
-            className="absolute inset-0 z-10 cursor-default bg-overlay/50"
-          />
-          <ul
-            ref={listRef}
-            data-testid="subagent-rail-list"
-            className="absolute inset-x-0 top-0 z-20 max-h-[70%] overflow-auto rounded-b-lg border border-line bg-surface py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
-          >
-            {subagents.map((item) => (
-              <li key={item.id} data-subagent-id={item.id}>
-                <button
-                  type="button"
-                  data-testid="subagent-rail-item"
-                  data-subagent-state={item.state}
-                  onClick={() => {
-                    setSelectedId(item.id);
-                    setListOpen(false);
-                  }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
-                    selected?.id === item.id ? "bg-hover" : "hover:bg-hover"
-                  }`}
-                >
-                  <StatusDot subagent={item} />
-                  <span
-                    className={`min-w-0 flex-1 truncate text-xs ${
-                      selected?.id === item.id ? "text-fg" : "text-fg-muted"
+      {/* 内容区：详情独占；浮层与遮罩都锚定在这里——与摘要行/当前行
+          物理不重叠（首版浮层 top-0 与摘要行 z-30 叠放，hover 半透明
+          时列表第一行透出文字成「重叠」，且第一行常被摘要行挡住） */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* 浮层完整列表：遮罩 + 列表（absolute 覆盖，点选即选中并收起）。
+            覆盖感：投影/描边/圆角与面板拉开层次 + 轻遮罩压暗底层（主题
+            --overlay 降浓度——模态级 45% 对右栏内小浮层过重）（原型评审
+            反馈「像内联列表」的修复） */}
+        {listOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="收起列表"
+              onClick={() => setListOpen(false)}
+              className="absolute inset-0 z-10 cursor-default bg-overlay/50"
+            />
+            <ul
+              ref={listRef}
+              data-testid="subagent-rail-list"
+              className="absolute inset-x-0 top-0 z-20 max-h-[85%] overflow-auto rounded-b-lg border border-line bg-surface py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+            >
+              {subagents.map((item) => (
+                <li key={item.id} data-subagent-id={item.id}>
+                  <button
+                    type="button"
+                    data-testid="subagent-rail-item"
+                    data-subagent-state={item.state}
+                    onClick={() => {
+                      setSelectedId(item.id);
+                      setListOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                      selected?.id === item.id ? "bg-hover" : "hover:bg-hover"
                     }`}
-                    title={item.task}
                   >
-                    {item.task === "" ? "（任务描述缺失）" : item.task}
-                  </span>
-                  <span className={`shrink-0 text-xs ${statusClass(item)}`}>
-                    {statusText(item)}
-                  </span>
-                  <Elapsed subagent={item} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {/* 详情：独占剩余高度 */}
-      {selected !== null && <SubagentDetail subagent={selected} />}
+                    <StatusDot subagent={item} />
+                    <span
+                      className={`min-w-0 flex-1 truncate text-xs ${
+                        selected?.id === item.id ? "text-fg" : "text-fg-muted"
+                      }`}
+                      title={item.task}
+                    >
+                      {item.task === "" ? "（任务描述缺失）" : item.task}
+                    </span>
+                    <span className={`shrink-0 text-xs ${statusClass(item)}`}>
+                      {statusText(item)}
+                    </span>
+                    <Elapsed subagent={item} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {/* 详情：独占剩余高度 */}
+        {selected !== null && <SubagentDetail subagent={selected} />}
+      </div>
     </div>
   );
 }
