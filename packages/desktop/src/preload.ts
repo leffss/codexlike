@@ -173,6 +173,18 @@ const api: CodexLikeApi = {
     get: () => ipcRenderer.invoke(IPC.themeSettings.get),
     set: (theme) => ipcRenderer.invoke(IPC.themeSettings.set, theme),
   },
+  traySettings: {
+    get: () => ipcRenderer.invoke(IPC.traySettings.get),
+    set: (input) => ipcRenderer.invoke(IPC.traySettings.set, input),
+    onLaunchAtLoginChanged: (listener) => {
+      const handle = (_event: Electron.IpcRendererEvent, enabled: boolean) =>
+        listener(enabled);
+      ipcRenderer.on(IPC.traySettings.changed, handle);
+      return () => {
+        ipcRenderer.removeListener(IPC.traySettings.changed, handle);
+      };
+    },
+  },
   launchState: {
     get: () => ipcRenderer.invoke(IPC.launchState.get),
     setWorkbenchTarget: (target) =>

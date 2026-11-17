@@ -219,8 +219,21 @@ async function main() {
     await window.getByTestId("task-search-toggle").click();
     await window.getByTestId("task-search-input").fill("长历史");
 
-    // 关闭按钮入口：即使项目折叠/正在搜索/当前非执行任务也提示，取消不提前停止。
+    // 关闭按钮入口（ADR 0025 托盘驻留）：点 X 只驻留——窗口隐藏、任务不停；
+    // 退出确认只在托盘菜单「退出」等价路径（app.quit）下出现，取消不提前停止。
     await window.getByTestId("window-close").click();
+    const resided = await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win.isVisible()) return false;
+      win.show();
+      win.focus();
+      return true;
+    });
+    assert(resided, "关闭按钮必须隐藏主窗口（驻留托盘）");
+    assert(!childDisconnected, "驻留不停止子代理模型连接");
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
     await window.getByTestId("exit-confirm").waitFor();
     await assertSemanticOverlay(
       window.getByTestId("exit-confirm").locator("../..")
@@ -310,7 +323,10 @@ async function main() {
     );
     const count = model.requestCount();
     const done = exited(app);
-    await window.getByTestId("window-close").click();
+    // 托盘「退出」等价路径（app.quit → 退出屏障）：flush 挂起期间不停止执行
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
     await window.getByTestId("exit-confirm").click();
     await window
       .getByTestId("exit-progress")

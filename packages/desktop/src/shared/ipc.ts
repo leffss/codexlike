@@ -45,6 +45,7 @@ import type {
 import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
+import type { TraySettings } from "../tray/tray-settings-store";
 import type { ExitState } from "../lifecycle/application-exit";
 import type {
   LaunchState,
@@ -66,6 +67,8 @@ export type { TerminalShell };
 export type { OpenerView, OpenerListResult, OpenerOpenInput, OpenerOpenResult };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
+// 托盘驻留（ADR 0025）：设置通道的公共形状
+export type { TraySettings };
 // 输入队列（票 01/02）：队列条与事件载荷的公共形状
 export type { QueuedMessage, QueueChangeReason };
 // 任务排队（任务并发上限票 02）：队列条与事件载荷的公共形状
@@ -187,6 +190,13 @@ export const IPC = {
   themeSettings: {
     get: "theme-settings:get",
     set: "theme-settings:set",
+  },
+  /** 托盘驻留与开机启动（ADR 0025）：开机启动开关（托盘菜单与设置页双入口同步） */
+  traySettings: {
+    get: "tray-settings:get",
+    set: "tray-settings:set",
+    /** 主→渲染：开关在任一入口变更（设置页已打开时实时刷新 checkbox） */
+    changed: "tray-settings:changed",
   },
   /** 启动现场（票03）：冷启动查询 + 工作台目标/视图变更上报（低频事件即时落盘） */
   launchState: {
@@ -637,6 +647,20 @@ export interface CodexLikeApi {
     get(): Promise<ThemeName | null>;
     /** 保存主题偏好（light / dark），立即生效并同步原生窗口底色 */
     set(theme: ThemeName): Promise<ThemeName>;
+  };
+  traySettings: {
+    /**
+     * 当前托盘设置（GLOSSARY「开机启动」默认关、驻留气泡只提示一次）；
+     * residencyHintShown 为内部标志，set 通道不接受它。
+     */
+    get(): Promise<TraySettings>;
+    /**
+     * 保存开机启动开关；主进程同步登录项（app.setLoginItemSettings，
+     * 开发模式跳过）与托盘菜单勾选态。
+     */
+    set(input: { launchAtLogin: boolean }): Promise<TraySettings>;
+    /** 订阅开关变更（托盘菜单切换时已打开的设置页实时刷新）；返回取消订阅函数 */
+    onLaunchAtLoginChanged(listener: (enabled: boolean) => void): () => void;
   };
   launchState: {
     /** 启动现场（无文件/损坏返回 null）；冷启动恢复工作台目标与视图初始值 */

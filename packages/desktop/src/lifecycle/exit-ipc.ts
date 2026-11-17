@@ -16,6 +16,12 @@ export function registerApplicationExit(options: {
    * 供注入方同步刷出防抖中的未落盘写（当前仅启动现场 launch-state 注入，票02）。
    */
   flushPendingWrites?(): void;
+  /**
+   * 托盘驻留（ADR 0025，GLOSSARY「托盘驻留」）：注入后，idle/error 下用户
+   * 关闭主窗口（点 X）只隐藏到托盘、不触发退出屏障；真退出经托盘菜单
+   * 「退出」→ app.quit → before-quit 走屏障。未注入维持关闭即退出的旧行为。
+   */
+  minimizeToTray?(): void;
 }) {
   const win = options.window;
   let storageClosed = false;
@@ -48,7 +54,21 @@ export function registerApplicationExit(options: {
     options.flushPendingWrites?.();
     exit.request();
   }
-  win.on("close", request);
+  win.on("close", (event) => {
+    const phase = exit.state().phase;
+    if (phase === "ready") return;
+    // 退出流程进行中（confirming/flushing/stopping）：维持屏障拦截，交给状态机收尾
+    if (
+      options.minimizeToTray !== undefined &&
+      (phase === "idle" || phase === "error")
+    ) {
+      // 托盘驻留（ADR 0025）：用户点 X 只是隐藏到托盘，任务后台继续，不进退出屏障
+      event.preventDefault();
+      options.minimizeToTray();
+      return;
+    }
+    request(event);
+  });
   app.on("before-quit", request);
   app.on("window-all-closed", () => app.quit());
   const owned = (event: Electron.IpcMainInvokeEvent) => {

@@ -335,24 +335,40 @@ async function main() {
     await window.keyboard.press("Alt");
     assert(!(await nativeState(app)).menuVisible, "Alt 不得唤回通用菜单");
 
+    // 托盘驻留（ADR 0025，GLOSSARY「托盘驻留」）：点 X 只隐藏到托盘、
+    // 任务后台继续，进程不退出；真退出走托盘菜单「退出」等价路径（app.quit）。
+    await window.getByTestId("window-close").click();
+    await until(
+      async () =>
+        !(await app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows().some((win) => win.isVisible())
+        )),
+      "关闭按钮必须隐藏主窗口（驻留托盘）"
+    );
     const child = app.process();
+    assert(
+      child.exitCode === null && child.signalCode === null,
+      "驻留后进程必须存活"
+    );
     const done = new Promise((resolve) =>
       child.once("exit", (code, signal) => resolve({ code, signal }))
     );
-    await window.getByTestId("window-close").click();
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
     let timer;
     const result = await Promise.race([
       done,
       new Promise((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error("自绘关闭按钮未正常结束进程")),
+          () => reject(new Error("托盘退出路径未正常结束进程")),
           15_000
         );
       }),
     ]).finally(() => clearTimeout(timer));
     assert(
       result.code === 0 && result.signal === null,
-      "空闲关闭必须受控正常退出"
+      "托盘退出必须受控正常退出"
     );
     app = null;
 
@@ -362,11 +378,11 @@ async function main() {
     await untilDraft(
       window,
       "自绘关闭按钮保留的草稿",
-      "自绘关闭应经过保存屏障"
+      "真退出路径应经过保存屏障"
     );
     await checkTitlebar(window);
     console.log(
-      "PASS window-controls: 菜单移除、最小化、最大化/还原、外部状态/初始快照、设置/窄窗/主题、关闭保存"
+      "PASS window-controls: 菜单移除、最小化、最大化/还原、外部状态/初始快照、设置/窄窗/主题、关闭驻留与托盘退出保存"
     );
   } finally {
     await closeApp(app);

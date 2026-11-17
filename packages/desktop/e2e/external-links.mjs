@@ -77,13 +77,34 @@ async function workbenchSnapshot(window) {
   });
 }
 
-/** 独立于 closeApp 清理的退出证据；只有真实 exit(0, null) 才算正常退出。 */
+/**
+ * 托盘驻留（ADR 0025）下的正常关闭证据：点 X（标题栏可见时）只驻留——
+ * 窗口隐藏、进程存活；真退出走托盘菜单「退出」等价路径（app.quit → 退出
+ * 屏障），只有真实 exit(0, null) 才算正常退出。独立于 closeApp 清理。
+ */
 async function attemptNormalClose(app, window, mainWindowId, closeVisible) {
   const child = app.process();
   assert(
     child.exitCode === null && child.signalCode === null,
     "关闭操作前应用进程必须仍在运行"
   );
+  if (closeVisible) {
+    // ① 点 X 只驻留：窗口隐藏、进程不停（任务后台继续的窗口面证据）
+    await rawClick(window, "window-close");
+    const hidden = await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win.isVisible()) return false;
+      win.show();
+      win.focus();
+      return true;
+    });
+    assert(hidden, "关闭按钮必须隐藏主窗口（驻留托盘）");
+    assert(
+      child.exitCode === null && child.signalCode === null,
+      "驻留后进程必须存活"
+    );
+  }
+  // ② 托盘退出等价路径：app.quit → 退出屏障 → 受控退出（不伪造保存回执）
   let onExit;
   let timer;
   const done = new Promise((resolve) => {
@@ -99,21 +120,16 @@ async function attemptNormalClose(app, window, mainWindowId, closeVisible) {
       CLOSE_TIMEOUT
     );
   });
-  const method = closeVisible ? "window-close.click" : "BrowserWindow.close";
+  const method = closeVisible ? "reside+tray-quit(app.quit)" : "app.quit";
   evidence("normal-close-request", {
     method,
     timeoutMs: CLOSE_TIMEOUT,
     pid: child.pid,
   });
   try {
-    if (closeVisible) {
-      await rawClick(window, "window-close");
-    } else {
-      // 标题栏丢失时仍尝试原生关闭；不调用 destroy/app.exit，也不伪造保存回执。
-      await app.evaluate(({ BrowserWindow }, id) => {
-        BrowserWindow.fromId(id).close();
-      }, mainWindowId);
-    }
+    await app.evaluate(({ app }) => {
+      app.quit();
+    });
     const result = { method, ...(await done) };
     evidence("normal-close-result", result);
     if (!result.exited)

@@ -168,6 +168,8 @@ export function SettingsPage() {
 
       <ThemeSettingsSection />
 
+      <TraySettingsSection />
+
       <SearchSettingsSection />
       <SubagentSettingsSection />
       <ExecutionSettingsSection />
@@ -224,6 +226,75 @@ function ThemeSettingsSection() {
             深色{theme === "dark" ? "（当前）" : ""}
           </button>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 启动与托盘区（ADR 0025，GLOSSARY「托盘驻留」「开机启动」）：
+ * 开机启动开关，即点即存（主进程统一同步登录项与托盘菜单勾选，
+ * 与托盘菜单切换互为镜像）；关闭主窗口驻留托盘为固定语义，仅说明不设开关。
+ */
+function TraySettingsSection() {
+  const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    void window.codexlike.traySettings.get().then((settings) => {
+      setLaunchAtLogin(settings.launchAtLogin);
+    });
+    // 托盘菜单切换时（设置页已打开）实时刷新，双入口始终同显
+    return window.codexlike.traySettings.onLaunchAtLoginChanged((enabled) => {
+      setLaunchAtLogin(enabled);
+    });
+  }, []);
+
+  function toggle(enabled: boolean) {
+    setLaunchAtLogin(enabled);
+    setMessage(null);
+    void window.codexlike.traySettings
+      .set({ launchAtLogin: enabled })
+      .then((settings) => setLaunchAtLogin(settings.launchAtLogin))
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-base font-medium text-fg">启动与托盘</h2>
+        <p className="text-xs text-fg-muted">
+          开机启动后随系统登录静默驻留托盘；关闭窗口时应用驻留系统托盘、任务继续后台运行。
+        </p>
+      </div>
+
+      <div
+        data-testid="tray-settings"
+        className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+      >
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            data-testid="tray-launch-at-login"
+            checked={launchAtLogin === true}
+            disabled={launchAtLogin === null}
+            onChange={(e) => toggle(e.target.checked)}
+          />
+          开机启动
+        </label>
+        <p className="text-xs text-fg-muted">
+          关闭窗口不会退出应用：它最小化到系统托盘继续运行，从托盘菜单「退出」才会真正退出。
+        </p>
+        {message && (
+          <p
+            data-testid="tray-settings-message"
+            className="text-xs text-danger-fg"
+          >
+            {message}
+          </p>
+        )}
       </div>
     </section>
   );

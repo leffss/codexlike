@@ -71,6 +71,13 @@ import { registerTaskHandlers } from "./tasks/task-ipc";
 import { createSqliteInputQueueStore } from "./tasks/input-queue-store";
 import { createSqliteTaskQueueStore } from "./tasks/task-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
+import {
+  createTraySettingsStore,
+  type TraySettings,
+} from "./tray/tray-settings-store";
+import { registerTraySettingsHandlers } from "./tray/tray-settings-ipc";
+import { shouldStartHidden, syncLoginItem } from "./tray/login-item";
+import { createTrayResidency, type TrayResidency } from "./tray/tray-residency";
 import { registerWindowControls } from "./window/window-controls";
 import { registerNavigationPolicy } from "./window/navigation-policy";
 import { taskScreenshotDir } from "./tasks/screenshots";
@@ -115,6 +122,32 @@ const WORKBENCH_DB_FILENAME = "task-workbench.db";
 
 let mainWindow: BrowserWindow | null = null;
 
+// 开机静默驻留（ADR 0025）：登录项以 --hidden 启动本应用时不弹主窗口；
+// 手动打开不带该参数，永远正常弹窗。
+const startHidden = shouldStartHidden(process.argv);
+
+// 单实例锁（ADR 0025）：驻留托盘后误开第二实例会出现两个托盘图标、两套
+// 任务队列；第二实例的启动意图是把应用调到眼前——激活已有主窗口后自行退出。
+// 仅打包环境启用（与登录项的 dev 防线一致）：开发/e2e 的 electron.exe 共用
+// 默认 userData，启用会把本机并行实例误判成第二实例。
+const hasSingleInstanceLock =
+  !app.isPackaged || app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+// 托盘控制器槽位（可变绑定延后到 whenReady 装配，同 pumpTaskQueue 模式）：
+// 第二实例激活走控制器的 showMainWindow，保住静默驻留的 pendingMaximize 补恢复。
+let trayResidency: TrayResidency | null = null;
+app.on("second-instance", () => {
+  if (trayResidency) {
+    trayResidency.showMainWindow();
+    return;
+  }
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 /** 各主题的窗口底色（页面加载前可见；与 styles.css 的 --canvas 保持一致） */
 const WINDOW_BACKGROUND: Record<ThemeName, string> = {
   light: "#f8fafc",
@@ -140,6 +173,8 @@ function createMainWindow(
     minHeight: MIN_WINDOW_SIZE.height,
     title: "CodexLike",
     frame: false,
+    // 开机静默驻留（ADR 0025）：--hidden 启动不显示窗口，驻留托盘待唤出
+    show: !startHidden,
     backgroundColor: WINDOW_BACKGROUND[theme ?? "light"],
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -162,8 +197,10 @@ function createMainWindow(
     );
   }
   const win = new BrowserWindow(options);
-  // maximized 为真：先按正常态 bounds 建窗再 maximize（取消最大化可回到现场 bounds）
-  if (launch?.maximized === true) {
+  // maximized 为真：先按正常态 bounds 建窗再 maximize（取消最大化可回到现场 bounds）。
+  // 静默驻留启动（--hidden）例外：maximize() 会强制显示窗口，改由托盘在
+  // 首次唤出时补恢复（createTrayResidency 的 pendingMaximize，ADR 0025）。
+  if (launch?.maximized === true && !startHidden) {
     win.maximize();
   }
 
@@ -413,6 +450,8 @@ function registerLaunchStateHandlers(store: LaunchStateStore): void {
 }
 
 void app.whenReady().then(async () => {
+  // 单实例锁未抢到（第二实例）：不装配（app.quit 已在途），立即返回
+  if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
   // ADR 0014：session→task 改名启用新库文件（task-workbench.db），旧 session-workbench.db
   // 不读、不删、不迁移；启动现场（workbench_state）在新库从零开始。
@@ -689,10 +728,47 @@ void app.whenReady().then(async () => {
   });
   console.log(`[main] CodexLike 已启动，数据目录：${dataDir()}`);
 
+  // 托盘驻留（ADR 0025，GLOSSARY「托盘驻留」「开机启动」）：关闭主窗口只
+  // 隐藏到托盘、任务后台继续；真退出走托盘菜单「退出」→ app.quit → 退出屏障。
+  const traySettingsStore = createTraySettingsStore({ dir: dataDir() });
+  const traySettings = await traySettingsStore.get();
+  // 开机启动开关变更的统一收尾：登录项 + 托盘菜单勾选 + 通知渲染层
+  // （设置页 IPC 与托盘菜单双入口共用，GLOSSARY「开机启动」；设置页
+  // 已打开时经 tray-settings:changed 实时刷新 checkbox）
+  const afterLaunchAtLoginChange = (enabled: boolean): void => {
+    syncLoginItem(app, enabled);
+    trayResidency?.setLaunchAtLoginChecked(enabled);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.traySettings.changed, enabled);
+    }
+  };
+  trayResidency = createTrayResidency({
+    window: mainWindow,
+    // dist/main.cjs 与 build/icon.ico 同级（打包后在 asar 内，Electron 可直读）
+    iconPath: join(__dirname, "..", "build", "icon.ico"),
+    initialLaunchAtLogin: traySettings.launchAtLogin,
+    pendingMaximize: startHidden && launchState?.maximized === true,
+    settings: traySettingsStore,
+    onToggleLaunchAtLogin: (enabled) => {
+      void traySettingsStore
+        .set({ launchAtLogin: enabled })
+        .then(() => afterLaunchAtLoginChange(enabled));
+    },
+    quit: () => app.quit(),
+  });
+  registerTraySettingsHandlers({
+    store: traySettingsStore,
+    onSaved: (saved: TraySettings) =>
+      afterLaunchAtLoginChange(saved.launchAtLogin),
+  });
+
   registerApplicationExit({
     window: mainWindow,
     runtime: taskRuntime,
     flushPendingWrites: () => launchStateTracking.flush(),
+    minimizeToTray: () => {
+      void trayResidency?.minimizeToTray();
+    },
     closeStorage: () => {
       persistence.close();
       queueStore.close();
