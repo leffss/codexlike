@@ -1,0 +1,8 @@
+# e2e 守门（retro，2026-11-17 subagent-work-plan 轮）：335acb1 浮层重构
+# 只跑单测即合入，六个子代理 e2e 场景静默损坏两个版本——单测全绿不代表
+# e2e 可用。推送前跑全量 e2e（40 场景含 pnpm build，耗时以十分钟计）；
+# 赶时间可 git push --no-verify 跳过，但跳过即自担 e2e 回归风险，合入
+# 前仍应实跑。GIT_* 注入的 unset 理由同 pre-commit（worktree 竞态）。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
+pnpm test:e2e:all

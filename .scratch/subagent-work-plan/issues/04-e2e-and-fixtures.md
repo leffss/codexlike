@@ -6,6 +6,6 @@
 
 **Status:** done
 
-- [ ] e2e 场景实跑通过：委派 → 建计划 → 更新 → 完成 → 详情底部计划卡终态 → 重启回看
-- [ ] dev fixtures 含子代理 `update_plan` 样例，dev 预览子代理详情可见计划卡
-- [ ] 三包测试与既有 e2e 场景（含 subagent-interrupted、subagent-recovery-review）不回归
+- [x] e2e 场景实跑通过：委派 → 建计划 → 更新 → 完成 → 详情底部计划卡终态 → 重启回看
+- [x] dev fixtures 含子代理 `update_plan` 样例，dev 预览子代理详情可见计划卡
+- [x] 三包测试与既有 e2e 场景（含 subagent-interrupted、subagent-recovery-review）不回归
