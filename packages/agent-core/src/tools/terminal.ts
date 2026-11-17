@@ -66,6 +66,9 @@ const ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
 ]);
 
+// 固定安装位候选，刻意不扫 PATH：PATH 首段 System32 的 bash.exe 是 WSL
+// 启动器，命中会落 Linux shell 且 cwd 翻成 /mnt/c/...（见 CODING_STANDARDS
+// 「Windows spawn 坑」）；自定义安装位置走下方显式配置项
 const GIT_BASH_CANDIDATES = [
   "C:\\Program Files\\Git\\bin\\bash.exe",
   "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
