@@ -14,6 +14,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -298,6 +299,8 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     const restoredBody = restoredPanel.getByTestId("subagent-body-block");
     await restoredBody.waitFor({ timeout: 10_000 });
+    // focus 定位展开的浮层盖住详情区拦截点击——收起后再展开正文折叠块
+    await collapseSubagentList(relaunchedWindow);
     await restoredBody.getByTestId("subagent-body-toggle").click();
     const restoredBodyText = await restoredBody
       .getByTestId("subagent-body-content")

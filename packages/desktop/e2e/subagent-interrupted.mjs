@@ -17,6 +17,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  collapseSubagentList,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -205,6 +206,17 @@ async function main() {
       delegationText !== null && delegationText.includes(TASKS[0]),
       `甲的委派说明缺失：${delegationText ?? "(空)"}`
     );
+    // 起止时间对齐全（启动收尾补记 completedAt）：列表行已用时定格。
+    // 列表行（subagent-rail-item）只在浮层展开时渲染——先在浮层展开态
+    // 断言，再收浮层做详情内点击（浮层遮罩盖住详情区拦截点击）
+    const elapsedJia = panel
+      .getByTestId("subagent-rail-item")
+      .getByTestId("subagent-elapsed");
+    assert(
+      (await elapsedJia.count()) >= 1,
+      "运行中被杀的委派应有起止时间（已用时定格）"
+    );
+    await collapseSubagentList(restored);
     const thinkingBlock = panel.getByTestId("subagent-thinking-block");
     await thinkingBlock.waitFor({ timeout: 10_000 });
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
@@ -231,14 +243,6 @@ async function main() {
     assert(
       toolsText !== null && toolsText.includes("read_file"),
       `运行中被杀的工具清单不可回看：${toolsText ?? "(空)"}`
-    );
-    // 起止时间对齐全（启动收尾补记 completedAt）：列表行已用时定格
-    const elapsedJia = panel
-      .getByTestId("subagent-rail-item")
-      .getByTestId("subagent-elapsed");
-    assert(
-      (await elapsedJia.count()) >= 1,
-      "运行中被杀的委派应有起止时间（已用时定格）"
     );
     console.log("[e2e] 运行中被杀（甲）：思考/正文/工具清单/起止时间完整回看");
 
