@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  models: ["glm-4.7"],
+  models: ["glm-4.7", "glm-4.6"],
 };
 
 /** 子代理专用 Profile（设置页「子代理模型」引用；默认 null = 同主模型） */
@@ -30,7 +30,7 @@ const subProfile: ProviderProfile = {
   name: "GLM 子代理",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-sub",
-  models: ["glm-4.7-air"],
+  models: ["glm-4.7-air", "glm-4.7-flash"],
 };
 
 function taskRecord(workspacePath: string): TaskRecord {
@@ -243,8 +243,11 @@ interface SubagentHarnessOptions {
   sub?: ScriptedStep[];
   /** 直接注入子代理模型（与 sub 脚本二选一；用于受控挂起等复杂场景） */
   subModel?: MockLanguageModelV4;
-  /** 子代理 Profile 解析（缺省固定返回 sub-profile） */
-  resolveProfile?: () => Promise<ProviderProfile | null>;
+  /** 子代理模型解析（缺省固定返回 sub-profile 第一项模型） */
+  resolveModel?: () => Promise<{
+    profile: ProviderProfile;
+    model: string;
+  } | null>;
   /** 并发上限（缺省 3） */
   maxConcurrent?: number;
   /**
@@ -289,7 +292,9 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
       tools: options.subTools ?? createBuiltinTools(),
       languageModelFor: (p) => (p.id === subProfile.id ? subModel : mainModel),
       settings: () => ({ maxConcurrent: options.maxConcurrent ?? 3 }),
-      resolveProfile: options.resolveProfile ?? (async () => subProfile),
+      resolveModel:
+        options.resolveModel ??
+        (async () => ({ profile: subProfile, model: subProfile.models[0]! })),
       toolRoundsLimit: options.toolRoundsLimit,
     },
     now: fakeClock(),
@@ -2483,5 +2488,77 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       expect(subagentId).toBe(idByTask.get(owner));
     }
     persistence.close();
+  });
+});
+
+describe("子代理模型级选择（票 02，ADR 0024：null 跟随主任务当前所用模型）", () => {
+  /** 记录两侧 languageModelFor 收到的 (profileId, model) 快照的最小装配 */
+  function makeModelLevelTask(
+    resolveModel: () => Promise<{
+      profile: ProviderProfile;
+      model: string;
+    } | null>
+  ) {
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord("C:/work/demo");
+    persistence.insertTask(record);
+    const mainModel = scriptedModel([
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "model-level-delegate",
+            toolName: "spawn_subagent",
+            input: { task: "独立调研" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["收到报告"] },
+    ]);
+    const subModel = scriptedModel([{ kind: "text", deltas: ["子代理报告"] }]);
+    const subCalls: { profileId: string; model?: string }[] = [];
+    const task = createAgentTask({
+      record,
+      persistence,
+      history: persistence.listMessages(record.id),
+      languageModelFor: () => mainModel,
+      subagents: {
+        tools: [],
+        languageModelFor: (subCallProfile, options) => {
+          subCalls.push({
+            profileId: subCallProfile.id,
+            model: options.model,
+          });
+          return subModel;
+        },
+        settings: () => ({ maxConcurrent: 3 }),
+        resolveModel,
+      },
+      now: fakeClock(),
+    });
+    return { task, subCalls };
+  }
+
+  it("resolveModel 返回具体 (Profile, 模型) 时子代理用它（设置选到具体模型）", async () => {
+    const { task, subCalls } = makeModelLevelTask(async () => ({
+      profile: subProfile,
+      model: "glm-4.7-flash",
+    }));
+    await collect(
+      task.sendMessage({ text: "委派", profile, model: "glm-4.6" })
+    );
+
+    expect(subCalls).toEqual([
+      { profileId: "sub-profile", model: "glm-4.7-flash" },
+    ]);
+  });
+
+  it("resolveModel 返回 null 时子代理跟随主任务当前所用模型（同 Profile 同模型）", async () => {
+    const { task, subCalls } = makeModelLevelTask(async () => null);
+    await collect(
+      task.sendMessage({ text: "委派", profile, model: "glm-4.6" })
+    );
+
+    expect(subCalls).toEqual([{ profileId: "main-profile", model: "glm-4.6" }]);
   });
 });

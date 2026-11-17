@@ -22,6 +22,7 @@ import {
   createSqliteTaskStore,
   createTavilySearchSource,
   createWorktreeService,
+  resolveModelOf,
   validateProviderProfile,
   type SearchSource,
 } from "@codexlike/agent-core/node";
@@ -283,9 +284,10 @@ function registerSearchSettingsHandlers(
 }
 
 /**
- * 注册子代理全局设置的 IPC 指令（工单 13）。
+ * 注册子代理全局设置的 IPC 指令（工单 13；票 02 升级模型级）。
  * 设置经内存缓存注入 SubagentsConfig（逐次解析），保存后对下一次委派即时生效；
- * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验）。
+ * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验），
+ * model 非 null 时必须在该 Profile 的模型列表内（null = 未选具体模型，解析时回退第一项）。
  */ function registerSubagentSettingsHandlers(options: {
   store: SubagentSettingsStore;
   profiles: ProfileStore;
@@ -299,7 +301,7 @@ function registerSearchSettingsHandlers(
       if (typeof input !== "object" || input === null) {
         throw new Error("子代理设置输入不合法");
       }
-      const { providerProfileId, maxConcurrent } = input as Record<
+      const { providerProfileId, model, maxConcurrent } = input as Record<
         string,
         unknown
       >;
@@ -307,19 +309,30 @@ function registerSearchSettingsHandlers(
         providerProfileId === null || providerProfileId === ""
           ? null
           : String(providerProfileId);
+      if (model !== null && model !== undefined && typeof model !== "string") {
+        throw new Error("子代理模型（model）必须是字符串或 null");
+      }
+      const modelId =
+        model === null || model === undefined || model === "" ? null : model;
       return (async () => {
         if (profileId !== null) {
-          const exists = (await profiles.list()).some(
+          const profile = (await profiles.list()).find(
             (p) => p.id === profileId
           );
-          if (!exists) {
+          if (!profile) {
             throw new Error(
               "所选 Provider Profile 不存在，请重新选择子代理模型"
+            );
+          }
+          if (modelId !== null && !profile.models.includes(modelId)) {
+            throw new Error(
+              "所选模型不在该 Provider Profile 的模型列表中，请重新选择"
             );
           }
         }
         const settings = await store.set({
           providerProfileId: profileId,
+          model: modelId,
           maxConcurrent: Number(maxConcurrent),
         });
         await onSaved(settings);
@@ -535,16 +548,21 @@ void app.whenReady().then(async () => {
       // 子代理模型请求重试（模型请求重试票 03，ADR 0024）：与主任务同一全局
       // 设置，子代理开始运行时快照（与轮次上限同一快照点）
       modelMaxRetries: () => agentSettings.modelMaxRetries,
-      // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
-      resolveProfile: async () => {
-        const profileId = subagentSettings.providerProfileId;
-        if (profileId === null) {
+      // 子代理模型（票 02 模型级）：设置页选到的 (Profile, 具体模型)；
+      // null = 同主模型（跟随主任务当前所用模型，同 Profile 同模型）。
+      // model 未配置或已从列表删除时回退该 Profile 列表第一项（resolveModelOf）
+      resolveModel: async () => {
+        const { providerProfileId, model } = subagentSettings;
+        if (providerProfileId === null) {
           return null;
         }
         const found = (await profileStore.list()).find(
-          (p) => p.id === profileId
+          (p) => p.id === providerProfileId
         );
-        return found ?? null;
+        if (!found) {
+          return null;
+        }
+        return { profile: found, model: resolveModelOf(found, model) };
       },
     },
   });

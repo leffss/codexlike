@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 
 import {
   DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
-  firstModelOf,
+  resolveModelOf,
   type ProviderProfile,
 } from "@codexlike/agent-core";
 import type { TerminalSettings } from "@codexlike/desktop/ipc";
+
+import { modelOptionValue, parseModelOptionValue } from "../lib/model-options";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
@@ -659,13 +661,15 @@ function TerminalSettingsSection() {
 }
 
 /**
- * 子代理全局配置区（工单 13，GLOSSARY「子代理」）：
- * 子代理模型（Provider Profile 引用；默认同主模型）+ 并发上限（默认 3，1-8）。
- * 保存后对后续任务/下一次委派即时生效（主进程逐次解析内存缓存）。
+ * 子代理全局配置区（工单 13，GLOSSARY「子代理」；票 02 升级模型级）：
+ * 子代理模型可选到具体「Profile · 模型」（默认同主模型 = 跟随主任务当前
+ * 所用模型）+ 并发上限（默认 3，1-8）。保存后对后续任务/下一次委派即时
+ * 生效（主进程逐次解析内存缓存）。
  */
 function SubagentSettingsSection() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
-  const [providerProfileId, setProviderProfileId] = useState<string>("");
+  /** 复合值：`${profileId}::${model}`；空串 = 同主模型 */
+  const [modelValue, setModelValue] = useState<string>("");
   const [maxConcurrent, setMaxConcurrent] = useState("3");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -679,11 +683,17 @@ function SubagentSettingsSection() {
         window.codexlike.subagentSettings.get(),
       ]);
       setProfiles(profileList);
-      // 空串 = 同主模型（默认）；引用的 Profile 已删除时回落为同主模型
-      const valid =
-        settings.providerProfileId !== null &&
-        profileList.some((p) => p.id === settings.providerProfileId);
-      setProviderProfileId(valid ? settings.providerProfileId! : "");
+      // 引用的 Profile 已删除时回落为同主模型；模型记录失效（已从列表删除）
+      // 回退该 Profile 列表第一项（与 agent-core resolveModelOf 同一语义）
+      const profile = profileList.find(
+        (p) => p.id === settings.providerProfileId
+      );
+      if (profile) {
+        const model = resolveModelOf(profile, settings.model);
+        setModelValue(modelOptionValue(profile.id, model));
+      } else {
+        setModelValue("");
+      }
       setMaxConcurrent(String(settings.maxConcurrent));
       setLoaded(true);
     } catch (error) {
@@ -700,8 +710,10 @@ function SubagentSettingsSection() {
     setSaving(true);
     setMessage("");
     try {
+      const parsed = parseModelOptionValue(modelValue);
       const settings = await window.codexlike.subagentSettings.set({
-        providerProfileId: providerProfileId === "" ? null : providerProfileId,
+        providerProfileId: parsed?.profileId ?? null,
+        model: parsed?.model ?? null,
         maxConcurrent: Number(maxConcurrent),
       });
       setMaxConcurrent(String(settings.maxConcurrent));
@@ -736,15 +748,20 @@ function SubagentSettingsSection() {
             <select
               data-testid="subagent-profile-select"
               className="rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
-              value={providerProfileId}
-              onChange={(e) => setProviderProfileId(e.target.value)}
+              value={modelValue}
+              onChange={(e) => setModelValue(e.target.value)}
             >
-              <option value="">同主模型（每次委派沿用当前任务所选模型）</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name} · {firstModelOf(profile)}
-                </option>
-              ))}
+              <option value="">同主模型（跟随主任务当前使用的模型）</option>
+              {profiles.flatMap((profile) =>
+                profile.models.map((model) => (
+                  <option
+                    key={modelOptionValue(profile.id, model)}
+                    value={modelOptionValue(profile.id, model)}
+                  >
+                    {profile.name} · {model}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 

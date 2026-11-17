@@ -227,8 +227,11 @@ interface SubagentThinkingHarnessOptions {
   main: ScriptedStep[];
   sub?: ScriptedStep[];
   subModel?: MockLanguageModelV4;
-  /** 子代理 Profile 解析（缺省固定返回独立 subProfile；null = 回退主模型） */
-  resolveProfile?: () => Promise<ProviderProfile | null>;
+  /** 子代理模型解析（缺省固定返回独立 subProfile 第一项；null = 回退主模型） */
+  resolveModel?: () => Promise<{
+    profile: ProviderProfile;
+    model: string;
+  } | null>;
   maxConcurrent?: number;
   thinkingEffort?: ThinkingEffort;
 }
@@ -267,7 +270,9 @@ function makeSubagentThinkingTask(
       tools: createBuiltinTools(),
       languageModelFor: factory,
       settings: () => ({ maxConcurrent: options.maxConcurrent ?? 3 }),
-      resolveProfile: options.resolveProfile ?? (async () => subProfile),
+      resolveModel:
+        options.resolveModel ??
+        (async () => ({ profile: subProfile, model: subProfile.models[0]! })),
     },
     now: fakeClock(),
   });
@@ -337,7 +342,7 @@ describe("子代理思考档位快照继承（spec「子代理继承触发消息
         workspacePath: workspace,
         main: delegateThenSummarize("调研测试框架"),
         sub: [{ kind: "text", deltas: ["调研报告"] }],
-        resolveProfile: async () => null,
+        resolveModel: async () => null,
       },
       factoryCalls
     );
@@ -877,7 +882,10 @@ describe("子代理入口 → 真实 provider 工厂（fetch 替身全链路）"
         tools: createBuiltinTools(),
         languageModelFor: realFactory,
         settings: () => ({ maxConcurrent: 3 }),
-        resolveProfile: async () => subProfile,
+        resolveModel: async () => ({
+          profile: subProfile,
+          model: subProfile.models[0]!,
+        }),
       },
       now: fakeClock(),
     });

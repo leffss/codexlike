@@ -16,6 +16,8 @@ export interface QueuedMessage {
   text: string;
   mentionPaths: string[];
   providerProfileId: string;
+  /** 任务所选具体模型（票 02 二元组）；null = 未显式选（回退列表第一项） */
+  model: string | null;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;
   createdAt: string;

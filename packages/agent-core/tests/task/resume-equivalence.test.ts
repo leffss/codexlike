@@ -372,7 +372,10 @@ describe("任务快照恢复等价性", () => {
       tools,
       languageModelFor: () => subModel,
       settings: () => ({ maxConcurrent: 3 }),
-      resolveProfile: async () => subProfile,
+      resolveModel: async () => ({
+        profile: subProfile,
+        model: subProfile.models[0]!,
+      }),
     };
     const task = createAgentTask({
       record: base,

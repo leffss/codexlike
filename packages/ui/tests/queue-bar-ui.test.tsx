@@ -12,6 +12,7 @@ function queued(texts: string[]): QueuedMessage[] {
     text,
     mentionPaths: [],
     providerProfileId: "p",
+    model: null,
     thinkingEffort: "auto",
     approvalMode: "ask",
     createdAt: "2026-11-13T00:00:00Z",

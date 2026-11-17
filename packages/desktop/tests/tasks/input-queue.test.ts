@@ -125,6 +125,7 @@ const INPUT = {
   text: "接着做第二步",
   mentionPaths: ["docs/a.md"],
   providerProfileId: "profile-1",
+  model: null,
   thinkingEffort: "low" as const,
   approvalMode: "assist" as const,
 };
@@ -437,6 +438,7 @@ describe("createSqliteInputQueueStore（队列持久化，与任务消息同库�
         position: 0,
         mentionPaths: ["docs/a.md"],
         providerProfileId: "profile-1",
+        model: null,
         thinkingEffort: "low",
         approvalMode: "assist",
         createdAt: "2026-11-13T00:00:00.000Z",

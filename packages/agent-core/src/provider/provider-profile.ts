@@ -37,11 +37,27 @@ export type ProviderProfileErrors = Partial<
 >;
 
 /**
- * Profile 模型列表第一项（ADR 0024：新建任务与模型记录失效任务的回退项）。
+ * Profile 模型列表第一项（ADR 0024：新建任务与未显式选模型任务的回退项）。
  * 校验层保证列表非空；空列表属非法状态，兜底返回空串防崩溃。
  */
 export function firstModelOf(profile: Pick<ProviderProfile, "models">): string {
   return profile.models[0] ?? "";
+}
+
+/**
+ * 任务级模型解析（票 02，ADR 0024）：把 (Profile, model) 二元组里的 model
+ * 归一为该 Profile 列表内的有效模型——在列表内原样返回；缺省（新建任务未
+ * 显式选择 / 存量任务无 model 记录）或已从列表删除（记录失效）一律回退
+ * 列表第一项。无「默认模型」跟随概念：回退只发生在解析瞬间，不写回任务
+ * 记录（用户重新选择前 UI 以「已保存的模型不可用」提示呈现失效态）。
+ */
+export function resolveModelOf(
+  profile: Pick<ProviderProfile, "models">,
+  model?: string | null
+): string {
+  return model !== null && model !== undefined && profile.models.includes(model)
+    ? model
+    : firstModelOf(profile);
 }
 
 /** 校验 Provider Profile 表单输入（URL 合法、name 非空、模型列表非空/逐项非空/去重、上下文窗口为正整数），供 UI 与存储层共用 */
