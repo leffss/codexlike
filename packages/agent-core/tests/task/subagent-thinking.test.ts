@@ -22,7 +22,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 /** 子代理独立 Profile（设置页「子代理模型」引用） */
@@ -31,7 +31,7 @@ const subProfile: ProviderProfile = {
   name: "GLM 子代理",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-sub",
-  model: "glm-4.7-air",
+  models: ["glm-4.7-air"],
 };
 
 function taskRecord(workspacePath: string): TaskRecord {

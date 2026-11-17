@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import {
+  firstModelOf,
   parseComposerDraft,
   type ApprovalMode,
   type ProviderProfile,
@@ -514,8 +515,9 @@ export function MessageComposer(props: {
                     : []),
                   ...props.profiles.map((profile) => ({
                     value: profile.id,
-                    label: `${profile.name} · ${profile.model}`,
-                    title: `${profile.name} · ${profile.model}（对下一条消息生效）`,
+                    // 任务级模型选择（票 02）落地前以列表第一项显示（ADR 0024 兼容语义）
+                    label: `${profile.name} · ${firstModelOf(profile)}`,
+                    title: `${profile.name} · ${firstModelOf(profile)}（对下一条消息生效）`,
                   })),
                 ]}
                 onSelect={props.onSelectProfile}

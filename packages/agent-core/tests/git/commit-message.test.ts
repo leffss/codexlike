@@ -68,7 +68,7 @@ describe("generateCommitMessage（一次不发工具的 LLM 请求）", () => {
         name: "local",
         baseURL: "https://provider.test/v1",
         apiKey: "key",
-        model: "test-model",
+        models: ["test-model"],
       },
       {
         fetch: async (_input, init) => {

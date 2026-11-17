@@ -46,7 +46,7 @@ export const PROFILES: ProviderProfile[] = [
     name: "GLM",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
     apiKey: "sk-sample",
-    model: "glm-4.7",
+    models: ["glm-4.7"],
     contextWindowTokens: 200000,
   },
   {
@@ -54,7 +54,7 @@ export const PROFILES: ProviderProfile[] = [
     name: "DeepSeek",
     baseURL: "https://api.deepseek.com/v1",
     apiKey: "sk-sample",
-    model: "deepseek-chat",
+    models: ["deepseek-chat"],
     contextWindowTokens: 128000,
   },
 ];

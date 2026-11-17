@@ -91,7 +91,7 @@ async function setup(hold = false) {
   });
   await profiles.create({
     name: "Mock",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });

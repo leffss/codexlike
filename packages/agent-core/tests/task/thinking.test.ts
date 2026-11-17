@@ -18,7 +18,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 function taskRecord(): TaskRecord {
@@ -546,14 +546,14 @@ describe("主任务入口 → 真实 provider 工厂（fetch 替身全链路）"
           id: "chatcmpl-thinking",
           object: "chat.completion.chunk",
           created: 0,
-          model: profile.model,
+          model: profile.models[0],
           choices: [{ index: 0, delta, finish_reason: null }],
         })),
         {
           id: "chatcmpl-thinking",
           object: "chat.completion.chunk",
           created: 0,
-          model: profile.model,
+          model: profile.models[0],
           choices: [
             {
               index: 0,

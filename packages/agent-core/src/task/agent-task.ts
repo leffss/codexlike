@@ -30,6 +30,7 @@ import {
   type ThinkingEffort,
 } from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
+import { firstModelOf } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
 import type {
   ToolCallRecord,
@@ -569,7 +570,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         // 模型选择对本次及后续消息生效，落库
         persistence.updateTask(record.id, {
           providerProfileId: profile.id,
-          model: profile.model,
+          model: firstModelOf(profile),
           status: "streaming",
           updatedAt: now(),
         });
@@ -1006,7 +1007,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         );
         persistence.updateTask(record.id, {
           providerProfileId: profile.id,
-          model: profile.model,
+          model: firstModelOf(profile),
           updatedAt: now(),
         });
         return {

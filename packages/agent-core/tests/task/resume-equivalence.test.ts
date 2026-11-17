@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 function taskRecord(workspacePath: string): TaskRecord {
@@ -326,7 +326,7 @@ describe("任务快照恢复等价性", () => {
       name: "GLM 子代理",
       baseURL: "https://open.bigmodel.cn/api/paas/v4",
       apiKey: "sk-sub",
-      model: "glm-4.7-air",
+      models: ["glm-4.7-air"],
     };
     // 子模型两轮：① 思考+正文+读文件工具轮（过程内容）；② 报告轮
     let subCall = 0;
