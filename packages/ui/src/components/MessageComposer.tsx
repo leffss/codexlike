@@ -347,7 +347,10 @@ export function MessageComposer(props: {
         paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
       }}
     >
-      <div className={contentWidthClass}>
+      {/* @container：工具栏窄宽降级（下行注释）以内容列实际宽度为基准——
+          挂 /task 容器不行的原因：右栏开合不改变 @container/task 宽度
+          （ADR 0011），但会挤压内容列实际渲染宽，断点必须跟着内容列走。 */}
+      <div className={`${contentWidthClass} @container`}>
         {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
             暂停态（停止保留队列）显示「恢复」「清空」操作 */}
         <QueueBar
@@ -465,9 +468,12 @@ export function MessageComposer(props: {
               className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             />
           </div>
-          {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。 */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5">
-            <div className="flex items-center gap-2">
+          {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。
+              内容列 <560px（窗口收窄或右栏挤压）时降级为两行流式：审批整行
+              左对齐、其余从左换行——两端分布在放不下时会把两行错开成斜的
+              （审批独占一行、右组右对齐起点更靠右），流式才整齐。 */}
+          <div className="flex flex-wrap items-center gap-2 px-3 pb-2.5 @min-[560px]:justify-between">
+            <div className="flex w-full min-w-0 items-center gap-2 @min-[560px]:w-auto">
               <ComposerSelect
                 testId="approval-mode-select"
                 label="审批模式"
@@ -475,6 +481,7 @@ export function MessageComposer(props: {
                 disabled={props.readOnly || props.approvalMode === null}
                 options={APPROVAL_MODE_OPTIONS}
                 onSelect={props.onSelectApprovalMode}
+                className="min-w-0 shrink"
                 renderIcon={(mode) => (
                   <ApprovalModeIcon
                     mode={mode}
@@ -483,7 +490,7 @@ export function MessageComposer(props: {
                 )}
               />
             </div>
-            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 @min-[560px]:ml-auto @min-[560px]:w-auto @min-[560px]:justify-end">
               <ComposerSelect
                 testId="profile-select"
                 label="模型"
@@ -523,6 +530,7 @@ export function MessageComposer(props: {
                 options={THINKING_EFFORT_OPTIONS}
                 onSelect={props.onSelectThinkingEffort}
                 renderIcon={() => <BrainIcon className="h-3 w-3" />}
+                className="min-w-0 shrink"
               />
               <button
                 type="button"

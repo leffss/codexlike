@@ -239,11 +239,14 @@ export function RailPanel(props: {
         style={{ width: railWidth }}
         className="flex shrink-0 flex-col border-l border-line bg-surface text-sm"
       >
-        {/* tab 行：独立描边按钮（对标标题栏开关样式），选中态 accent */}
+        {/* tab 行：独立描边按钮（对标标题栏开关样式），选中态 accent。
+            flex-wrap 兜底：窄窗口下右栏会被夹到低于 RAIL_MIN_WIDTH
+            （正文 STREAM_MIN_WIDTH 优先，max 先于 min 生效），200px 宽
+            放不下三个 tab 时换行而不是溢出右栏。 */}
         <div
           role="tablist"
           aria-label="右栏面板切换"
-          className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2"
         >
           <button
             type="button"
