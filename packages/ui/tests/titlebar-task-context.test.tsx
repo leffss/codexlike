@@ -32,6 +32,13 @@ function context(overrides: Partial<TitlebarContext> = {}): TitlebarContext {
       onToggle: () => {},
       changesCount: null,
     },
+    // 工作区打开器：静态断言只关渲染，注入空实现（交互见 workspace-opener-ui）
+    opener: {
+      workspacePath: task().workspacePath,
+      listOpeners: async () => ({ openers: [], defaultId: "explorer" }),
+      openWorkspace: async () => ({ defaultId: "explorer" }),
+      notifyError: () => {},
+    },
     ...overrides,
   };
 }
@@ -240,14 +247,16 @@ it("未提交变更角标：>0 显示精确数并入无障碍名，0/null 不渲
   }
 });
 
-it("拖动区按控件归属划分（审查修复 1）：徽章免拖，任务名可拖", () => {
+it("拖动区按控件归属划分（审查修复 1）：徽章与打开器免拖，任务名可拖", () => {
   const html = renderToStaticMarkup(
     createElement(TitlebarTaskContext, { context: context() })
   );
-  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）一个。
+  // 只有交互控件挂在 window-no-drag 作用域内：徽章容器（含点击弹层）与
+  // 「工作区打开器」分裂按钮（含下拉菜单）各一个。
   // 真实拖拽行为由 window-controls 场景以系统级输入验证（品牌回退态），
   // 任务态划分以此静态断言兜底。
-  expect(html.match(/<div class="window-no-drag/g)).toHaveLength(1);
+  expect(html.match(/<div class="window-no-drag/g)).toHaveLength(2);
+  expect(html).toMatch(/data-testid="workspace-opener-main"/);
   // 任务名与品牌是纯展示文本：不落入免拖作用域，跟随父级标题栏拖动
   const titleTag =
     html.match(/<span[^>]*data-testid="task-title"[^>]*>/)?.[0] ?? "";

@@ -1406,6 +1406,12 @@ export function WorkspacePage(props: {
   );
   // draft 已选工作区时同样可开右栏，预览走 draft 管线
   const hasDraftWorkspace = draft !== null && draftWorkspacePath !== null;
+  // 工作区打开器（GLOSSARY）：任务工作区优先，draft 已选目录次之，其余禁用
+  const openerWorkspacePath = titlebarTask
+    ? titlebarTask.workspacePath
+    : hasDraftWorkspace
+      ? draftWorkspacePath
+      : null;
   const titlebarContext = useMemo<TitlebarContext>(
     () => ({
       task: titlebarTask,
@@ -1415,14 +1421,29 @@ export function WorkspacePage(props: {
         onToggle: toggleRail,
         changesCount,
       },
+      opener: {
+        workspacePath: openerWorkspacePath,
+        // IPC 绑定收在 page 层：标题栏组件保持纯 props 可测
+        listOpeners: () => window.codexlike.openers.list(),
+        openWorkspace: (input) => window.codexlike.openers.open(input),
+        notifyError: (message) => {
+          toastState.show("workspace-opener", {
+            kind: "error",
+            content: message,
+            contentTestId: "workspace-opener-error",
+          });
+        },
+      },
     }),
     [
       titlebarTask,
       railOpen,
       hasCurrentTask,
       hasDraftWorkspace,
+      openerWorkspacePath,
       toggleRail,
       changesCount,
+      toastState,
     ]
   );
   useEffect(() => {

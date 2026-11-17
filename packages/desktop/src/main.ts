@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +11,7 @@ import {
   nativeTheme,
   safeStorage,
   screen,
+  shell,
   type IpcMainInvokeEvent,
 } from "electron";
 
@@ -44,6 +46,9 @@ import {
   type TerminalSettings,
 } from "./terminal/terminal-settings-store";
 import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
+import { createOpenerSettingsStore } from "./openers/opener-settings-store";
+import { createOpenerLauncher } from "./openers/opener-launcher";
+import { registerOpenerHandlers } from "./openers/opener-ipc";
 import {
   createThemeSettingsStore,
   isThemeName,
@@ -608,6 +613,20 @@ void app.whenReady().then(async () => {
     onSaved: (settings: TerminalSettings) => {
       terminalSettings = settings;
     },
+  });
+  // 工作区打开器（GLOSSARY）：标题栏分裂按钮的候选探测与打开；
+  // 真实启动依赖在此装配（explorer 走 shell.openPath，编辑器 detach spawn）
+  registerOpenerHandlers({
+    store: createOpenerSettingsStore({ dir: dataDir() }),
+    launch: createOpenerLauncher({
+      openPath: (path) => shell.openPath(path),
+      spawnProcess: (command, args) =>
+        spawn(command, args, {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        }),
+    }),
   });
   registerThemeSettingsHandlers({
     store: themeSettingsStore,

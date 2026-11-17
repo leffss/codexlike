@@ -52,6 +52,7 @@
     "test:e2e:launch-state": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:launch-state",
     "test:e2e:launch-state-target": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:launch-state-target",
     "test:e2e:external-links": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:external-links",
+    "test:e2e:workspace-opener": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:workspace-opener",
     "test:e2e:reasoning-recovery": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:reasoning-recovery",
     "test:e2e:scroll": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:scroll",
     "test:e2e:subagent-recovery": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-recovery",

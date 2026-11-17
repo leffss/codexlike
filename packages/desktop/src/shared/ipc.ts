@@ -36,6 +36,12 @@ import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { AgentSettings } from "../execution/agent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
 import type { TerminalSettings } from "../terminal/terminal-settings-store";
+import type {
+  OpenerListResult,
+  OpenerOpenInput,
+  OpenerOpenResult,
+  OpenerView,
+} from "../openers/opener-settings-store";
 import type { McpServerView } from "../mcp/mcp-service";
 import type { McpServerInput } from "../mcp/mcp-store";
 import type { ThemeName } from "../theme/theme-settings-store";
@@ -56,6 +62,8 @@ export type { SubagentSettings };
 export type { AgentSettings };
 export type { TerminalSettings };
 export type { TerminalShell };
+// 工作区打开器（GLOSSARY）：候选/打开通道的公共形状
+export type { OpenerView, OpenerListResult, OpenerOpenInput, OpenerOpenResult };
 export type { McpServerView, McpServerInput };
 export type { ThemeName };
 // 输入队列（票 01/02）：队列条与事件载荷的公共形状
@@ -213,6 +221,13 @@ export const IPC = {
   files: {
     /** 保存文本文件：取消返回 { saved: false }；写入成功返回保存路径 */
     saveText: "files:save-text",
+  },
+  /** 工作区打开器（GLOSSARY）：标题栏分裂按钮的候选列表与打开 */
+  openers: {
+    /** 候选打开器（仅本机探测到的，资源管理器恒在）与当前默认 */
+    list: "openers:list",
+    /** 打开工作区目录；携带 openerId 时以它打开并记为默认（点选即设置） */
+    open: "openers:open",
   },
 } as const;
 
@@ -660,5 +675,15 @@ export interface CodexLikeApi {
     ): Promise<string>;
     /** 提交当前全部变更；无变更时 committed=false */
     commit(taskId: string, message: string): Promise<GitCommitResult>;
+  };
+  openers: {
+    /** 候选打开器（仅本机探测到的，资源管理器恒在）与当前生效默认 */
+    list(): Promise<OpenerListResult>;
+    /**
+     * 打开工作区目录（GLOSSARY「工作区打开器」）：不带 openerId 用生效默认
+     * （主按钮）；携带时以它打开并记为默认（点选即设置，打开失败不改默认）。
+     * 目录不存在 / 未检测到所选程序 / 启动失败以中文异常抛回。
+     */
+    open(input: OpenerOpenInput): Promise<OpenerOpenResult>;
   };
 }

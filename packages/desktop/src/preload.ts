@@ -210,6 +210,10 @@ const api: CodexLikeApi = {
   files: {
     saveText: (input) => ipcRenderer.invoke(IPC.files.saveText, input),
   },
+  openers: {
+    list: () => ipcRenderer.invoke(IPC.openers.list),
+    open: (input) => ipcRenderer.invoke(IPC.openers.open, input),
+  },
 };
 
 contextBridge.exposeInMainWorld("codexlike", api);
