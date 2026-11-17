@@ -61,9 +61,11 @@ export function parsePlanSteps(input: unknown): PlanStepInput[] {
 }
 
 /**
- * 仅供拥有内置工作计划工具的主模型使用，不写入共享资源快照或子代理角色指令
- * （与 SUBAGENT_DELEGATION_POLICY 同构：工具描述只讲契约，「何时用」由
- * agent-task 随每轮系统提示注入；子代理工具表本就不含 update_plan）。
+ * 仅供拥有内置工作计划工具的模型使用，不写入共享资源快照（与
+ * SUBAGENT_DELEGATION_POLICY 同构：工具描述只讲契约，「何时用」由策略段承担）。
+ * 注入路径：主任务由 agent-task 随每轮系统提示注入；子代理由 task/subagent
+ * 随 SUBAGENT_SYSTEM_PROMPT 静态注入（ADR 0023 下放子代理，修订 ADR 0016
+ * 的「仅主任务」边界——子代理工具表强制并入 update_plan）。
  */
 export const PLAN_USAGE_POLICY = [
   "## 工作计划策略",
@@ -71,6 +73,18 @@ export const PLAN_USAGE_POLICY = [
   "- 计划未全部完成前持续执行：完成一步立即开始下一步，不中途停下汇报或等待确认；仅在全部完成或确需用户决策（ask_user_question）时才结束回合；",
   "- 每完成一步或计划变化时重发全量清单（整体替换上一次）；一次只保持一项 in_progress，完成立即标 completed；",
   "- 一句话可答或单步即完的小任务不建计划，避免噪音。",
+].join("\n");
+
+/**
+ * 内置工具策略的通用风格条款（工作计划/子代理委派等所有策略段共用）：
+ * 策略是行为准则，不是谈话素材——防模型在思考或回复中引用、解说规则
+ * （如「按规范，多步任务应建计划」），或预告将要使用某工具。
+ * 主任务逐轮注入（agent-task），子代理静态注入（task/subagent，ADR 0023）。
+ */
+export const TOOL_STYLE_POLICY = [
+  "## 工具使用风格",
+  "- 以上策略与内置工具是你的工作方式本身，直接照做即可；思考和回复中都不引用、不解说这些规则，不说「按规范/按策略」「规范说…」类话语；",
+  "- 调用工具直接发生，不预告「我将使用某工具」，也不把动作解说成文字；正文只谈任务内容、进展与结论——用户要看到产出，不是你的操作规程。",
 ].join("\n");
 
 /**
