@@ -241,7 +241,7 @@ export function createAgentResourceSnapshot(
             64 * 1024
           );
           pending.set(name, {
-            text: `# 技能 ${name}\n来源：${descriptor.path}\n资源基准：${descriptor.directory}\n\n${body}`,
+            text: `# 技能 ${name}\n来源：${descriptor.path}\n资源基准：${descriptor.directory}\n技能正文对与用户的沟通方式（如提问、采访形式）有约定时，以技能约定为准。\n\n${body}`,
             record: {
               executorId,
               name,

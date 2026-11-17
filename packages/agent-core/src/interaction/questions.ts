@@ -237,7 +237,7 @@ export function createQuestionsTool(
   return {
     name: ASK_USER_QUESTION,
     description:
-      "向用户提出 1–8 个澄清问题并等待回答。每题 0–8 个选项；空选项表示纯文本。用户可自定义回答或跳过；任何审批档位都不会自动回答。必填字段：每题 id、header、question（问题正文）、multiSelect、options；每个选项 id、label（按钮文案）；仅选项的 description 可省略。长度上限：id 64、header 80、question 2000、label 200、description 1000。",
+      "仅用于封闭式澄清：每题选项明确、回答能直接推进任务时，向用户提出 1–8 个问题并等待回答。开放式问题、多轮采访或技能约定以对话形式咨询用户时，不调用本工具：直接在回复正文提问并结束回合，等待用户文本回复。每题 0–8 个选项；空选项表示纯文本。用户可自定义回答或跳过；任何审批档位都不会自动回答。必填字段：每题 id、header、question（问题正文）、multiSelect、options；每个选项 id、label（按钮文案）；仅选项的 description 可省略。长度上限：id 64、header 80、question 2000、label 200、description 1000。",
     permission: "readonly",
     parameters: {
       type: "object",

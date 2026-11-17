@@ -70,7 +70,7 @@ export function parsePlanSteps(input: unknown): PlanStepInput[] {
 export const PLAN_USAGE_POLICY = [
   "## 工作计划策略",
   "- 预计多于一步的任务开工时，先用 update_plan 建立完整工作计划，让用户随时看到进度；",
-  "- 计划未全部完成前持续执行：完成一步立即开始下一步，不中途停下汇报或等待确认；仅在全部完成或确需用户决策（ask_user_question）时才结束回合；",
+  "- 计划未全部完成前持续执行：完成一步立即开始下一步，不中途停下汇报或等待确认；仅在全部完成或确需用户决策时才结束回合——封闭式决策用 ask_user_question，开放式提问直接写在正文里等用户回复；",
   "- 每完成一步或计划变化时重发全量清单（整体替换上一次）；一次只保持一项 in_progress，完成立即标 completed；",
   "- 一句话可答或单步即完的小任务不建计划，避免噪音。",
 ].join("\n");
