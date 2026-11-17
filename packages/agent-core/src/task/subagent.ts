@@ -47,7 +47,10 @@ import type {
 } from "../tools/types";
 
 import { decideApproval, type ApprovalMode } from "./approval";
-import { DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS } from "./execution-settings";
+import {
+  DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
+  DEFAULT_MODEL_MAX_RETRIES,
+} from "./execution-settings";
 import { describeModelError, isAbortLike } from "./errors";
 import type { TaskPersistence } from "./persistence";
 import type { TaskEvent } from "./types";
@@ -101,6 +104,14 @@ export interface SubagentsConfig {
    * （DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS，与设置层共用单一来源）。
    */
   toolRoundsLimit?: () => number;
+  /**
+   * 模型请求重试次数的逐次解析取值函数（GLOSSARY「执行设置」，ADR 0024；
+   * 先例为 toolRoundsLimit 的 resolver 范式，agent-core 不依赖任何存储实现）：
+   * 与主任务同款全局执行设置，作用于子代理全部模型请求。单个子代理在开始
+   * 运行时快照一次（运行中不受设置页中途调整影响），排队未开跑的按开跑时
+   * 的值解析；未注入用 DEFAULT_MODEL_MAX_RETRIES（=2，与 SDK 默认一致）。
+   */
+  modelMaxRetries?: () => number;
   /**
    * 子代理模型（Provider Profile 引用）：null = 同主模型（用本次 sendMessage 的 profile）。
    * 异步以允许宿主读取加密存储的 Profile。
@@ -373,6 +384,9 @@ export function createSubagentOrchestrator(
     // 工具轮次上限（执行设置 ADR 0017）：运行开始快照，声明在 try 外供截断标记
     // 使用（标记在终态区，不在 try 作用域内）；解析失败按默认值兜底
     let maxToolRounds = DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
+    // 模型请求重试次数（GLOSSARY「执行设置」，ADR 0024）：与轮次上限同一快照点
+    // （运行开始时读取一次），声明在 try 外供失败报告文案使用
+    let modelMaxRetries = DEFAULT_MODEL_MAX_RETRIES;
     // 本轮正文与思考缓冲（ADR 0021 票 02）：轮终态即写一行 subagent_messages
     // （轮边界即行边界）——思考的权威记录即在此表；spawn 行不再拼接
     // （票 04 contract 步：双份存储无消费者）
@@ -426,6 +440,9 @@ export function createSubagentOrchestrator(
       // 运行中不受设置页中途调小影响；未注入用默认 200
       maxToolRounds =
         config.toolRoundsLimit?.() ?? DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS;
+      // 重试次数同一快照点（ADR 0024）：本子代理全部 streamText 与失败报告
+      // 文案用同一值；未注入用默认 2
+      modelMaxRetries = config.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       const questionsTool = createQuestionsTool((questions, toolCallId) =>
         port.requestInteraction({
@@ -478,6 +495,8 @@ export function createSubagentOrchestrator(
           messages,
           tools: modelTools,
           abortSignal: signal,
+          // 重试次数（执行设置）：运行开始快照，本子代理全部轮次复用
+          maxRetries: modelMaxRetries,
         });
 
         const toolCalls: {
@@ -615,7 +634,8 @@ export function createSubagentOrchestrator(
         aborted = true;
       } else {
         // 子代理失败不崩主任务：失败原因作为报告回流，isError 标记
-        output = `子代理执行失败：${describeModelError(error)}`;
+        // （重试耗尽文案携带运行开始快照的重试次数配置值，ADR 0024）
+        output = `子代理执行失败：${describeModelError(error, modelMaxRetries)}`;
         isError = true;
       }
     }

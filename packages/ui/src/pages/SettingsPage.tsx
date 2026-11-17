@@ -11,6 +11,7 @@ import { McpSettingsSection } from "../components/McpSettingsSection";
 import {
   parseCompactKeepRoundsInput,
   parseContextWarningPercentInput,
+  parseModelMaxRetriesInput,
   parseTaskConcurrencyLimitInput,
   parseToolRoundsInput,
 } from "../lib/execution-settings-form";
@@ -224,10 +225,11 @@ function ThemeSettingsSection() {
  * 执行设置区（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：
  * agent 执行参数——主任务工具轮次上限（票 01）、子代理工具轮次上限（票 02）、
  * 压缩保留轮数与上下文告警阈值（票 03）、任务并发上限（任务并发上限票 01，
- * GLOSSARY「任务并发上限」），同构输入、独立可调。
- * 改动即时保存；轮次上限用开始时的值（回合/运行开始快照），保留轮数与告警
- * 阈值无「进行中」状态逐次读取（保留轮数对下一次 /compact 生效、阈值即时生效）；
- * 任务并发上限由 desktop 主进程发送闸门消费，改动对队列即时生效。
+ * GLOSSARY「任务并发上限」）、模型请求重试次数（模型请求重试票 03，ADR 0024
+ * 「重试不做 failover」），同构输入、独立可调。
+ * 改动即时保存；轮次上限与重试次数用开始时的值（回合/运行开始快照），保留轮数
+ * 无「进行中」状态逐次读取（对下一次 /compact 生效）、阈值即时生效；任务并发
+ * 上限由 desktop 主进程发送闸门消费，改动对队列即时生效。
  */
 export function ExecutionSettingsBody(props: {
   /** 输入框当前文本（容器持有，便于回退默认后写回展示） */
@@ -236,11 +238,13 @@ export function ExecutionSettingsBody(props: {
   compactKeepRounds: string;
   contextWarningThresholdPercent: string;
   taskConcurrencyLimit: string;
+  modelMaxRetries: string;
   onInput: (value: string) => void;
   onSubagentInput: (value: string) => void;
   onCompactKeepInput: (value: string) => void;
   onContextWarningInput: (value: string) => void;
   onTaskConcurrencyInput: (value: string) => void;
+  onModelRetriesInput: (value: string) => void;
   onSave: () => void;
   saving: boolean;
   message: string;
@@ -341,6 +345,24 @@ export function ExecutionSettingsBody(props: {
         </span>
       </label>
 
+      <label className="flex flex-col gap-1 text-sm text-fg-muted">
+        模型请求重试次数（0-10）
+        <input
+          type="number"
+          min={0}
+          max={10}
+          step={1}
+          data-testid="execution-model-retries-input"
+          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          value={props.modelMaxRetries}
+          onChange={(e) => props.onModelRetriesInput(e.target.value)}
+        />
+        <span className="text-xs text-fg-subtle">
+          模型请求失败后的自动重试次数（默认 2），作用于对话、压缩与子代理的
+          全部模型请求；设为 0 关闭重试，调试时快速失败。
+        </span>
+      </label>
+
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -372,6 +394,7 @@ function ExecutionSettingsSection() {
   const [contextWarningThresholdPercent, setContextWarningThresholdPercent] =
     useState("80");
   const [taskConcurrencyLimit, setTaskConcurrencyLimit] = useState("3");
+  const [modelMaxRetries, setModelMaxRetries] = useState("2");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -387,6 +410,7 @@ function ExecutionSettingsSection() {
         String(settings.contextWarningThresholdPercent)
       );
       setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
+      setModelMaxRetries(String(settings.modelMaxRetries));
       setLoaded(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -403,8 +427,8 @@ function ExecutionSettingsSection() {
     setMessage("");
     try {
       // 非法/越界输入回退默认值（ADR 0017）；回退值写回输入框可见。
-      // 五项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
-      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 七字段整体形状），
+      // 六项各自解析、一次保存（独立字段，互不影响）；MCP 超时两项（票 07）
+      // 不在本分区编辑——保存时读取当前最新值原样回传（IPC 八字段整体形状），
       // 避免用装载快照覆盖 MCP 分区的并发保存。
       const current = await window.codexlike.agentSettings.get();
       const settings = await window.codexlike.agentSettings.set({
@@ -419,6 +443,7 @@ function ExecutionSettingsSection() {
         ),
         taskConcurrencyLimit:
           parseTaskConcurrencyLimitInput(taskConcurrencyLimit),
+        modelMaxRetries: parseModelMaxRetriesInput(modelMaxRetries),
         mcpCallTimeoutSeconds: current.mcpCallTimeoutSeconds,
         mcpConnectTimeoutSeconds: current.mcpConnectTimeoutSeconds,
       });
@@ -429,8 +454,9 @@ function ExecutionSettingsSection() {
         String(settings.contextWarningThresholdPercent)
       );
       setTaskConcurrencyLimit(String(settings.taskConcurrencyLimit));
+      setModelMaxRetries(String(settings.modelMaxRetries));
       setMessage(
-        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%、任务并发上限 ${settings.taskConcurrencyLimit}`
+        `已保存：主任务工具轮次上限 ${settings.maxToolRounds}、子代理工具轮次上限 ${settings.maxSubagentToolRounds}、压缩保留对话轮数 ${settings.compactKeepRounds}、上下文告警阈值 ${settings.contextWarningThresholdPercent}%、任务并发上限 ${settings.taskConcurrencyLimit}、模型请求重试次数 ${settings.modelMaxRetries}`
       );
       setMessageError(false);
     } catch (error) {
@@ -458,11 +484,13 @@ function ExecutionSettingsSection() {
           compactKeepRounds={compactKeepRounds}
           contextWarningThresholdPercent={contextWarningThresholdPercent}
           taskConcurrencyLimit={taskConcurrencyLimit}
+          modelMaxRetries={modelMaxRetries}
           onInput={setMaxToolRounds}
           onSubagentInput={setMaxSubagentToolRounds}
           onCompactKeepInput={setCompactKeepRounds}
           onContextWarningInput={setContextWarningThresholdPercent}
           onTaskConcurrencyInput={setTaskConcurrencyLimit}
+          onModelRetriesInput={setModelMaxRetries}
           onSave={() => void save()}
           saving={saving}
           message={message}
