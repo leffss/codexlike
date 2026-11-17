@@ -1,6 +1,6 @@
 # Spec: 子代理工作计划
 
-Status: ready-for-agent
+Status: done
 
 决策依据：ADR 0023（update_plan 下放子代理，计划卡常驻右栏详情底部）；修订 ADR 0016 的「仅主任务」边界。术语见 GLOSSARY「工作计划」「计划项」「子代理」「子代理记录」。
 

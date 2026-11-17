@@ -4,7 +4,7 @@
 
 **Blocked by:** None（can start immediately）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 子代理每次运行的工具表含 `update_plan`；资源快照 execution tools 与 `update_plan` 撞名被拒绝
 - [ ] 子代理系统提示含工作计划使用策略与风格条款（复用同一常量），且不随轮次重复注入

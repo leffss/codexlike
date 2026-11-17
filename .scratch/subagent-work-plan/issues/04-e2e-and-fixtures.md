@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（子代理真实具备 update_plan 能力），02（详情计划卡）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] e2e 场景实跑通过：委派 → 建计划 → 更新 → 完成 → 详情底部计划卡终态 → 重启回看
 - [ ] dev fixtures 含子代理 `update_plan` 样例，dev 预览子代理详情可见计划卡

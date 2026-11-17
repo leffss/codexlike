@@ -4,7 +4,7 @@
 
 **Blocked by:** 02（复用其子代理计划收集薄壳）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 工具摘要纯函数对 `update_plan` 输出中文统计摘要；其他工具的摘要行为不变
 - [ ] 工具清单计数口径不变（`update_plan` 照常计入次数）

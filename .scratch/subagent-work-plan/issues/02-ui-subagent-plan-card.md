@@ -4,7 +4,7 @@
 
 **Blocked by:** None（can start immediately；与 01 并行——ui 测试自造子代理工具调用数据，真实端到端演示需 01 合入）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 子代理工具调用序列派生计划快照的纯函数：多次 `update_plan` 时当前计划取最后一次；无 `update_plan` 时无计划
 - [ ] 详情滚动容器末尾挂卡，复用主任务同款折叠卡（百分比 + N/M 计数 + 当前/下一步预览，展开完整清单三态）
