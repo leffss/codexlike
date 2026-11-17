@@ -105,12 +105,14 @@ async function main() {
     await workspacePath.waitFor();
     const pathBox = await workspacePath.boundingBox();
     const composerBox = await window.getByTestId("composer-card").boundingBox();
+    // 83219f0「输入卡与消息列同宽」定稿：composer-card 去 -mx-2 外扩，与
+    // 内容列左右缘完全对齐（width-tiers 断言同款 ±1px 亚像素容差）。
     assert(
       pathBox !== null &&
         composerBox !== null &&
-        Math.abs(pathBox.x - composerBox.x - 8) <= 1 &&
-        Math.abs(composerBox.width - pathBox.width - 16) <= 1,
-      "顶部工作区路径与内容列对齐，输入卡片左右各外扩 8px"
+        Math.abs(pathBox.x - composerBox.x) <= 1 &&
+        Math.abs(composerBox.width - pathBox.width) <= 1,
+      "顶部工作区路径与内容列对齐，输入卡与内容列左右缘一致"
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
