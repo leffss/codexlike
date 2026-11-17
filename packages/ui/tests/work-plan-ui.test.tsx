@@ -8,11 +8,16 @@ import { setRememberedOpen } from "../src/lib/collapse-memory";
 import {
   activeStep,
   collectPlanSnapshots,
+  collectSubagentPlanSnapshots,
   completedCount,
   currentPlan,
   parsePlanSteps,
 } from "../src/lib/plan-view";
-import type { MessageSegment, ToolCallSegment } from "../src/lib/task-view";
+import type {
+  MessageSegment,
+  SubagentToolCall,
+  ToolCallSegment,
+} from "../src/lib/task-view";
 
 /**
  * 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016 派生层 + ADR 0019 呈现）：
@@ -142,6 +147,68 @@ describe("plan-view 派生层纯函数", () => {
     ]);
     expect(currentPlan(items)?.segmentId).toBe("p2");
     expect(currentPlan([userSeg("u1", "t1")])).toBeNull();
+  });
+
+  it("collectSubagentPlanSnapshots：子代理工具调用序列按序收集 update_plan 快照，当前计划取最后一次；无 update_plan 时无计划", () => {
+    const tools: SubagentToolCall[] = [
+      {
+        id: "sub-t1",
+        taskId: "s1",
+        toolName: "read_file",
+        arguments: '{"path":"a.ts"}',
+        output: "内容",
+        isError: false,
+      },
+      {
+        id: "sub-p1",
+        taskId: "s1",
+        toolName: "update_plan",
+        arguments: JSON.stringify({
+          steps: [
+            { content: "一", status: "in_progress" },
+            { content: "二", status: "pending" },
+          ],
+        }),
+        output: "工作计划已更新",
+        isError: false,
+      },
+      {
+        id: "sub-t2",
+        taskId: "s1",
+        toolName: "glob",
+        arguments: '{"pattern":"*.ts"}',
+        output: "a.ts",
+        isError: false,
+      },
+      {
+        id: "sub-p2",
+        taskId: "s1",
+        toolName: "update_plan",
+        arguments: JSON.stringify({
+          steps: [
+            { content: "一", status: "completed" },
+            { content: "二", status: "in_progress" },
+          ],
+        }),
+        output: "工作计划已更新",
+        isError: false,
+      },
+    ];
+    const snapshots = collectSubagentPlanSnapshots(tools);
+    // 只收 update_plan（其他工具过滤），按调用序排列
+    expect(snapshots.map((snapshot) => snapshot.segmentId)).toEqual([
+      "sub-p1",
+      "sub-p2",
+    ]);
+    // 解析复用 parsePlanSteps：当前计划（最后一次）反映最新状态
+    expect(snapshots.at(-1)?.steps).toEqual([
+      { id: "0-一", content: "一", status: "completed" },
+      { id: "1-二", content: "二", status: "in_progress" },
+    ]);
+    // 无 update_plan / 空序列：无计划
+    const readOnly: SubagentToolCall[] = [tools[0]!];
+    expect(collectSubagentPlanSnapshots(readOnly)).toEqual([]);
+    expect(collectSubagentPlanSnapshots([])).toEqual([]);
   });
 
   it("completedCount / activeStep：in_progress 优先，其次第一个未完成，兜底末项", () => {
