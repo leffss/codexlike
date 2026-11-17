@@ -6,7 +6,11 @@
  * 每次调用的计划快照，「当前计划」= 最后一次 update_plan 的参数。
  * 不新增事件类型/段类型/存储表。
  */
-import type { MessageSegment, ToolCallSegment } from "./task-view";
+import type {
+  MessageSegment,
+  SubagentToolCall,
+  ToolCallSegment,
+} from "./task-view";
 
 /** 工作计划工具名（与 agent-core UPDATE_PLAN 契约一致） */
 export const PLAN_TOOL_NAME = "update_plan";
@@ -74,6 +78,22 @@ export function collectPlanSnapshots(items: MessageSegment[]): PlanSnapshot[] {
     segmentId: segment.id,
     steps: parsePlanSteps(segment.arguments),
   }));
+}
+
+/**
+ * 子代理侧收集薄壳（ADR 0023）：子代理工具调用嵌在 SubagentSegment.tools
+ * （无 kind 判别字段，isPlanSegment 不适用），按 toolName 过滤 update_plan；
+ * 解析复用 parsePlanSteps，「当前计划」= 最后一次快照（全量替换语义）。
+ */
+export function collectSubagentPlanSnapshots(
+  tools: SubagentToolCall[]
+): PlanSnapshot[] {
+  return tools
+    .filter((tool) => tool.toolName === PLAN_TOOL_NAME)
+    .map((tool) => ({
+      segmentId: tool.id,
+      steps: parsePlanSteps(tool.arguments),
+    }));
 }
 
 /** 当前计划：最后一次 update_plan 的快照（全量替换语义下即最新状态） */
