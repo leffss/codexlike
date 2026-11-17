@@ -3,7 +3,8 @@
  *
  * spawn_subagent(task) 把调研/大范围搜索类任务委派给子代理：
  * - 独立上下文：固定系统指令 + 任务描述，不含主任务历史；
- * - 完整工具集但剔除 spawn_subagent（防递归，有测试）；
+ * - 完整工具集但剔除 spawn_subagent（防递归，有测试）；update_plan 与
+ *   questionsTool 同款每次运行强制并入，策略静态注入系统提示（ADR 0023）；
  * - 模型用全局子代理配置（SubagentsConfig.resolveProfile；null = 同主模型）；
  * - 单任务并发上限（默认 3，设置页可配）：超出的委派 FIFO 排队；
  * - 子代理工具调用同样过当前审批模式（readonly 下子代理同样只读，
@@ -33,6 +34,11 @@ import type {
   ThinkingEffort,
 } from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
+import {
+  createUpdatePlanTool,
+  PLAN_USAGE_POLICY,
+  TOOL_STYLE_POLICY,
+} from "../tools/update-plan";
 import { runTool, toModelTools } from "../tools/registry";
 import type {
   ToolCallRecord,
@@ -152,7 +158,10 @@ export interface SubagentHostPort {
   generateId(): string;
 }
 
-/** 子代理固定角色指令；运行时追加本轮共享资源规范与目录，不复制主任务正文。 */
+/**
+ * 子代理固定角色指令；运行时追加本轮共享资源规范与目录及工作计划/风格策略
+ * （ADR 0023 静态注入，不复制主任务正文）。
+ */
 const SUBAGENT_SYSTEM_PROMPT = [
   "你是 CodexLike 的子代理：主任务把一项独立工作委派给你执行。",
   "- 你拥有独立上下文，看不到主任务历史，只会收到本条委派说明；",
@@ -223,6 +232,10 @@ export function createSubagentOrchestrator(
       typeof config.tools === "function" ? config.tools() : config.tools;
     return resolved.filter((tool) => tool.name !== SUBAGENT_TOOL_NAME);
   }
+
+  // 工作计划工具（ADR 0023）：无外部依赖，编排器级单例——每次运行与 questionsTool
+  // 同款强制并入子代理工具表（撞名拒绝见 runSubagent 内），复用主任务同一实现
+  const planTool = createUpdatePlanTool();
 
   const modelFor = config.languageModelFor ?? createLanguageModelFromProfile;
 
@@ -393,6 +406,12 @@ export function createSubagentOrchestrator(
       const systemPrompt = [
         SUBAGENT_SYSTEM_PROMPT,
         snapshot?.systemPrompt ?? "",
+        // 工作计划策略与通用风格条款静态注入子代理（ADR 0023 修订 ADR 0016
+        // 仅主任务边界）：子代理无每轮 turnSystemPrompt 机制，复用主任务同一
+        // 常量随 SUBAGENT_SYSTEM_PROMPT 一次性组装，不随轮次重复；风格条款
+        // 殿后统摄表达方式（与主任务注入顺序同构）
+        PLAN_USAGE_POLICY,
+        TOOL_STYLE_POLICY,
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -424,6 +443,11 @@ export function createSubagentOrchestrator(
       if (subagentTools.some((tool) => tool.name === questionsTool.name))
         throw new Error(`工具名称冲突：${questionsTool.name}`);
       subagentTools.push(questionsTool);
+      // update_plan 强制并入（ADR 0023，同 questionsTool 模式）：宿主子代理
+      // 工具撞名即拒绝；并入后资源快照 execution tools 再撞名由下方循环拒绝
+      if (subagentTools.some((tool) => tool.name === planTool.name))
+        throw new Error(`工具名称冲突：${planTool.name}`);
+      subagentTools.push(planTool);
       const toolsByName = new Map(
         subagentTools.map((tool) => [tool.name, tool])
       );

@@ -36,7 +36,11 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../tools/types";
-import { createUpdatePlanTool, PLAN_USAGE_POLICY } from "../tools/update-plan";
+import {
+  createUpdatePlanTool,
+  PLAN_USAGE_POLICY,
+  TOOL_STYLE_POLICY,
+} from "../tools/update-plan";
 
 import {
   decideApproval,
@@ -195,17 +199,6 @@ export interface AgentTask {
     signal?: AbortSignal;
   }): Promise<CompactResult>;
 }
-
-/**
- * 内置工具策略的通用风格条款（工作计划/子代理委派等所有策略段共用）：
- * 策略是行为准则，不是谈话素材——防模型在思考或回复中引用、解说规则
- * （如「按规范，多步任务应建计划」），或预告将要使用某工具。
- */
-const TOOL_STYLE_POLICY = [
-  "## 工具使用风格",
-  "- 以上策略与内置工具是你的工作方式本身，直接照做即可；思考和回复中都不引用、不解说这些规则，不说「按规范/按策略」「规范说…」类话语；",
-  "- 调用工具直接发生，不预告「我将使用某工具」，也不把动作解说成文字；正文只谈任务内容、进展与结论——用户要看到产出，不是你的操作规程。",
-].join("\n");
 
 /** 对话上下文只包含 user / assistant / compact-summary 消息；error 提示不进入模型 */
 function toModelMessage(message: StoredMessage): ModelMessage {
@@ -557,7 +550,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           snapshot?.systemPrompt ?? "",
           explicitBody,
           // 工作计划策略（ADR 0016）：update_plan 无条件并入工具表，
-          // 策略随之常驻主任务每轮提示（子代理不注入，见 PLAN_USAGE_POLICY 注释）
+          // 策略随之常驻主任务每轮提示；子代理侧由 subagent.ts 静态注入（ADR 0023）
           PLAN_USAGE_POLICY,
           orchestrator !== null &&
           toolsByName.get(SUBAGENT_TOOL_NAME) === orchestrator.tool

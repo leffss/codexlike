@@ -3,6 +3,7 @@ import type {
   ResourceCatalog,
   SkillLoadRecord,
 } from "../../src/context/resource-types";
+import type { ToolDefinition } from "../../src/tools/types";
 
 /** 任务边界的磁盘资源替身；文件发现与预算由资源模块自己的测试验证。 */
 export function fakeResourceSnapshot(
@@ -10,7 +11,9 @@ export function fakeResourceSnapshot(
   bodies: Record<string, string> = {
     alpha: "ALPHA_PRIVATE_BODY",
     beta: "BETA_PRIVATE_BODY",
-  }
+  },
+  /** 额外并入 execution tools 的工具（撞名用例：update_plan 等强制并入工具） */
+  extraExecutionTools: ToolDefinition[] = []
 ): AgentResourceSnapshot {
   const loaded: SkillLoadRecord[] = [];
   const catalog: ResourceCatalog = {
@@ -57,6 +60,7 @@ export function fakeResourceSnapshot(
       return {
         loadExplicit: load,
         tools: [
+          ...extraExecutionTools,
           {
             name: "load_skill",
             description: "按需加载技能",
