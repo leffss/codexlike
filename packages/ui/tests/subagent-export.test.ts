@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { subagentExportMarkdown } from "../src/lib/subagent-export";
-import type { SubagentSegment } from "../src/lib/task-view";
+import type { SubagentSegment, SubagentToolCall } from "../src/lib/task-view";
 
 /**
  * 子代理导出 Markdown（ADR 0021 票 04）：逐轮正文与思考结构离线归档。
@@ -23,6 +23,21 @@ function seg(overrides: Partial<SubagentSegment> = {}): SubagentSegment {
     ok: true,
     tools: [],
     ...overrides,
+  };
+}
+
+/** 子代理 update_plan 工具调用样例（ADR 0023：计划状态即工具调用记录） */
+function planTool(
+  id: string,
+  steps: { content: string; status: string }[]
+): SubagentToolCall {
+  return {
+    id,
+    taskId: "s1",
+    toolName: "update_plan",
+    arguments: JSON.stringify({ steps }),
+    output: "工作计划已更新",
+    isError: false,
   };
 }
 
@@ -77,6 +92,58 @@ describe("subagentExportMarkdown（逐轮结构导出，票 04）", () => {
     expect(markdown).toContain("## 最终报告\n\n子代理执行失败：API 429");
   });
 
+  it("工作计划终态段（票 03）：最后一次 update_plan 完整清单三态回看，位于最终报告之前", () => {
+    const markdown = subagentExportMarkdown(
+      seg({
+        tools: [
+          planTool("sub-p1", [
+            { content: "调研折叠记忆约定", status: "in_progress" },
+            { content: "梳理开合键约定", status: "pending" },
+          ]),
+          planTool("sub-p2", [
+            { content: "调研折叠记忆约定", status: "completed" },
+            { content: "梳理开合键约定", status: "in_progress" },
+            { content: "汇总成文", status: "pending" },
+          ]),
+        ],
+        turns: [{ content: "过程正文" }],
+      })
+    );
+    // 终态 = 最后一次 update_plan（全量替换语义）：统计行 + 三态清单
+    expect(markdown).toContain("## 工作计划");
+    expect(markdown).toContain("共 3 项：1 已完成、1 进行中、1 待办");
+    expect(markdown).toContain("- 已完成：调研折叠记忆约定");
+    expect(markdown).toContain("- 进行中：梳理开合键约定");
+    expect(markdown).toContain("- 待办：汇总成文");
+    // 段序：逐轮记录之后、最终报告之前
+    expect(markdown.indexOf("## 工作计划")).toBeGreaterThan(
+      markdown.indexOf("### 第 1 轮")
+    );
+    expect(markdown.indexOf("## 工作计划")).toBeLessThan(
+      markdown.indexOf("## 最终报告")
+    );
+  });
+
+  it("无计划（无 update_plan 调用）：导出不含工作计划段", () => {
+    const markdown = subagentExportMarkdown(
+      seg({
+        tools: [
+          {
+            id: "sub-t1",
+            taskId: "s1",
+            toolName: "read_file",
+            arguments: '{"path":"a.ts"}',
+            output: "内容",
+            isError: false,
+          },
+        ],
+        turns: [{ content: "过程正文" }],
+      })
+    );
+    expect(markdown).toContain("## 最终报告");
+    expect(markdown).not.toContain("## 工作计划");
+  });
+
   it("旧记录（无逐轮数据）：回退纯报告导出（现行为不变）", () => {
     const markdown = subagentExportMarkdown(
       seg({ turns: undefined, reasoning: "旧记录拼接的思考" })
@@ -85,5 +152,7 @@ describe("subagentExportMarkdown（逐轮结构导出，票 04）", () => {
     expect(markdown).toContain("最终报告：已梳理");
     expect(markdown).not.toContain("逐轮记录");
     expect(markdown).not.toContain("旧记录拼接的思考");
+    // 旧记录（本特性落地前）无 update_plan 调用：同样不含工作计划段
+    expect(markdown).not.toContain("## 工作计划");
   });
 });

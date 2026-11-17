@@ -136,6 +136,31 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(tools).not.toContain('open=""');
   });
 
+  it("工具清单计数口径含 update_plan：照常计入次数，行内摘要为中文统计（票 03）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-p", {
+            tools: [
+              TOOL,
+              planTool("sub-p1", [
+                { content: "调研现有布局", status: "completed" },
+                { content: "布局变体原型", status: "pending" },
+              ]),
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 计数口径不变（ADR 0023）：update_plan 照常计入调用次数
+    expect(html).toContain("工具调用（2 次）");
+    // update_plan 行内摘要与工具执行输出同口径的中文统计，不走压缩 JSON
+    expect(html).toContain(
+      "工作计划已更新（共 2 项：1 已完成、0 进行中、1 待办）"
+    );
+  });
+
   it("运行中：当前活动工具与思考块默认展开（流式），无报告操作行", () => {
     const running = subSeg("sa-run", {
       state: "running",
