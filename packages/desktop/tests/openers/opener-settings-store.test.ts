@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createOpenerSettingsStore,
   isOpenerId,
+  OPENER_IDS,
+  OPENER_LABELS,
   resolveDefaultOpener,
   type OpenerSettings,
 } from "../../src/openers/opener-settings-store";
@@ -95,9 +97,21 @@ describe("resolveDefaultOpener", () => {
 
 describe("isOpenerId", () => {
   it("枚举成员放行，其余拒绝", () => {
-    for (const id of ["explorer", "vscode", "pycharm", "intellij", "webstorm"])
+    for (const id of [
+      "explorer",
+      "terminal",
+      "vscode",
+      "pycharm",
+      "intellij",
+      "webstorm",
+    ])
       expect(isOpenerId(id)).toBe(true);
     expect(isOpenerId("notepad")).toBe(false);
     expect(isOpenerId(null)).toBe(false);
+  });
+
+  it("OPENER_IDS 顺序即下拉菜单顺序：terminal 紧随 explorer（资源管理器下面）且带中文标签", () => {
+    expect(OPENER_IDS.slice(0, 2)).toEqual(["explorer", "terminal"]);
+    expect(OPENER_LABELS.terminal).toBe("终端");
   });
 });

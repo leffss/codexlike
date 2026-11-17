@@ -101,7 +101,7 @@ describe("resolveOpeners", () => {
     );
   });
 
-  it("探测不到的 JetBrains 产品不出现；可用项按固定顺序（explorer、vscode、pycharm、intellij、webstorm）", () => {
+  it("探测不到的 JetBrains 产品不出现；可用项按固定顺序（explorer、terminal、vscode、pycharm、intellij、webstorm）", () => {
     const apps = join(
       "C:\\Users\\tester\\AppData\\Local",
       "JetBrains",
@@ -123,6 +123,126 @@ describe("resolveOpeners", () => {
       "vscode",
       "webstorm",
     ]);
+  });
+});
+
+describe("resolveOpeners：终端打开器（第一版 Windows-only）", () => {
+  it("wt.exe 用户装（WindowsApps）优先：terminal 紧随 explorer（资源管理器下面），wt 启动风格", () => {
+    const wt = join(
+      "C:\\Users\\tester\\AppData\\Local",
+      "Microsoft",
+      "WindowsApps",
+      "wt.exe"
+    );
+    const openers = resolveOpeners(fakeEnv([wt], {}));
+    expect(openers.map((o) => o.id)).toEqual(["explorer", "terminal"]);
+    expect(openers[1]).toMatchObject({
+      exePath: wt,
+      terminalStyle: "wt",
+    });
+  });
+
+  it("wt.exe 经 PATH 目录也识别，且优先于偏好 shell（wt 恒第一优先）", () => {
+    const wt = join("D:\\tools\\bin", "wt.exe");
+    const bash = join("C:\\Program Files", "Git", "bin", "bash.exe");
+    const openers = resolveOpeners(
+      fakeEnv([wt, bash], {}, { pathEntries: ["D:\\tools\\bin"] }),
+      { terminalShell: "powershell" }
+    );
+    expect(openers.find((o) => o.id === "terminal")).toMatchObject({
+      exePath: wt,
+      terminalStyle: "wt",
+    });
+  });
+
+  it("无 wt：默认链落 Git Bash（bin\\bash.exe），cwd 继承启动风格", () => {
+    const bash = join("C:\\Program Files", "Git", "bin", "bash.exe");
+    const openers = resolveOpeners(fakeEnv([bash], {}));
+    expect(openers.find((o) => o.id === "terminal")).toMatchObject({
+      exePath: bash,
+      terminalStyle: "inherit-cwd",
+    });
+  });
+
+  it("偏好 powershell：wt 缺失时直接用 powershell.exe（SystemRoot 系统位）", () => {
+    const powershell = join(
+      "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const env = fakeEnv([powershell], {}, { systemRoot: "C:\\Windows" });
+    const openers = resolveOpeners(env, { terminalShell: "powershell" });
+    expect(openers.find((o) => o.id === "terminal")).toMatchObject({
+      exePath: powershell,
+      terminalStyle: "inherit-cwd",
+    });
+  });
+
+  it("偏好 shell 未安装时沿固定链退化（git-bash 缺 → powershell 缺 → cmd）", () => {
+    const cmd = join("C:\\Windows", "System32", "cmd.exe");
+    const env = fakeEnv([cmd], {}, { systemRoot: "C:\\Windows" });
+    const openers = resolveOpeners(env, { terminalShell: "git-bash" });
+    expect(openers.find((o) => o.id === "terminal")).toMatchObject({
+      exePath: cmd,
+      terminalStyle: "inherit-cwd",
+    });
+  });
+
+  it("无 systemRoot 时 PowerShell/cmd 也可经 PATH 目录识别", () => {
+    const powershell = join("D:\\sh", "powershell.exe");
+    const openers = resolveOpeners(
+      fakeEnv([powershell], {}, { pathEntries: ["D:\\sh"] })
+    );
+    expect(openers.find((o) => o.id === "terminal")?.exePath).toBe(powershell);
+  });
+
+  it("PATH 上的 bash.exe 不当 Git Bash（防命中 System32 的 WSL 启动器）：Git 未装时沿链落 powershell", () => {
+    const wslBash = join("C:\\Windows", "System32", "bash.exe");
+    const powershell = join(
+      "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const env = fakeEnv(
+      [wslBash, powershell],
+      {},
+      { systemRoot: "C:\\Windows" }
+    );
+    const openers = resolveOpeners(env);
+    expect(openers.find((o) => o.id === "terminal")?.exePath).toBe(powershell);
+  });
+
+  it("Git Bash 也认 32 位安装位（ProgramFiles(x86)）", () => {
+    const bash = join("C:\\Program Files (x86)", "Git", "bin", "bash.exe");
+    const env = fakeEnv(
+      [bash],
+      {},
+      { programFilesX86: "C:\\Program Files (x86)" }
+    );
+    const openers = resolveOpeners(env);
+    expect(openers.find((o) => o.id === "terminal")).toMatchObject({
+      exePath: bash,
+      terminalStyle: "inherit-cwd",
+    });
+  });
+
+  it("Windows 上一个终端都探测不到：terminal 不出现，explorer 恒在", () => {
+    expect(
+      resolveOpeners(fakeEnv([], {}), { platform: "win32" }).map((o) => o.id)
+    ).toEqual(["explorer"]);
+  });
+
+  it("非 Windows 平台：终端项隐藏（第一版 Windows-only）", () => {
+    const bash = join("C:\\Program Files", "Git", "bin", "bash.exe");
+    expect(
+      resolveOpeners(fakeEnv([bash], {}), { platform: "darwin" }).map(
+        (o) => o.id
+      )
+    ).toEqual(["explorer"]);
   });
 });
 

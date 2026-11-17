@@ -192,6 +192,41 @@ const OPENER_ICONS: Record<string, ReactNode> = {
       />
     </svg>
   ),
+  terminal: (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      data-testid="workspace-opener-icon-terminal"
+      aria-hidden="true"
+    >
+      {/* 终端提示符观感：外框 + &gt;_ （跟随文字色，无单一品牌） */}
+      <rect
+        x="1.5"
+        y="2.5"
+        width="13"
+        height="11"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M4.2 5.8l2.2 2.2-2.2 2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.8 10.4h4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  ),
   vscode: (
     <svg
       width="14"

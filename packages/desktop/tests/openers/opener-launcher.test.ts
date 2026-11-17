@@ -14,29 +14,37 @@ function fakeSpawn() {
   const spawned: {
     command: string;
     args: string[];
+    options?: { cwd?: string };
     listeners: { error: ((error: Error) => void)[]; spawn: (() => void)[] };
   }[] = [];
   const unref = vi.fn();
   return {
     spawned,
     unref,
-    spawn: vi.fn((command: string, args: string[]) => {
-      const child = {
-        command,
-        args,
-        listeners: {
-          error: [] as ((error: Error) => void)[],
-          spawn: [] as (() => void)[],
-        },
-      };
-      spawned.push(child);
-      return {
-        once: (event: "error" | "spawn", listener: never) => {
-          (child.listeners[event] as never[]).push(listener);
-        },
-        unref: () => unref(),
-      };
-    }),
+    spawn: vi.fn(
+      (
+        command: string,
+        args: string[],
+        options?: { cwd?: string; windowsHide?: boolean }
+      ) => {
+        const child = {
+          command,
+          args,
+          options,
+          listeners: {
+            error: [] as ((error: Error) => void)[],
+            spawn: [] as (() => void)[],
+          },
+        };
+        spawned.push(child);
+        return {
+          once: (event: "error" | "spawn", listener: never) => {
+            (child.listeners[event] as never[]).push(listener);
+          },
+          unref: () => unref(),
+        };
+      }
+    ),
     emit(
       child: (typeof spawned)[number],
       event: "error" | "spawn",
@@ -54,6 +62,16 @@ const explorer: ResolvedOpener = { id: "explorer", exePath: null };
 const vscode: ResolvedOpener = {
   id: "vscode",
   exePath: "C:\\Program Files\\Microsoft VS Code\\Code.exe",
+};
+const wtTerminal: ResolvedOpener = {
+  id: "terminal",
+  exePath: "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe",
+  terminalStyle: "wt",
+};
+const bashTerminal: ResolvedOpener = {
+  id: "terminal",
+  exePath: "C:\\Program Files\\Git\\bin\\bash.exe",
+  terminalStyle: "inherit-cwd",
 };
 
 describe("createOpenerLauncher", () => {
@@ -95,5 +113,43 @@ describe("createOpenerLauncher", () => {
     if (!second) throw new Error("未记录第二次 spawn 调用");
     fake.emit(second, "error", new Error("ENOENT"));
     await expect(failing).rejects.toThrow(/Code\.exe.*ENOENT/);
+  });
+
+  it("终端（wt 风格）：-d 显式起始目录（不传 cwd），窗口不隐藏，成功 unref", async () => {
+    const fake = fakeSpawn();
+    const launch = createOpenerLauncher({
+      openPath: vi.fn(async () => ""),
+      spawnProcess: fake.spawn,
+    });
+
+    const pending = launch(wtTerminal, "C:\\ws");
+    expect(fake.spawn).toHaveBeenCalledWith(
+      wtTerminal.exePath,
+      ["-d", "C:\\ws"],
+      { windowsHide: false }
+    );
+    const first = fake.spawned[0];
+    if (!first) throw new Error("未记录 spawn 调用");
+    fake.emit(first, "spawn");
+    await expect(pending).resolves.toBeUndefined();
+    expect(fake.unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("终端（cwd 继承风格）：无参启动，工作区经 cwd 传入且窗口不隐藏（bash/powershell/cmd）", async () => {
+    const fake = fakeSpawn();
+    const launch = createOpenerLauncher({
+      openPath: vi.fn(async () => ""),
+      spawnProcess: fake.spawn,
+    });
+
+    const pending = launch(bashTerminal, "C:\\ws");
+    expect(fake.spawn).toHaveBeenCalledWith(bashTerminal.exePath, [], {
+      cwd: "C:\\ws",
+      windowsHide: false,
+    });
+    const first = fake.spawned[0];
+    if (!first) throw new Error("未记录 spawn 调用");
+    fake.emit(first, "spawn");
+    await expect(pending).resolves.toBeUndefined();
   });
 });

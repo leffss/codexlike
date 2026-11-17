@@ -4,9 +4,14 @@ import { join } from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
 
+import type { TerminalShell } from "@codexlike/agent-core/node";
+
 import { registerOpenerHandlers } from "../../src/openers/opener-ipc";
 import { createOpenerSettingsStore } from "../../src/openers/opener-settings-store";
-import type { OpenerProbeEnv } from "../../src/openers/opener-resolver";
+import type {
+  OpenerProbeEnv,
+  ResolvedOpener,
+} from "../../src/openers/opener-resolver";
 import { IPC } from "../../src/shared/ipc";
 
 /**
@@ -38,7 +43,10 @@ async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 }
 
 /** 假探测环境：files 内的 exe 视为可用（explorer 恒在）；系统装根目录固定 */
-function probeEnv(files: string[]): OpenerProbeEnv {
+function probeEnv(
+  files: string[],
+  overrides: Partial<OpenerProbeEnv> = {}
+): OpenerProbeEnv {
   const fileSet = new Set(files);
   return {
     localAppData: null,
@@ -46,6 +54,7 @@ function probeEnv(files: string[]): OpenerProbeEnv {
     pathEntries: [],
     exists: (path) => fileSet.has(path),
     readDir: () => null,
+    ...overrides,
   };
 }
 
@@ -56,25 +65,32 @@ interface Launch {
 
 function setup(options: {
   files?: string[];
+  probeOverrides?: Partial<OpenerProbeEnv>;
   launchError?: Error;
   testLogPath?: string;
+  terminalShell?: () => TerminalShell;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "opener-ipc-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const store = createOpenerSettingsStore({ dir });
   const launched: Launch[] = [];
+  const resolved: ResolvedOpener[] = [];
   registerOpenerHandlers({
     store,
-    probeEnv: probeEnv(options.files ?? []),
+    probeEnv: probeEnv(options.files ?? [], options.probeOverrides),
     launch: async (opener, workspacePath) => {
       if (options.launchError) throw options.launchError;
       launched.push({ id: opener.id, workspacePath });
+      resolved.push(opener);
     },
+    ...(options.terminalShell !== undefined
+      ? { terminalShell: options.terminalShell }
+      : {}),
     ...(options.testLogPath !== undefined
       ? { testLogPath: options.testLogPath }
       : {}),
   });
-  return { store, launched, dir };
+  return { store, launched, resolved, dir };
 }
 
 function workspace(): string {
@@ -132,6 +148,26 @@ it("open（点选下拉项）：以该程序打开并持久化为默认，list �
   expect(list.defaultId).toBe("vscode");
 });
 
+it("终端打开器：点选即打开并记默认，偏好注入决定探测结果（terminalStyle 传到启动器）", async () => {
+  const cmd = join("C:\\Windows", "System32", "cmd.exe");
+  const { resolved, store } = setup({
+    files: [cmd],
+    probeOverrides: { systemRoot: "C:\\Windows" },
+    terminalShell: () => "cmd",
+  });
+  const ws = workspace();
+  const result = (await invoke(IPC.openers.open, {
+    workspacePath: ws,
+    openerId: "terminal",
+  })) as { defaultId: string };
+  expect(result.defaultId).toBe("terminal");
+  expect(await store.get()).toEqual({ defaultId: "terminal" });
+  expect(resolved.find((o) => o.id === "terminal")).toMatchObject({
+    exePath: cmd,
+    terminalStyle: "inherit-cwd",
+  });
+});
+
 it("open 边界：非法输入、目录不存在、未知/未探测到的 id 均中文拒绝", async () => {
   const { launched } = setup({ files: [VSCODE_EXE] });
   const ws = workspace();
@@ -177,6 +213,7 @@ it("E2E 钩子：testLogPath 下 list 全量可用、open 记录 JSON 行不启�
   };
   expect(list.openers.map((o) => o.id)).toEqual([
     "explorer",
+    "terminal",
     "vscode",
     "pycharm",
     "intellij",

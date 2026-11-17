@@ -1,11 +1,14 @@
 import { accessSync, readdirSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
+import type { TerminalShell } from "@codexlike/agent-core/node";
+
 import type { OpenerId } from "./opener-settings-store";
 
 /**
  * 工作区打开器探测解析器：按注入的探测环境折算候选可用性。
  * explorer 走 Electron shell.openPath（跨平台文件管理器），恒可用置首；
+ * 终端打开器（Windows）紧随其后：wt.exe 优先，无 wt 沿偏好 shell 退化链；
  * 编辑器类按「用户安装 → 系统安装 → PATH 目录」顺序探测真实 exe。
  * Windows 优先（共识）：LOCALAPPDATA / ProgramFiles / PATH 三路；
  * 接缝即 OpenerProbeEnv，macOS/Linux 补充时新增构建器不改本逻辑。
@@ -15,10 +18,14 @@ import type { OpenerId } from "./opener-settings-store";
 
 /** 探测环境接缝：生产用 createNodeProbeEnv，测试注入内存假环境 */
 export interface OpenerProbeEnv {
-  /** Windows：%LOCALAPPDATA%（VS Code 用户装 / JetBrains Toolbox） */
+  /** Windows：%LOCALAPPDATA%（VS Code 用户装 / JetBrains Toolbox / wt 别名） */
   localAppData: string | null;
-  /** Windows：%ProgramFiles%（VS Code 系统装 / JetBrains 独立安装） */
+  /** Windows：%ProgramFiles%（VS Code 系统装 / JetBrains 独立安装 / Git Bash） */
   programFiles: string | null;
+  /** Windows：%ProgramFiles(x86)%（32 位 Git / VS Code 32 位装）；可选 */
+  programFilesX86?: string | null;
+  /** Windows：%SystemRoot%（powershell / cmd 系统位）；可选，缺省只探 PATH */
+  systemRoot?: string | null;
   /** PATH 已拆分的目录列表 */
   pathEntries: readonly string[];
   exists(path: string): boolean;
@@ -31,6 +38,8 @@ export interface ResolvedOpener {
   id: OpenerId;
   /** 可直接 spawn 的 exe 绝对路径；explorer 为 null */
   exePath: string | null;
+  /** 仅 terminal：wt 以 `-d` 显式起始目录启动，其余 shell 继承 spawn cwd */
+  terminalStyle?: "wt" | "inherit-cwd";
 }
 
 /** JetBrains 产品探测参数：Toolbox 应用目录 slug 候选 + 独立安装目录前缀 + exe 名 */
@@ -188,9 +197,107 @@ function resolveJetbrains(
   );
 }
 
+/** 终端 shell 的 exe 探测（wt 已排除后）：按 shell 类型给候选路径 */
+function probeShellExe(
+  env: OpenerProbeEnv,
+  shell: TerminalShell
+): string | null {
+  const candidates: string[] = [];
+  if (shell === "git-bash") {
+    // bash.exe 交互式起在继承 cwd（Win11 默认终端宿主即 Windows Terminal）。
+    // 固定安装位候选（bin / usr/bin、64/32 位 ProgramFiles），与 agent-core
+    // findGitBash 的固定候选同源；刻意不扫 PATH——PATH 首段 System32 的
+    // bash.exe 是 WSL 启动器，命中会落 Linux shell 且 cwd 翻成 /mnt/c/…
+    const roots = [env.programFiles, env.programFilesX86 ?? null];
+    for (const root of roots) {
+      if (root === null) continue;
+      candidates.push(
+        join(root, "Git", "bin", "bash.exe"),
+        join(root, "Git", "usr", "bin", "bash.exe")
+      );
+    }
+  } else {
+    // powershell / cmd：系统位恒在（SystemRoot）→ PATH 兜底
+    const systemRoot = env.systemRoot ?? null;
+    if (systemRoot !== null) {
+      candidates.push(
+        shell === "powershell"
+          ? join(
+              systemRoot,
+              "System32",
+              "WindowsPowerShell",
+              "v1.0",
+              "powershell.exe"
+            )
+          : join(systemRoot, "System32", "cmd.exe")
+      );
+    }
+    const exeName = shell === "powershell" ? "powershell.exe" : "cmd.exe";
+    for (const entry of env.pathEntries) {
+      candidates.push(join(entry, exeName));
+    }
+  }
+  return firstExisting(env, candidates);
+}
+
+/**
+ * 终端打开器探测（第一版 Windows-only，调用方已按平台门控）：
+ * wt.exe（Windows Terminal）恒第一优先——系统默认终端、多开即多窗口；
+ * 无 wt 沿「偏好 shell → git-bash → powershell → cmd」退化链取首个已装
+ * （偏好即终端设置的生效 shell，宿主注入；cmd 系统位恒在作最终兜底）。
+ */
+function resolveTerminal(
+  env: OpenerProbeEnv,
+  preference: TerminalShell | null
+): ResolvedOpener | null {
+  const wtCandidates: string[] = [];
+  if (env.localAppData !== null) {
+    // Windows Terminal 应用执行别名（应用包安装的规范位置）
+    wtCandidates.push(
+      join(env.localAppData, "Microsoft", "WindowsApps", "wt.exe")
+    );
+  }
+  for (const entry of env.pathEntries) {
+    wtCandidates.push(join(entry, "wt.exe"));
+  }
+  const wt = firstExisting(env, wtCandidates);
+  if (wt !== null) {
+    return { id: "terminal", exePath: wt, terminalStyle: "wt" };
+  }
+  const order: TerminalShell[] = [];
+  const chain: (TerminalShell | null)[] = [
+    preference,
+    "git-bash",
+    "powershell",
+    "cmd",
+  ];
+  for (const shell of chain) {
+    if (shell !== null && !order.includes(shell)) order.push(shell);
+  }
+  for (const shell of order) {
+    const exePath = probeShellExe(env, shell);
+    if (exePath !== null) {
+      return { id: "terminal", exePath, terminalStyle: "inherit-cwd" };
+    }
+  }
+  return null;
+}
+
 /** 探测可用的工作区打开器（固定顺序；explorer 恒在置首，未探测到的隐藏） */
-export function resolveOpeners(env: OpenerProbeEnv): ResolvedOpener[] {
+export function resolveOpeners(
+  env: OpenerProbeEnv,
+  options: {
+    /** 平台门控：终端打开器第一版 Windows-only（缺省当前平台） */
+    platform?: NodeJS.Platform;
+    /** 终端设置解析出的生效 shell 偏好（设置项 > CODEXLIKE_SHELL > git-bash） */
+    terminalShell?: TerminalShell | null;
+  } = {}
+): ResolvedOpener[] {
   const resolved: ResolvedOpener[] = [{ id: "explorer", exePath: null }];
+  if ((options.platform ?? process.platform) === "win32") {
+    const terminal = resolveTerminal(env, options.terminalShell ?? null);
+    if (terminal !== null) resolved.push(terminal);
+  }
   const vscode = resolveVscode(env);
   if (vscode !== null) resolved.push({ id: "vscode", exePath: vscode });
   // JETBRAINS 键序即菜单顺序（pycharm → intellij → webstorm），单一来源
@@ -206,6 +313,8 @@ export function createNodeProbeEnv(): OpenerProbeEnv {
   return {
     localAppData: process.env.LOCALAPPDATA ?? null,
     programFiles: process.env.ProgramFiles ?? null,
+    programFilesX86: process.env["ProgramFiles(x86)"] ?? null,
+    systemRoot: process.env.SystemRoot ?? null,
     pathEntries: (process.env.PATH ?? "").split(delimiter).filter(Boolean),
     exists(path) {
       try {

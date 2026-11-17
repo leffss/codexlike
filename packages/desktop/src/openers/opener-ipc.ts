@@ -2,6 +2,8 @@ import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 
+import type { TerminalShell } from "@codexlike/agent-core/node";
+
 import {
   createNodeProbeEnv,
   resolveOpeners,
@@ -52,6 +54,12 @@ export function registerOpenerHandlers(options: {
   store: OpenerSettingsStore;
   /** 探测环境（生产默认 createNodeProbeEnv；测试注入） */
   probeEnv?: OpenerProbeEnv;
+  /**
+   * 终端设置的生效 shell 偏好（设置项 > CODEXLIKE_SHELL > git-bash，逐次
+   * 解析）：无 wt 时决定终端打开器退化链起点；main.ts 装配处绑定
+   * resolveTerminalShell 合并逻辑（与 run_terminal_command 同一来源）。
+   */
+  terminalShell?: () => TerminalShell;
   /** 启动器（main.ts 装配处绑定 electron shell 与 child_process） */
   launch: (opener: ResolvedOpener, workspacePath: string) => Promise<void>;
   /** E2E 钩子（生产默认 CODEXLIKE_TEST_OPENER_LOG） */
@@ -67,7 +75,9 @@ export function registerOpenerHandlers(options: {
     if (testLogPath !== null) {
       return OPENER_IDS.map((id) => ({ id, exePath: `e2e:${id}` }));
     }
-    return resolveOpeners(probeEnv);
+    return resolveOpeners(probeEnv, {
+      terminalShell: options.terminalShell?.() ?? null,
+    });
   }
 
   ipcMain.handle(IPC.openers.list, async () => {

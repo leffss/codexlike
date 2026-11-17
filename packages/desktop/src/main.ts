@@ -654,16 +654,26 @@ void app.whenReady().then(async () => {
     },
   });
   // 工作区打开器（GLOSSARY）：标题栏分裂按钮的候选探测与打开；
-  // 真实启动依赖在此装配（explorer 走 shell.openPath，编辑器 detach spawn）
+  // 真实启动依赖在此装配（explorer 走 shell.openPath，编辑器 detach spawn，
+  // 终端 wt/-d 或 shell/cwd 继承——见 opener-launcher 启动风格注释）
   registerOpenerHandlers({
     store: createOpenerSettingsStore({ dir: dataDir() }),
+    // 无 wt 时终端退化链起点用生效 shell 偏好（与 run_terminal_command 同源，
+    // 设置页保存后对下一次展开/打开即时生效——见上方 terminalSettings 缓存）
+    terminalShell: () =>
+      resolveTerminalShell(
+        terminalSettings.shell,
+        process.env["CODEXLIKE_SHELL"]
+      ),
     launch: createOpenerLauncher({
       openPath: (path) => shell.openPath(path),
-      spawnProcess: (command, args) =>
+      spawnProcess: (command, args, options) =>
         spawn(command, args, {
           detached: true,
           stdio: "ignore",
-          windowsHide: true,
+          // 编辑器/资源管理器隐藏控制台闪烁；终端打开器显式传 false 弹出窗口
+          windowsHide: options?.windowsHide ?? true,
+          cwd: options?.cwd,
         }),
     }),
   });

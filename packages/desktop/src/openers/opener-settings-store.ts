@@ -11,6 +11,7 @@ import { readJsonFile, writeJsonFile } from "../storage/json-file";
 /** 工作区打开器 id 枚举（顺序即下拉菜单顺序；explorer 恒在兜底） */
 export const OPENER_IDS = [
   "explorer",
+  "terminal",
   "vscode",
   "pycharm",
   "intellij",
@@ -29,6 +30,7 @@ export function isOpenerId(value: unknown): value is OpenerId {
 /** 打开器中文标签（下拉菜单展示） */
 export const OPENER_LABELS: Record<OpenerId, string> = {
   explorer: "资源管理器",
+  terminal: "终端",
   vscode: "VS Code",
   pycharm: "PyCharm",
   intellij: "IntelliJ IDEA",

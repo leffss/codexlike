@@ -13,7 +13,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, closeApp, launchApp, projectAction } from "./helpers.mjs";
 
-const OPENER_IDS = ["explorer", "vscode", "pycharm", "intellij", "webstorm"];
+const OPENER_IDS = [
+  "explorer",
+  "terminal",
+  "vscode",
+  "pycharm",
+  "intellij",
+  "webstorm",
+];
 
 function readLog(logFile) {
   if (!existsSync(logFile)) return [];
