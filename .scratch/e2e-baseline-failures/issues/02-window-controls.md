@@ -4,11 +4,11 @@
 
 **Blocked by:** None（can start immediately；建议在 01 修复后一起全量验证）
 
-**Status:** needs-triage
+**Status:** wontfix
 
-- [ ] 单跑 `node e2e/window-controls.mjs` 取证（失败形态、稳定复现性）
-- [ ] 定位根因并修复（真行为缺陷或过期断言，参照 worktree.mjs d749aa1 的断言同步先例区分对待）
-- [ ] 全量 e2e（test:e2e:all）不回归
+- [x] 单跑 `node e2e/window-controls.mjs` 取证（失败形态、稳定复现性）
+- [x] 定位根因并修复（真行为缺陷或过期断言，参照 worktree.mjs d749aa1 的断言同步先例区分对待）
+- [x] 全量 e2e（test:e2e:all）不回归
 
 ## Comments
 
@@ -21,6 +21,7 @@
 **What we've established so far:**
 
 - 2026-11-17 单跑取证（main @ 4a84d6e）：`node e2e/window-controls.mjs` **全场景 PASS**（菜单移除、最小化、最大化/还原、外部状态/初始快照、设置/窄窗/主题、关闭保存），退出码 0——当前 main 不复现，9fa1bd8 时点的失败证据已过期（其后某提交已修复，或该失败本为链上上下文相关/偶发）。
+- 2026-11-17 关单（wontfix / 已不复现）：免费证据落地——01/03 修复后全量门推送实跑 40 场景全链通过（链上第 38 位 window-controls 含在内，链尾 external-links PASS 佐证无短路），`4a84d6e..cd4535e main -> main` 过门发布。当前 main 单跑与全量链双双绿灯，无事可修。
 
 **What we still need（非人力信息，等免费证据）:**
 
