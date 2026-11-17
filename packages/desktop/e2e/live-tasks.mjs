@@ -224,11 +224,14 @@ async function main() {
       .filter({ hasText: "失败" })
       .waitFor();
     await a.click();
-    // 消息段时序（消息流票 01）：工具调用之后产生的正文独立成段、显示在
-    // 工具卡之后（不再合并回靠前气泡）；中断切回不丢内容，两段正文共同
-    // 构成完整回复
+    // 消息段时序（消息流票 01；断言按 ADR 0015 过程段语义同步，0a89d66
+    // 引入过程段折叠卡时漏改本场景，与 d749aa1 worktree 断言漏网同款）：
+    // 工具调用之后产生的正文独立成段、显示在工具卡之后（不再合并回靠前
+    // 段）；中断切回不丢内容——被工具卡隔断的早段正文以过程段折叠卡常驻
+    // 留痕（收起态内容仍在 DOM，textContent 可回读），两段正文共同构成
+    // 完整回复
     await window
-      .getByTestId("message-assistant")
+      .getByTestId("process-text-block")
       .filter({ hasText: "项目A前半段。后台第二段。" })
       .waitFor();
     const finalSegment = window
@@ -236,12 +239,12 @@ async function main() {
       .filter({ hasText: "A问答之后" });
     await finalSegment.waitFor();
     const earlyText = await window
-      .getByTestId("message-assistant")
+      .getByTestId("process-text-block")
       .filter({ hasText: "项目A前半段。后台第二段。" })
       .textContent();
     assert(
       earlyText !== null && !earlyText.includes("A问答之后"),
-      "工具卡之后的正文不应合并回靠前气泡"
+      "工具卡之后的正文不应合并回靠前段"
     );
     const order = await window.evaluate(() => {
       const stream = document.querySelector('[data-testid="message-stream"]');
