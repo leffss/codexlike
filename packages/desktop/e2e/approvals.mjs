@@ -121,7 +121,7 @@ async function main() {
       .getByLabel("baseURL", { exact: true })
       .fill(`http://127.0.0.1:${port}/v1`);
     await profileForm.getByLabel("API Key", { exact: true }).fill("sk-e2e");
-    await profileForm.getByLabel("模型", { exact: true }).fill("mock-model");
+    await profileForm.getByLabel("模型 1", { exact: true }).fill("mock-model");
     await profileForm
       .getByRole("button", { name: "创建", exact: true })
       .click();

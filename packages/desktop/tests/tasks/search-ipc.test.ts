@@ -76,7 +76,7 @@ async function setup() {
     name: "私密配置名称",
     apiKey: "sk-private-search-secret",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
-    model: "private-model-config",
+    models: ["private-model-config"],
   });
   function register() {
     const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>

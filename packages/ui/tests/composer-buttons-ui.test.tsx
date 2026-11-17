@@ -11,7 +11,7 @@ function composer(props: Partial<Parameters<typeof MessageComposer>[0]> = {}) {
         {
           id: "p1",
           name: "Mock",
-          model: "mock-model",
+          models: ["mock-model"],
           baseURL: "http://127.0.0.1:9/v1",
           apiKey: "sk-test",
         },

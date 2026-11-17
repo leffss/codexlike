@@ -78,7 +78,7 @@ async function setup(limit: number) {
   });
   const profile = await profiles.create({
     name: "重启模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${port}/v1`,
   });

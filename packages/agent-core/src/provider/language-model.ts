@@ -2,6 +2,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { wrapLanguageModel, type LanguageModel } from "ai";
 
 import type { ProviderProfile } from "./provider-profile";
+import { firstModelOf } from "./provider-profile";
 
 /** 逐条消息的思考档位；缺省保留服务端默认行为。 */
 export type ThinkingEffort = "auto" | "low" | "medium" | "high" | "off";
@@ -68,7 +69,8 @@ export function createLanguageModelFromProfile(
     fetch: options.fetch,
   });
   return wrapLanguageModel({
-    model: provider.chatModel(profile.model),
+    // 任务级模型选择（票 02）落地前，现有任务链路解析为 Profile 列表第一项（ADR 0024 兼容语义）
+    model: provider.chatModel(firstModelOf(profile)),
     middleware: {
       specificationVersion: "v4",
       transformParams: async ({ params }) => ({

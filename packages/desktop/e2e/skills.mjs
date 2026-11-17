@@ -137,7 +137,7 @@ async function main() {
     await form.getByLabel("名称").fill("Skills Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
     await form.getByLabel("API Key").fill("sk-e2e");
-    await form.getByLabel("模型").fill("mock-model");
+    await form.getByLabel("模型 1").fill("mock-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Skills Mock", { exact: true }).first().waitFor();
     await window.getByTestId("settings-back").click();

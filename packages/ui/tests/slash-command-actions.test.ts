@@ -15,21 +15,21 @@ const profiles: ProviderProfile[] = [
     name: "GLM",
     baseURL: "https://a",
     apiKey: "k",
-    model: "glm-4.7",
+    models: ["glm-4.7"],
   },
   {
     id: "p2",
     name: "DeepSeek",
     baseURL: "https://b",
     apiKey: "k",
-    model: "deepseek-v4",
+    models: ["deepseek-v4"],
   },
   {
     id: "p3",
     name: "GLM 便宜档",
     baseURL: "https://c",
     apiKey: "k",
-    model: "glm-4.7-flash",
+    models: ["glm-4.7-flash"],
   },
 ];
 

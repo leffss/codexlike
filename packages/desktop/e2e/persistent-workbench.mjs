@@ -67,14 +67,14 @@ async function main() {
     await form.getByLabel("名称").fill("Persistent Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
     await form.getByLabel("API Key").fill("test");
-    await form.getByLabel("模型").fill("persistent-model");
+    await form.getByLabel("模型 1").fill("persistent-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Persistent Mock", { exact: true }).waitFor();
     await window.getByTestId("profile-create").click();
     await form.getByLabel("名称").fill("Second Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
     await form.getByLabel("API Key").fill("test-second");
-    await form.getByLabel("模型").fill("second-model");
+    await form.getByLabel("模型 1").fill("second-model");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Second Mock", { exact: true }).waitFor();
     const profiles = await window.evaluate(() =>

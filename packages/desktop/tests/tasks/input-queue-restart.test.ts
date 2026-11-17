@@ -93,7 +93,7 @@ async function setup() {
   }
   const profile = await profiles.create({
     name: "重启模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: `http://127.0.0.1:${port}/v1`,
   });
@@ -196,7 +196,7 @@ it("失效 Profile 的任务只保留自己的队首，不阻塞其他任务恢�
   const app = await setup();
   const doomed = await app.profiles.create({
     name: "重启前删除的模型",
-    model: "mock",
+    models: ["mock"],
     apiKey: "test",
     baseURL: "http://127.0.0.1:1/v1",
   });

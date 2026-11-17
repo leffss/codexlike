@@ -12,7 +12,10 @@ export type {
   ProviderProfileErrors,
   ProviderProfileInput,
 } from "./provider/provider-profile";
-export { validateProviderProfile } from "./provider/provider-profile";
+export {
+  validateProviderProfile,
+  firstModelOf,
+} from "./provider/provider-profile";
 
 export type {
   CreateLanguageModelOptions,

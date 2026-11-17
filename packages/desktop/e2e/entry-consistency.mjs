@@ -74,7 +74,7 @@ try {
     .getByLabel("baseURL", { exact: true })
     .fill(`http://127.0.0.1:${model.port}/v1`);
   await form.getByLabel("API Key", { exact: true }).fill("test");
-  await form.getByLabel("模型", { exact: true }).fill("mock-model");
+  await form.getByLabel("模型 1", { exact: true }).fill("mock-model");
   await form.getByRole("button", { name: /保存|创建/ }).click();
   await profiles.getByText("Entry Mock", { exact: true }).waitFor();
   await window.getByTestId("settings-back").click();

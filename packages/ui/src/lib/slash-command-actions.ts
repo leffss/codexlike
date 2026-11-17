@@ -1,4 +1,5 @@
 import {
+  firstModelOf,
   fuzzyMatch,
   type ProviderProfile,
   type SlashCommandName,
@@ -59,7 +60,8 @@ export function matchProfilesForModelSwitch(
   const matched = fuzzyMatch(
     query,
     profiles,
-    (profile) => `${profile.name} ${profile.model}`
+    // 任务级模型选择（票 02）落地前以列表第一项匹配（ADR 0024 兼容语义）
+    (profile) => `${profile.name} ${firstModelOf(profile)}`
   );
   if (matched.length === 1) {
     return { kind: "unique", profile: matched[0]! };

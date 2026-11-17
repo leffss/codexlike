@@ -21,7 +21,7 @@ const profile: ProviderProfile = {
   name: "测试",
   baseURL: "https://example.com/v1",
   apiKey: "test",
-  model: "test",
+  models: ["test"],
 };
 const questions = [
   {

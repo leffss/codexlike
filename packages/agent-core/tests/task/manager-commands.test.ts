@@ -16,7 +16,7 @@ const profile: ProviderProfile = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
   apiKey: "sk-test",
-  model: "glm-4.7",
+  models: ["glm-4.7"],
 };
 
 function okModel() {

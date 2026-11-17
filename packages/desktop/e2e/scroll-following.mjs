@@ -105,7 +105,7 @@ async function main() {
     await form.getByLabel("名称").fill("Follow Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
     await form.getByLabel("API Key").fill("sk-e2e");
-    await form.getByLabel("模型").fill("follow-model");
+    await form.getByLabel("模型 1").fill("follow-model");
     await window
       .locator("form")
       .getByRole("button", { name: /保存|创建/ })

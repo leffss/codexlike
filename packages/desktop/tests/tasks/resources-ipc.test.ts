@@ -113,7 +113,7 @@ describe("规范与技能 IPC", () => {
           name: "Mock",
           baseURL: "http://127.0.0.1:1/v1",
           apiKey: "test",
-          model: "mock",
+          models: ["mock"],
         },
       })
       [Symbol.asyncIterator]();

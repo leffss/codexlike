@@ -35,6 +35,7 @@ import {
 } from "../lib/live-task";
 
 import {
+  firstModelOf,
   resolveComposerSubmission,
   type ApprovalMode,
   type ProviderProfile,
@@ -1217,7 +1218,7 @@ export function WorkspacePage(props: {
         if (match.kind === "unique") {
           setSelectedProfileId(match.profile.id);
           pushLocalStatus(
-            `模型已切换：${match.profile.name} · ${match.profile.model}（对下一条消息生效）`
+            `模型已切换：${match.profile.name} · ${firstModelOf(match.profile)}（对下一条消息生效）`
           );
         } else {
           pushLocalStatus(
@@ -1226,7 +1227,7 @@ export function WorkspacePage(props: {
                 ? "当前可选模型（用 /model 关键词 切换）："
                 : `「${action.query}」匹配多个模型，请更精确地指定：`,
               ...match.candidates.map(
-                (profile) => `- ${profile.name} · ${profile.model}`
+                (profile) => `- ${profile.name} · ${firstModelOf(profile)}`
               ),
             ].join("\n")
           );

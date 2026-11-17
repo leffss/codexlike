@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   DEFAULT_MAX_SUBAGENT_TOOL_ROUNDS,
+  firstModelOf,
   type ProviderProfile,
 } from "@codexlike/agent-core";
 import type { TerminalSettings } from "@codexlike/desktop/ipc";
@@ -87,7 +88,7 @@ export function SettingsPage() {
                       name: editingProfile.name,
                       baseURL: editingProfile.baseURL,
                       apiKey: editingProfile.apiKey,
-                      model: editingProfile.model,
+                      models: editingProfile.models,
                     }}
                     submitLabel="保存修改"
                     onCancel={() => setEditing(null)}
@@ -108,7 +109,7 @@ export function SettingsPage() {
                       {profile.name}
                     </p>
                     <p className="truncate text-xs text-fg-muted">
-                      {profile.baseURL} · {profile.model}
+                      {profile.baseURL} · {profile.models.join("、")}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1">
@@ -741,7 +742,7 @@ function SubagentSettingsSection() {
               <option value="">同主模型（每次委派沿用当前任务所选模型）</option>
               {profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
-                  {profile.name} · {profile.model}
+                  {profile.name} · {firstModelOf(profile)}
                 </option>
               ))}
             </select>
