@@ -112,7 +112,7 @@ async function main() {
         name: "Reasoning Mock",
         baseURL: `http://127.0.0.1:${port}/v1`,
         apiKey: "sk-e2e",
-        model: "mock-model",
+        models: ["mock-model"],
       });
     }, model.port);
     await prepareDraft(window);
