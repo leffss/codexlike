@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type {
   OpenerListResult,
@@ -167,73 +167,122 @@ function WorkspaceBadge(props: {
   );
 }
 
-/** 打开器单色线性图标（14px，与标题栏图标语言一致；JetBrains 家族共用 IDE 方块） */
-const OPENER_ICONS = {
-  folder: (
+/**
+ * 打开器品牌图标（14px，用户定稿：用工具自身默认观感、颜色不统一没关系；
+ * JetBrains 三款即其「色块 + 产品缩写」官方语言）。每个图标带独立定位器，
+ * 主按钮与菜单项共用同一份（查询须按容器限定，避免默认项两处命中）。
+ */
+const OPENER_ICONS: Record<string, ReactNode> = {
+  explorer: (
     <svg
       width="14"
       height="14"
       viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      data-testid="workspace-opener-icon-explorer"
       aria-hidden="true"
     >
-      <path d="M1.8 4.2c0-.7.6-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.6 1.2 1.2v6c0 .7-.6 1.2-1.2 1.2H3c-.7 0-1.2-.6-1.2-1.2z" />
+      {/* 双色文件夹：背板深黄 + 面板亮黄（系统资源管理器观感） */}
+      <path
+        d="M1.8 4.3c0-.66.54-1.2 1.2-1.2h3.2l1.4 1.6h5.4c.66 0 1.2.54 1.2 1.2v6.8c0 .66-.54 1.2-1.2 1.2H3c-.66 0-1.2-.54-1.2-1.2z"
+        fill="#F0A32C"
+      />
+      <path
+        d="M3 6.4h10a.9.9 0 0 1 .88 1.08l-.88 3.9a1.2 1.2 0 0 1-1.17.96H3.17a1.2 1.2 0 0 1-1.17-.96l-.88-3.9A.9.9 0 0 1 3 6.4z"
+        fill="#FFD056"
+      />
     </svg>
   ),
-  code: (
+  vscode: (
     <svg
       width="14"
       height="14"
       viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      data-testid="workspace-opener-icon-vscode"
       aria-hidden="true"
     >
-      <path d="M5.5 4.5 11 8l-5.5 3.5" />
-      <path d="M12.8 3.2 9.8 5.4M12.8 12.8 9.8 10.6" />
+      {/* 品牌蓝的带侧翼箭头带（VS Code 官方标记观感） */}
+      <path
+        d="M12.9 1.5 5.5 6.9 3.2 5.2 1.8 5.9 4.5 8 1.8 10.1l1.4.7 2.3-1.7 7.4 5.4 1.6-.8V2.3z"
+        fill="#0078D4"
+      />
     </svg>
   ),
-  ide: (
+  pycharm: (
     <svg
       width="14"
       height="14"
       viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      data-testid="workspace-opener-icon-pycharm"
       aria-hidden="true"
     >
-      <rect x="2" y="2" width="12" height="12" rx="1.5" />
-      <path d="M8 2v12M2 8h12" />
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="#21D789" />
+      <text
+        x="8"
+        y="10.3"
+        textAnchor="middle"
+        fontSize="6.2"
+        fontWeight="700"
+        fill="#FFFFFF"
+        fontFamily="Segoe UI, system-ui, sans-serif"
+      >
+        PC
+      </text>
     </svg>
   ),
-} as const;
-
-/** id → 图标款式的单点映射（新增产品只改这里与 JETBRAINS 探测表） */
-const OPENER_ICON_KIND: Record<string, keyof typeof OPENER_ICONS> = {
-  explorer: "folder",
-  vscode: "code",
-  pycharm: "ide",
-  intellij: "ide",
-  webstorm: "ide",
+  intellij: (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      data-testid="workspace-opener-icon-intellij"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="#087CFA" />
+      <text
+        x="8"
+        y="10.3"
+        textAnchor="middle"
+        fontSize="6.2"
+        fontWeight="700"
+        fill="#FFFFFF"
+        fontFamily="Segoe UI, system-ui, sans-serif"
+      >
+        IJ
+      </text>
+    </svg>
+  ),
+  webstorm: (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      data-testid="workspace-opener-icon-webstorm"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="#00B8D9" />
+      <text
+        x="8"
+        y="10.3"
+        textAnchor="middle"
+        fontSize="6.2"
+        fontWeight="700"
+        fill="#FFFFFF"
+        fontFamily="Segoe UI, system-ui, sans-serif"
+      >
+        WS
+      </text>
+    </svg>
+  ),
 };
 
 function openerIcon(id: string) {
-  return OPENER_ICONS[OPENER_ICON_KIND[id] ?? "ide"];
+  return OPENER_ICONS[id] ?? OPENER_ICONS.explorer;
 }
 
 /**
  * 「工作区打开器」分裂按钮（GLOSSARY）：主按钮用默认程序打开工作区，
- * 下拉列出本机探测到的候选（展开时拉取，✓ 标当前默认）；点选即以该程序
+ * 图标跟随当前默认（挂载即预取一次候选；失败静默回退资源管理器图标）；
+ * 下拉列出本机探测到的候选（展开时重拉，✓ 标当前默认）；点选即以该程序
  * 打开并记为默认（行为即设置）。无路径时整组禁用；失败经 notifyError 提示。
  */
 function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
@@ -246,6 +295,22 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
     OpenerListResult["defaultId"] | null
   >(null);
   const rootRef = useDismissOnBlur(open, () => setOpen(false));
+  useEffect(() => {
+    // 主按钮图标需要当前默认：可用即预取一次（静默失败——错误留给用户
+    // 显式动作（展开/打开）时再报，避免标题栏挂载即弹 toast 打扰）
+    if (disabled) return;
+    let cancelled = false;
+    listOpeners()
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.openers);
+        setDefaultId(result.defaultId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [disabled, listOpeners]);
 
   async function toggleMenu() {
     if (open) {
@@ -303,21 +368,8 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
         onClick={() => void openMain()}
         className="rounded-l border border-r-0 border-line bg-surface px-2 py-0.5 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50 disabled:hover:border-line disabled:hover:text-fg-muted"
       >
-        {/* 文件夹打开动作图标（不随默认项变化；默认由下拉 ✓ 表达） */}
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M1.8 4.2c0-.7.6-1.2 1.2-1.2h3l1.4 1.6h5.6c.7 0 1.2.6 1.2 1.2v6c0 .7-.6 1.2-1.2 1.2H3c-.7 0-1.2-.6-1.2-1.2z" />
-          <path d="M6.2 8.2h4.6M9.4 6.6l1.6 1.6-1.6 1.6" />
-        </svg>
+        {/* 主按钮图标跟随当前默认（用户定稿）；未拉到列表前回退资源管理器 */}
+        {openerIcon(defaultId ?? "explorer")}
       </button>
       <button
         type="button"

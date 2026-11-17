@@ -69,10 +69,27 @@ function context(
   };
 }
 
+/** 主按钮内限定查图标（默认项图标与菜单项共用定位器，须按容器限定） */
+function mainIcon(id: string): Element | null {
+  return screen
+    .getByTestId("workspace-opener-main")
+    .querySelector(`[data-testid="workspace-opener-icon-${id}"]`);
+}
+
 afterEach(() => cleanup());
 
 describe("WorkspaceOpenerButton 分裂按钮", () => {
-  it("展开下拉拉取候选，默认项带 ✓；点选即打开并记默认、收起菜单", async () => {
+  it("挂载预取默认：主按钮图标跟随；点选后图标随新默认切换", async () => {
+    const ctx = context();
+    render(createElement(TitlebarTaskContext, { context: ctx }));
+    await waitFor(() => {
+      expect(mainIcon("explorer")).toBeTruthy();
+    });
+    // 挂载只拉一次（菜单未展开）
+    expect(ctx.opener.listOpeners).toHaveBeenCalledTimes(1);
+  });
+
+  it("展开下拉拉取候选，默认项带 ✓；点选即打开并记默认、收起菜单、主按钮图标切换", async () => {
     const ctx = context({
       openWorkspace: vi.fn(async () => openResult("vscode")),
     });
@@ -83,7 +100,8 @@ describe("WorkspaceOpenerButton 分裂按钮", () => {
     await waitFor(() => {
       expect(screen.getByTestId("workspace-opener-menu")).toBeTruthy();
     });
-    expect(ctx.opener.listOpeners).toHaveBeenCalledTimes(1);
+    // 挂载预取（1）+ 展开重拉（2）
+    expect(ctx.opener.listOpeners).toHaveBeenCalledTimes(2);
     expect(
       screen.getByTestId("workspace-opener-option-explorer").textContent
     ).toContain("资源管理器");
@@ -105,6 +123,11 @@ describe("WorkspaceOpenerButton 分裂按钮", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("workspace-opener-menu")).toBeNull();
     });
+    // 主按钮图标切到新默认 vscode（用户定稿：图标跟随默认）
+    await waitFor(() => {
+      expect(mainIcon("vscode")).toBeTruthy();
+    });
+    expect(mainIcon("explorer")).toBeNull();
   });
 
   it("主按钮不带 openerId 用默认打开；打开失败提示、不改本地默认", async () => {
@@ -148,7 +171,7 @@ describe("WorkspaceOpenerButton 分裂按钮", () => {
     expect(screen.queryByTestId("workspace-opener-menu")).toBeNull();
   });
 
-  it("无工作区路径（无任务且草稿未选目录）：主按钮与下拉禁用，提示未选择工作区", () => {
+  it("无工作区路径（无任务且草稿未选目录）：主按钮与下拉禁用、不预取列表，提示未选择工作区", () => {
     const ctx = context({ workspacePath: null });
     render(createElement(TitlebarTaskContext, { context: ctx }));
     const main = screen.getByTestId(
@@ -160,6 +183,7 @@ describe("WorkspaceOpenerButton 分裂按钮", () => {
     expect(main.disabled).toBe(true);
     expect(toggle.disabled).toBe(true);
     expect(main.title).toBe("未选择工作区");
+    expect(ctx.opener.listOpeners).not.toHaveBeenCalled();
   });
 
   it("Escape 收起下拉", async () => {

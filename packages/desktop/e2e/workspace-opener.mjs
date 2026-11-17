@@ -67,6 +67,9 @@ async function main() {
     const toggle = window.getByTestId("workspace-opener-toggle");
     assert(!(await main.isDisabled()), "草稿有工作区：主按钮应可用");
     assert(!(await toggle.isDisabled()), "草稿有工作区：下拉应可用");
+    // 挂载预取默认：主按钮图标初始为资源管理器（图标定位器与菜单项共用，
+    // 须限定在主按钮容器内查询）
+    await main.getByTestId("workspace-opener-icon-explorer").waitFor();
 
     // 展开下拉：E2E 钩子下五项全量可用，默认 explorer 带 ✓
     let menu = await openMenu(window);
@@ -82,7 +85,7 @@ async function main() {
       "PyCharm 初始不应是默认"
     );
 
-    // 点选 PyCharm：记录一行（该程序 + 草稿工作区），菜单收起
+    // 点选 PyCharm：记录一行（该程序 + 草稿工作区），菜单收起、主按钮图标切换
     await menu.getByTestId("workspace-opener-option-pycharm").click();
     await menu.waitFor({ state: "hidden" });
     assert(
@@ -90,6 +93,8 @@ async function main() {
         JSON.stringify([{ openerId: "pycharm", workspacePath: workspaceDir }]),
       "点选应记录一次 PyCharm 打开草稿工作区"
     );
+    // 用户定稿：主按钮图标跟随当前默认，点选后即切到 PyCharm
+    await main.getByTestId("workspace-opener-icon-pycharm").waitFor();
 
     // 再展开：✓ 已迁到 PyCharm；主按钮按新默认记录
     menu = await openMenu(window);
@@ -123,6 +128,11 @@ async function main() {
     await window.getByTestId("draft-workspace-info").waitFor({
       timeout: 5000,
     });
+    // 全局单一默认（用户定稿）：重启后主按钮图标仍为上次点选的 PyCharm
+    await window
+      .getByTestId("workspace-opener-main")
+      .getByTestId("workspace-opener-icon-pycharm")
+      .waitFor();
     menu = await openMenu(window);
     assert(
       (await menu.getByTestId("workspace-opener-check-pycharm").count()) === 1,
