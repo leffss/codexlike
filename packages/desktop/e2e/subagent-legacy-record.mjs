@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   assert,
   closeApp,
+  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -144,6 +145,8 @@ async function main() {
     );
     const thinkingBlock = panel.getByTestId("subagent-thinking-block");
     await thinkingBlock.waitFor({ timeout: 10_000 });
+    // focus 定位展开的浮层盖住详情区拦截点击——收起后再展开思考块
+    await collapseSubagentList(window);
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
     const thinkingText = await thinkingBlock
       .getByTestId("subagent-thinking-content")

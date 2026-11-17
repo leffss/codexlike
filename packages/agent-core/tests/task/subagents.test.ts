@@ -298,7 +298,7 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
 }
 
 describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
-  it("内置委派工具启用时仅主模型获得策略，保留原提示与资源且多用户轮不累积", async () => {
+  it("内置委派工具启用时主任务逐轮注入策略、子代理静态注入计划与风格策略，保留原提示与资源且多用户轮不累积", async () => {
     const { task, mainModel, subModel, persistence } = makeSubagentTask({
       workspacePath: "C:/work/demo",
       systemPrompt: "原宿主系统提示",
@@ -355,16 +355,17 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
       "AGENTS.md：共享规范；技能目录 alpha/beta"
     );
     expect(JSON.stringify(child.prompt)).not.toContain("## 子代理委派策略");
-    expect(JSON.stringify(child.prompt)).not.toContain("## 工作计划策略");
-    // 通用风格条款也仅注入主任务（子代理提示由 SUBAGENT_SYSTEM_PROMPT 自成一体）
-    expect(JSON.stringify(child.prompt)).not.toContain("## 工具使用风格");
+    // 工作计划策略与风格条款静态注入子代理（ADR 0023，复用主任务同一常量；
+    // 子代理无每轮注入机制，随 SUBAGENT_SYSTEM_PROMPT 一次性组装）
+    expect(JSON.stringify(child.prompt)).toContain("## 工作计划策略");
+    expect(JSON.stringify(child.prompt)).toContain("## 工具使用风格");
     expect(JSON.stringify(child.prompt)).not.toContain("原宿主系统提示");
     expect(JSON.stringify(child.prompt)).not.toContain("ALPHA_PRIVATE_BODY");
     expect(child.tools?.map((tool) => tool.name)).not.toContain(
       "spawn_subagent"
     );
-    // 计划是任务级状态由主任务独占维护：子代理工具表不含 update_plan
-    expect(child.tools?.map((tool) => tool.name)).not.toContain("update_plan");
+    // update_plan 强制并入子代理工具表（ADR 0023 修订 ADR 0016 仅主任务边界）
+    expect(child.tools?.map((tool) => tool.name)).toContain("update_plan");
     expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
       "## 子代理委派策略"
     );
@@ -562,6 +563,84 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(subModel.doStreamCalls).toHaveLength(0);
     expect(events.at(-1)?.type).toBe("assistant-done");
     expect(task.resourceState.active).toBeNull();
+    persistence.close();
+  });
+
+  it("update_plan 强制并入撞名拒绝（ADR 0023，同 questionsTool 模式）：宿主子代理工具重名报错回流，不请求子模型", async () => {
+    const { task, subModel, persistence } = makeSubagentTask({
+      workspacePath: "C:/work/demo",
+      subTools: [
+        {
+          name: "update_plan",
+          description: "宿主自定义工具，撞内置工作计划工具的名",
+          parameters: { type: "object", properties: {} },
+          permission: "readonly",
+          async execute() {
+            throw new Error("不应执行");
+          },
+        },
+      ],
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-plan",
+              toolName: "spawn_subagent",
+              input: { task: "任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["失败报告已收到"] },
+      ],
+    });
+    const events = await collect(task.sendMessage({ text: "委派", profile }));
+    expect(
+      events.find((event) => event.type === "subagent-report")
+    ).toMatchObject({
+      ok: false,
+      report: expect.stringContaining("工具名称冲突：update_plan"),
+    });
+    expect(subModel.doStreamCalls).toHaveLength(0);
+    expect(events.at(-1)?.type).toBe("assistant-done");
+    persistence.close();
+  });
+
+  it("update_plan 强制并入撞名拒绝（ADR 0023）：资源快照 execution tools 重名在发送前拒绝", async () => {
+    const { task, subModel, persistence } = makeSubagentTask({
+      workspacePath: "C:/work/demo",
+      resources: () =>
+        fakeResourceSnapshot("本轮规范与技能目录", undefined, [
+          {
+            name: "update_plan",
+            description: "资源侧同名工具，撞内置工作计划工具的名",
+            parameters: { type: "object", properties: {} },
+            permission: "readonly",
+            async execute() {
+              throw new Error("不应执行");
+            },
+          },
+        ]),
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-plan",
+              toolName: "spawn_subagent",
+              input: { task: "任务" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["不应到达"] },
+      ],
+    });
+    // 主任务工具表无条件含 update_plan，共享资源快照的 execution tools 同名
+    // 工具先撞主任务侧（子代理用同一快照，拒绝在发送前即达成——不区分拒绝点）
+    await expect(
+      collect(task.sendMessage({ text: "委派", profile }))
+    ).rejects.toThrow("工具名称冲突：update_plan");
+    expect(subModel.doStreamCalls).toHaveLength(0);
     persistence.close();
   });
 
@@ -1875,6 +1954,132 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     // 子代理过程行不混入主任务 tool_calls（主表只有 spawn_subagent 一行）
     const mainCalls = persistence.listToolCalls("task-1");
     expect(mainCalls.map((call) => call.toolName)).toEqual(["spawn_subagent"]);
+    persistence.close();
+  });
+
+  it("子代理 update_plan 免审批执行并逐条落库：中文统计输出、恢复快照含计划行、报告纯文本、策略不随轮次重复（ADR 0023）", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+    const planCreated = {
+      steps: [
+        { content: "定位挂载点", status: "completed" },
+        { content: "核对策略注入", status: "in_progress" },
+        { content: "整理报告", status: "pending" },
+      ],
+    };
+    const planDone = {
+      steps: planCreated.steps.map((step) => ({
+        ...step,
+        status: "completed" as const,
+      })),
+    };
+    const { task, subModel, persistence } = makeSubagentTask({
+      workspacePath: workspace,
+      // ask 档最严：readonly 的 update_plan 仍须免审批直行
+      approvalMode: "ask",
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "delegate-plan",
+              toolName: "spawn_subagent",
+              input: { task: "多步调研并维护工作计划" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [
+        // 第 1 轮：建计划（1 完成、1 进行中、1 待办）
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-plan-1",
+              toolName: "update_plan",
+              input: planCreated,
+            },
+          ],
+        },
+        // 第 2 轮：更新计划（全量替换，全部完成）
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-plan-2",
+              toolName: "update_plan",
+              input: planDone,
+            },
+          ],
+        },
+        { kind: "text", deltas: ["三步全部完成，结论如计划所示。"] },
+      ],
+    });
+
+    const events = await collect(task.sendMessage({ text: "去调研", profile }));
+
+    // 免审批：ask 档下 readonly 工具不产生任何审批请求
+    expect(events.some((event) => event.type === "approval-request")).toBe(
+      false
+    );
+
+    // 中文统计摘要随 subagent-tool result 事件流出（与工具执行输出同口径）
+    const planResults = events.filter(
+      (event): event is Extract<TaskEvent, { type: "subagent-tool" }> =>
+        event.type === "subagent-tool" &&
+        event.phase === "result" &&
+        event.call.toolName === "update_plan"
+    );
+    expect(planResults).toHaveLength(2);
+    expect(planResults[0]?.call.output).toBe(
+      "工作计划已更新（共 3 项：1 已完成、1 进行中、1 待办）"
+    );
+    expect(planResults[0]?.call.isError).toBe(false);
+    expect(planResults[1]?.call.output).toBe(
+      "工作计划已更新（共 3 项：3 已完成、0 进行中、0 待办）"
+    );
+
+    // 逐条落 subagent_tool_calls：全量清单参数 + 统计输出 + 双归属
+    const rows = persistence
+      .listSubagentToolCalls("task-1")
+      .filter((row) => row.toolName === "update_plan");
+    expect(rows).toHaveLength(2);
+    expect(JSON.parse(rows[0]!.arguments)).toEqual(planCreated);
+    expect(rows[0]).toMatchObject({
+      id: "sub-plan-1",
+      taskId: "task-1",
+      output: "工作计划已更新（共 3 项：1 已完成、1 进行中、1 待办）",
+      isError: false,
+    });
+    expect(rows[1]).toMatchObject({ id: "sub-plan-2", isError: false });
+
+    // 恢复快照（manager → UI 的初始 history 通道）包含计划行
+    const manager = createTaskManager({ persistence });
+    const snapshots = manager.subagents("task-1");
+    expect(snapshots).toHaveLength(1);
+    const snapshotPlanCalls = snapshots[0]!.toolCalls.filter(
+      (call) => call.toolName === "update_plan"
+    );
+    expect(snapshotPlanCalls.map((call) => call.id)).toEqual([
+      "sub-plan-1",
+      "sub-plan-2",
+    ]);
+
+    // 最终报告纯文本：不附计划统计摘要（ADR 0023 报告边界）
+    const reportEvent = events.find(
+      (event): event is Extract<TaskEvent, { type: "subagent-report" }> =>
+        event.type === "subagent-report"
+    );
+    expect(reportEvent?.report).toContain("三步全部完成");
+    expect(reportEvent?.report).not.toContain("工作计划已更新");
+
+    // 策略静态注入：多轮运行中每次请求各恰一次，不随轮次重复
+    expect(subModel.doStreamCalls).toHaveLength(3);
+    for (const request of subModel.doStreamCalls) {
+      const prompt = JSON.stringify(request.prompt);
+      expect(prompt.match(/## 工作计划策略/g)).toHaveLength(1);
+      expect(prompt.match(/## 工具使用风格/g)).toHaveLength(1);
+    }
     persistence.close();
   });
 

@@ -15,6 +15,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -138,7 +139,10 @@ async function main() {
     );
     console.log("[e2e] 起止时间恢复：已用时定格 + 完成时刻可读");
 
-    // 2) 逐轮正文：两轮轮边界保留（第一轮过程正文 + 第二轮报告）
+    // 2) 逐轮正文：两轮轮边界保留（第一轮过程正文 + 第二轮报告）。
+    //    focus 定位展开的浮层盖住详情区拦截点击——列表行断言已完成，
+    //    收起浮层（Escape 标准出口）再做详情内展开交互
+    await collapseSubagentList(window);
     const bodyBlock = panel.getByTestId("subagent-body-block");
     await bodyBlock.waitFor({ timeout: 10_000 });
     await bodyBlock.getByTestId("subagent-body-toggle").click();

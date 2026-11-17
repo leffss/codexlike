@@ -1740,10 +1740,15 @@ export function WorkspacePage(props: {
                   布局行。 */}
               <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
                 <div className={contentWidthClass}>
-                  <WorkPlanCardFromSegments
-                    items={displayMessages}
-                    taskId={currentId}
-                  />
+                  {/* 草稿态（currentId === null）无 update_plan 段，卡本就
+                      渲染 null；条件短路使 FromSegments 的 taskId 收紧为
+                      非空（开合记忆作用域二选一，见 WorkPlanCardScope） */}
+                  {currentId !== null && (
+                    <WorkPlanCardFromSegments
+                      items={displayMessages}
+                      taskId={currentId}
+                    />
+                  )}
                 </div>
               </div>
               {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或

@@ -6,7 +6,11 @@
  * 每次调用的计划快照，「当前计划」= 最后一次 update_plan 的参数。
  * 不新增事件类型/段类型/存储表。
  */
-import type { MessageSegment, ToolCallSegment } from "./task-view";
+import type {
+  MessageSegment,
+  SubagentToolCall,
+  ToolCallSegment,
+} from "./task-view";
 
 /** 工作计划工具名（与 agent-core UPDATE_PLAN 契约一致） */
 export const PLAN_TOOL_NAME = "update_plan";
@@ -76,6 +80,22 @@ export function collectPlanSnapshots(items: MessageSegment[]): PlanSnapshot[] {
   }));
 }
 
+/**
+ * 子代理侧收集薄壳（ADR 0023）：子代理工具调用嵌在 SubagentSegment.tools
+ * （无 kind 判别字段，isPlanSegment 不适用），按 toolName 过滤 update_plan；
+ * 解析复用 parsePlanSteps，「当前计划」= 最后一次快照（全量替换语义）。
+ */
+export function collectSubagentPlanSnapshots(
+  tools: SubagentToolCall[]
+): PlanSnapshot[] {
+  return tools
+    .filter((tool) => tool.toolName === PLAN_TOOL_NAME)
+    .map((tool) => ({
+      segmentId: tool.id,
+      steps: parsePlanSteps(tool.arguments),
+    }));
+}
+
 /** 当前计划：最后一次 update_plan 的快照（全量替换语义下即最新状态） */
 export function currentPlan(items: MessageSegment[]): PlanSnapshot | null {
   const snapshots = collectPlanSnapshots(items);
@@ -84,6 +104,52 @@ export function currentPlan(items: MessageSegment[]): PlanSnapshot | null {
 
 export function completedCount(steps: PlanStep[]): number {
   return steps.filter((step) => step.status === "completed").length;
+}
+
+/** 计划项三态的呈现用语（导出行前缀与统计行同源：已完成 / 进行中 / 待办） */
+export const STEP_STATUS_LABELS: Record<PlanStepStatus, string> = {
+  completed: "已完成",
+  in_progress: "进行中",
+  pending: "待办",
+};
+
+/**
+ * 三态计数（票 03 收口的单一来源）：接受原始 steps 数组（宽容口径）或
+ * 已解析的 PlanStep[]——非对象项 / 非法 status 项不计入任何桶，
+ * N = 三态之和（与 agent-core update_plan 执行输出的防御口径一致）。
+ */
+export function planStatusCounts(
+  steps: readonly unknown[]
+): Record<PlanStepStatus, number> {
+  const counts: Record<PlanStepStatus, number> = {
+    completed: 0,
+    in_progress: 0,
+    pending: 0,
+  };
+  for (const step of steps) {
+    if (typeof step !== "object" || step === null) continue;
+    const status = (step as Record<string, unknown>)["status"];
+    if (
+      status === "completed" ||
+      status === "in_progress" ||
+      status === "pending"
+    ) {
+      counts[status] += 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * 计划统计行（票 03 收口的单一来源，与 agent-core 工具执行输出同口径）：
+ * 「共 N 项：X 已完成、Y 进行中、Z 待办」。N = 三态之和——原始数组含
+ * 非法 status 项时不随 steps.length 虚高；合法清单下 N === steps.length，
+ * 文案与收口前两处手写格式串逐字符一致。
+ */
+export function planSummaryLine(steps: readonly unknown[]): string {
+  const counts = planStatusCounts(steps);
+  const total = counts.completed + counts.in_progress + counts.pending;
+  return `共 ${total} 项：${counts.completed} 已完成、${counts.in_progress} 进行中、${counts.pending} 待办`;
 }
 
 /** 当前活动步骤：in_progress 优先，其次第一个未完成，兜底末项 */

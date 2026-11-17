@@ -19,11 +19,13 @@ import { useCollapseState } from "../lib/collapse-memory";
 import {
   activeStep,
   collectPlanSnapshots,
+  collectSubagentPlanSnapshots,
   completedCount,
   type PlanSnapshot,
   type PlanStep,
   type PlanStepStatus,
 } from "../lib/plan-view";
+import type { SubagentToolCall } from "../lib/task-view";
 
 /**
  * 三态图标（ZCode 同构语义）：pending 空心圆最弱；in_progress 用**静态箭头**
@@ -156,17 +158,28 @@ export function PlanMarkerRow(props: {
 }
 
 /**
+ * 开合记忆作用域（二选一，判别联合）：主任务卡传 taskId（任务作用域）；
+ * 子代理卡传 subagentId（ADR 0023，各子代理各自记忆、默认收起，与主任务
+ * 记忆互不污染，键前缀对齐 collapse-memory 既有 subagent-* 命名）。
+ * 类型上强制二选一——两者都不传的「共享 plan-card-none 键」静默串记忆
+ * 不再可能。
+ */
+export type WorkPlanCardScope = { taskId: string } | { subagentId: string };
+
+/**
  * 工作计划进度折叠卡（ADR 0019）：内容 = 当前计划（最后一次 update_plan，
- * 全量替换语义）。无计划时渲染 null（挂载点不占布局行）。
+ * 全量替换语义）。无计划时渲染 null（挂载点不占布局行）。开合记忆按
+ * scope 作用域（见 WorkPlanCardScope）。
  */
 export function WorkPlanCard(props: {
   items: PlanSnapshot[];
-  taskId?: string | null;
+  scope: WorkPlanCardScope;
 }) {
-  const { items, taskId } = props;
-  // 开合记忆任务作用域（卡随任务切换重挂载，跨任务串开合态会跳变）
+  const { items, scope } = props;
   const { open, toggle } = useCollapseState(
-    `plan-card-${taskId ?? "none"}`,
+    "subagentId" in scope
+      ? `subagent-plan-card-${scope.subagentId}`
+      : `plan-card-${scope.taskId}`,
     false
   );
   const latest = items.at(-1);
@@ -262,15 +275,35 @@ export function WorkPlanCard(props: {
   );
 }
 
-/** 便捷入口：由消息段序列收集快照后渲染卡（无计划时渲染 null） */
+/** 便捷入口：由消息段序列收集快照后渲染卡（无计划时渲染 null），主任务作用域 */
 export function WorkPlanCardFromSegments(props: {
   items: import("../lib/task-view").MessageSegment[];
-  taskId?: string | null;
+  taskId: string;
 }) {
   const snapshots = useMemo(
     () => collectPlanSnapshots(props.items),
     [props.items]
   );
   if (snapshots.length === 0) return null;
-  return <WorkPlanCard items={snapshots} taskId={props.taskId} />;
+  return <WorkPlanCard items={snapshots} scope={{ taskId: props.taskId }} />;
+}
+
+/**
+ * 子代理便捷入口（ADR 0023）：由子代理工具调用序列收集快照后渲染卡，
+ * 开合记忆按 subagentId 作用域。任何详情状态常驻挂载——运行中随工具
+ * 调用实时刷新（tools 逐次归并）、已完成回看终态、已中断回看最后快照；
+ * 无计划渲染 null 不占布局行。
+ */
+export function WorkPlanCardFromSubagentTools(props: {
+  tools: SubagentToolCall[];
+  subagentId: string;
+}) {
+  const snapshots = useMemo(
+    () => collectSubagentPlanSnapshots(props.tools),
+    [props.tools]
+  );
+  if (snapshots.length === 0) return null;
+  return (
+    <WorkPlanCard items={snapshots} scope={{ subagentId: props.subagentId }} />
+  );
 }

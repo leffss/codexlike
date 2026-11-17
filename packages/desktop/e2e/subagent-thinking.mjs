@@ -16,6 +16,7 @@ import {
   selectComposerOption,
   assert,
   closeApp,
+  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -217,6 +218,8 @@ async function main() {
       !(await thinkingContent.isVisible()),
       "子代理思考块应默认收起（内容不可见）"
     );
+    // focus 定位展开的浮层盖住详情区拦截点击——收起后再展开思考块
+    await collapseSubagentList(window);
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
     await thinkingContent.waitFor({ timeout: 10_000 });
     const thinkingText = await thinkingContent.textContent();

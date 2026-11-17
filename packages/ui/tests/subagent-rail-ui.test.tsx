@@ -48,6 +48,23 @@ const TOOL: SubagentToolCall = {
   endedAt: 3_000,
 };
 
+/** 子代理 update_plan 工具调用样例（ADR 0023：计划状态即工具调用记录） */
+function planTool(
+  id: string,
+  steps: { content: string; status: string }[],
+  running = false
+): SubagentToolCall {
+  return {
+    id,
+    taskId: "task-1",
+    toolName: "update_plan",
+    arguments: JSON.stringify({ steps }),
+    output: "工作计划已更新",
+    isError: false,
+    running,
+  };
+}
+
 describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
   it("空列表：占位提示，不渲染列表", () => {
     const html = renderToStaticMarkup(
@@ -117,6 +134,31 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       /<details[^>]*data-testid="subagent-tools"[^>]*>/
     )?.[0];
     expect(tools).not.toContain('open=""');
+  });
+
+  it("工具清单计数口径含 update_plan：照常计入次数，行内摘要为中文统计（票 03）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-p", {
+            tools: [
+              TOOL,
+              planTool("sub-p1", [
+                { content: "调研现有布局", status: "completed" },
+                { content: "布局变体原型", status: "pending" },
+              ]),
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 计数口径不变（ADR 0023）：update_plan 照常计入调用次数
+    expect(html).toContain("工具调用（2 次）");
+    // update_plan 行内摘要与工具执行输出同口径的中文统计，不走压缩 JSON
+    expect(html).toContain(
+      "工作计划已更新（共 2 项：1 已完成、0 进行中、1 待办）"
+    );
   });
 
   it("运行中：当前活动工具与思考块默认展开（流式），无报告操作行", () => {
@@ -295,6 +337,189 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     // 无报告块与操作行（未产出报告）
     expect(html).not.toMatch(/data-testid="subagent-report"/);
     expect(html).not.toMatch(/data-testid="subagent-report-actions"/);
+  });
+});
+
+describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 ADR 0019 折叠卡）", () => {
+  const STEPS_2_OF_3 = [
+    { content: "梳理需求", status: "completed" },
+    { content: "写实现", status: "in_progress" },
+    { content: "补测试", status: "pending" },
+  ];
+
+  it("完成态有计划：详情滚动容器末尾渲染计划卡（工具清单之后），百分比 + N/M + 当前/下一步预览，默认收起", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-plan", {
+            tools: [TOOL, planTool("sub-p1", STEPS_2_OF_3)],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    expect(html).toContain('data-testid="plan-card"');
+    expect(html).toContain("33%");
+    expect(html).toContain("1/3");
+    expect(html).toContain('data-testid="plan-card-current"');
+    expect(html).toContain("写实现");
+    expect(html).toContain('data-testid="plan-card-next"');
+    expect(html).toContain("下一步：补测试");
+    // 默认收起：完整清单不渲染
+    expect(html).not.toContain('data-testid="plan-card-panel"');
+    // 槽位：滚动容器末尾，状态区（工具清单）之后
+    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
+      html.indexOf('data-testid="subagent-tools"')
+    );
+    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
+      html.indexOf('data-testid="subagent-report-actions"')
+    );
+  });
+
+  it("无计划：不渲染计划卡不占布局行（其他工具调用不触发）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-noplan", { tools: [TOOL] })],
+        focus: null,
+      })
+    );
+    expect(html).not.toContain('data-testid="plan-card"');
+    // 零工具的运行中子代理同样无卡
+    const empty = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-empty", {
+            state: "running",
+            endedAt: null,
+            report: null,
+            ok: null,
+            tools: [],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    expect(empty).not.toContain('data-testid="plan-card"');
+  });
+
+  it("运行中实时刷新：卡随最后一次 update_plan 快照更新（含尚未返回的运行中调用）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-run-plan", {
+            state: "running",
+            endedAt: null,
+            report: null,
+            ok: null,
+            tools: [
+              planTool(
+                "sub-p1",
+                [
+                  { content: "梳理需求", status: "completed" },
+                  { content: "写实现", status: "in_progress" },
+                  { content: "补测试", status: "pending" },
+                ],
+                true
+              ),
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // call 已到即渲染（arguments 齐备），显示最新快照 1/3
+    expect(html).toContain('data-testid="plan-card"');
+    expect(html).toContain("1/3");
+    expect(html).toContain('data-testid="plan-card-current"');
+    expect(html).toContain("写实现");
+  });
+
+  it("已中断回看最后快照：卡常驻显示最后一次 update_plan，位于中断说明与工具清单之后", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-int-plan", {
+            state: "interrupted",
+            endedAt: "2026-11-14T08:00:09.000Z",
+            report: null,
+            ok: false,
+            tools: [
+              planTool("sub-p1", [
+                { content: "梳理需求", status: "completed" },
+                { content: "写实现", status: "in_progress" },
+              ]),
+              planTool("sub-p2", [
+                { content: "梳理需求", status: "completed" },
+                { content: "写实现", status: "completed" },
+              ]),
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    expect(html).toContain('data-testid="plan-card"');
+    // 最后一次快照（全量替换语义）：中断时 2/2 全部完成
+    expect(html).toContain("2/2");
+    expect(html).toContain('data-testid="plan-card-done"');
+    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
+      html.indexOf('data-testid="subagent-interrupted-note"')
+    );
+    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
+      html.indexOf('data-testid="subagent-tools"')
+    );
+  });
+
+  it("开合记忆按 subagentId 作用域：预置展开记忆生效，且不受主任务计划卡记忆键污染", () => {
+    // 预置主任务键展开 + 另一子代理键展开：本子代理卡应仍默认收起
+    setRememberedOpen("plan-card-task-1", true);
+    setRememberedOpen("subagent-plan-card-sa-other", true);
+    const collapsed = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-mine", { tools: [planTool("sub-p1", STEPS_2_OF_3)] }),
+        ],
+        focus: null,
+      })
+    );
+    expect(collapsed).toContain('data-testid="plan-card"');
+    expect(collapsed).not.toContain('data-testid="plan-card-panel"');
+    // 本子代理键预置展开后：完整清单渲染
+    setRememberedOpen("subagent-plan-card-sa-mine", true);
+    const opened = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-mine", { tools: [planTool("sub-p1", STEPS_2_OF_3)] }),
+        ],
+        focus: null,
+      })
+    );
+    expect(opened).toContain('data-testid="plan-card-panel"');
+    expect(opened).toContain("梳理需求");
+  });
+
+  it("切换子代理互不串：各子代理计划卡按各自记忆独立开合（各自独立计划）", () => {
+    setRememberedOpen("subagent-plan-card-sa-a", true);
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [
+          subSeg("sa-a", { tools: [planTool("sub-a-p1", STEPS_2_OF_3)] }),
+          subSeg("sa-b", {
+            tools: [
+              planTool("sub-b-p1", [
+                { content: "乙方案调研", status: "in_progress" },
+              ]),
+            ],
+          }),
+        ],
+        focus: null,
+      })
+    );
+    // 默认选中最后一个（sa-b）：其卡收起且显示自己的计划，不串 sa-a 的展开记忆
+    expect(html).toContain('data-testid="plan-card"');
+    expect(html).not.toContain('data-testid="plan-card-panel"');
+    expect(html).toContain("乙方案调研");
+    expect(html).toContain("0/1");
   });
 });
 
