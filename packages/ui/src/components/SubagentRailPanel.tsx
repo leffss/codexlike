@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 
 import { exportFileNameBase } from "./AssistantActions";
 import { DisclosureArrow } from "./DisclosureArrow";
+import { WorkPlanCardFromSubagentTools } from "./WorkPlanCard";
 import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
 import { markdownComponents } from "../lib/markdown";
@@ -297,6 +298,14 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
           <ToolsDetails subagent={subagent} />
         </>
       )}
+      {/* 工作计划卡（ADR 0023）：详情滚动容器末尾常驻——运行中随子代理
+          工具调用实时刷新（tools 逐次归并）、已完成回看终态、已中断回看
+          最后快照；开合记忆按 subagentId 各自记忆（默认收起）。子代理
+          没建计划时组件内部渲染 null 不占布局行。 */}
+      <WorkPlanCardFromSubagentTools
+        tools={subagent.tools}
+        subagentId={subagent.id}
+      />
     </div>
   );
 }
