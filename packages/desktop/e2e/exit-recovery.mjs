@@ -134,6 +134,13 @@ async function main() {
       });
     }, model.port);
     await window.getByTestId("settings-open").click();
+    // 场景峰值 5 任务并发（项目慢任务/独立问答/后台审批/子代理任务活跃到
+    // 退出，长历史终态收口），超 ADR 0022 默认上限 3：不调上限时第 4 个任务
+    // 满员入队排队（waiting-user 占坑不释放），子代理模型请求永不发出。经
+    // 设置页调到 5 保持场景「多任务同时活跃过退出」的验证意图；设置随
+    // homeDir 持久化，重启后的进程沿用，无额外自动开跑（退出时无排队条目）。
+    await window.getByTestId("execution-task-concurrency-input").fill("5");
+    await window.getByTestId("execution-settings-save").click();
     await window.getByTestId("settings-back").click();
     await window.getByTestId("add-project").click();
     await projectAction(window);
