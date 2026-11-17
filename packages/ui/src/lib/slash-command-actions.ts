@@ -1,6 +1,7 @@
 import {
   fuzzyMatch,
   type ProviderProfile,
+  type ResolvedModel,
   type SlashCommandName,
 } from "@codexlike/agent-core";
 
@@ -47,11 +48,12 @@ export function planSlashCommand(
   }
 }
 
-/** /model 关键词匹配（票 02 模型级）：在「Profile 名 模型名」上模糊匹配 */
-export interface ModelSwitchCandidate {
-  profile: ProviderProfile;
-  model: string;
-}
+/**
+ * /model 关键词匹配（票 02 模型级）：在「Profile 名 模型名」上模糊匹配。
+ * 候选形状复用 agent-core 的 ResolvedModel 二元组（review 修复 3 收敛，
+ * 与 SubagentsConfig.resolveModel 等消费点同一形状，不再本地自定义）。
+ */
+export type ModelSwitchCandidate = ResolvedModel;
 
 export type ModelSwitchMatch =
   | ({ kind: "unique" } & ModelSwitchCandidate)

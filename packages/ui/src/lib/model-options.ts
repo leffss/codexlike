@@ -34,6 +34,37 @@ export function parseModelOptionValue(
   };
 }
 
+/**
+ * 子代理分区「跟随主任务模型」占位值（review 修复 1，ADR 0024）：
+ * 存量/未选具体模型时 settings.model 为 null——回显用复合键的空 model 位
+ * （`${profileId}::`）表达「已选 Profile、未选具体模型」，不落成列表第一项：
+ * 未改选直接保存保留 null（子代理跟随主任务当前所用模型，Profile
+ * 重排序同样跟随），用户仍可主动改选具体模型。保存侧经
+ * subagentSettingsOfValue 把空 model 位归一回 null。
+ */
+export function subagentFollowModelValue(profileId: string): string {
+  return modelOptionValue(profileId, "");
+}
+
+/**
+ * 子代理分区选择器 value → 保存参数：非复合键（value=""）= 同主模型
+ * （providerProfileId 与 model 一并 null）；空 model 位（跟随占位）保留
+ * providerProfileId、model 归一 null；具体复合键原样通过。
+ */
+export function subagentSettingsOfValue(value: string): {
+  providerProfileId: string | null;
+  model: string | null;
+} {
+  const parsed = parseModelOptionValue(value);
+  if (parsed === null) {
+    return { providerProfileId: null, model: null };
+  }
+  return {
+    providerProfileId: parsed.profileId,
+    model: parsed.model === "" ? null : parsed.model,
+  };
+}
+
 /** Profile 是否提供 (id, 模型名) 这个组合 */
 function hasModel(
   profiles: readonly ProviderProfile[],

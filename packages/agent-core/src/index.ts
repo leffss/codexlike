@@ -11,6 +11,7 @@ export type {
   ProviderProfile,
   ProviderProfileErrors,
   ProviderProfileInput,
+  ResolvedModel,
 } from "./provider/provider-profile";
 export {
   validateProviderProfile,

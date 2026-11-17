@@ -1078,7 +1078,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     );
 
     // 前 3 个并发运行（模型调用 = 3），第 4 个排队（无第 4 次模型调用）。
-    // 模型调用发生在 resolveProfile 微任务后，用 waitFor 等其稳定。
+    // 模型调用发生在 resolveModel 微任务后，用 waitFor 等其稳定。
     await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(3));
     expect(events.filter((e) => e.type === "subagent-start")).toHaveLength(3);
     expect(events.filter((e) => e.type === "subagent-report")).toHaveLength(0);
@@ -1788,7 +1788,7 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
         event.type === "subagent-queued" &&
         events.filter((e) => e.type === "subagent-queued").length === 2
     );
-    // 模型调用发生在 resolveProfile 微任务后，用 waitFor 等第 1 个真实开跑
+    // 模型调用发生在 resolveModel 微任务后，用 waitFor 等第 1 个真实开跑
     await vi.waitFor(() => expect(subModel.doStreamCalls).toHaveLength(1));
 
     // 第 1 个开跑（running），第 2 个排队（queued、startedAt 为 null）：

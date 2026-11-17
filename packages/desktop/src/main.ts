@@ -77,6 +77,7 @@ import {
 import { createAgentSettingsStore } from "./execution/agent-settings-store";
 import { registerAgentSettingsHandlers } from "./execution/agent-settings-ipc";
 import { IPC } from "./shared/ipc";
+import { normalizeModelInput } from "./shared/model-value";
 import { createMcpStore } from "./mcp/mcp-store";
 import { createMcpService } from "./mcp/mcp-service";
 import { registerMcpHandlers } from "./mcp/mcp-ipc";
@@ -312,8 +313,9 @@ function registerSearchSettingsHandlers(
       if (model !== null && model !== undefined && typeof model !== "string") {
         throw new Error("子代理模型（model）必须是字符串或 null");
       }
-      const modelId =
-        model === null || model === undefined || model === "" ? null : model;
+      // 归一后的具体模型名（null = 未选具体模型）；与 send/compact 的
+      // IPC 边界共用 normalizeModelInput 单一口径（review 修复 2）
+      const modelName = normalizeModelInput(model);
       return (async () => {
         if (profileId !== null) {
           const profile = (await profiles.list()).find(
@@ -324,7 +326,7 @@ function registerSearchSettingsHandlers(
               "所选 Provider Profile 不存在，请重新选择子代理模型"
             );
           }
-          if (modelId !== null && !profile.models.includes(modelId)) {
+          if (modelName !== null && !profile.models.includes(modelName)) {
             throw new Error(
               "所选模型不在该 Provider Profile 的模型列表中，请重新选择"
             );
@@ -332,7 +334,7 @@ function registerSearchSettingsHandlers(
         }
         const settings = await store.set({
           providerProfileId: profileId,
-          model: modelId,
+          model: modelName,
           maxConcurrent: Number(maxConcurrent),
         });
         await onSaved(settings);

@@ -17,6 +17,7 @@ import {
   assert,
   closeApp,
   launchApp,
+  modelOptionValue,
   NARROW_WIDTH,
   prepareDraft,
   startMockProvider,
@@ -216,7 +217,7 @@ async function main() {
     await selectComposerOption(
       window,
       "profile-select",
-      `${mockProfileId}::mock-model`
+      modelOptionValue(mockProfileId, "mock-model")
     );
 
     const effortSelect = window.getByTestId("thinking-effort-select");
@@ -255,11 +256,11 @@ async function main() {
     await selectComposerOption(
       window,
       "profile-select",
-      `${longProfileId}::${longModelName}`
+      modelOptionValue(longProfileId, longModelName)
     );
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${longProfileId}::${longModelName}` &&
+        modelOptionValue(longProfileId, longModelName) &&
         (await profileSelect.textContent()).includes(longProfileName) &&
         (await profileSelect.textContent()).includes(longModelName),
       "鼠标提交 (Profile, 模型) 复合值，触发器保留完整名称文本"
@@ -268,14 +269,14 @@ async function main() {
     await profileSelect.press("Home");
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${longProfileId}::${longModelName}`,
+        modelOptionValue(longProfileId, longModelName),
       "模型键盘导航不提前提交"
     );
     await profileSelect.press("Enter");
     await profileMenu.waitFor({ state: "hidden" });
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${mockProfileId}::mock-model`,
+        modelOptionValue(mockProfileId, "mock-model"),
       "Home + Enter 提交首个模型"
     );
     await profileSelect.press("Space");
@@ -283,7 +284,7 @@ async function main() {
     await profileSelect.press("Space");
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${longProfileId}::${longModelName}`,
+        modelOptionValue(longProfileId, longModelName),
       "End + Space 提交末个模型"
     );
     await profileSelect.press("ArrowDown");
@@ -291,7 +292,7 @@ async function main() {
     await profileSelect.press("Enter");
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${mockProfileId}::mock-model`,
+        modelOptionValue(mockProfileId, "mock-model"),
       "方向键可切回前一个模型"
     );
     await profileSelect.press("Enter");
@@ -299,7 +300,7 @@ async function main() {
     await profileSelect.press("Escape");
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${mockProfileId}::mock-model`,
+        modelOptionValue(mockProfileId, "mock-model"),
       "Escape 取消未提交的模型导航"
     );
     await profileSelect.click();
@@ -449,8 +450,8 @@ async function main() {
       );
       const selections = [
         ...EFFORT_BODIES.map(([effort]) => ["thinking-effort-select", effort]),
-        ["profile-select", `${mockProfileId}::mock-model`],
-        ["profile-select", `${longProfileId}::${longModelName}`],
+        ["profile-select", modelOptionValue(mockProfileId, "mock-model")],
+        ["profile-select", modelOptionValue(longProfileId, longModelName)],
       ];
       for (const [testId, value] of selections) {
         await selectComposerOption(window, testId, value);
@@ -506,7 +507,7 @@ async function main() {
       });
       assert(
         (await selectedProfile.getAttribute("data-value")) ===
-          `${longProfileId}::${longModelName}` &&
+          modelOptionValue(longProfileId, longModelName) &&
           (await selectedProfile.textContent()).includes(longProfileName) &&
           (await selectedProfile.textContent()).includes(longModelName),
         "模型选中态与完整长名称跟随受控值"
@@ -594,7 +595,7 @@ async function main() {
       await profileMenu.waitFor();
       await assertMenuBounds(profileMenu);
       const longOption = profileMenu.getByTestId(
-        `profile-select-option-${longProfileId}::${longModelName}`
+        `profile-select-option-${modelOptionValue(longProfileId, longModelName)}`
       );
       assert(
         (await profileSelect.getAttribute("aria-activedescendant")) ===
@@ -706,7 +707,7 @@ async function main() {
     await selectComposerOption(
       window,
       "profile-select",
-      `${mockProfileId}::mock-model`
+      modelOptionValue(mockProfileId, "mock-model")
     );
     assert(seenBodies.length === 0, "模型与思考选择、主题切换不自动发送请求");
     await selectComposerOption(window, "thinking-effort-select", "auto");
@@ -879,7 +880,7 @@ async function main() {
     await selectComposerOption(
       window,
       "profile-select",
-      `${longProfileId}::${longModelName}`
+      modelOptionValue(longProfileId, longModelName)
     );
     await window.getByTestId("settings-open").click();
     const profileRow = window.locator("li").filter({
@@ -894,17 +895,17 @@ async function main() {
       .waitFor();
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${longProfileId}::${longModelName}`,
+        modelOptionValue(longProfileId, longModelName),
       "失效模型占位保留已保存的 (Profile, 模型) 复合值"
     );
     await selectComposerOption(
       window,
       "profile-select",
-      `${mockProfileId}::mock-model`
+      modelOptionValue(mockProfileId, "mock-model")
     );
     assert(
       (await profileSelect.getAttribute("data-value")) ===
-        `${mockProfileId}::mock-model`,
+        modelOptionValue(mockProfileId, "mock-model"),
       "失效模型仍可通过菜单显式改选可用模型"
     );
     assert(seenBodies.length === 9, "删除和重选模型不额外发送请求");

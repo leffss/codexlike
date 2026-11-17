@@ -7,7 +7,12 @@ import {
 } from "@codexlike/agent-core";
 import type { TerminalSettings } from "@codexlike/desktop/ipc";
 
-import { modelOptionValue, parseModelOptionValue } from "../lib/model-options";
+import {
+  modelOptionValue,
+  parseModelOptionValue,
+  subagentFollowModelValue,
+  subagentSettingsOfValue,
+} from "../lib/model-options";
 
 import { ProviderProfileForm } from "../components/ProviderProfileForm";
 import { McpSettingsSection } from "../components/McpSettingsSection";
@@ -668,7 +673,7 @@ function TerminalSettingsSection() {
  */
 function SubagentSettingsSection() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
-  /** 复合值：`${profileId}::${model}`；空串 = 同主模型 */
+  /** 复合值：`${profileId}::${model}`；空 model 位 = 跟随占位；空串 = 同主模型 */
   const [modelValue, setModelValue] = useState<string>("");
   const [maxConcurrent, setMaxConcurrent] = useState("3");
   const [loaded, setLoaded] = useState(false);
@@ -683,14 +688,22 @@ function SubagentSettingsSection() {
         window.codexlike.subagentSettings.get(),
       ]);
       setProfiles(profileList);
-      // 引用的 Profile 已删除时回落为同主模型；模型记录失效（已从列表删除）
-      // 回退该 Profile 列表第一项（与 agent-core resolveModelOf 同一语义）
+      // 引用的 Profile 已删除时回落为同主模型；model 为 null（未选具体
+      // 模型）回显「跟随」占位而不落成具体模型（review 修复 1：未改选
+      // 保存保留 null，子代理继续跟随主任务当前所用模型）；模型记录失效
+      // （已从列表删除）回退该 Profile 列表第一项（resolveModelOf 同语义）
       const profile = profileList.find(
         (p) => p.id === settings.providerProfileId
       );
       if (profile) {
-        const model = resolveModelOf(profile, settings.model);
-        setModelValue(modelOptionValue(profile.id, model));
+        setModelValue(
+          settings.model === null
+            ? subagentFollowModelValue(profile.id)
+            : modelOptionValue(
+                profile.id,
+                resolveModelOf(profile, settings.model)
+              )
+        );
       } else {
         setModelValue("");
       }
@@ -706,14 +719,22 @@ function SubagentSettingsSection() {
     void refresh();
   }, []);
 
+  // 跟随占位项（review 修复 1）：当前选中值为空 model 位复合键时才渲染
+  // 显式占位（已选 Profile、未选具体模型）；选了具体模型或「同主模型」后消失
+  const followParsed = parseModelOptionValue(modelValue);
+  const followProfile =
+    followParsed?.model === ""
+      ? profiles.find((p) => p.id === followParsed.profileId)
+      : undefined;
+
   async function save() {
     setSaving(true);
     setMessage("");
     try {
-      const parsed = parseModelOptionValue(modelValue);
+      const parsed = subagentSettingsOfValue(modelValue);
       const settings = await window.codexlike.subagentSettings.set({
-        providerProfileId: parsed?.profileId ?? null,
-        model: parsed?.model ?? null,
+        providerProfileId: parsed.providerProfileId,
+        model: parsed.model,
         maxConcurrent: Number(maxConcurrent),
       });
       setMaxConcurrent(String(settings.maxConcurrent));
@@ -752,6 +773,11 @@ function SubagentSettingsSection() {
               onChange={(e) => setModelValue(e.target.value)}
             >
               <option value="">同主模型（跟随主任务当前使用的模型）</option>
+              {followProfile !== undefined && (
+                <option value={modelValue}>
+                  {followProfile.name} · 跟随主任务模型（未选具体模型）
+                </option>
+              )}
               {profiles.flatMap((profile) =>
                 profile.models.map((model) => (
                   <option
