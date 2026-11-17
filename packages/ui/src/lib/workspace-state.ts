@@ -26,6 +26,8 @@ export interface NewTaskDraft {
   workspacePath?: string;
   workspaceMode?: "local" | "worktree";
   providerProfileId: string;
+  /** 首条消息所用具体模型（票 02 二元组）；空串 = 未显式选（回退第一项） */
+  model: string;
   thinkingEffort: ThinkingEffort;
   approvalMode: ApprovalMode;
   busy: boolean;
@@ -48,6 +50,9 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   const removedProjects = new Set<string>();
   const defaultPreferences: TaskPreferences = {
     providerProfileId: "",
+    // 旧持久化数据无 model 字段（票 02 前）：undefined 等价未显式选，
+    // 发送时由主进程/agent-core 回退 Profile 列表第一项
+    model: "",
     thinkingEffort: "auto",
     approvalMode: "ask",
   };
@@ -61,7 +66,11 @@ export function createWorkspaceState(port?: WorkbenchPort) {
   const drafts = new Map<string, QuestionDraft>();
   const composers = new Map<string, string>();
   const newDrafts = new Map<string | null, NewTaskDraft>();
-  function newDraft(projectId: string | null, defaultProfile = "") {
+  function newDraft(
+    projectId: string | null,
+    defaultProfile = "",
+    defaultModel = ""
+  ) {
     let draft = newDrafts.get(projectId);
     if (!draft) {
       draft = {
@@ -69,6 +78,8 @@ export function createWorkspaceState(port?: WorkbenchPort) {
         projectId,
         text: "",
         providerProfileId: defaultProfile,
+        // 新建任务默认 Profile 列表第一项（票 02：不选模型也能直接开工）
+        model: defaultModel,
         thinkingEffort: "auto",
         approvalMode: "ask",
         busy: false,
@@ -76,8 +87,11 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       };
       newDrafts.set(projectId, draft);
     }
-    if (!draft.providerProfileId && defaultProfile)
+    if (!draft.providerProfileId && defaultProfile) {
       draft.providerProfileId = defaultProfile;
+      // 旧持久化草稿无 model：随默认 Profile 补第一项
+      if (!draft.model) draft.model = defaultModel;
+    }
     return draft;
   }
   const submissions = new Map<string, SubmissionState>();
@@ -133,7 +147,11 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       loaded.add(taskId);
       notify();
     },
-    async loadNewDraft(projectId: string | null, defaultProfile = "") {
+    async loadNewDraft(
+      projectId: string | null,
+      defaultProfile = "",
+      defaultModel = ""
+    ) {
       const entry = await persisted.load({ kind: "new", projectId });
       if (projectId !== null && removedProjects.has(projectId)) return;
       if (entry && !newDrafts.has(projectId))
@@ -144,10 +162,12 @@ export function createWorkspaceState(port?: WorkbenchPort) {
           workspacePath: entry.value.workspacePath,
           workspaceMode: entry.value.workspaceMode,
           ...entry.value.preferences,
+          // 旧持久化草稿（票 02 前）无 model：归一空串 = 未显式选（回退第一项）
+          model: entry.value.preferences.model ?? "",
           busy: false,
           error: null,
         });
-      newDraft(projectId, defaultProfile);
+      newDraft(projectId, defaultProfile, defaultModel);
       notify();
     },
     preferences: (taskId: string) =>
@@ -193,6 +213,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
           workspaceMode: snapshot.workspaceMode,
           preferences: {
             providerProfileId: snapshot.providerProfileId,
+            model: snapshot.model,
             thinkingEffort: snapshot.thinkingEffort,
             approvalMode: snapshot.approvalMode,
           },
@@ -237,6 +258,7 @@ export function createWorkspaceState(port?: WorkbenchPort) {
           workspacePath: entry.value.workspacePath,
           workspaceMode: entry.value.workspaceMode,
           ...entry.value.preferences,
+          model: entry.value.preferences.model ?? "",
           busy: false,
           error: null,
         });

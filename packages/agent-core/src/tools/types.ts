@@ -32,6 +32,12 @@ export interface ToolExecutionContext {
    */
   profile?: ProviderProfile;
   /**
+   * 本次 sendMessage 归一后的具体模型（票 02，ADR 0024 二元组）：与 profile
+   * 同一通道转发——「子代理模型 = 同主模型」跟随主任务当前所用模型
+   * （同 Profile 同模型）；其余工具可忽略。
+   */
+  model?: string;
+  /**
    * 本次 sendMessage 固定的思考档位快照（GLOSSARY「思考档位」，思考档位 03）：
    * 与 profile 同一通道由主任务工具执行入口转发；spawn_subagent 委派入队时
    * 以此捕获快照（排队/运行/全部工具轮次均用它），其余工具可忽略。

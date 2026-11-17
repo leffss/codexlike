@@ -55,6 +55,8 @@ export function registerWorkbenchHandlers(
         readingPosition: null,
         preferences: {
           providerProfileId: task?.providerProfileId ?? profile?.id ?? "",
+          // 任务记录的模型（票 02 二元组）：重启恢复未改选时沿用上次实际发送所用
+          model: task?.model ?? undefined,
           thinkingEffort: "auto",
           approvalMode: task?.approvalMode ?? "ask",
         },
@@ -145,6 +147,12 @@ export function registerWorkbenchHandlers(
       requestId: entry.value.requestId,
       preferences: {
         providerProfileId: entry.value.preferences.providerProfileId,
+        // 任务级模型（票 02 二元组）：可选字段，仅接受字符串（旧数据缺失/非法剔除）
+        model:
+          typeof entry.value.preferences.model === "string" &&
+          entry.value.preferences.model !== ""
+            ? entry.value.preferences.model
+            : undefined,
         thinkingEffort: entry.value.preferences.thinkingEffort,
         approvalMode: entry.value.preferences.approvalMode,
       },

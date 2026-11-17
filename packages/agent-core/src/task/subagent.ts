@@ -113,10 +113,12 @@ export interface SubagentsConfig {
    */
   modelMaxRetries?: () => number;
   /**
-   * 子代理模型（Provider Profile 引用）：null = 同主模型（用本次 sendMessage 的 profile）。
-   * 异步以允许宿主读取加密存储的 Profile。
+   * 子代理模型解析（票 02，ADR 0024 模型级）：设置页选到具体 (Profile, 模型)
+   * 时返回该二元组（model 已由宿主用 resolveModelOf 归一）；null = 同主模型
+   * ——跟随主任务当前所用模型（同 Profile 同模型，取本次 sendMessage 归一
+   * 后的二元组）。异步以允许宿主读取加密存储的 Profile。
    */
-  resolveProfile(): Promise<ProviderProfile | null>;
+  resolveModel(): Promise<{ profile: ProviderProfile; model: string } | null>;
 }
 
 /**
@@ -255,8 +257,11 @@ export function createSubagentOrchestrator(
   const emit = port.emit;
 
   const entries = new Map<string, SubagentEntry>();
-  /** 「同主模型」回退 Profile：spawn 时暂存本次 sendMessage 的 profile */
-  const fallbackProfiles = new Map<string, ProviderProfile>();
+  /** 「同主模型」回退二元组：spawn 时暂存本次 sendMessage 的 (profile, model) */
+  const fallbackModels = new Map<
+    string,
+    { profile: ProviderProfile; model: string }
+  >();
 
   function hasPending(): boolean {
     for (const entry of entries.values()) {
@@ -429,12 +434,14 @@ export function createSubagentOrchestrator(
       ]
         .filter(Boolean)
         .join("\n\n");
-      // 模型解析：设置页的子代理 Profile；null = 同主模型（spawn 时暂存的任务 profile）
-      const fallback = fallbackProfiles.get(entry.subagentId);
-      const profile = (await config.resolveProfile()) ?? fallback;
-      if (profile === undefined) {
+      // 模型解析（票 02 模型级）：设置页选到的具体 (Profile, 模型)；
+      // null = 同主模型（spawn 时暂存的主任务二元组，同 Profile 同模型）
+      const fallback = fallbackModels.get(entry.subagentId);
+      const resolved = (await config.resolveModel()) ?? fallback;
+      if (resolved === undefined) {
         throw new Error("未解析到子代理模型（Provider Profile）");
       }
+      const { profile, model } = resolved;
       const messages: ModelMessage[] = [{ role: "user", content: entry.task }];
       // 快照点（执行设置 ADR 0017「回合开始快照」）：子代理开始运行时读取一次，
       // 运行中不受设置页中途调小影响；未注入用默认 200
@@ -489,8 +496,12 @@ export function createSubagentOrchestrator(
         roundText = "";
         roundReasoning = "";
         const result = streamText({
-          // 全部轮次复用入队时捕获的档位快照（运行中主任务切档不影响本任务）
-          model: modelFor(profile, { thinkingEffort: entry.thinkingEffort }),
+          // 全部轮次复用入队时捕获的档位快照（运行中主任务切档不影响本任务）；
+          // model 携带解析出的具体模型（票 02：设置指定或跟随主任务当前所用）
+          model: modelFor(profile, {
+            thinkingEffort: entry.thinkingEffort,
+            model,
+          }),
           system: systemPrompt,
           messages,
           tools: modelTools,
@@ -659,7 +670,7 @@ export function createSubagentOrchestrator(
     entry.output = output;
     entry.isError = isError;
     entry.state = "done";
-    fallbackProfiles.delete(entry.subagentId);
+    fallbackModels.delete(entry.subagentId);
     // 骨架行终态更新（ADR 0021）：状态与完成时间随报告回流一并落库；
     // 进程内中断（随主任务 abort）同样走到这里——报告已回流即为终态，
     // interrupted 只属于重启收尾补记（残留 queued/running 行）
@@ -725,8 +736,13 @@ export function createSubagentOrchestrator(
         isError: false,
       };
       entries.set(subagentId, entry);
-      if (context.profile !== undefined) {
-        fallbackProfiles.set(subagentId, context.profile);
+      if (context.profile !== undefined && context.model !== undefined) {
+        // 「同主模型」= 同 Profile 同模型（票 02 细化）：暂存主任务发送时
+        // 归一后的二元组，子代理运行时未配置具体模型则以此跟随
+        fallbackModels.set(subagentId, {
+          profile: context.profile,
+          model: context.model,
+        });
       }
       // 骨架行 queued 即写（ADR 0021）：入队瞬间插入，排队中被杀的委派
       // 也留有「曾委派过」的事实与委派说明；启动/终态只做状态更新

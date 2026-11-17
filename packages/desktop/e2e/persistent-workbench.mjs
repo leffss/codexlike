@@ -123,12 +123,16 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
-    await selectComposerOption(window, "profile-select", secondProfileId);
+    await selectComposerOption(
+      window,
+      "profile-select",
+      `${secondProfileId}::second-model`
+    );
     assert(
       (await window
         .getByTestId("profile-select")
-        .getAttribute("data-value")) === secondProfileId,
-      "鼠标切换模型提交 Profile ID"
+        .getAttribute("data-value")) === `${secondProfileId}::second-model`,
+      "鼠标切换模型提交 (Profile, 模型) 复合值"
     );
     await window.getByTestId("composer-input").fill("正式任务未发送输入");
     await selectComposerOption(window, "thinking-effort-select", "off");
@@ -205,14 +209,19 @@ async function main() {
         .getAttribute("data-value")) === "off",
       "思考真实重启恢复"
     );
+    // profiles 列表与任务记录异步恢复：等选择器落到重启前的 (Profile, 模型) 复合值
+    await window.waitForFunction(
+      (value) =>
+        document
+          .querySelector('[data-testid="profile-select"]')
+          ?.getAttribute("data-value") === value,
+      `${secondProfileId}::second-model`
+    );
     assert(
-      (await window
-        .getByTestId("profile-select")
-        .getAttribute("data-value")) === secondProfileId &&
-        (await window.getByTestId("profile-select").textContent()).includes(
-          "Second Mock · second-model"
-        ),
-      "模型 ID 与显示名称真实重启恢复"
+      (await window.getByTestId("profile-select").textContent()).includes(
+        "Second Mock · second-model"
+      ),
+      "模型复合值与显示名称真实重启恢复（票 02 二元组）"
     );
     await window
       .getByTestId("composer-input")
@@ -239,11 +248,11 @@ async function main() {
       "新任务不能继承完全访问"
     );
     await window.waitForFunction(
-      (id) =>
+      (value) =>
         document
           .querySelector('[data-testid="profile-select"]')
-          ?.getAttribute("data-value") === id,
-      defaultProfileId
+          ?.getAttribute("data-value") === value,
+      `${defaultProfileId}::persistent-model`
     );
     assert(
       (await window.getByTestId("profile-select").textContent()).includes(

@@ -15,6 +15,7 @@ export type {
 export {
   validateProviderProfile,
   firstModelOf,
+  resolveModelOf,
 } from "./provider/provider-profile";
 
 export type {

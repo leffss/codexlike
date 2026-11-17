@@ -563,6 +563,7 @@ it("正在发出的条目随事件与快照接续（票 03）：sending 锁定 i
     text: "正在发出的一条",
     mentionPaths: [],
     providerProfileId: "p1",
+    model: null,
     thinkingEffort: "auto" as const,
     approvalMode: "ask" as const,
     createdAt: "2026-11-13T00:00:00Z",
@@ -616,6 +617,7 @@ function queuedStartEntry(overrides: {
   return {
     mentionPaths: [],
     providerProfileId: "p1",
+    model: null,
     thinkingEffort: "auto" as const,
     approvalMode: "ask" as const,
     createdAt: "2026-11-16T08:00:00Z",
@@ -759,6 +761,7 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
       text: "排队第一条",
       mentionPaths: [],
       providerProfileId: "p1",
+      model: null,
       thinkingEffort: "auto" as const,
       approvalMode: "ask" as const,
       createdAt: "2026-11-13T00:00:00Z",

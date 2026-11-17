@@ -307,7 +307,7 @@ describe("createLanguageModelFromProfile（OpenAI 兼容 provider 构造）", ()
     );
   });
 
-  it("多模型 Profile 的请求 model 字段取列表第一项（任务级选择落地前的兼容语义）", async () => {
+  it("多模型 Profile 缺省时请求 model 字段取列表第一项（未显式选模型任务的兼容语义）", async () => {
     const fetchSpy = createFetchSpy();
 
     const model = createLanguageModelFromProfile(profile, {
@@ -317,6 +317,19 @@ describe("createLanguageModelFromProfile（OpenAI 兼容 provider 构造）", ()
 
     const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
     expect(body.model).toBe("glm-4.7");
+  });
+
+  it("options.model 指定任务所选模型时请求体 model 字段用该值（票 02 二元组）", async () => {
+    const fetchSpy = createFetchSpy();
+
+    const model = createLanguageModelFromProfile(profile, {
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+      model: "glm-4.6",
+    });
+    await generateText({ model, prompt: "你好" });
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.model).toBe("glm-4.6");
   });
 
   it("请求携带 Authorization: Bearer <apiKey>", async () => {

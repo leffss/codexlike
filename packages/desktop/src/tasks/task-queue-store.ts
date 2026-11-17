@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS task_queue (
   text TEXT NOT NULL,
   mention_paths TEXT,
   provider_profile_id TEXT NOT NULL,
+  model TEXT,
   thinking_effort TEXT NOT NULL,
   approval_mode TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -32,6 +33,7 @@ interface TaskQueueRow {
   text: string;
   mention_paths: string | null;
   provider_profile_id: string;
+  model: string | null;
   thinking_effort: string;
   approval_mode: string;
   created_at: string;
@@ -53,6 +55,8 @@ function toQueuedTaskStart(row: TaskQueueRow): QueuedTaskStart {
     text: row.text,
     mentionPaths,
     providerProfileId: row.provider_profile_id,
+    // 存量行无 model 列值（票 02 前入队）：NULL 读回 null = 未显式选模型
+    model: row.model,
     thinkingEffort: row.thinking_effort as QueuedTaskStart["thinkingEffort"],
     approvalMode: row.approval_mode as QueuedTaskStart["approvalMode"],
     createdAt: row.created_at,
@@ -63,11 +67,17 @@ export function createSqliteTaskQueueStore(dbPath: string): TaskQueueStore {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec(TASK_QUEUE_SCHEMA);
+  // 存量库升级（票 02）：补 model 列；已存在（新库或已升级）时忽略重复列错误
+  try {
+    db.exec("ALTER TABLE task_queue ADD COLUMN model TEXT");
+  } catch {
+    // 列已存在
+  }
   const listStmt = db.prepare(
     "SELECT * FROM task_queue ORDER BY position, rowid"
   );
   const appendStmt = db.prepare(
-    "INSERT INTO task_queue (task_id, position, text, mention_paths, provider_profile_id, thinking_effort, approval_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO task_queue (task_id, position, text, mention_paths, provider_profile_id, model, thinking_effort, approval_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const nextPositionStmt = db.prepare(
     "SELECT COALESCE(MAX(position) + 1, 0) AS next FROM task_queue"
@@ -90,6 +100,7 @@ export function createSqliteTaskQueueStore(dbPath: string): TaskQueueStore {
         entry.text,
         JSON.stringify(entry.mentionPaths),
         entry.providerProfileId,
+        entry.model,
         entry.thinkingEffort,
         entry.approvalMode,
         entry.createdAt

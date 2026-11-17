@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   firstModelOf,
+  resolveModelOf,
   validateProviderProfile,
   type ProviderProfileInput,
 } from "../../src/index";
@@ -104,5 +105,24 @@ describe("firstModelOf（Profile 模型列表第一项）", () => {
 
   it("列表为空时兜底返回空串（校验层保证非空，此处仅防崩溃）", () => {
     expect(firstModelOf({ models: [] })).toBe("");
+  });
+});
+
+describe("resolveModelOf（任务级模型解析：失效一律回退列表第一项，ADR 0024）", () => {
+  it("model 在 Profile 列表内时原样返回", () => {
+    expect(resolveModelOf({ models: ["glm-4.7", "glm-4.6"] }, "glm-4.6")).toBe(
+      "glm-4.6"
+    );
+  });
+
+  it("model 缺省（新建任务未显式选择）回退列表第一项", () => {
+    expect(resolveModelOf({ models: ["glm-4.7", "glm-4.6"] })).toBe("glm-4.7");
+    expect(resolveModelOf({ models: ["glm-4.7", "glm-4.6"] }, null)).toBe(
+      "glm-4.7"
+    );
+  });
+
+  it("model 已从列表删除（存量任务记录失效）回退列表第一项", () => {
+    expect(resolveModelOf({ models: ["glm-4.7"] }, "glm-4.6")).toBe("glm-4.7");
   });
 });

@@ -4,7 +4,7 @@ import type { ProviderProfile } from "@codexlike/agent-core";
 
 import {
   formatTaskStatus,
-  matchProfilesForModelSwitch,
+  matchModelsForModelSwitch,
   planSlashCommand,
 } from "../src/lib/slash-command-actions";
 import type { TaskStatusInfo } from "@codexlike/desktop/ipc";
@@ -15,7 +15,7 @@ const profiles: ProviderProfile[] = [
     name: "GLM",
     baseURL: "https://a",
     apiKey: "k",
-    models: ["glm-4.7"],
+    models: ["glm-4.7", "glm-4.6"],
   },
   {
     id: "p2",
@@ -78,31 +78,45 @@ describe("planSlashCommand", () => {
   });
 });
 
-describe("matchProfilesForModelSwitch（/model 关键词匹配）", () => {
-  it("唯一命中：按名称模糊匹配（含中文名）", () => {
-    expect(matchProfilesForModelSwitch("deep", profiles)).toEqual({
+describe("matchModelsForModelSwitch（/model 关键词匹配，票 02 模型级平铺）", () => {
+  it("唯一命中：按「Profile 名 模型名」模糊匹配到具体模型（含中文名）", () => {
+    expect(matchModelsForModelSwitch("deep", profiles)).toEqual({
       kind: "unique",
       profile: profiles[1],
+      model: "deepseek-v4",
     });
   });
 
-  it("多命中：列出候选交由用户再用一次 /model 精确指定", () => {
-    const result = matchProfilesForModelSwitch("glm", profiles);
+  it("同 Profile 的两个模型可用模型名区分：命中其一即唯一", () => {
+    expect(matchModelsForModelSwitch("glm-4.6", profiles)).toEqual({
+      kind: "unique",
+      profile: profiles[0],
+      model: "glm-4.6",
+    });
+  });
+
+  it("多命中：列出平铺候选（Profile · 模型）交由用户再用一次 /model 精确指定", () => {
+    const result = matchModelsForModelSwitch("glm", profiles);
     expect(result.kind).toBe("ambiguous");
     if (result.kind === "ambiguous") {
-      expect(result.candidates.map((p) => p.name)).toEqual([
-        "GLM",
-        "GLM 便宜档",
+      expect(
+        result.candidates.map(
+          (candidate) => `${candidate.profile.name} · ${candidate.model}`
+        )
+      ).toEqual([
+        "GLM · glm-4.7",
+        "GLM · glm-4.6",
+        "GLM 便宜档 · glm-4.7-flash",
       ]);
     }
   });
 
-  it("空关键词与零命中：返回全部候选（无匹配时也列出可选项）", () => {
-    expect(matchProfilesForModelSwitch("", profiles).kind).toBe("ambiguous");
-    const none = matchProfilesForModelSwitch("不存在的模型", profiles);
+  it("空关键词与零命中：返回全部平铺候选（无匹配时也列出可选项）", () => {
+    expect(matchModelsForModelSwitch("", profiles).kind).toBe("ambiguous");
+    const none = matchModelsForModelSwitch("不存在的模型", profiles);
     expect(none.kind).toBe("ambiguous");
     if (none.kind === "ambiguous") {
-      expect(none.candidates).toHaveLength(3);
+      expect(none.candidates).toHaveLength(4);
     }
   });
 });

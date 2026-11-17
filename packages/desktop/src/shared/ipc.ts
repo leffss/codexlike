@@ -334,6 +334,8 @@ export interface StartTaskInput {
   workspaceMode?: WorkspaceMode;
   text: string;
   providerProfileId?: string;
+  /** 首条消息使用的具体模型（票 02 二元组）；缺省回退 Profile 列表第一项 */
+  model?: string;
   thinkingEffort?: ThinkingEffort;
   approvalMode?: ApprovalMode;
   mentionPaths?: string[];
@@ -467,7 +469,9 @@ export interface TaskApi {
     providerProfileId?: string,
     mentionPaths?: string[],
     thinkingEffort?: ThinkingEffort,
-    approvalMode?: ApprovalMode
+    approvalMode?: ApprovalMode,
+    /** 本条消息使用的具体模型（票 02 二元组）；缺省回退 Profile 列表第一项 */
+    model?: string
   ): Promise<void>;
   /**
    * 打断指定任务运行中的本轮（停止按钮）：
@@ -520,11 +524,13 @@ export interface TaskApi {
   draftResources(workspacePath: string): Promise<TaskResourcesView>;
   /**
    * /compact：用所选 Provider Profile 的模型压缩历史为摘要（保留最近 3 轮）。
+   * model 为压缩所用具体模型（票 02 二元组）；缺省回退 Profile 列表第一项。
    * 压缩失败（模型错误 / 历史过短 / 任务正忙）以异常抛回，原历史不受损，可重试。
    */
   compact(
     taskId: string,
-    providerProfileId: string
+    providerProfileId: string,
+    model?: string
   ): Promise<{ compactedMessages: number }>;
   /** @引用 菜单候选（工作区文件相对路径，POSIX 分隔符） */
   workspaceFiles(taskId: string): Promise<string[]>;

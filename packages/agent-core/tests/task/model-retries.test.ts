@@ -345,7 +345,10 @@ describe("子代理 maxRetries（执行设置 resolver 注入）", () => {
         languageModelFor: (p) =>
           p.id === subProfile.id ? subModel : mainModel,
         settings: () => ({ maxConcurrent: 3 }),
-        resolveProfile: async () => subProfile,
+        resolveModel: async () => ({
+          profile: subProfile,
+          model: subProfile.models[0]!,
+        }),
         modelMaxRetries: options.modelMaxRetries,
       },
       now: fakeClock(),
