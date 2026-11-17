@@ -56,6 +56,12 @@ export interface CreateTaskManagerOptions {
    */
   compactKeepRounds?: () => number;
   /**
+   * 模型请求重试次数的逐次解析取值函数（GLOSSARY「执行设置」，ADR 0024）：
+   * 原样透传给每个任务的 createAgentTask（对话回合开始快照，compact 逐次读取）；
+   * 未注入用默认 2（与 SDK 默认一致）。
+   */
+  modelMaxRetries?: () => number;
+  /**
    * Provider Profile → 语言模型 的工厂；测试注入 mock，默认 OpenAI 兼容构造。
    * options 携带本条消息的思考档位快照（与 agent-task / subagent 的同名
    * 注入点签名对齐）；少参（0/1 参）工厂仍可注入——不关心档位的调用方不受影响。
@@ -250,6 +256,7 @@ export function createTaskManager(
       subagents: options.subagents,
       toolRoundsLimit: options.toolRoundsLimit,
       compactKeepRounds: options.compactKeepRounds,
+      modelMaxRetries: options.modelMaxRetries,
       systemPrompt: systemPromptFor?.(record) ?? "",
       resources:
         options.resourcesFor === undefined

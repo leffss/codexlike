@@ -519,6 +519,10 @@ void app.whenReady().then(async () => {
     // /compact 保留轮数（执行设置票 03，ADR 0017）：resolver 逐次解析内存缓存，
     // agent-core 在每次 compact 执行时读取（无回合快照）——改动对下一次压缩生效
     compactKeepRounds: () => agentSettings.compactKeepRounds,
+    // 模型请求重试次数（模型请求重试票 03，ADR 0024）：resolver 逐次解析内存
+    // 缓存，对话回合开始快照、compact 逐次读取——改动对后续执行生效，进行中
+    // 执行不受影响
+    modelMaxRetries: () => agentSettings.modelMaxRetries,
     subagents: {
       // 子代理工具集 = 完整任务工具（内置 + MCP + 浏览器，同一工厂逐次解析；
       // 编排器剔除 spawn_subagent 防递归）
@@ -527,6 +531,9 @@ void app.whenReady().then(async () => {
       // 子代理工具轮次上限（执行设置票 02，ADR 0017）：resolver 逐次解析内存缓存，
       // 子代理开始运行时快照——设置改动即时落盘，下一次委派按新值执行
       toolRoundsLimit: () => agentSettings.maxSubagentToolRounds,
+      // 子代理模型请求重试（模型请求重试票 03，ADR 0024）：与主任务同一全局
+      // 设置，子代理开始运行时快照（与轮次上限同一快照点）
+      modelMaxRetries: () => agentSettings.modelMaxRetries,
       // 子代理模型（设置页 Provider Profile 引用）；null = 同主模型（回退当前任务所选）
       resolveProfile: async () => {
         const profileId = subagentSettings.providerProfileId;
