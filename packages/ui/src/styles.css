@@ -178,7 +178,9 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版） */
+/* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版）。
+ * 密度取「舒适留白」档（prototype/reading-density 分支四档原型评审选定 A）：
+ * 段距 0.85em + 行高 1.65，标题/列表/代码块/表格同步放宽，避免只有段落放宽显得孤立。 */
 .markdown > :first-child {
   margin-top: 0;
 }
@@ -188,7 +190,8 @@ body {
 }
 
 .markdown p {
-  margin: 0.5em 0;
+  margin: 0.85em 0;
+  line-height: 1.65;
   white-space: pre-wrap;
 }
 
@@ -196,14 +199,14 @@ body {
 .markdown h2,
 .markdown h3,
 .markdown h4 {
-  margin: 0.8em 0 0.4em;
+  margin: 1.3em 0 0.5em;
   font-weight: 600;
   color: var(--fg);
 }
 
 .markdown ul,
 .markdown ol {
-  margin: 0.5em 0;
+  margin: 0.85em 0;
   padding-left: 1.5em;
 }
 
@@ -216,7 +219,8 @@ body {
 }
 
 .markdown li {
-  margin: 0.15em 0;
+  margin: 0.3em 0;
+  line-height: 1.6;
 }
 
 .markdown a {
@@ -225,8 +229,8 @@ body {
 }
 
 .markdown blockquote {
-  margin: 0.5em 0;
-  padding: 0.2em 0.9em;
+  margin: 0.9em 0;
+  padding: 0.35em 1em;
   border-left: 3px solid var(--line);
   color: var(--fg-muted);
 }
@@ -244,8 +248,9 @@ body {
 }
 
 .markdown pre {
-  margin: 0.6em 0;
-  padding: 0.75em 1em;
+  margin: 1em 0;
+  padding: 1em 1.25em;
+  line-height: 1.6;
   border-radius: 8px;
   background-color: var(--code-bg);
   overflow-x: auto;
@@ -257,7 +262,7 @@ body {
 
 /* collapse 下 border-radius 无效，改 separate + 单向内分隔线，外框与圆角收在 table 自身 */
 .markdown table {
-  margin: 0.6em 0;
+  margin: 1em 0;
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -268,7 +273,7 @@ body {
 
 .markdown th,
 .markdown td {
-  padding: 0.3em 0.7em;
+  padding: 0.45em 0.8em;
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
 }
@@ -290,7 +295,7 @@ body {
 }
 
 .markdown hr {
-  margin: 0.8em 0;
+  margin: 1.2em 0;
   border-color: var(--line);
 }
 

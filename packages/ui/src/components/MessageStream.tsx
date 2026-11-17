@@ -844,7 +844,7 @@ function MessageBubble(props: {
 
   return (
     <li data-testid="message-assistant" className="max-w-full">
-      <div className="markdown rounded-lg border border-line bg-surface px-4 py-3 text-sm">
+      <div className="markdown rounded-lg border border-line bg-surface px-5 py-4 text-sm">
         <div data-testid="assistant-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}

@@ -452,7 +452,7 @@ function SubagentRoundsDisclosure(props: {
       </summary>
       <div
         data-testid={`subagent-${variant}-content`}
-        className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg ${
+        className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-sm leading-6 text-fg ${
           variant === "thinking" ? "max-h-48" : "max-h-64"
         }`}
       >
@@ -462,9 +462,9 @@ function SubagentRoundsDisclosure(props: {
             data-testid={`subagent-${variant}-round-${index + 1}`}
           >
             {rounds.length > 1 && (
-              <p className="mb-1 text-fg-subtle">第 {index + 1} 轮</p>
+              <p className="mb-1 text-xs text-fg-subtle">第 {index + 1} 轮</p>
             )}
-            <p className="mb-2 last:mb-0">{text}</p>
+            <p className="mb-3 last:mb-0">{text}</p>
           </div>
         ))}
       </div>
