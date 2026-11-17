@@ -158,22 +158,28 @@ export function PlanMarkerRow(props: {
 }
 
 /**
+ * 开合记忆作用域（二选一，判别联合）：主任务卡传 taskId（任务作用域）；
+ * 子代理卡传 subagentId（ADR 0023，各子代理各自记忆、默认收起，与主任务
+ * 记忆互不污染，键前缀对齐 collapse-memory 既有 subagent-* 命名）。
+ * 类型上强制二选一——两者都不传的「共享 plan-card-none 键」静默串记忆
+ * 不再可能。
+ */
+export type WorkPlanCardScope = { taskId: string } | { subagentId: string };
+
+/**
  * 工作计划进度折叠卡（ADR 0019）：内容 = 当前计划（最后一次 update_plan，
- * 全量替换语义）。无计划时渲染 null（挂载点不占布局行）。
- * 开合记忆作用域按归属参数化：主任务卡传 taskId（任务作用域）；子代理卡
- * 传 subagentId（ADR 0023，各子代理各自记忆、默认收起，与主任务记忆互不
- * 污染，键前缀对齐 collapse-memory 既有 subagent-* 命名）。
+ * 全量替换语义）。无计划时渲染 null（挂载点不占布局行）。开合记忆按
+ * scope 作用域（见 WorkPlanCardScope）。
  */
 export function WorkPlanCard(props: {
   items: PlanSnapshot[];
-  taskId?: string | null;
-  subagentId?: string | null;
+  scope: WorkPlanCardScope;
 }) {
-  const { items, taskId, subagentId } = props;
+  const { items, scope } = props;
   const { open, toggle } = useCollapseState(
-    subagentId != null
-      ? `subagent-plan-card-${subagentId}`
-      : `plan-card-${taskId ?? "none"}`,
+    "subagentId" in scope
+      ? `subagent-plan-card-${scope.subagentId}`
+      : `plan-card-${scope.taskId}`,
     false
   );
   const latest = items.at(-1);
@@ -269,17 +275,17 @@ export function WorkPlanCard(props: {
   );
 }
 
-/** 便捷入口：由消息段序列收集快照后渲染卡（无计划时渲染 null） */
+/** 便捷入口：由消息段序列收集快照后渲染卡（无计划时渲染 null），主任务作用域 */
 export function WorkPlanCardFromSegments(props: {
   items: import("../lib/task-view").MessageSegment[];
-  taskId?: string | null;
+  taskId: string;
 }) {
   const snapshots = useMemo(
     () => collectPlanSnapshots(props.items),
     [props.items]
   );
   if (snapshots.length === 0) return null;
-  return <WorkPlanCard items={snapshots} taskId={props.taskId} />;
+  return <WorkPlanCard items={snapshots} scope={{ taskId: props.taskId }} />;
 }
 
 /**
@@ -297,5 +303,7 @@ export function WorkPlanCardFromSubagentTools(props: {
     [props.tools]
   );
   if (snapshots.length === 0) return null;
-  return <WorkPlanCard items={snapshots} subagentId={props.subagentId} />;
+  return (
+    <WorkPlanCard items={snapshots} scope={{ subagentId: props.subagentId }} />
+  );
 }

@@ -132,8 +132,11 @@ export function createUpdatePlanTool(): ToolDefinition {
         (step) => step.status === "in_progress"
       ).length;
       const pending = steps.filter((step) => step.status === "pending").length;
+      // 总数取三态之和而非 steps.length：与 ui 侧统计行（plan-view
+      // planSummaryLine）同口径；parsePlanSteps 已校验 status 必为三态
+      // 之一（两值恒等），防御性对齐避免「N 大于三态之和」的统计漂移
       return {
-        output: `工作计划已更新（共 ${steps.length} 项：${completed} 已完成、${inProgress} 进行中、${pending} 待办）`,
+        output: `工作计划已更新（共 ${completed + inProgress + pending} 项：${completed} 已完成、${inProgress} 进行中、${pending} 待办）`,
         isError: false,
       };
     },

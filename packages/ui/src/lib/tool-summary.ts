@@ -2,6 +2,7 @@
  * 工具卡片参数摘要：把工具名 + 参数 JSON 压成一行人可读文本（折叠态展示）。
  * 纯函数（spec Testing Decisions：UI 纯逻辑单测）。
  */
+import { planSummaryLine } from "./plan-view";
 
 /** 摘要长度上限（超长截断加省略号） */
 const MAX_SUMMARY_LENGTH = 60;
@@ -86,17 +87,11 @@ function summarizeByTool(
     case "update_plan": {
       // 票 03（ADR 0023）：与 agent-core 工具执行输出同口径的中文统计摘要，
       // 子代理工具清单行回看历史计划更新不读压缩 JSON；steps 非数组（历史
-      // 边界）回退压缩 JSON，不输出误导统计
+      // 边界）回退压缩 JSON，不输出误导统计。三态计数与统计行格式串收口
+      // plan-view（planSummaryLine：N = 三态之和，防御口径与核心侧一致）
       const steps = args["steps"];
       if (!Array.isArray(steps)) return JSON.stringify(args);
-      const count = (status: string) =>
-        steps.filter(
-          (step) =>
-            typeof step === "object" &&
-            step !== null &&
-            (step as Record<string, unknown>)["status"] === status
-        ).length;
-      return `工作计划已更新（共 ${steps.length} 项：${count("completed")} 已完成、${count("in_progress")} 进行中、${count("pending")} 待办）`;
+      return `工作计划已更新（${planSummaryLine(steps)}）`;
     }
     default: {
       // MCP 工具（mcp_<server>_<tool>，工单 12）：参数是任意 JSON Schema，
