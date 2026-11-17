@@ -330,7 +330,7 @@ async function main() {
         name: "External Links Mock",
         baseURL: `http://127.0.0.1:${port}/v1`,
         apiKey: "test",
-        model: "mock-model",
+        models: ["mock-model"],
       });
     }, model.port);
     await window.getByTestId("settings-open").click();

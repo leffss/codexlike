@@ -130,7 +130,7 @@ async function main() {
         name: "Exit Mock",
         baseURL: `http://127.0.0.1:${port}/v1`,
         apiKey: "test",
-        model: "mock",
+        models: ["mock-model"],
       });
     }, model.port);
     await window.getByTestId("settings-open").click();
