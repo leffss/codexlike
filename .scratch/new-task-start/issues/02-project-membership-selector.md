@@ -15,3 +15,5 @@
 - [ ] 归属选择器变更随 e2e 交互面记录，供 05 号票实跑（本票不跑 e2e）
 
 ## Comments
+
+**票 01 衔接（6bf8e47）**：接入点已预留——`NewTaskStart.tsx` 标题行右侧现为静态语境 `<span>`（组件内搜「票 02」注释有标记），`projects` 与 `onEditDraft` 已传入组件；工作区卡已按 `draft.projectId` 驱动形态，无需再动。切换归属在 WorkspacePage 层新增回调（走 `startCreateTask(projectId)` 同语义）并按 spec 重置独立任务已选目录。
