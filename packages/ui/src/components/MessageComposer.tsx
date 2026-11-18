@@ -9,26 +9,21 @@ import {
 } from "@codexlike/agent-core";
 
 import { useComposerMenu } from "../lib/use-composer-menu";
-import {
-  composerModelOptions,
-  composerModelValue,
-  parseModelOptionValue,
-} from "../lib/model-options";
-import {
-  APPROVAL_MODE_OPTIONS,
-  THINKING_EFFORT_OPTIONS,
-} from "../lib/composer-options";
+import { APPROVAL_MODE_OPTIONS } from "../lib/composer-options";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
 import { ComposerMenuList } from "./ComposerMenuList";
-import { ApprovalModeIcon, ArrowUpIcon, BrainIcon } from "./ComposerIcons";
+import { ApprovalModeIcon, ArrowUpIcon } from "./ComposerIcons";
+import { ModelThinkingSelect } from "./ModelThinkingSelect";
 import { QueueBar } from "./QueueBar";
 import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
 
 /**
  * 中栏底部：消息输入区（卡片式 composer：上行输入、下行工具栏）。
  * - `/` 开头的单行草稿弹出命令菜单，`@` 触发工作区文件模糊搜索菜单（键盘可选）；
- * - 模型选择器（Provider Profile）对下一条发送的消息生效；
+ * - 模型与思考档位统一选择器（ADR 0024 呈现修订）：单入口「模型名 · 档位」，
+ *   弹层内点模型/档位分别经 onSelectModel / onSelectThinkingEffort 即时保存，
+ *   均只对下一条发送的消息生效；
  * - 审批模式选择器随时可切，只对下一次发送生效；
  * - 发送内容（命令或消息）由上层用 resolveComposerSubmission 分发；
  * - 本轮回复进行中（流式输出或工具执行）：有输入时显示「加入队列」与「停止」
@@ -68,9 +63,10 @@ export function MessageComposer(props: {
   approvalMode: ApprovalMode | null;
   onSelectApprovalMode: (mode: ApprovalMode) => void;
   /**
-   * 思考档位（GLOSSARY「思考档位」）当前选择：逐条消息的临时发送设置，
-   * 只对下一条发送的消息生效；null（无任务）时选择器禁用。
-   * 回复运行中允许改选（为下一条消息预置）。
+   * 思考档位（GLOSSARY「思考档位」）当前选择：任务独立记忆、重启后保留，
+   * 调整只对下一次发送生效，不改变已开始的执行或历史；null（无任务）时
+   * 整个统一选择器禁用（与审批/技能同源，见下方接线）。回复运行中允许改选
+   * （为下一条消息预置）。
    */
   thinkingEffort: ThinkingEffort | null;
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
@@ -285,38 +281,18 @@ export function MessageComposer(props: {
               />
             </div>
             <div className="flex w-full min-w-0 flex-wrap items-center gap-2 @min-[560px]:ml-auto @min-[560px]:w-auto @min-[560px]:justify-end">
-              <ComposerSelect
-                testId="profile-select"
-                label="模型"
-                value={composerModelValue(
-                  props.profiles,
-                  props.selectedProfileId,
-                  props.selectedModel
-                )}
-                disabled={props.readOnly}
-                options={composerModelOptions(
-                  props.profiles,
-                  props.selectedProfileId,
-                  props.selectedModel
-                )}
-                onSelect={(value) => {
-                  const parsed = parseModelOptionValue(value);
-                  if (parsed) {
-                    props.onSelectModel(parsed.profileId, parsed.model);
-                  }
-                }}
+              {/* 模型与思考统一选择器（ADR 0024 呈现修订）：单入口收起
+                  「模型名 · 档位」；无任务（approvalMode=null）与恢复中整体
+                  禁用（与审批/技能同源），运行中允许改选，只对下一条消息生效。 */}
+              <ModelThinkingSelect
                 className="min-w-0 max-w-56 shrink"
-              />
-              {/* 无任务禁用；运行中允许改选，只对下一条消息生效。 */}
-              <ComposerSelect
-                testId="thinking-effort-select"
-                label="思考档位"
-                value={props.thinkingEffort ?? "auto"}
-                disabled={props.readOnly || props.thinkingEffort === null}
-                options={THINKING_EFFORT_OPTIONS}
-                onSelect={props.onSelectThinkingEffort}
-                renderIcon={() => <BrainIcon className="h-3 w-3" />}
-                className="min-w-0 shrink"
+                profiles={props.profiles}
+                selectedProfileId={props.selectedProfileId}
+                selectedModel={props.selectedModel}
+                thinkingEffort={props.thinkingEffort}
+                disabled={props.readOnly || props.approvalMode === null}
+                onSelectModel={props.onSelectModel}
+                onSelectThinkingEffort={props.onSelectThinkingEffort}
               />
               <button
                 type="button"

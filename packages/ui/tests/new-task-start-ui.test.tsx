@@ -5,7 +5,7 @@
 // 本文件测 NewTaskStart 的 props seam（呈现结构与交互回调），接线到
 // WorkspacePage 的端到端行为由 desktop e2e 覆盖（05 号票统一实跑）。
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { NewTaskStart } from "../src/components/NewTaskStart";
@@ -92,7 +92,23 @@ function baseProps(
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.unstubAllGlobals();
+  cleanup();
+});
+
+// jsdom 未实现 ResizeObserver（统一选择器定位 hook 观察 trigger 用）：空 stub
+//（先例 workspace-queue-ui.test.tsx）
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  );
+});
 
 // jsdom 未实现 scrollIntoView（选择器菜单定位滚动用）：stub 成空函数
 // （先例 subagent-rail-switch.test.tsx）
@@ -255,38 +271,43 @@ describe("NewTaskStart 居中起点页", () => {
     expect(screen.getByText(/来源目录，发送后使用隔离工作区/)).toBeTruthy();
   });
 
-  it("审批/模型/思考三项一级呈现；切换审批走 onSelectApprovalMode（full-access 确认由上层拦截）", () => {
+  it("审批/模型与思考统一选择器/一级呈现；切换审批走 onSelectApprovalMode（full-access 确认由上层拦截）", () => {
     const props = baseProps();
     render(createElement(NewTaskStart, props));
     const approval = screen.getByTestId("approval-mode-select");
     expect(approval.getAttribute("data-value")).toBe("ask");
-    expect(
-      screen.getByTestId("profile-select").getAttribute("data-value")
-    ).toBe("prof-1::glm-4.7");
-    expect(
-      screen.getByTestId("thinking-effort-select").getAttribute("data-value")
-    ).toBe("auto");
+    const modelTrigger = screen.getByTestId("model-thinking-select");
+    expect(modelTrigger.getAttribute("data-model-value")).toBe(
+      "prof-1::glm-4.7"
+    );
+    expect(modelTrigger.textContent).toContain("glm-4.7");
+    expect(modelTrigger.getAttribute("data-thinking-effort")).toBe("auto");
 
     fireEvent.click(approval);
     fireEvent.click(screen.getByTestId("approval-mode-select-option-assist"));
     expect(props.onSelectApprovalMode).toHaveBeenCalledWith("assist");
   });
 
-  it("切模型/思考写回草稿字段（onEditDraft）", () => {
+  it("统一选择器：提供商只筛选，点模型写回二元组且保持打开，点档位写回并关闭", () => {
     const props = baseProps();
     render(createElement(NewTaskStart, props));
-    fireEvent.click(screen.getByTestId("profile-select"));
+    const trigger = screen.getByTestId("model-thinking-select");
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByTestId("model-thinking-provider"), {
+      target: { value: "prof-2" },
+    });
+    expect(props.onEditDraft).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByTestId("profile-select-option-prof-2::deepseek-chat")
+      screen.getByTestId("model-thinking-model-option-prof-2::deepseek-chat")
     );
     expect(props.onEditDraft).toHaveBeenCalledWith({
       providerProfileId: "prof-2",
       model: "deepseek-chat",
     });
-
-    fireEvent.click(screen.getByTestId("thinking-effort-select"));
-    fireEvent.click(screen.getByTestId("thinking-effort-select-option-high"));
+    // 点模型不关弹层：接着点档位，写回档位并关闭
+    fireEvent.click(screen.getByTestId("model-thinking-effort-high"));
     expect(props.onEditDraft).toHaveBeenCalledWith({ thinkingEffort: "high" });
+    expect(screen.queryByTestId("model-thinking-popover")).toBeNull();
   });
 
   it("输入卡：placeholder 提示 /·@·$；空输入发送禁用；输入经 onEditDraft 写回、有文字时点击发送回调 onSend", () => {
@@ -331,6 +352,10 @@ describe("NewTaskStart 居中起点页", () => {
     ).toBe(true);
     expect(
       (screen.getByTestId("draft-project-select") as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("model-thinking-select") as HTMLButtonElement)
+        .disabled
     ).toBe(true);
   });
 

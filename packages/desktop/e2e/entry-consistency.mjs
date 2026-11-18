@@ -14,6 +14,7 @@ import {
   selectComposerOption,
   assert,
   closeApp,
+  composerOptionValue,
   hoverClick,
   launchApp,
   projectAction,
@@ -298,9 +299,7 @@ try {
     "恢复的是该任务明确授权偏好"
   );
   assert(
-    (await window
-      .getByTestId("thinking-effort-select")
-      .getAttribute("data-value")) === "high",
+    (await composerOptionValue(window, "thinking-effort-select")) === "high",
     "任务思考偏好不串用"
   );
   assert(

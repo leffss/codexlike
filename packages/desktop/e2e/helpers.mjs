@@ -54,8 +54,54 @@ export async function workspaceBadgeInfo(window) {
   return { path, origin };
 }
 
-/** 真实打开受控选择器并点击 portal 选项，不绕过用户交互或风险确认。 */
+/** 逻辑字段沿用旧调用名；真实模型/思考控件只暴露统一 trigger，不保留隐藏旧 DOM。 */
+export async function composerOptionValue(window, testId) {
+  if (testId === "profile-select")
+    return window
+      .getByTestId("model-thinking-select")
+      .getAttribute("data-model-value");
+  if (testId === "thinking-effort-select")
+    return window
+      .getByTestId("model-thinking-select")
+      .getAttribute("data-thinking-effort");
+  return window.getByTestId(testId).getAttribute("data-value");
+}
+
+/** 真实打开选择器并操作选项；返回时关闭菜单，不绕过用户交互或风险确认。 */
 export async function selectComposerOption(window, testId, value) {
+  if (testId === "profile-select" || testId === "thinking-effort-select") {
+    await window.getByTestId("model-thinking-select").click();
+    const menu = window.getByTestId("model-thinking-popover");
+    await menu.waitFor();
+    if (testId === "profile-select") {
+      const separator = value.indexOf(MODEL_VALUE_SEPARATOR);
+      assert(separator > 0, "模型选项必须是 (Profile, 模型) 复合值");
+      await menu
+        .getByTestId("model-thinking-provider")
+        .selectOption(value.slice(0, separator));
+      await menu.getByTestId(`model-thinking-model-option-${value}`).click();
+    } else {
+      await menu.getByTestId(`model-thinking-effort-${value}`).click();
+    }
+    await window.waitForFunction(
+      ({ attribute, value }) =>
+        document
+          .querySelector('[data-testid="model-thinking-select"]')
+          ?.getAttribute(attribute) === value,
+      {
+        attribute:
+          testId === "profile-select"
+            ? "data-model-value"
+            : "data-thinking-effort",
+        value,
+      }
+    );
+    // 模型点击即时保存但保持打开；通用 helper 仍保证调用方拿回已关闭的菜单。
+    // 专用 thinking 场景必须直接验证保持打开，不能用此收尾掩盖契约。
+    if (testId === "profile-select") await window.keyboard.press("Escape");
+    await menu.waitFor({ state: "hidden" });
+    return;
+  }
   const trigger = window.getByTestId(testId);
   await trigger.click();
   const menu = window.getByTestId(`${testId}-listbox`);

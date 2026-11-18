@@ -14,6 +14,7 @@ import {
   selectComposerOption,
   assert,
   assertSemanticOverlay,
+  composerOptionValue,
   launchApp,
   projectAction,
   startMockProvider,
@@ -369,9 +370,7 @@ async function main() {
     // 等待到达期望文本（确定信号）而非立即断言。
     await untilDraft(window, "最后一笔立即退出输入", "退出前最后草稿已持久化");
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) === "high",
+      (await composerOptionValue(window, "thinking-effort-select")) === "high",
       "设置重开恢复"
     );
     await projectAction(window);

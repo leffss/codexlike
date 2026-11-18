@@ -6,6 +6,7 @@ import {
   selectComposerOption,
   assert,
   closeApp,
+  composerOptionValue,
   launchApp,
   modelOptionValue,
   projectAction,
@@ -159,9 +160,7 @@ async function main() {
         "独立新建草稿"
     );
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) === "high",
+      (await composerOptionValue(window, "thinking-effort-select")) === "high",
       "独立草稿设置重开恢复"
     );
     // 票02 切归属 = 切入口草稿（票05 实跑）：页面内归属选择器切换与从对应
@@ -175,17 +174,13 @@ async function main() {
     await selectComposerOption(window, "draft-project-select", projectId);
     await untilDraft(window, "项目新建草稿", "切到项目应恢复项目入口草稿");
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) !== "high",
+      (await composerOptionValue(window, "thinking-effort-select")) !== "high",
       "项目入口草稿不串用独立的思考档位"
     );
     await selectComposerOption(window, "draft-project-select", "standalone");
     await untilDraft(window, "独立草稿切换段", "切回独立应恢复独立入口草稿");
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) === "high",
+      (await composerOptionValue(window, "thinking-effort-select")) === "high",
       "独立入口思考档位随切换恢复"
     );
     // 断言①（票 02 验收 4 补实跑）：经选择器切到项目后发送首条消息，
@@ -268,9 +263,7 @@ async function main() {
       modelOptionValue(secondProfileId, "second-model")
     );
     assert(
-      (await window
-        .getByTestId("profile-select")
-        .getAttribute("data-value")) ===
+      (await composerOptionValue(window, "profile-select")) ===
         modelOptionValue(secondProfileId, "second-model"),
       "鼠标切换模型提交 (Profile, 模型) 复合值"
     );
@@ -311,9 +304,7 @@ async function main() {
       "正式草稿隔离"
     );
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) === "off",
+      (await composerOptionValue(window, "thinking-effort-select")) === "off",
       "任务思考隔离"
     );
     assert(
@@ -344,23 +335,31 @@ async function main() {
       "正式草稿真实重启恢复"
     );
     assert(
-      (await window
-        .getByTestId("thinking-effort-select")
-        .getAttribute("data-value")) === "off",
+      (await composerOptionValue(window, "thinking-effort-select")) === "off",
       "思考真实重启恢复"
     );
     // profiles 列表与任务记录异步恢复：等选择器落到重启前的 (Profile, 模型) 复合值
     await window.waitForFunction(
       (value) =>
         document
-          .querySelector('[data-testid="profile-select"]')
-          ?.getAttribute("data-value") === value,
+          .querySelector('[data-testid="model-thinking-select"]')
+          ?.getAttribute("data-model-value") === value,
       modelOptionValue(secondProfileId, "second-model")
     );
     assert(
-      (await window.getByTestId("profile-select").textContent()).includes(
-        "Second Mock · second-model"
-      ),
+      (
+        await window.getByTestId("model-thinking-select").textContent()
+      ).includes("second-model") &&
+        (
+          await window
+            .getByTestId("model-thinking-select")
+            .getAttribute("title")
+        ).includes("Second Mock") &&
+        (
+          await window
+            .getByTestId("model-thinking-select")
+            .getAttribute("title")
+        ).includes("second-model"),
       "模型复合值与显示名称真实重启恢复（票 02 二元组）"
     );
     await window
@@ -389,15 +388,29 @@ async function main() {
     await window.waitForFunction(
       (value) =>
         document
-          .querySelector('[data-testid="profile-select"]')
-          ?.getAttribute("data-value") === value,
+          .querySelector('[data-testid="model-thinking-select"]')
+          ?.getAttribute("data-model-value") === value,
       modelOptionValue(defaultProfileId, "persistent-model")
     );
     assert(
-      (await window.getByTestId("profile-select").textContent()).includes(
-        "Persistent Mock · persistent-model"
-      ),
-      "新任务采用应用默认而非上一个任务模型"
+      (
+        await window.getByTestId("model-thinking-select").textContent()
+      ).includes("persistent-model") &&
+        (
+          await window
+            .getByTestId("model-thinking-select")
+            .getAttribute("title")
+        ).includes("Persistent Mock") &&
+        (
+          await window
+            .getByTestId("model-thinking-select")
+            .getAttribute("title")
+        ).includes("persistent-model"),
+      `新任务采用应用默认而非上一个任务模型：text=${await window
+        .getByTestId("model-thinking-select")
+        .textContent()} title=${await window
+        .getByTestId("model-thinking-select")
+        .getAttribute("title")}`
     );
     assert(model.requestCount() === 3, "切换与重启不自动发送");
     await window.getByTestId("composer-input").fill("提问草稿验收");

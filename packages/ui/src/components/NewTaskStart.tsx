@@ -7,19 +7,12 @@ import {
 } from "@codexlike/agent-core";
 import type { NewTaskDraft } from "../lib/workspace-state";
 import { useComposerMenu } from "../lib/use-composer-menu";
-import {
-  APPROVAL_MODE_OPTIONS,
-  THINKING_EFFORT_OPTIONS,
-} from "../lib/composer-options";
-import {
-  composerModelOptions,
-  composerModelValue,
-  parseModelOptionValue,
-} from "../lib/model-options";
+import { APPROVAL_MODE_OPTIONS } from "../lib/composer-options";
 import { WorkspaceModeSelector } from "./WorkspaceModeSelector";
 import { ComposerSelect } from "./ComposerSelect";
 import { ComposerMenuList } from "./ComposerMenuList";
-import { ApprovalModeIcon, ArrowUpIcon, BrainIcon } from "./ComposerIcons";
+import { ApprovalModeIcon, ArrowUpIcon } from "./ComposerIcons";
+import { ModelThinkingSelect } from "./ModelThinkingSelect";
 
 /**
  * 新建任务居中起点页（ADR 0026 变体 A「决策台」，票 01 骨架转正）：
@@ -207,8 +200,8 @@ export function NewTaskStart(props: NewTaskStartProps) {
             </div>
           </div>
 
-          {/* 决策行：审批/模型/思考一级呈现（与正式任务 composer 同款选择器；
-              技能不入一级——输入框 `$` 直调，placeholder 承载发现性）。
+          {/* 决策行：审批 + 模型与思考统一选择器（ADR 0024 呈现修订）一级呈现
+              （技能不入一级——输入框 `$` 直调，placeholder 承载发现性）。
               min-w-0：允许长模型名随容器收缩不横向撑出（任务态 composer 同款） */}
           <div className="mb-5 flex min-w-0 flex-wrap items-center gap-2">
             <ComposerSelect
@@ -225,41 +218,19 @@ export function NewTaskStart(props: NewTaskStartProps) {
                 />
               )}
             />
-            <ComposerSelect
-              testId="profile-select"
-              label="模型"
+            <ModelThinkingSelect
               className="min-w-0 max-w-56 shrink"
-              value={composerModelValue(
-                props.profiles,
-                draft.providerProfileId,
-                draft.model
-              )}
+              profiles={props.profiles}
+              selectedProfileId={draft.providerProfileId}
+              selectedModel={draft.model}
+              thinkingEffort={draft.thinkingEffort}
               disabled={draft.busy}
-              options={composerModelOptions(
-                props.profiles,
-                draft.providerProfileId,
-                draft.model
-              )}
-              onSelect={(value) => {
-                const parsed = parseModelOptionValue(value);
-                if (parsed)
-                  props.onEditDraft({
-                    providerProfileId: parsed.profileId,
-                    model: parsed.model,
-                  });
-              }}
-            />
-            <ComposerSelect
-              testId="thinking-effort-select"
-              label="思考档位"
-              className="min-w-0 shrink"
-              value={draft.thinkingEffort}
-              disabled={draft.busy}
-              options={THINKING_EFFORT_OPTIONS}
-              onSelect={(thinkingEffort) =>
+              onSelectModel={(providerProfileId, model) =>
+                props.onEditDraft({ providerProfileId, model })
+              }
+              onSelectThinkingEffort={(thinkingEffort) =>
                 props.onEditDraft({ thinkingEffort })
               }
-              renderIcon={() => <BrainIcon className="h-3 w-3" />}
             />
           </div>
 

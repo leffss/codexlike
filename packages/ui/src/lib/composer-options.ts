@@ -30,10 +30,10 @@ export const APPROVAL_MODE_OPTIONS: {
 ];
 
 /**
- * 思考档位（GLOSSARY「思考档位」）→ 胶囊选项文案。
- * 与 Provider Profile 选择一样属于「下一条消息怎么发」的临时设置：
- * 只对下一条发送的消息生效，不做任务级记忆；「关」是显式发送关闭请求，
- * 不保证强制思考模型实际停止思考（以服务端行为为准）。
+ * 思考档位（GLOSSARY「思考档位」）→ 弹层内档位文案。
+ * 任务独立记忆、重启后保留；调整只对下一次发送生效，不改变已开始的
+ * 执行或历史。「关」是显式发送关闭请求，不保证强制思考模型实际停止
+ * 思考（以服务端行为为准）。
  */
 export const THINKING_EFFORT_OPTIONS: {
   value: ThinkingEffort;
