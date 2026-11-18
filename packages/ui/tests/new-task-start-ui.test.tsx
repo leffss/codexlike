@@ -41,6 +41,12 @@ const PROJECTS: ProjectRecord[] = [
     workspacePath: "C:\\ws\\ai-agent",
     createdAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    id: "p2",
+    name: "另一个项目",
+    workspacePath: "D:\\ws\\another",
+    createdAt: "2026-01-02T00:00:00.000Z",
+  },
 ];
 
 function baseDraft(overrides: Partial<NewTaskDraft> = {}): NewTaskDraft {
@@ -68,6 +74,7 @@ function baseProps(
     workspaceFiles: [],
     onOpenSkills: vi.fn(),
     onEditDraft: vi.fn(),
+    onSwitchProject: vi.fn(),
     onSelectWorkspace: vi.fn(),
     onSelectApprovalMode: vi.fn(),
     onSend: vi.fn(),
@@ -83,7 +90,7 @@ afterEach(cleanup);
 window.HTMLElement.prototype.scrollIntoView = () => {};
 
 describe("NewTaskStart 居中起点页", () => {
-  it("项目任务：标题行左侧「新建任务」、右侧项目名语境；工作区卡显示项目路径与本地/Worktree 切换，无目录选择入口", () => {
+  it("项目任务：标题行左侧「新建任务」、右侧归属选择器回显项目名；工作区卡显示项目路径与本地/Worktree 切换，无目录选择入口", () => {
     render(
       createElement(
         NewTaskStart,
@@ -91,7 +98,9 @@ describe("NewTaskStart 居中起点页", () => {
       )
     );
     expect(screen.getByText("新建任务")).toBeTruthy();
-    expect(screen.getByText("项目 · ai-agent")).toBeTruthy();
+    const selector = screen.getByTestId("draft-project-select");
+    expect(selector.getAttribute("data-value")).toBe("p1");
+    expect(selector.textContent).toContain("ai-agent");
     expect(screen.getByTestId("workspace-path").textContent).toContain(
       "C:\\ws\\ai-agent"
     );
@@ -100,10 +109,12 @@ describe("NewTaskStart 居中起点页", () => {
     expect(screen.queryByTestId("draft-managed-workspace")).toBeNull();
   });
 
-  it("独立任务（未选目录）：专用目录文案 + 「选择已有目录」（点击回调）；无 Worktree 选项（域语义红线）", () => {
+  it("独立任务（未选目录）：归属选择器初值为独立；专用目录文案 + 「选择已有目录」（点击回调）；无 Worktree 选项（域语义红线）", () => {
     const props = baseProps({ draft: baseDraft({ projectId: null }) });
     render(createElement(NewTaskStart, props));
-    expect(screen.getByText("独立任务")).toBeTruthy();
+    expect(
+      screen.getByTestId("draft-project-select").getAttribute("data-value")
+    ).toBe("standalone");
     expect(screen.getByTestId("workspace-path").textContent).toContain(
       "应用专用持久目录（发送第一条消息后分配）"
     );
@@ -111,6 +122,96 @@ describe("NewTaskStart 居中起点页", () => {
     expect(screen.queryByTestId("draft-managed-workspace")).toBeNull();
     fireEvent.click(screen.getByTestId("draft-select-workspace"));
     expect(props.onSelectWorkspace).toHaveBeenCalled();
+  });
+
+  it("归属选择器（票 02）：列出「不选项目（独立任务）」与全部项目；初始值为进入入口的语境；选择即切换入口回调", () => {
+    const props = baseProps({ draft: baseDraft({ projectId: "p1" }) });
+    render(createElement(NewTaskStart, props));
+    fireEvent.click(screen.getByTestId("draft-project-select"));
+    const standaloneOption = screen.getByTestId(
+      "draft-project-select-option-standalone"
+    );
+    expect(standaloneOption.textContent).toContain("不选项目（独立任务）");
+    expect(
+      screen.getByTestId("draft-project-select-option-p2").textContent
+    ).toContain("另一个项目");
+
+    fireEvent.click(standaloneOption);
+    expect(props.onSwitchProject).toHaveBeenCalledWith(null);
+
+    // 从独立语境选择项目：回调携带项目 id
+    fireEvent.click(screen.getByTestId("draft-project-select"));
+    fireEvent.click(screen.getByTestId("draft-project-select-option-p2"));
+    expect(props.onSwitchProject).toHaveBeenCalledWith("p2");
+  });
+
+  it("归属切换后（上层换新入口草稿 props）：选择器、工作区形态与草稿文字随切换呈现（切换 = 恢复对应入口草稿）", () => {
+    const props = baseProps({
+      draft: baseDraft({ projectId: "p1", text: "项目入口的文字" }),
+    });
+    const view = render(createElement(NewTaskStart, props));
+    // 切到独立入口：上层恢复独立草稿（文字随持久草稿），已选目录被重置
+    view.rerender(
+      createElement(
+        NewTaskStart,
+        baseProps({
+          draft: baseDraft({ projectId: null, text: "独立入口的文字" }),
+        })
+      )
+    );
+    expect(
+      screen.getByTestId("draft-project-select").getAttribute("data-value")
+    ).toBe("standalone");
+    expect(
+      (screen.getByTestId("composer-input") as HTMLTextAreaElement).value
+    ).toBe("独立入口的文字");
+    expect(screen.getByTestId("workspace-path").textContent).toContain(
+      "应用专用持久目录（发送第一条消息后分配）"
+    );
+    expect(screen.getByTestId("draft-select-workspace")).toBeTruthy();
+
+    // 切回项目入口：项目草稿文字与项目目录恢复
+    view.rerender(
+      createElement(
+        NewTaskStart,
+        baseProps({
+          draft: baseDraft({ projectId: "p1", text: "项目入口的文字" }),
+        })
+      )
+    );
+    expect(
+      screen.getByTestId("draft-project-select").getAttribute("data-value")
+    ).toBe("p1");
+    expect(
+      (screen.getByTestId("composer-input") as HTMLTextAreaElement).value
+    ).toBe("项目入口的文字");
+    expect(screen.getByTestId("workspace-path").textContent).toContain(
+      "C:\\ws\\ai-agent"
+    );
+    expect(screen.getByTestId("draft-workspace-mode")).toBeTruthy();
+  });
+
+  it("切到独立时已选目录重置（上层清 workspacePath 重渲染）：工作区行回专用目录默认形态，不残留上次所选目录", () => {
+    const view = render(
+      createElement(
+        NewTaskStart,
+        baseProps({
+          draft: baseDraft({ projectId: null, workspacePath: "E:\\picked" }),
+        })
+      )
+    );
+    expect(screen.getByTestId("draft-managed-workspace")).toBeTruthy();
+    view.rerender(
+      createElement(
+        NewTaskStart,
+        baseProps({ draft: baseDraft({ projectId: null }) })
+      )
+    );
+    expect(screen.queryByTestId("draft-managed-workspace")).toBeNull();
+    expect(screen.getByTestId("draft-select-workspace")).toBeTruthy();
+    expect(screen.getByTestId("workspace-path").textContent).toContain(
+      "应用专用持久目录（发送第一条消息后分配）"
+    );
   });
 
   it("独立任务已选目录：显示所选路径与「使用专用目录」回退；回退清空 workspacePath", () => {
@@ -201,7 +302,7 @@ describe("NewTaskStart 居中起点页", () => {
     expect(props.onSend).toHaveBeenCalledWith("帮我修个 bug");
   });
 
-  it("busy（首条发送中）：输入只读、发送与工作区操作禁用", () => {
+  it("busy（首条发送中）：输入只读、发送与工作区操作禁用、归属选择器不可切入口", () => {
     const props = baseProps({
       draft: baseDraft({ projectId: null, text: "首条", busy: true }),
     });
@@ -215,6 +316,9 @@ describe("NewTaskStart 居中起点页", () => {
     expect(
       (screen.getByTestId("draft-select-workspace") as HTMLButtonElement)
         .disabled
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("draft-project-select") as HTMLButtonElement).disabled
     ).toBe(true);
   });
 

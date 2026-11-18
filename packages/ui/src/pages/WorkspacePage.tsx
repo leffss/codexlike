@@ -787,8 +787,14 @@ export function WorkspacePage(props: {
     []
   );
 
-  /** 入口只恢复该项目/独立入口草稿，不调用创建 IPC。 */
-  async function startCreateTask(projectId: string | null = null) {
+  /**
+   * 入口只恢复该项目/独立入口草稿，不调用创建 IPC。返回切换是否生效
+   * （恢复失败或被更新的打开请求取代时为 false——归属选择器的切换后
+   * 动作据此决定是否执行）。
+   */
+  async function startCreateTask(
+    projectId: string | null = null
+  ): Promise<boolean> {
     const request = ++taskRequestRef.current;
     setLoading(true);
     try {
@@ -805,9 +811,9 @@ export function WorkspacePage(props: {
           `恢复草稿失败：${error instanceof Error ? error.message : String(error)}`
         );
       }
-      return;
+      return false;
     }
-    if (taskRequestRef.current !== request) return;
+    if (taskRequestRef.current !== request) return false;
     // 进入新建草稿也更新启动现场（票03）：重开回到同一草稿状态（含项目关联）
     reportWorkbenchTarget({ kind: "new", projectId });
     workspaceState.activeDraftProjectId = projectId;
@@ -830,6 +836,22 @@ export function WorkspacePage(props: {
     setCompacting(false);
     toastState.retract("context-warning");
     setFullAccessPending(false);
+    return true;
+  }
+
+  /**
+   * 归属选择器切换（票 02）：切归属 = 切入口——与从对应入口进入同一语义
+   * （startCreateTask：flush → 恢复该入口持久草稿 → 上报启动现场 target
+   * 随切换更新），持久化模型一寸不动。切到独立入口时重置已选目录
+   * （spec：目录选择不跨切换保留，经既有 editNewDraft 路径写回持久；
+   * 冷启动恢复不走选择器切换，不受影响）。
+   */
+  async function switchDraftProject(projectId: string | null) {
+    if (draftProjectId === projectId) return;
+    const switched = await startCreateTask(projectId);
+    if (switched && projectId === null) {
+      workspaceState.editNewDraft(null, { workspacePath: undefined });
+    }
   }
 
   async function addProject() {
@@ -1660,6 +1682,9 @@ export function WorkspacePage(props: {
                 onOpenSkills={refreshResourcesForView}
                 onEditDraft={(patch) =>
                   workspaceState.editNewDraft(draft.projectId, patch)
+                }
+                onSwitchProject={(projectId) =>
+                  void switchDraftProject(projectId)
                 }
                 onSelectWorkspace={() => void selectDraftWorkspace()}
                 onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}

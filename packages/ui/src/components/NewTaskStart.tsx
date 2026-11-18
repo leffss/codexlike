@@ -38,14 +38,16 @@ import { ApprovalModeIcon, ArrowUpIcon, BrainIcon } from "./ComposerIcons";
 /**
  * 新建任务居中起点页（ADR 0026 变体 A「决策台」，票 01 骨架转正）：
  * 草稿态主列整体替换为居中起点式布局——800px 居中列、垂直居中、纯起点
- * 留白；标题行右侧为入口静态语境（票 02 换成项目归属选择器）；工作区
- * 单独成卡（项目任务：路径 + 本地/Worktree 切换；独立任务：专用目录
- * 文案 + 选择已有目录/回退）；审批/模型/思考一级呈现（技能不入一级：
+ * 留白；标题行右侧为项目归属选择器（票 02：可选某项目或不选，切换即
+ * 切换入口，由上层走 startCreateTask 同语义恢复对应入口的持久草稿）；
+ * 工作区单独成卡（项目任务：路径 + 本地/Worktree 切换；独立任务：专用
+ * 目录文案 + 选择已有目录/回退）；审批/模型/思考一级呈现（技能不入一级：
  * 输入框 `$` 直调，placeholder 承载发现性）；专属输入卡壳（更大输入区、
  * 圆形上箭头发送按钮、空输入禁用）。
  *
  * 域语义红线（spec「实现决策」）：本组件只动呈现层——草稿字段经
  * onEditDraft 写回既有 NewTaskDraft（requestId/projectId 不可改），
+ * 归属切换只发 onSwitchProject 回调（持久草稿的加载/重置由上层承担），
  * 首条发送才创建任务、失败保留输入由 WorkspacePage 的 sendFirst 承担；
  * 独立任务（projectId === null）无 Worktree 选项。无 Profile 时整体
  * 替换为配置引导卡（spec 用户故事 10）。
@@ -63,6 +65,8 @@ export interface NewTaskStartProps {
   onEditDraft: (
     patch: Partial<Omit<NewTaskDraft, "requestId" | "projectId">>
   ) => void;
+  /** 切换任务归属 = 切换入口（上层走 startCreateTask 同语义恢复对应入口持久草稿，并重置独立任务已选目录） */
+  onSwitchProject: (projectId: string | null) => void;
   /** 「选择已有目录」（原生目录对话框），仅独立任务 */
   onSelectWorkspace: () => void;
   /** 审批模式切换（full-access 的风险确认弹层由 WorkspacePage 统一拦截） */
@@ -71,6 +75,9 @@ export interface NewTaskStartProps {
   onSend: (text: string) => void;
   onOpenSettings: () => void;
 }
+
+/** 归属选择器中「不选项目（独立任务）」的值（ComposerSelect 值域为 string） */
+const STANDALONE_PROJECT_VALUE = "standalone";
 
 export function NewTaskStart(props: NewTaskStartProps) {
   const { draft, projects } = props;
@@ -122,12 +129,38 @@ export function NewTaskStart(props: NewTaskStartProps) {
     >
       <div className="mx-auto flex min-h-full w-full max-w-[800px] flex-1 items-center justify-center px-6 py-12">
         <div className="w-full">
-          {/* 标题行：左「新建任务」，右侧入口静态语境（票 02 换归属选择器） */}
+          {/* 标题行：左「新建任务」，右侧项目归属选择器（票 02：切换归属 =
+              切换入口——选择即回调 onSwitchProject，由上层恢复对应入口的
+              持久草稿；busy（首条发送中）不可切） */}
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-lg font-semibold text-fg">新建任务</h1>
-            <span className="min-w-0 truncate text-xs text-fg-muted">
-              {isStandalone ? "独立任务" : `项目 · ${project?.name ?? ""}`}
-            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-xs text-fg-subtle">项目</span>
+              <ComposerSelect
+                testId="draft-project-select"
+                label="项目"
+                value={draft.projectId ?? STANDALONE_PROJECT_VALUE}
+                disabled={draft.busy}
+                options={[
+                  {
+                    value: STANDALONE_PROJECT_VALUE,
+                    label: "不选项目（独立任务）",
+                    title: "不选项目，作为独立任务创建",
+                  },
+                  ...projects.map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                    title: item.workspacePath,
+                  })),
+                ]}
+                onSelect={(value) =>
+                  props.onSwitchProject(
+                    value === STANDALONE_PROJECT_VALUE ? null : value
+                  )
+                }
+                className="max-w-[320px]"
+              />
+            </div>
           </div>
 
           {/* 工作区卡（最重决策项，单独成卡） */}
