@@ -221,7 +221,7 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
             aria-label="模型与思考"
             data-testid="model-thinking-popover"
             style={popoverStyle}
-            className="z-50 flex min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs text-fg shadow-lg"
+            className="z-50 flex w-[340px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs text-fg shadow-lg"
           >
             <label className="block p-3">
               提供商

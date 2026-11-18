@@ -211,10 +211,14 @@ async function assertMenuBounds(window) {
         rect.top >= 0 &&
         rect.right <= innerWidth + 1 &&
         rect.bottom <= innerHeight + 1 &&
+        // 绝对宽度上限：弹层是内容面板不是全屏层——首测锁定若把无宽度约束的
+        // portal 块级元素撑满视口（真实缺陷，曾漏过只比前后一致的锁定断言），
+        // 这里直接拦下。340 内容宽 + 边距容差。
+        rect.width <= 360 &&
         element.scrollWidth <= element.clientWidth + 1
       );
     }),
-    "dialog 处于视口内且长名称不产生横向溢出"
+    "dialog 处于视口内、宽度为内容面板级（≤360px）且长名称不产生横向溢出"
   );
   for (const locator of [
     provider,
