@@ -66,7 +66,6 @@ async function main() {
       if (inProject) await projectAction(window);
       else {
         await window.getByTestId("new-task").click();
-        await window.getByTestId("new-standalone-task-item").click();
       }
       if (!inProject)
         await window.getByTestId("draft-select-workspace").click();

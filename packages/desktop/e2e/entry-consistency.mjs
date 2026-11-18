@@ -14,6 +14,7 @@ import {
   selectComposerOption,
   assert,
   closeApp,
+  hoverClick,
   launchApp,
   projectAction,
   projectMenuAction,
@@ -53,12 +54,16 @@ async function command(text) {
 try {
   ({ app, window } = await launchApp({ homeDir, workspaceDir }));
   await window.getByTestId("new-task").waitFor();
+  // 票03 顶栏菜单退役：单一「新建任务」按钮，单击直达独立入口语境的
+  // 新建页（归属在页面内选），不再携带独立/项目菜单语境罗列与 menu 语义
   assert(
-    // 图标化后入口文案收进 title（「新建任务（独立 / 项目）」）
-    (
-      (await window.getByTestId("new-task").getAttribute("title")) ?? ""
-    ).includes("独立"),
-    "全局入口文案必须明确独立任务，不能与项目新建混淆"
+    (await window.getByTestId("new-task").getAttribute("title")) === "新建任务",
+    "顶栏入口为单一「新建任务」按钮（语境罗列随菜单退役）"
+  );
+  assert(
+    (await window.getByTestId("new-task").getAttribute("aria-haspopup")) ===
+      null,
+    "顶栏入口不再携带菜单语义"
   );
   await window.getByTestId("settings-open").click();
   const profiles = window.locator("section").filter({
@@ -78,8 +83,37 @@ try {
   await form.getByRole("button", { name: /保存|创建/ }).click();
   await profiles.getByText("Entry Mock", { exact: true }).waitFor();
   await window.getByTestId("settings-back").click();
+  // 票03/05 四入口收敛：顶栏单按钮与独立组头「+」直达独立语境新建页，
+  // 项目组头「+」直达对应项目语境——同一 new-task-start 页面，语境由
+  // 票02 归属选择器（draft-project-select 的 data-value）呈现；/new 沿用
+  // 当前管理归属的断言见下方既有场景。
+  async function assertNewTaskEntry(expected, label) {
+    await window.getByTestId("new-task-start").waitFor();
+    await window.getByTestId("composer-input").waitFor();
+    // 入口切换走异步 startCreateTask（flush→恢复入口草稿），等语境落定
+    await window.waitForFunction(
+      (value) =>
+        document
+          .querySelector('[data-testid="draft-project-select"]')
+          ?.getAttribute("data-value") === value,
+      expected
+    );
+  }
+  await window.getByTestId("new-task").click();
+  await assertNewTaskEntry("standalone", "顶栏单按钮入口");
+  await hoverClick(
+    window,
+    window.getByTestId("standalone-header").getByTestId("standalone-new-task"),
+    "独立组头新建按钮"
+  );
+  await assertNewTaskEntry("standalone", "独立组头入口");
   await window.getByTestId("add-project").click();
+  await window.getByTestId("project-group").waitFor();
+  const [projectId] = await window.evaluate(async () =>
+    (await window.codexlike.projects.list()).map((project) => project.id)
+  );
   await projectAction(window);
+  await assertNewTaskEntry(projectId, "项目组头入口");
   await command("/new");
   await window.getByTestId("draft-workspace-mode").waitFor();
   assert(
@@ -208,7 +242,6 @@ try {
   await input().fill("项目入口保留草稿");
   await item(longTitle).click();
   await window.getByTestId("new-task").click();
-  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",
@@ -228,7 +261,6 @@ try {
   app = null;
   ({ app, window } = await launchApp({ homeDir, workspaceDir }));
   await window.getByTestId("new-task").click();
-  await window.getByTestId("new-standalone-task-item").click();
   await window.getByTestId("draft-select-workspace").waitFor();
   assert(
     (await input().inputValue()) === "独立入口保留草稿",

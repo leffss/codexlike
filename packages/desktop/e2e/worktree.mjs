@@ -103,16 +103,19 @@ async function main() {
     const draftMode = draftInfo.getByTestId("draft-workspace-mode");
     await draftMode.waitFor({ timeout: 5000 });
     await workspacePath.waitFor();
-    const pathBox = await workspacePath.boundingBox();
-    const composerBox = await window.getByTestId("composer-card").boundingBox();
-    // 83219f0「输入卡与消息列同宽」定稿：composer-card 去 -mx-2 外扩，与
-    // 内容列左右缘完全对齐（width-tiers 断言同款 ±1px 亚像素容差）。
+    const infoBox = await draftInfo.boundingBox();
+    const composerBox = await window
+      .getByTestId("new-task-composer")
+      .boundingBox();
+    // 票01 居中起点页（ADR 0026）：草稿态主列替换为新建任务页——工作区卡
+    // 与专属输入卡（new-task-composer，旧 composer-card 随旧草稿布局退役）
+    // 同在 800px 居中列内，左右缘一致（±1px 亚像素容差，width-tiers 同款）。
     assert(
-      pathBox !== null &&
+      infoBox !== null &&
         composerBox !== null &&
-        Math.abs(pathBox.x - composerBox.x) <= 1 &&
-        Math.abs(composerBox.width - pathBox.width) <= 1,
-      "顶部工作区路径与内容列对齐，输入卡与内容列左右缘一致"
+        Math.abs(infoBox.x - composerBox.x) <= 1 &&
+        Math.abs(composerBox.width - infoBox.width) <= 1,
+      "新建页工作区卡与输入卡在居中列内左右缘一致"
     );
     assert(
       (await window.getByTestId("workspace-sharing-notice").count()) === 0,
@@ -201,7 +204,6 @@ async function main() {
     });
 
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").waitFor();
     assert(
       (await window.getByTestId("draft-workspace-mode").count()) === 0,
@@ -272,7 +274,6 @@ async function main() {
 
     // 独立入口使用同项目目录且等待问答，项目草稿必须出现共享风险提示。
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("共享等待");
     await window.getByTestId("composer-send").click();
@@ -288,7 +289,7 @@ async function main() {
     );
     assert(
       (await draftInfo.getByTestId("workspace-sharing-notice").count()) === 0,
-      "草稿收纳行不包含底部风险提示"
+      "新建页工作区卡不包含右下角风险提示 toast"
     );
     await window.screenshot({ path: join(screenshots, "sharing-warning.png") });
     await draftMode.selectOption("worktree");

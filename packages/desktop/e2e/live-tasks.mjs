@@ -88,7 +88,6 @@ async function main() {
       .filter({ hasText: "项目A前半段。" })
       .waitFor();
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立B");
     await window.getByTestId("composer-send").click();
     const b = window.getByTestId("task-item").filter({ hasText: "独立B" });
@@ -214,7 +213,6 @@ async function main() {
     );
     assert(stopped.activity.outcome === "interrupted", "停止终态由宿主保存");
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("失败C");
     await window.getByTestId("composer-send").click();
     await window

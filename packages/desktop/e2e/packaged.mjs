@@ -31,11 +31,18 @@ try {
   assert((await window.title()).length > 0, "窗口标题为空（窗口未真正创建）");
   assert(existsSync(homeDir), "数据目录未自动创建（打包冷启动黑屏回归）");
   assert(existsSync(join(homeDir, "task-workbench.db")), "SQLite 库文件未落盘");
-  // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与草稿界面确认。
+  // 窗口标题/数据库存在不等于 React 页面加载成功；通过真实 preload 与新建页确认。
   await window.getByTestId("add-project").waitFor();
+  // 票01（spec 用户故事 10）：无 Provider Profile 时新建页整体为配置引导卡
+  // （品牌语 + 一键去设置），不渲染残缺表单——顶栏单按钮单击直达（票03）。
   await window.getByTestId("new-task").click();
-  await window.getByTestId("new-standalone-task-item").click();
-  await window.getByTestId("draft-select-workspace").waitFor();
+  await window.getByTestId("draft-empty-start").waitFor();
+  await window.getByTestId("draft-goto-settings").waitFor();
+  assert(
+    (await window.getByTestId("draft-workspace-info").count()) === 0 &&
+      (await window.getByTestId("composer-input").count()) === 0,
+    "无 Profile 冷启动不得渲染残缺表单（应整体为引导卡）"
+  );
 
   // 票01 标题栏任务上下文：草稿无任务回退品牌展示（任务名/徽章不渲染），
   // 任务搜索随票01 迁入标题栏（冷启动即可用）。
@@ -58,21 +65,6 @@ try {
   assert(
     (await titlebar.getByTestId("task-search-toggle").count()) === 0,
     "任务搜索不得留在标题栏（ADR 0018 已迁任务列表头部）"
-  );
-
-  // 票01 workspace-info 常驻行取消：完整路径只出现在草稿就地收纳行
-  // （正式任务的路径收进标题栏徽章，冷启动无任务态可对照负断言唯一性）。
-  const draftInfo = window.getByTestId("draft-workspace-info");
-  await draftInfo.waitFor();
-  assert(
-    (await window.getByTestId("workspace-path").count()) === 1,
-    "workspace-path 应只存在于草稿收纳行（常驻 workspace-info 行须保持取消）"
-  );
-  assert(
-    (await draftInfo.getByTestId("workspace-path").textContent()).includes(
-      "专用持久目录"
-    ),
-    "产物独立草稿未显示默认工作区"
   );
 
   // 票02 提示条 toast 化：toast 为渲染层内存态，冷启动无任何提示残留；
@@ -102,16 +94,43 @@ try {
     (await window.getByTestId("task-item").count()) === 0,
     "冷启动新建不能产生空历史"
   );
+  assert(!existsSync(join(homeDir, "tasks")), "未发送不得创建专用工作区");
+  assert(!existsSync(join(homeDir, "codexlike.db")), "新应用不能创建旧库");
+
+  // 表单态（原草稿界面断言）：经真实 UI 建 Profile（不发消息，baseURL 无需
+  // 可用）后再次进入新建页——工作区卡/决策行就位，完整路径只出现在工作区
+  // 卡（票01：常驻 workspace-info 行取消，正式任务的路径收进标题栏徽章）。
+  await window.getByTestId("settings-open").click();
+  await window.getByTestId("profile-create").click();
+  const form = window.locator("form");
+  await form.getByLabel("名称").fill("Packaged Mock");
+  await form.getByLabel("baseURL").fill("http://127.0.0.1:9/v1");
+  await form.getByLabel("API Key").fill("test");
+  await form.getByLabel("模型 1").fill("mock-model");
+  await form.getByRole("button", { name: /保存|创建/ }).click();
+  await window.getByText("Packaged Mock", { exact: true }).waitFor();
+  await window.getByTestId("settings-back").click();
+  await window.getByTestId("new-task").click();
+  const draftInfo = window.getByTestId("draft-workspace-info");
+  await draftInfo.waitFor();
+  assert(
+    (await window.getByTestId("workspace-path").count()) === 1,
+    "workspace-path 应只存在于新建页工作区卡（常驻 workspace-info 行须保持取消）"
+  );
+  assert(
+    (await draftInfo.getByTestId("workspace-path").textContent()).includes(
+      "专用持久目录"
+    ),
+    "产物独立草稿未显示默认工作区"
+  );
   assert(
     (await window
       .getByTestId("approval-mode-select")
       .getAttribute("data-value")) === "ask",
     "产物新任务默认必须为 ask"
   );
-  assert(!existsSync(join(homeDir, "tasks")), "未发送不得创建专用工作区");
-  assert(!existsSync(join(homeDir, "codexlike.db")), "新应用不能创建旧库");
   console.log(
-    "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏与独立草稿/权限默认正常；票05 新布局断言（标题栏上下文回退/无常驻 workspace-info/toast 内存态/抽屉关闭态）全过"
+    "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏、无 Profile 引导卡与建后表单态/权限默认正常；票05 新布局断言（标题栏上下文回退/无常驻 workspace-info/toast 内存态/抽屉关闭态）全过"
   );
 } finally {
   await closeApp(app);

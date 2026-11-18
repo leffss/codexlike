@@ -10,6 +10,7 @@ import {
   modelOptionValue,
   projectAction,
   startMockProvider,
+  untilDraft,
 } from "./helpers.mjs";
 
 async function main() {
@@ -91,7 +92,6 @@ async function main() {
     await projectAction(window);
     await window.getByTestId("composer-input").fill("项目新建草稿");
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await selectComposerOption(window, "thinking-effort-select", "high");
     await projectAction(window);
@@ -109,7 +109,6 @@ async function main() {
       "草稿不是正式历史"
     );
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.waitForFunction(
       () =>
         document.querySelector('[data-testid="composer-input"]')?.value ===
@@ -121,6 +120,30 @@ async function main() {
         .getAttribute("data-value")) === "high",
       "独立草稿设置重开恢复"
     );
+    // 票02 切归属 = 切入口草稿（票05 实跑）：页面内归属选择器切换与从对应
+    // 入口进入同一语义——独立⇄项目来回切换，各自入口的持久草稿独立恢复
+    //（文本与思考档位），切换不丢工作也不串用。
+    await window.getByTestId("composer-input").fill("独立草稿切换段");
+    const [projectId] = await window.evaluate(async () =>
+      (await window.codexlike.projects.list()).map((project) => project.id)
+    );
+    await selectComposerOption(window, "draft-project-select", projectId);
+    await untilDraft(window, "项目新建草稿", "切到项目应恢复项目入口草稿");
+    assert(
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) !== "high",
+      "项目入口草稿不串用独立的思考档位"
+    );
+    await selectComposerOption(window, "draft-project-select", "standalone");
+    await untilDraft(window, "独立草稿切换段", "切回独立应恢复独立入口草稿");
+    assert(
+      (await window
+        .getByTestId("thinking-effort-select")
+        .getAttribute("data-value")) === "high",
+      "独立入口思考档位随切换恢复"
+    );
+    await window.getByTestId("composer-input").fill("独立新建草稿");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
@@ -242,7 +265,6 @@ async function main() {
       "权限真实重启恢复"
     );
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")

@@ -148,6 +148,59 @@ async function assertAligned(window, contentTestId, label) {
   return content;
 }
 
+/**
+ * 新建任务居中起点列（票01，ADR 0026 变体 A）：草稿态主列整体替换为居中
+ * 起点页——列容器 max-w-[800px]（含两侧 px-6 共 48px 内边距）、任务容器
+ * 内容区内水平居中、工作区卡与专属输入卡（new-task-composer）同宽；容器
+ * 不足 848px 时列回落全宽。期望宽运行时按 root.clientWidth（不含竖滚动
+ * 条占位）自算：min(clientWidth, 800) − 48，滚动条有无都自适应。
+ */
+const NEW_TASK_COLUMN_PADDING = 48; // 居中列 px-6 × 2
+
+async function assertNewTaskStart(window, label) {
+  await assertViewportLayout(window, label);
+  const geometry = await window.evaluate(() => {
+    const root = document.querySelector('[data-testid="new-task-start"]');
+    const composer = document.querySelector(
+      '[data-testid="new-task-composer"]'
+    );
+    const info = document.querySelector('[data-testid="draft-workspace-info"]');
+    if (!root || !composer) return null;
+    const rootRect = root.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    return {
+      // 期望宽以滚动条内侧内容区为基准（clientWidth 不含竖滚动条占位）
+      expectedWidth: Math.min(root.clientWidth, 800) - 48,
+      composerWidth: composerRect.width,
+      insetStart: composerRect.left - rootRect.left,
+      insetEnd: rootRect.left + root.clientWidth - composerRect.right,
+      infoAligned:
+        info === null
+          ? null
+          : Math.abs(info.getBoundingClientRect().left - composerRect.left) <=
+              1 &&
+            Math.abs(info.getBoundingClientRect().width - composerRect.width) <=
+              1,
+    };
+  });
+  assert(geometry !== null, `${label}：新建居中列必须可见`);
+  assert(
+    Math.abs(geometry.composerWidth - geometry.expectedWidth) <= 2,
+    `${label}：新建居中列宽应为 ${geometry.expectedWidth}（±2 取整容差）：实测 ${geometry.composerWidth}`
+  );
+  assert(
+    Math.abs(geometry.insetStart - geometry.insetEnd) <= 1,
+    `${label}：新建居中列应在任务容器内水平居中：左留白 ${geometry.insetStart}，右留白 ${geometry.insetEnd}`
+  );
+  if (geometry.infoAligned !== null) {
+    assert(
+      geometry.infoAligned,
+      `${label}：工作区卡与输入卡在居中列内左右缘一致`
+    );
+  }
+  return geometry;
+}
+
 async function main() {
   const { server, port } = await startMockProvider((ctx) => {
     ctx.textRound(WIDE_REPLY);
@@ -188,17 +241,9 @@ async function main() {
     // 固定窗口内容区 1280×800：任务容器 = 1280 - 320 = 960px
     await resizeWindow(app, 1280, 800);
 
-    // 场景 1：新建草稿与已有任务采用相同 4xl 档，不再单独收窄。
-    const emptyBox = await window.getByTestId("message-empty").boundingBox();
-    assert(emptyBox !== null, "空态提示必须可见");
-    assert(
-      emptyBox.width > 768 && emptyBox.width <= 896,
-      `新建草稿应采用 4xl 内容列（>768 且 ≤896）：实测 ${emptyBox.width}`
-    );
-    await assertAligned(window, "message-empty", "新建任务");
-    const emptyGutter = await window
-      .getByTestId("message-stream")
-      .evaluate((el) => el.offsetWidth - el.clientWidth);
+    // 场景 1（票01 居中起点页）：新建任务为 800px 居中列（ADR 0026 变体 A
+    // 定稿），不再复用任务态内容列分档——工作区卡与输入卡同宽、列水平居中。
+    await assertNewTaskStart(window, "新建任务");
     await window.screenshot({ path: join(screenshots, "new-task.png") });
 
     // 发送消息 → mock 返回宽表格 + 长代码行
@@ -206,6 +251,10 @@ async function main() {
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await waitForReplyDone(window);
+    // 滚动槽基线在任务态消息流上测（草稿态居中页无消息流）
+    const emptyGutter = await window
+      .getByTestId("message-stream")
+      .evaluate((el) => el.offsetWidth - el.clientWidth);
 
     // 场景 2：4xl 档（容器 992px）：突破 768px 旧锁死，上限 896px
     const tier4 = await assertContentWidth(window, {
@@ -475,10 +524,10 @@ async function main() {
 
     // 同一真实任务通过IPC应答闸门切回：只延迟真实结果，不伪造历史。
     const task = window.getByTestId("task-item").first();
-    for (const [width, height, min, max] of [
-      [1060, 800, expectedFull - 2, expectedFull + 2],
-      [1280, 800, 769, 896],
-      [1600, 900, expectedWide - 2, expectedWide + 2],
+    for (const [width, height] of [
+      [1060, 800],
+      [1280, 800],
+      [1600, 900],
     ]) {
       await resizeWindow(app, width, height);
       const existing = await assertAligned(
@@ -487,18 +536,10 @@ async function main() {
         `${width} 已有`
       );
       await window.getByTestId("new-task").click();
-      await window.getByTestId("new-standalone-task-item").click();
       await window.getByTestId("draft-select-workspace").waitFor();
-      const draft = await assertAligned(
-        window,
-        "message-empty",
-        `${width} 新建`
-      );
-      assert(
-        draft.width >= min && draft.width <= max,
-        `${width} 新建使用相应档位`
-      );
-      assert(Math.abs(existing.width - draft.width) <= 1, "已有转新建不跳宽");
+      // 票01 起新建为居中起点列：不与任务内容列断同宽（两套布局并存），
+      // 只断言列宽随容器回落/保持 800 上限与水平居中。
+      await assertNewTaskStart(window, `${width} 新建`);
       await app.evaluate(({ ipcMain }) => {
         const original = ipcMain._invokeHandlers.get("tasks:view");
         ipcMain.removeHandler("tasks:view");

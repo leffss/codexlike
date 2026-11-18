@@ -146,6 +146,19 @@ async function main() {
   try {
     let window;
     ({ app, window } = await launchApp({ homeDir }));
+    // 票01（spec 用户故事 10）：无 Provider Profile 时新建页整体为配置
+    // 引导卡、无输入卡——本场景核心断言「草稿文本跨真退出保存」需要真实
+    // 草稿，先经真实 UI 建一个 Profile（全程不发消息，baseURL 无需可用）。
+    await window.getByTestId("settings-open").click();
+    await window.getByTestId("profile-create").click();
+    const form = window.locator("form");
+    await form.getByLabel("名称").fill("Window Controls Mock");
+    await form.getByLabel("baseURL").fill("http://127.0.0.1:9/v1");
+    await form.getByLabel("API Key").fill("test");
+    await form.getByLabel("模型 1").fill("mock-model");
+    await form.getByRole("button", { name: /保存|创建/ }).click();
+    await window.getByText("Window Controls Mock", { exact: true }).waitFor();
+    await window.getByTestId("settings-back").click();
     await window.getByTestId("window-close").waitFor();
     const initial = await nativeState(app);
     assert(
@@ -331,7 +344,6 @@ async function main() {
     await checkTitlebar(window);
     await window.getByTestId("settings-back").click();
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("自绘关闭按钮保留的草稿");
     await window.keyboard.press("Alt");
     assert(!(await nativeState(app)).menuVisible, "Alt 不得唤回通用菜单");
@@ -375,7 +387,6 @@ async function main() {
 
     ({ app, window } = await launchApp({ homeDir }));
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await untilDraft(
       window,
       "自绘关闭按钮保留的草稿",

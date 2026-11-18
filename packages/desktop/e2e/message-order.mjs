@@ -492,7 +492,6 @@ async function main() {
       "复制进行中应禁止重复请求"
     );
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window
       .getByTestId("assistant-actions")
       .waitFor({ state: "detached" });

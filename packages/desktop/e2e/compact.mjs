@@ -100,7 +100,6 @@ async function main() {
 
     // 挂起Compact后A→B→A：停止入口恢复，停止不改历史；再后台完成同样更新。
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await sendAndAwait(window, composer, "任务B", 1);
     const chooseA = () =>
       window.getByTestId("task-item").filter({ hasText: "第1轮问题" }).click();

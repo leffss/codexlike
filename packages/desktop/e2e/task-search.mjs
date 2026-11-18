@@ -119,8 +119,7 @@ async function main() {
         .getByTestId(project ? "project-new-task" : "new-task")
         .click();
       if (!project) {
-        // 统一新建入口（顶栏「+」）：菜单选中「新建独立任务」才开草稿
-        await window.getByTestId("new-standalone-task-item").click();
+        // 顶栏「+」单按钮直达独立入口草稿（票03：菜单退役）；显式选目录
         await window.getByTestId("draft-select-workspace").click();
       }
       await window.getByTestId("composer-input").fill(title);

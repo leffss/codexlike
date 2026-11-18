@@ -69,7 +69,6 @@ async function main() {
     await window.getByTestId("composer-input").fill("项目草稿");
     assert((await window.getByTestId("task-item").count()) === 0, "新建仅草稿");
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("composer-input").fill("独立草稿");
     assert(!existsSync(join(homeDir, "tasks")), "首次发送前不分配专用目录");
     await projectAction(window);
@@ -86,7 +85,6 @@ async function main() {
     await selectComposerOption(window, "approval-mode-select", "full-access");
     await window.getByTestId("full-access-confirm-ok").click();
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     assert(
       (await window
         .getByTestId("approval-mode-select")
@@ -158,7 +156,6 @@ async function main() {
       .filter({ hasText: "独立新标题" })
       .waitFor();
     await window.getByTestId("new-task").click();
-    await window.getByTestId("new-standalone-task-item").click();
     await window.getByTestId("draft-select-workspace").click();
     await window.getByTestId("composer-input").fill("同目录但独立");
     await window.getByTestId("composer-send").click();
