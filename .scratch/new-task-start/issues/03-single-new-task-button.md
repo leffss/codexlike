@@ -12,3 +12,5 @@
 - [ ] 空侧栏空态文案与新入口一致（如有「新建」引导文案则指向单按钮）
 
 ## Comments
+
+**票 02 衔接（bf9d6ee）**：① `NewTaskStartProps.onSwitchProject` 为必填 prop（当前仅 WorkspacePage 一处挂载，测试桩需同步）。② 单一「新建任务」按钮直达走 `startCreateTask(null)`，**不要**复用 `switchDraftProject`——那是页面内选择器的切换动作，含「切到独立就重置已选目录」副作用，外部入口首次进入独立草稿不应重置。③ `startCreateTask` 现返回 `Promise<boolean>`（false = 恢复失败被更新请求取代，已有中文 toast）；入口点击 `void` 调用即可。④ `/new` 的「沿用显式管理归属」在 `runCommand` 的 `case "new-task"`，无需改动。⑤ e2e：`new-task`/`new-standalone-task-item`/`new-project-task-item` testid 存废会叠加票 02 新增的选择器断言（`draft-project-select` 系），05 号票一并对账 entry-consistency。
