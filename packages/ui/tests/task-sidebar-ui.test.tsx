@@ -1,9 +1,35 @@
+// @vitest-environment jsdom
 import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TaskActivityBadge } from "../src/components/TaskActivityBadge";
 import { TaskSidebar } from "../src/components/TaskSidebar";
+
+/** 侧栏交互测试用基础 props（jsdom + @testing-library 直达回调断言） */
+function sidebarProps(
+  overrides: Partial<Parameters<typeof TaskSidebar>[0]> = {}
+): Parameters<typeof TaskSidebar>[0] {
+  return {
+    projects: [],
+    tasks: [],
+    currentId: null,
+    creating: false,
+    onAddProject() {},
+    onCreateInProject() {},
+    onSelect() {},
+    onCreate() {},
+    onMembership() {},
+    onRename() {},
+    onArchive() {},
+    onPin() {},
+    onPinProject() {},
+    onCollapseProject() {},
+    searchRecordsRevision: 0,
+    ...overrides,
+  };
+}
 
 function task(overrides: Partial<TaskListItem> = {}): TaskListItem {
   return {
@@ -94,6 +120,7 @@ function expectCompactLabel(html: string, label: string) {
 }
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -136,44 +163,42 @@ it("项目置顶入口是独立键盘按钮，置顶标识与空项目均保留"
   );
 });
 
-it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任务组头保留悬停加号", () => {
+it("顶栏图标化：单一「新建任务」按钮（无菜单语义），独立任务组头保留悬停加号", () => {
   const html = renderToStaticMarkup(
-    createElement(TaskSidebar, {
-      projects: [
-        {
-          id: "p1",
-          name: "演示项目",
-          workspacePath: "/work",
-          createdAt: "2026-11-12",
-        },
-      ],
-      tasks: [],
-      currentId: null,
-      creating: false,
-      onAddProject() {},
-      onCreateInProject() {},
-      onSelect() {},
-      onCreate() {},
-      onMembership() {},
-      onRename() {},
-      onArchive() {},
-      onPin() {},
-      onPinProject() {},
-      onCollapseProject() {},
-      searchRecordsRevision: 0,
-    })
+    createElement(
+      TaskSidebar,
+      sidebarProps({
+        projects: [
+          {
+            id: "p1",
+            name: "演示项目",
+            workspacePath: "/work",
+            createdAt: "2026-11-12",
+          },
+        ],
+      })
+    )
   );
   // 标题文案与整行按钮移除（原型 prototype/sidebar-buttons 变体 A 定稿）
   expect(html).toContain("任务列表");
   expect(html).not.toContain("+ 新建独立任务");
-  // 统一新建入口：图标按钮 + menu 语义，SSR 初始态闭合
+  // 单一新建入口：图标按钮直达，不再挂 menu 语义（票 03：菜单退役）
   expect(html).toMatch(
-    /<button[^>]*data-testid="new-task"[^>]*aria-haspopup="menu"/
+    /<button[^>]*data-testid="new-task"[^>]*title="新建任务"/
   );
-  expect(html).toMatch(
-    /<button[^>]*data-testid="new-task"[^>]*aria-expanded="false"/
+  expect(html).not.toMatch(
+    /<button[^>]*data-testid="new-task"[^>]*aria-haspopup/
   );
+  expect(html).not.toMatch(
+    /<button[^>]*data-testid="new-task"[^>]*aria-expanded/
+  );
+  // 多选项菜单容器与菜单项 testid 一并退役
+  expect(html).not.toContain('data-testid="new-task-menu"');
+  expect(html).not.toContain('data-testid="new-standalone-task-item"');
+  expect(html).not.toContain('data-testid="new-project-task-item"');
   expect(html).not.toContain('role="menu"');
+  expect(html).not.toContain("新建独立任务</");
+  expect(html).not.toContain("在 演示项目 新建任务");
   // 添加项目为图标按钮（aria-label 承担可访问名称）
   expect(html).toMatch(
     /<button[^>]*data-testid="add-project"[^>]*aria-label="添加项目"/
@@ -193,6 +218,91 @@ it("顶栏图标化：统一新建入口收进菜单（闭合态），独立任�
   expect(
     (html.match(/group-hover\/header:invisible/g) ?? []).length
   ).toBeGreaterThanOrEqual(2);
+});
+
+it("顶栏「+」单击直达新建任务入口：不弹菜单，多项目时也无项目选项", () => {
+  const onCreate = vi.fn();
+  const { container } = render(
+    createElement(
+      TaskSidebar,
+      sidebarProps({
+        projects: [
+          {
+            id: "p1",
+            name: "演示项目",
+            workspacePath: "/work",
+            createdAt: "2026-11-12",
+          },
+          {
+            id: "p2",
+            name: "第二个项目",
+            workspacePath: "/work2",
+            createdAt: "2026-11-12",
+          },
+        ],
+        onCreate,
+      })
+    )
+  );
+  const button = screen.getByTestId("new-task");
+  expect(button.getAttribute("aria-label")).toBe("新建任务");
+  expect(button.getAttribute("title")).toBe("新建任务");
+  // 单按钮无 menu 语义（aria-haspopup / aria-expanded 均不存在）
+  expect(button.hasAttribute("aria-haspopup")).toBe(false);
+  expect(button.hasAttribute("aria-expanded")).toBe(false);
+  fireEvent.click(button);
+  // 直达：单击即触发新建回调，不弹菜单（含项目存在时也不出项目选项）
+  expect(onCreate).toHaveBeenCalledTimes(1);
+  expect(container.querySelector("[data-testid='new-task-menu']")).toBeNull();
+  expect(screen.queryByTestId("new-standalone-task-item")).toBeNull();
+  expect(screen.queryByTestId("new-project-task-item")).toBeNull();
+  expect(container.querySelector("[role='menu']")).toBeNull();
+  // 二次点击仍是直达（原菜单形态下二次点击是收起菜单）
+  fireEvent.click(button);
+  expect(onCreate).toHaveBeenCalledTimes(2);
+});
+
+it("组头悬停「+」带语境直达保留：项目组头带项目 id、独立组头走独立入口", () => {
+  const onCreate = vi.fn();
+  const onCreateInProject = vi.fn();
+  render(
+    createElement(
+      TaskSidebar,
+      sidebarProps({
+        projects: [
+          {
+            id: "p1",
+            name: "演示项目",
+            workspacePath: "/work",
+            createdAt: "2026-11-12",
+          },
+        ],
+        onCreate,
+        onCreateInProject,
+      })
+    )
+  );
+  const projectPlus = screen.getByTestId("project-new-task");
+  expect(projectPlus.getAttribute("aria-label")).toBe("在此项目新建任务");
+  fireEvent.click(projectPlus);
+  expect(onCreateInProject).toHaveBeenCalledWith("p1");
+  expect(onCreate).not.toHaveBeenCalled();
+  const standalonePlus = screen.getByTestId("standalone-new-task");
+  expect(standalonePlus.getAttribute("aria-label")).toBe("新建独立任务");
+  fireEvent.click(standalonePlus);
+  expect(onCreate).toHaveBeenCalledTimes(1);
+});
+
+it("空侧栏空态文案指向单一新建任务入口，不再罗列独立 / 项目", () => {
+  const html = renderToStaticMarkup(createElement(TaskSidebar, sidebarProps()));
+  // groups 恒含独立分区（project-groups：独立组始终保留），
+  // 空态分支实际不可达；其引导文案仍与新入口同步（防未来复用误导）。
+  expect(html).not.toContain("独立 / 项目");
+  // 真实可见行为：空数据显示独立组头，顶栏单一「新建任务」按钮在场
+  expect(html).toContain('data-testid="standalone-header"');
+  expect(html).toMatch(
+    /<button[^>]*data-testid="new-task"[^>]*title="新建任务"/
+  );
 });
 it.each([
   {

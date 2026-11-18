@@ -110,8 +110,9 @@ function PlusIcon() {
 /**
  * 左栏：任务列表（ADR 0010）。
  * 顶栏两枚图标按钮（原型 prototype/sidebar-buttons 变体 A 定稿）：
- * 统一新建入口「+」点开菜单可选独立任务或各项目任务，添加项目为 ghost 图标；
- * 整行按钮取消，列表起始位上移。项目组头与独立任务组头悬停均出就近「+」。
+ * 「+」为单一「新建任务」按钮，直达新建任务页（独立入口语境，
+ * 归属在页面内选——ADR 0026 顶栏菜单退役）；添加项目为 ghost 图标。
+ * 项目组头与独立任务组头悬停均出就近「+」（带语境直达）。
  * 项目组头不依赖任务存在；归属只看 projectId，绝不按目录自动聚合。
  * 组内活跃任务在上、「已归档」子折叠在下。
  * 任务标题优先占用单行空间，最近使用时间收进提示；后台输出不改变顺序。
@@ -156,8 +157,6 @@ export function TaskSidebar(props: {
     projectId: string;
     anchor: TaskMenuAnchor;
   } | null>(null);
-  // 统一新建菜单（顶栏「+」）：独立任务 / 各项目任务
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const menuTask = props.tasks.find((task) => task.id === menu?.taskId);
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
@@ -262,27 +261,6 @@ export function TaskSidebar(props: {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  // 统一新建菜单外点 / Escape 关闭：命中菜单容器内（按钮 + 菜单）不关闭，
-  // 按钮自身由 onClick 切换，避免「外点误判」与「切换竞态」。
-  useEffect(() => {
-    if (!newMenuOpen) return;
-    function onMouseDown(event: MouseEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("[data-testid='new-task-menu']") === null) {
-        setNewMenuOpen(false);
-      }
-    }
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setNewMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [newMenuOpen]);
 
   const groups = groupTasksByProject(props.tasks, props.projects);
 
@@ -687,57 +665,19 @@ export function TaskSidebar(props: {
           >
             <FolderPlusIcon />
           </button>
-          <div className="relative" data-testid="new-task-menu">
-            <button
-              type="button"
-              data-testid="new-task"
-              disabled={props.creating}
-              title="新建任务（独立 / 项目）"
-              aria-label="新建任务"
-              aria-haspopup="menu"
-              aria-expanded={newMenuOpen}
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => setNewMenuOpen((prev) => !prev)}
-            >
-              <PlusIcon />
-            </button>
-            {newMenuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-full z-20 mt-1 w-52 rounded-md border border-line bg-surface p-1 shadow-lg"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="new-standalone-task-item"
-                  disabled={props.creating}
-                  className="w-full rounded px-2 py-1.5 text-left text-xs text-fg hover:bg-hover disabled:opacity-50"
-                  onClick={() => {
-                    setNewMenuOpen(false);
-                    props.onCreate();
-                  }}
-                >
-                  新建独立任务
-                </button>
-                {props.projects.map((project) => (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    key={project.id}
-                    data-testid="new-project-task-item"
-                    data-project-id={project.id}
-                    className="w-full rounded px-2 py-1.5 text-left text-xs text-fg hover:bg-hover"
-                    onClick={() => {
-                      setNewMenuOpen(false);
-                      props.onCreateInProject(project.id);
-                    }}
-                  >
-                    在 {project.name} 新建任务
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* 单一「新建任务」按钮：直达新建任务页（独立入口语境，
+              归属在页面内选——ADR 0026 顶栏菜单退役，单击不再弹菜单） */}
+          <button
+            type="button"
+            data-testid="new-task"
+            disabled={props.creating}
+            title="新建任务"
+            aria-label="新建任务"
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => props.onCreate()}
+          >
+            <PlusIcon />
+          </button>
         </div>
       </div>
 
@@ -746,7 +686,7 @@ export function TaskSidebar(props: {
           <p className="text-center text-xs text-fg-subtle">
             暂无任务
             <br />
-            点右上角 + 新建任务（独立 / 项目），首次发送才建立工作区
+            点右上角 + 新建任务，首次发送才建立工作区
           </p>
         </div>
       ) : (
