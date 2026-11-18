@@ -67,7 +67,7 @@ function baseDraft(overrides: Partial<NewTaskDraft> = {}): NewTaskDraft {
 function baseProps(
   overrides: Partial<Parameters<typeof NewTaskStart>[0]> = {}
 ): Parameters<typeof NewTaskStart>[0] {
-  return {
+  const merged = {
     draft: baseDraft(),
     projects: PROJECTS,
     profiles: PROFILES,
@@ -80,6 +80,15 @@ function baseProps(
     onSend: vi.fn(),
     onOpenSettings: vi.fn(),
     ...overrides,
+  };
+  // 归属解析与 WorkspacePage 上提逻辑同构（draft.projectId 命中项目）
+  return {
+    ...merged,
+    project:
+      overrides.project ??
+      (merged.draft.projectId !== null
+        ? (PROJECTS.find((item) => item.id === merged.draft.projectId) ?? null)
+        : null),
   };
 }
 
@@ -150,7 +159,7 @@ describe("NewTaskStart 居中起点页", () => {
       draft: baseDraft({ projectId: "p1", text: "项目入口的文字" }),
     });
     const view = render(createElement(NewTaskStart, props));
-    // 切到独立入口：上层恢复独立草稿（文字随持久草稿），已选目录被重置
+    // 切到独立入口：上层恢复独立草稿（文字随持久草稿）
     view.rerender(
       createElement(
         NewTaskStart,
@@ -191,8 +200,19 @@ describe("NewTaskStart 居中起点页", () => {
     expect(screen.getByTestId("draft-workspace-mode")).toBeTruthy();
   });
 
-  it("切到独立时已选目录重置（上层清 workspacePath 重渲染）：工作区行回专用目录默认形态，不残留上次所选目录", () => {
+  it("切到独立恢复已存目录（上层以独立入口草稿重渲染，不重置目录）：工作区行显示持久草稿中的所选目录", () => {
     const view = render(
+      createElement(
+        NewTaskStart,
+        baseProps({
+          draft: baseDraft({ projectId: null }),
+        })
+      )
+    );
+    expect(screen.getByTestId("draft-select-workspace")).toBeTruthy();
+    // 切到项目再切回独立：上层恢复独立入口持久草稿（含已选目录），
+    // 切换为纯恢复、不重置目录（修订：目录是「设置」的一部分）
+    view.rerender(
       createElement(
         NewTaskStart,
         baseProps({
@@ -201,16 +221,8 @@ describe("NewTaskStart 居中起点页", () => {
       )
     );
     expect(screen.getByTestId("draft-managed-workspace")).toBeTruthy();
-    view.rerender(
-      createElement(
-        NewTaskStart,
-        baseProps({ draft: baseDraft({ projectId: null }) })
-      )
-    );
-    expect(screen.queryByTestId("draft-managed-workspace")).toBeNull();
-    expect(screen.getByTestId("draft-select-workspace")).toBeTruthy();
     expect(screen.getByTestId("workspace-path").textContent).toContain(
-      "应用专用持久目录（发送第一条消息后分配）"
+      "E:\\picked"
     );
   });
 

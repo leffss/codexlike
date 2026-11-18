@@ -124,9 +124,10 @@ async function main() {
     // 入口进入同一语义——独立⇄项目来回切换，各自入口的持久草稿独立恢复
     //（文本与思考档位），切换不丢工作也不串用。
     await window.getByTestId("composer-input").fill("独立草稿切换段");
-    const [projectId] = await window.evaluate(async () =>
-      (await window.codexlike.projects.list()).map((project) => project.id)
-    );
+    const [projectId, projectPath] = await window.evaluate(async () => {
+      const [project] = await window.codexlike.projects.list();
+      return [project.id, project.workspacePath];
+    });
     await selectComposerOption(window, "draft-project-select", projectId);
     await untilDraft(window, "项目新建草稿", "切到项目应恢复项目入口草稿");
     assert(
@@ -143,10 +144,80 @@ async function main() {
         .getAttribute("data-value")) === "high",
       "独立入口思考档位随切换恢复"
     );
+    // 断言①（票 02 验收 4 补实跑）：经选择器切到项目后发送首条消息，
+    // 任务按当前归属创建——projectId 归属该项目、workspacePath 即项目目录
+    //（主进程 start 通道按 projectId 解析项目目录，local 模式数据面）。
+    await selectComposerOption(window, "draft-project-select", projectId);
+    await untilDraft(window, "项目新建草稿", "断言①发送前恢复项目草稿");
+    await window.getByTestId("composer-input").fill("切换项目首条");
+    await window.getByTestId("composer-send").click();
+    await window.getByTestId("message-assistant").waitFor();
+    await window.getByTestId("composer-send").waitFor();
+    const switchedTask = await window.evaluate(async (name) => {
+      const task = (await window.codexlike.tasks.list()).find(
+        (s) => s.title === name
+      );
+      return task === undefined
+        ? null
+        : { projectId: task.projectId, workspacePath: task.workspacePath };
+    }, "切换项目首条");
+    assert(switchedTask !== null, "切换后发送首条应创建任务");
+    assert(
+      switchedTask.projectId === projectId,
+      "任务按切换后的归属项目创建（projectId）"
+    );
+    assert(
+      switchedTask.workspacePath === projectPath,
+      "任务工作区即项目目录（local 模式数据面）"
+    );
+    // 发送后硬切任务视图：顶栏「+」回独立草稿，按原路径发送独立首条，
+    // 与项目侧构成「按当前归属创建」的独立对照（projectId 为 null）
+    await window.getByTestId("new-task").click();
+    await untilDraft(window, "独立草稿切换段", "任务态回独立恢复独立草稿");
     await window.getByTestId("composer-input").fill("独立新建草稿");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("message-assistant").waitFor();
     await window.getByTestId("composer-send").waitFor();
+    const standaloneTask = await window.evaluate(async (name) => {
+      const task = (await window.codexlike.tasks.list()).find(
+        (s) => s.title === name
+      );
+      return task === undefined
+        ? null
+        : { projectId: task.projectId, workspacePath: task.workspacePath };
+    }, "独立新建草稿");
+    assert(standaloneTask !== null, "独立入口发送首条应创建独立任务");
+    assert(
+      standaloneTask.projectId === null,
+      "独立任务不归属项目（projectId 为 null）"
+    );
+    assert(
+      standaloneTask.workspacePath !== projectPath,
+      "独立任务工作区不是项目目录"
+    );
+    // 断言②（票 02 补实跑）：选择器切到项目后冷启动，重开恢复到切换后
+    // 入口（草稿态归属选择器 data-value 回显项目 id）；项目草稿文本补回，
+    // 衔接后续 projectAction 发送「项目新建草稿」的原路径。发送后处于
+    // 任务态（无归属选择器），先经顶栏「+」回草稿态再切换。
+    await window.getByTestId("new-task").click();
+    await untilDraft(window, "", "发送消费后独立草稿为空");
+    await selectComposerOption(window, "draft-project-select", projectId);
+    await window.getByTestId("composer-input").fill("项目新建草稿");
+    await closeApp(app);
+    app = null;
+    ({ app, window } = await launchApp({ homeDir, workspaceDir }));
+    await untilDraft(window, "项目新建草稿", "重开恢复项目入口草稿文本");
+    assert(
+      (await window
+        .getByTestId("draft-project-select")
+        .getAttribute("data-value")) === projectId,
+      "选择器切换后冷启动恢复到切换后入口"
+    );
+    await window
+      .getByTestId("task-item")
+      .filter({ hasText: "独立新建草稿" })
+      .click();
+    await window.getByTestId("message-assistant").waitFor();
     await selectComposerOption(
       window,
       "profile-select",
@@ -284,7 +355,7 @@ async function main() {
       ),
       "新任务采用应用默认而非上一个任务模型"
     );
-    assert(model.requestCount() === 2, "切换与重启不自动发送");
+    assert(model.requestCount() === 3, "切换与重启不自动发送");
     await window.getByTestId("composer-input").fill("提问草稿验收");
     await window.getByTestId("composer-send").click();
     await window.getByTestId("question-custom").fill("尚未提交的问答文本");
@@ -323,7 +394,7 @@ async function main() {
       (await window.getByTestId("question-submit").count()) === 0,
       "失效请求不能重新提交或授权"
     );
-    assert(model.requestCount() === 3, "问答重启不自动请求模型");
+    assert(model.requestCount() === 4, "问答重启不自动请求模型");
     for (let round = 0; round < 4; round++) {
       await window.getByTestId("composer-input").fill(`问答后继续${round}`);
       await window.getByTestId("composer-send").click();
@@ -409,7 +480,7 @@ async function main() {
         )
       );
     });
-    assert(model.requestCount() === 9, "Compact与显式继续之外没有重放请求");
+    assert(model.requestCount() === 10, "Compact与显式继续之外没有重放请求");
     console.log(
       "[e2e] 草稿、偏好、阅读、真实重启及Compact→编辑→flush→正常退出→继续发送通过"
     );

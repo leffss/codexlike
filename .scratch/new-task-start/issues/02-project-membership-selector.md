@@ -26,3 +26,5 @@
 - 移除面：标题行右侧静态语境文本「项目 · <名>」与「独立任务」不再渲染——entry-consistency / projects-sidebar 若有依赖该文本的断言需改为选择器断言。
 - 交互语义：选择即切换入口（持久草稿按 `["new", projectId]` 分份恢复、启动现场 target 随切换更新）；切到独立重置已选目录（回「选择已有目录」默认形态）；busy（首条发送中）选择器 disabled。
 - 建议场景断言：persistent-workbench 在草稿态输入文字后经选择器切换再切回，断言各入口文字分份恢复；切换后首条发送按当前归属创建（项目/独立各一次）。
+
+**代码审查修订（2026-11-18，review-fix 轮）**：上文 What to build 与验收第 3 条中「切换时重置独立任务的已选目录状态」系从原型演示态错误延续——用户故事 5「切到哪个入口就恢复哪个入口的文字与设置」中目录是「设置」的一部分，应压过该实现决策行。已修订：`switchDraftProject` 改为纯恢复目标入口草稿（删除切到独立时 `editNewDraft(null, { workspacePath: undefined })` 的重置副作用——该调用会把独立入口持久草稿中已存的目录选择永久抹掉；`startCreateTask` 为此引入的 `Promise<boolean>` 返回值一并回退为 `Promise<void>`）。同步修订：spec 实现决策「项目归属选择器」条、`workspace-state.test.ts`（原断言固化「重开后仍无目录」→ 改为「切回独立恢复已存的目录选择」）、`new-task-start-ui.test.tsx`（原「切到独立时已选目录重置」测试改为「切到独立恢复已存目录」）。e2e 交互面中「切到独立重置已选目录」一句同步作废。

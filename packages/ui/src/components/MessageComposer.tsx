@@ -1,27 +1,14 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import {
   parseComposerDraft,
   type ApprovalMode,
   type ProviderProfile,
-  type SlashCommandDef,
   type SkillDescriptor,
   type ThinkingEffort,
 } from "@codexlike/agent-core";
 
-import {
-  applyMentionSelection,
-  applySkillSelection,
-  computeMenu,
-  handleMenuKey,
-  type ComposerMenuState,
-} from "../lib/composer-menu";
+import { useComposerMenu } from "../lib/use-composer-menu";
 import {
   composerModelOptions,
   composerModelValue,
@@ -119,52 +106,27 @@ export function MessageComposer(props: {
     setLocalValue(next);
     props.onDraftChange?.(next);
   }
-  const [menu, setMenu] = useState<ComposerMenuState | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  /** Esc 关闭菜单的签名（value + 光标）：draft 未变化前不再自动弹出 */
-  const dismissedRef = useRef<string | null>(null);
-  const skillMenuOpenRef = useRef(false);
-
-  // 解构到局部：syncMenu 回调只依赖这三个属性，直接引用 props 对象
-  // 会让 exhaustive-deps 无法核对（props 每次渲染都是新引用）。
-  const { workspaceFiles, skills, onOpenSkills } = props;
-  const syncMenu = useCallback(
-    (text: string, caretIndex: number) => {
-      const signature = `${text.length}:${caretIndex}:${text}`;
-      if (dismissedRef.current === signature) {
-        return;
-      }
-      const draft = parseComposerDraft(text, { caretIndex });
-      const openingSkills =
-        draft.menu === "skills" && !skillMenuOpenRef.current;
-      skillMenuOpenRef.current = draft.menu === "skills";
-      setMenu(
-        computeMenu(draft, {
-          files: workspaceFiles,
-          skills,
-        })
-      );
-      if (openingSkills) onOpenSkills?.();
-    },
-    [workspaceFiles, skills, onOpenSkills]
-  );
-
-  // 异步候选到达时重算；Esc 关闭后不因刷新而重开。
-  useEffect(() => {
-    const caret = textareaRef.current?.selectionStart ?? value.length;
-    syncMenu(value, caret);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只监听候选集到达：value/光标变化由 commitText 显式 syncMenu，补全 value 会让每次按键都重算菜单
-  }, [workspaceFiles, skills]);
-
-  function commitText(next: string, caretIndex: number) {
-    setValue(next);
-    dismissedRef.current = null;
-    syncMenu(next, caretIndex);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(caretIndex, caretIndex);
-    });
-  }
+  // `/`·`@`·`$` 菜单宿主：状态机与键盘导航收拢在 useComposerMenu
+  //（与 NewTaskStart StartComposer 共用），本组件只保留任务态键处理与提交。
+  const {
+    menu,
+    textareaRef,
+    syncMenu,
+    commitText,
+    handleTyping,
+    selectItem,
+    handleMenuKeyDown,
+    reopenMenu,
+    resetMenu,
+  } = useComposerMenu({
+    value,
+    onTextCommit: setValue,
+    onSend: props.onSend,
+    canSubmit: !props.disabled,
+    workspaceFiles: props.workspaceFiles,
+    skills: props.skills,
+    onOpenSkills: props.onOpenSkills,
+  });
 
   function submit() {
     // 空白检查不改原文；提交解析层决定 trim，避免破坏 Markdown 代码缩进。
@@ -174,50 +136,13 @@ export function MessageComposer(props: {
     }
     props.onSend(text);
     if (props.clearOnSend !== false) setValue("");
-    setMenu(null);
-    dismissedRef.current = null;
-  }
-
-  function selectItem(
-    item: ComposerMenuState["items"][number],
-    caretIndex: number
-  ) {
-    if (menu === null) return;
-    if (menu.kind === "skills") {
-      const applied = applySkillSelection({
-        text: value,
-        skillStart: menu.skillStart ?? 0,
-        selectedName: (item as SkillDescriptor).name,
-        caretIndex,
-      });
-      commitText(applied.text, applied.caretIndex);
-    } else if (menu.kind === "mentions") {
-      const applied = applyMentionSelection({
-        text: value,
-        mentionStart: menu.mentionStart ?? 0,
-        selectedPath: item as string,
-        caretIndex,
-      });
-      commitText(applied.text, applied.caretIndex);
-    } else {
-      const command = item as SlashCommandDef;
-      if (command.argumentHint === null) {
-        setValue("");
-        setMenu(null);
-        dismissedRef.current = null;
-        if (!props.disabled) props.onSend(`/${command.name}`);
-      } else {
-        commitText(`/${command.name} `, `/${command.name} `.length);
-      }
-    }
+    resetMenu();
   }
 
   function openSkills() {
-    dismissedRef.current = null;
     const caret = textareaRef.current?.selectionStart ?? value.length;
     if (parseComposerDraft(value, { caretIndex: caret }).menu === "skills") {
-      skillMenuOpenRef.current = false;
-      syncMenu(value, caret);
+      reopenMenu(value, caret);
       textareaRef.current?.focus();
       return;
     }
@@ -231,30 +156,7 @@ export function MessageComposer(props: {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
-    if (menu !== null && !event.shiftKey) {
-      const result = handleMenuKey(menu, event.key);
-      if (result.action === "move") {
-        event.preventDefault();
-        setMenu({ ...menu, activeIndex: result.activeIndex });
-        return;
-      }
-      if (result.action === "close") {
-        event.preventDefault();
-        const caret = event.currentTarget.selectionStart ?? value.length;
-        dismissedRef.current = `${value.length}:${caret}:${value}`;
-        skillMenuOpenRef.current = false;
-        setMenu(null);
-        return;
-      }
-      if (result.action === "select") {
-        event.preventDefault();
-        selectItem(
-          result.item,
-          event.currentTarget.selectionStart ?? value.length
-        );
-        return;
-      }
-    }
+    if (handleMenuKeyDown(event)) return;
 
     // Esc 取消取回编辑（票 03）：菜单已关时才生效（菜单优先用 Esc 关闭）。
     // 正在编辑由 queueEditingItemId 派生（review 重构），取消入口单数化。
@@ -344,11 +246,10 @@ export function MessageComposer(props: {
               data-testid="composer-input"
               value={value}
               onChange={(event) => {
-                setValue(event.target.value);
-                const caret =
-                  event.target.selectionStart ?? event.target.value.length;
-                dismissedRef.current = null;
-                syncMenu(event.target.value, caret);
+                handleTyping(
+                  event.target.value,
+                  event.target.selectionStart ?? event.target.value.length
+                );
               }}
               onClick={(event) => {
                 const caret =

@@ -208,6 +208,12 @@ export function WorkspacePage(props: {
           profiles[0]?.id ?? "",
           profiles[0]?.models[0] ?? ""
         );
+  // 归属解析（review 上提）：NewTaskStart 只消费解析结果（工作区路径
+  // 回退与归属回显），归属 find 不散在子组件里
+  const draftProject =
+    draft?.projectId != null
+      ? (projects.find((item) => item.id === draft.projectId) ?? null)
+      : null;
   const creating = draft?.busy ?? false;
   const preferences =
     currentId === null ? null : workspaceState.preferences(currentId);
@@ -788,13 +794,12 @@ export function WorkspacePage(props: {
   );
 
   /**
-   * 入口只恢复该项目/独立入口草稿，不调用创建 IPC。返回切换是否生效
-   * （恢复失败或被更新的打开请求取代时为 false——归属选择器的切换后
-   * 动作据此决定是否执行）。
+   * 入口只恢复该项目/独立入口草稿，不调用创建 IPC。恢复失败或被更新的
+   * 打开请求取代时停留在错误提示/最新请求的现场，不做后续动作。
    */
   async function startCreateTask(
     projectId: string | null = null
-  ): Promise<boolean> {
+  ): Promise<void> {
     const request = ++taskRequestRef.current;
     setLoading(true);
     try {
@@ -811,9 +816,9 @@ export function WorkspacePage(props: {
           `进入新建任务失败：${error instanceof Error ? error.message : String(error)}`
         );
       }
-      return false;
+      return;
     }
-    if (taskRequestRef.current !== request) return false;
+    if (taskRequestRef.current !== request) return;
     // 进入新建草稿也更新启动现场（票03）：重开回到同一草稿状态（含项目关联）
     reportWorkbenchTarget({ kind: "new", projectId });
     workspaceState.activeDraftProjectId = projectId;
@@ -836,22 +841,17 @@ export function WorkspacePage(props: {
     setCompacting(false);
     toastState.retract("context-warning");
     setFullAccessPending(false);
-    return true;
   }
 
   /**
    * 归属选择器切换（票 02）：切归属 = 切入口——与从对应入口进入同一语义
    * （startCreateTask：flush → 恢复该入口持久草稿 → 上报启动现场 target
-   * 随切换更新），持久化模型一寸不动。切到独立入口时重置已选目录
-   * （spec：目录选择不跨切换保留，经既有 editNewDraft 路径写回持久；
-   * 冷启动恢复不走选择器切换，不受影响）。
+   * 随切换更新），持久化模型一寸不动。切换为纯恢复目标入口草稿：已选
+   * 目录是入口「设置」的一部分（用户故事 5），随草稿恢复、不做重置。
    */
   async function switchDraftProject(projectId: string | null) {
     if (draftProjectId === projectId) return;
-    const switched = await startCreateTask(projectId);
-    if (switched && projectId === null) {
-      workspaceState.editNewDraft(null, { workspacePath: undefined });
-    }
+    await startCreateTask(projectId);
   }
 
   async function addProject() {
@@ -1675,6 +1675,7 @@ export function WorkspacePage(props: {
             {draft ? (
               <NewTaskStart
                 draft={draft}
+                project={draftProject}
                 projects={projects}
                 profiles={profiles}
                 workspaceFiles={workspaceFiles}

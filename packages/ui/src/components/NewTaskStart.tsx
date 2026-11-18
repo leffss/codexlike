@@ -1,26 +1,12 @@
+import { type KeyboardEvent } from "react";
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
-import {
-  parseComposerDraft,
   type ApprovalMode,
   type ProjectRecord,
   type ProviderProfile,
   type SkillDescriptor,
-  type SlashCommandDef,
 } from "@codexlike/agent-core";
 import type { NewTaskDraft } from "../lib/workspace-state";
-import {
-  applyMentionSelection,
-  applySkillSelection,
-  computeMenu,
-  handleMenuKey,
-  type ComposerMenuState,
-} from "../lib/composer-menu";
+import { useComposerMenu } from "../lib/use-composer-menu";
 import {
   APPROVAL_MODE_OPTIONS,
   THINKING_EFFORT_OPTIONS,
@@ -54,6 +40,8 @@ import { ApprovalModeIcon, ArrowUpIcon, BrainIcon } from "./ComposerIcons";
  */
 export interface NewTaskStartProps {
   draft: NewTaskDraft;
+  /** 当前归属解析结果（WorkspacePage 上提计算）：draft.projectId 命中的项目，独立任务为 null */
+  project: ProjectRecord | null;
   projects: readonly ProjectRecord[];
   profiles: readonly ProviderProfile[];
   /** @引用 菜单候选（工作区文件） */
@@ -65,7 +53,7 @@ export interface NewTaskStartProps {
   onEditDraft: (
     patch: Partial<Omit<NewTaskDraft, "requestId" | "projectId">>
   ) => void;
-  /** 切换任务归属 = 切换入口（上层走 startCreateTask 同语义恢复对应入口持久草稿，并重置独立任务已选目录） */
+  /** 切换任务归属 = 切换入口（上层走 startCreateTask 同语义恢复对应入口持久草稿） */
   onSwitchProject: (projectId: string | null) => void;
   /** 「选择已有目录」（原生目录对话框），仅独立任务 */
   onSelectWorkspace: () => void;
@@ -80,11 +68,7 @@ export interface NewTaskStartProps {
 const STANDALONE_PROJECT_VALUE = "standalone";
 
 export function NewTaskStart(props: NewTaskStartProps) {
-  const { draft, projects } = props;
-  const project =
-    draft.projectId !== null
-      ? (projects.find((item) => item.id === draft.projectId) ?? null)
-      : null;
+  const { draft, projects, project } = props;
   const isStandalone = draft.projectId === null;
 
   // 无 Provider Profile：起点卡整体替换为配置引导卡（spec 用户故事 10），
@@ -285,123 +269,42 @@ export function NewTaskStart(props: NewTaskStartProps) {
   );
 }
 
-/** 新建起点页专属输入卡（票 01）：菜单交互与 MessageComposer 同构（lib 共享），行为差异只有三处——textarea 更高、placeholder 承载 `$ 技能` 发现性、无队列/停止等任务态控件。 */
+/** 新建起点页专属输入卡（票 01）：菜单交互与 MessageComposer 同构（useComposerMenu 共享），行为差异只有三处——textarea 更高、placeholder 承载 `$ 技能` 发现性、无队列/停止等任务态控件。 */
 function StartComposer(props: NewTaskStartProps) {
   const { draft } = props;
   const value = draft.text;
-  const [menu, setMenu] = useState<ComposerMenuState | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  /** Esc 关闭菜单的签名（value + 光标）：draft 未变化前不再自动弹出 */
-  const dismissedRef = useRef<string | null>(null);
-  const skillMenuOpenRef = useRef(false);
   const canSend = value.trim() !== "" && !draft.busy;
 
-  const { workspaceFiles, skills, onOpenSkills } = props;
-  const syncMenu = useCallback(
-    (text: string, caretIndex: number) => {
-      const signature = `${text.length}:${caretIndex}:${text}`;
-      if (dismissedRef.current === signature) return;
-      const parsed = parseComposerDraft(text, { caretIndex });
-      const openingSkills =
-        parsed.menu === "skills" && !skillMenuOpenRef.current;
-      skillMenuOpenRef.current = parsed.menu === "skills";
-      setMenu(
-        computeMenu(parsed, {
-          files: workspaceFiles,
-          skills,
-        })
-      );
-      if (openingSkills) onOpenSkills?.();
-    },
-    [workspaceFiles, skills, onOpenSkills]
-  );
-
-  // 异步候选（技能预览）到达时重算；Esc 关闭后不因刷新而重开。
-
-  useEffect(() => {
-    const caret = textareaRef.current?.selectionStart ?? value.length;
-    syncMenu(value, caret);
-  }, [workspaceFiles, skills]);
-
-  function commitText(next: string, caretIndex: number) {
-    props.onEditDraft({ text: next });
-    dismissedRef.current = null;
-    syncMenu(next, caretIndex);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(caretIndex, caretIndex);
-    });
-  }
+  // `/`·`@`·`$` 菜单宿主：状态机与键盘导航收拢在 useComposerMenu
+  //（与 MessageComposer 共用），本组件只保留提交与新建态键处理。
+  const {
+    menu,
+    textareaRef,
+    syncMenu,
+    handleTyping,
+    selectItem,
+    handleMenuKeyDown,
+    resetMenu,
+  } = useComposerMenu({
+    value,
+    onTextCommit: (next) => props.onEditDraft({ text: next }),
+    onSend: props.onSend,
+    canSubmit: !draft.busy,
+    workspaceFiles: props.workspaceFiles,
+    skills: props.skills,
+    onOpenSkills: props.onOpenSkills,
+  });
 
   function submit() {
     // 空白检查不改原文；提交解析（斜杠命令/首条消息）由上层统一分发
     if (value.trim() === "" || draft.busy) return;
     props.onSend(value);
-    setMenu(null);
-    dismissedRef.current = null;
-  }
-
-  function selectItem(
-    item: ComposerMenuState["items"][number],
-    caretIndex: number
-  ) {
-    if (menu === null) return;
-    if (menu.kind === "skills") {
-      const applied = applySkillSelection({
-        text: value,
-        skillStart: menu.skillStart ?? 0,
-        selectedName: (item as SkillDescriptor).name,
-        caretIndex,
-      });
-      commitText(applied.text, applied.caretIndex);
-    } else if (menu.kind === "mentions") {
-      const applied = applyMentionSelection({
-        text: value,
-        mentionStart: menu.mentionStart ?? 0,
-        selectedPath: item as string,
-        caretIndex,
-      });
-      commitText(applied.text, applied.caretIndex);
-    } else {
-      const command = item as SlashCommandDef;
-      if (command.argumentHint === null) {
-        // 无参命令选中即提交（与正式 composer 同构），清空输入防重复
-        props.onEditDraft({ text: "" });
-        setMenu(null);
-        dismissedRef.current = null;
-        if (!draft.busy) props.onSend(`/${command.name}`);
-      } else {
-        commitText(`/${command.name} `, `/${command.name} `.length);
-      }
-    }
+    resetMenu();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
-    if (menu !== null && !event.shiftKey) {
-      const result = handleMenuKey(menu, event.key);
-      if (result.action === "move") {
-        event.preventDefault();
-        setMenu({ ...menu, activeIndex: result.activeIndex });
-        return;
-      }
-      if (result.action === "close") {
-        event.preventDefault();
-        const caret = event.currentTarget.selectionStart ?? value.length;
-        dismissedRef.current = `${value.length}:${caret}:${value}`;
-        skillMenuOpenRef.current = false;
-        setMenu(null);
-        return;
-      }
-      if (result.action === "select") {
-        event.preventDefault();
-        selectItem(
-          result.item,
-          event.currentTarget.selectionStart ?? value.length
-        );
-        return;
-      }
-    }
+    if (handleMenuKeyDown(event)) return;
     // Enter 发送，Shift+Enter 换行
     if (
       event.key === "Enter" &&
@@ -438,11 +341,10 @@ function StartComposer(props: NewTaskStartProps) {
           data-testid="composer-input"
           value={value}
           onChange={(event) => {
-            props.onEditDraft({ text: event.target.value });
-            const caret =
-              event.target.selectionStart ?? event.target.value.length;
-            dismissedRef.current = null;
-            syncMenu(event.target.value, caret);
+            handleTyping(
+              event.target.value,
+              event.target.selectionStart ?? event.target.value.length
+            );
           }}
           onClick={(event) => {
             const caret = event.currentTarget.selectionStart ?? value.length;

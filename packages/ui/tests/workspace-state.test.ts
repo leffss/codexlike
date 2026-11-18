@@ -405,7 +405,7 @@ describe("工作台页面之上的状态", () => {
       "second",
     ]);
   });
-  it("新建草稿按入口分份：切入口恢复各自持久草稿（文字/目录/模式互不串扰），重置独立已选目录不影响其他入口", async () => {
+  it("新建草稿按入口分份：切入口恢复各自持久草稿（文字/目录/模式互不串扰），切回独立恢复已存的目录选择", async () => {
     const preferences = {
       providerProfileId: "prof-1",
       model: "glm-4.7",
@@ -452,23 +452,22 @@ describe("工作台页面之上的状态", () => {
     expect(state.newDraft("p1").workspaceMode).toBe("worktree");
     expect(state.newDraft("p1").projectId).toBe("p1");
     // 切到独立入口：恢复独立入口草稿（文字与已选目录各自恢复）；
-    // 归属字段随入口（独立任务发送的数据面）
+    // 归属字段随入口（独立任务发送的数据面）。切换为纯恢复——
+    // 不重置已选目录（修订：用户故事 5「切到哪个入口就恢复哪个入口的
+    // 文字与设置」，目录是设置的一部分）
     await state.loadNewDraft(null, "prof-1", "glm-4.7");
     const standalone = state.newDraft(null);
     expect(standalone.text).toBe("独立入口的文字");
     expect(standalone.workspacePath).toBe("E:\\picked");
     expect(standalone.projectId).toBeNull();
-    // 切换到独立时重置已选目录（票 02：目录选择不跨切换保留）
-    state.editNewDraft(null, { workspacePath: undefined });
-    expect(state.newDraft(null).workspacePath).toBeUndefined();
     await state.flush();
-    // 项目入口草稿不受独立入口重置影响（各入口互不串扰）
+    // 项目入口草稿不受独立入口切换影响（各入口互不串扰）
     expect(state.newDraft("p1").text).toBe("项目入口的文字");
-    // 重开（重建状态）：独立入口恢复后无已选目录，项目入口文字仍在
+    // 重开（重建状态）：切回独立仍恢复已存的目录选择，项目入口文字仍在
     const reopened = createWorkspaceState(port);
     await reopened.loadNewDraft(null, "prof-1", "glm-4.7");
     expect(reopened.newDraft(null).text).toBe("独立入口的文字");
-    expect(reopened.newDraft(null).workspacePath).toBeUndefined();
+    expect(reopened.newDraft(null).workspacePath).toBe("E:\\picked");
     await reopened.loadNewDraft("p1", "prof-1", "glm-4.7");
     expect(reopened.newDraft("p1").text).toBe("项目入口的文字");
     expect(reopened.newDraft("p1").workspaceMode).toBe("worktree");
