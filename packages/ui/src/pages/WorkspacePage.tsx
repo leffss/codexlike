@@ -808,7 +808,7 @@ export function WorkspacePage(props: {
       if (taskRequestRef.current === request) {
         setLoading(false);
         pushLocalStatus(
-          `恢复草稿失败：${error instanceof Error ? error.message : String(error)}`
+          `进入新建任务失败：${error instanceof Error ? error.message : String(error)}`
         );
       }
       return false;

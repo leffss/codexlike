@@ -344,7 +344,7 @@ export function RailPanel(props: {
               <p className="px-3 pb-2 text-xs text-danger-fg">{error}</p>
             ) : !hasTask ? (
               <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-fg-muted">
-                草稿态暂无任务改动，发送首条消息后可检视。
+                新建任务暂无改动，发送第一条消息后可检视。
               </div>
             ) : !loading && status?.isGitRepo === false ? (
               <div
