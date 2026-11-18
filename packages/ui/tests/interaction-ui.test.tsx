@@ -371,5 +371,14 @@ describe("唯一底部 InteractionPanel", () => {
     expect(html.indexOf('data-testid="interaction-region"')).toBeLessThan(
       html.indexOf('data-testid="interaction-panel"')
     );
+    // 面板本体复用 composer-card 卡片形态：rounded-2xl 浮卡带边框阴影，
+    // 高度上限 65vh 随内容增加；不再是 border-t 全宽条带。
+    const panel =
+      html.match(/<section[^>]*data-testid="interaction-panel"[^>]*>/)?.[0] ??
+      "";
+    expect(panel).toContain("rounded-2xl");
+    expect(panel).toContain("shadow-lg");
+    expect(panel).toContain("max-h-[65vh]");
+    expect(panel).not.toContain("border-t");
   });
 });

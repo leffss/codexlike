@@ -63,8 +63,10 @@ export function InteractionPanel(props: {
   }
   return (
     // 外壳与消息输入框共用同一插槽容器（ComposerRegion）：画布背景、
-    // px-4 py-3、滚动槽右缘补偿、contentWidthClass 居中收窄——问题区域
-    // 宽度与输入框一致，不再占满中栏（2026-11-19 整合轮）。
+    // px-4 py-3、滚动槽右缘补偿、contentWidthClass 居中收窄；面板本体
+    // 复用 composer-card 的卡片形态（rounded-2xl 边框浮卡，宽度=输入
+    // 卡片宽、高度随内容增加，上限 65vh）——问题区域直接「就是」输入框
+    // 位置上的卡片，输入框原组件全部隐藏（2026-11-19 整合轮）。
     <ComposerRegion
       testId="interaction-region"
       contentWidthClass={props.contentWidthClass}
@@ -75,7 +77,7 @@ export function InteractionPanel(props: {
         data-interaction-kind={request.kind}
         aria-label="等待用户交互"
         aria-busy={props.busy}
-        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col border-t border-line bg-surface px-4 py-3 text-fg"
+        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col rounded-2xl border border-line bg-surface px-4 py-3 text-fg shadow-lg transition-colors focus-within:border-fg-muted"
       >
         <header className="mb-2 flex flex-wrap items-center gap-2 text-xs">
           <span
