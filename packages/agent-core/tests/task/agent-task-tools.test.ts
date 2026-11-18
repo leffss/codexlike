@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
+import { createLanguageModelFromProfile } from "../../src/provider/language-model";
 import type { ProviderProfile } from "../../src/provider/provider-profile";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createAgentTask } from "../../src/task/agent-task";
@@ -154,7 +155,173 @@ function makeTask(
   return { task, persistence };
 }
 
+interface ProtocolRequest {
+  messages: {
+    role: string;
+    content?: string;
+    tool_call_id?: string;
+    tool_calls?: { id: string }[];
+  }[];
+}
+
+/** 只替换 HTTP 边界，真实 provider + SDK 负责解析调用并组装下一次请求。 */
+function protocolRound(
+  calls: { id: string; name: string; arguments: string }[] | string
+): Response {
+  const delta =
+    typeof calls === "string"
+      ? { content: calls }
+      : {
+          tool_calls: calls.map((call, index) => ({
+            index,
+            id: call.id,
+            type: "function",
+            function: { name: call.name, arguments: call.arguments },
+          })),
+        };
+  const frame = (delta: unknown, finish: string | null) => ({
+    id: "chatcmpl-protocol",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "test",
+    choices: [{ index: 0, delta, finish_reason: finish }],
+  });
+  return new Response(
+    [
+      frame(delta, null),
+      frame({}, typeof calls === "string" ? "stop" : "tool_calls"),
+    ]
+      .map((value) => `data: ${JSON.stringify(value)}\n\n`)
+      .join("") + "data: [DONE]\n\n",
+    { headers: { "content-type": "text/event-stream" } }
+  );
+}
+
+async function runProtocolCalls(
+  subagent: boolean,
+  calls: { id: string; name: string; arguments: string }[]
+) {
+  const requests: ProtocolRequest[] = [];
+  const executed: unknown[] = [];
+  const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)) as ProtocolRequest);
+    const index = requests.length - 1;
+    if (subagent && index === 0)
+      return protocolRound([
+        {
+          id: "delegate",
+          name: "spawn_subagent",
+          arguments: '{"task":"检查协议"}',
+        },
+      ]);
+    if (index === (subagent ? 1 : 0)) return protocolRound(calls);
+    return protocolRound("完成");
+  };
+  const factory = () => createLanguageModelFromProfile(profile, { fetch });
+  const persistence = createSqliteTaskStore(":memory:");
+  const record = taskRecord("C:/work/demo");
+  record.approvalMode = "ask";
+  persistence.insertTask(record);
+  const tools = [
+    {
+      name: "write",
+      description: "可观察的副作用边界",
+      permission: "write" as const,
+      parameters: { type: "object" as const },
+      async execute(input: unknown) {
+        executed.push(input);
+        return { output: "执行完成", isError: false };
+      },
+    },
+  ];
+  const task = createAgentTask({
+    record,
+    persistence,
+    languageModelFor: factory,
+    tools,
+    ...(subagent
+      ? {
+          subagents: {
+            tools,
+            languageModelFor: factory,
+            settings: () => ({ maxConcurrent: 1 }),
+            resolveModel: async () => ({ profile, model: profile.models[0]! }),
+          },
+        }
+      : {}),
+  });
+  try {
+    const events: TaskEvent[] = [];
+    for await (const event of task.sendMessage({ text: "检查协议", profile })) {
+      events.push(event);
+      if (event.type === "interaction-request")
+        task.respondApproval(event.interaction.request.id, "approve");
+    }
+    return {
+      events,
+      executed,
+      nextRequest: requests[subagent ? 2 : 1],
+      stored: subagent
+        ? persistence.listSubagentToolCalls(task.id)
+        : persistence.listToolCalls(task.id),
+    };
+  } finally {
+    persistence.close();
+  }
+}
+
 describe("AgentTask 工具循环（六件工具默认放行）", () => {
+  it.each([false, true])(
+    "F18：未知工具在真实 SDK 请求中恰好一个结果（子代理：%s）",
+    async (subagent) => {
+      const { events, executed, nextRequest, stored } = await runProtocolCalls(
+        subagent,
+        [{ id: "unknown-call", name: "unknown_tool", arguments: "{}" }]
+      );
+      expect(nextRequest).toBeDefined();
+      expect(
+        nextRequest!.messages.filter(
+          (message) => message.tool_call_id === "unknown-call"
+        )
+      ).toHaveLength(1);
+      expect(executed).toEqual([]);
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({
+        toolName: "unknown_tool",
+        isError: true,
+      });
+      expect(events.at(-1)?.type).toBe("assistant-done");
+    }
+  );
+
+  it.each([false, true])(
+    "F18：非法调用不审批不执行，混合合法调用仍单次配对（子代理：%s）",
+    async (subagent) => {
+      const { events, executed, nextRequest, stored } = await runProtocolCalls(
+        subagent,
+        [
+          { id: "invalid-call", name: "write", arguments: '{"broken":' },
+          { id: "valid-call", name: "write", arguments: '{"value":"valid"}' },
+        ]
+      );
+      expect(executed).toEqual([{ value: "valid" }]);
+      expect(
+        events.filter((event) => event.type === "interaction-request")
+      ).toHaveLength(1);
+      expect(nextRequest).toBeDefined();
+      const results = nextRequest!.messages.filter(
+        (message) => message.role === "tool"
+      );
+      expect(results.map((message) => message.tool_call_id)).toEqual([
+        "invalid-call",
+        "valid-call",
+      ]);
+      expect(stored.map((call) => call.isError)).toEqual([true, false]);
+      expect(stored[0]?.output).toContain("参数无效");
+      expect(events.at(-1)?.type).toBe("assistant-done");
+    }
+  );
+
   it("普通请求自主加载技能与资源，仅同轮回填且 active 摘要实时变化，下轮执行者清空", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord("C:/work/demo");
@@ -203,7 +370,10 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       text: "处理任务",
       profile,
     })) {
-      if (event.type === "tool-result" && event.call.id === "load") {
+      if (
+        event.type === "tool-result" &&
+        event.call.toolName === "load_skill"
+      ) {
         expect(event.call.isError).toBe(false);
         expect(task.resourceState.active?.loaded).toHaveLength(1);
       }
@@ -316,7 +486,8 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     );
 
     const result = events.find(
-      (event) => event.type === "tool-result" && event.call.id === "plan-1"
+      (event) =>
+        event.type === "tool-result" && event.call.toolName === "update_plan"
     );
     expect(result).toMatchObject({
       call: {
@@ -331,7 +502,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      id: "plan-1",
+      id: result?.type === "tool-result" ? result.call.id : "missing",
       toolName: "update_plan",
       isError: false,
       arguments: JSON.stringify(plan),
@@ -456,7 +627,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
         e.type === "tool-call"
     );
     expect(toolCallEvent?.call.toolName).toBe("write_file");
-    expect(toolCallEvent?.call.id).toBe("call-1");
+    expect(toolCallEvent?.call.id).not.toBe("call-1");
     expect(JSON.parse(toolCallEvent!.call.arguments)).toEqual({
       path: "hello.txt",
       content: "你好工具",
@@ -481,7 +652,7 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
     const calls = persistence.listToolCalls("task-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      id: "call-1",
+      id: toolCallEvent?.call.id,
       toolName: "write_file",
       isError: false,
     });

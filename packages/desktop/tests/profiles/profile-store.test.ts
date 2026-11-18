@@ -22,6 +22,31 @@ const fakeSafeStorage = {
   },
 };
 
+function pauseEncryptionFor(apiKey: string) {
+  let entered!: () => void;
+  let resume!: () => void;
+  const encrypting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  return {
+    encrypting,
+    resume,
+    safeStorage: {
+      ...fakeSafeStorage,
+      encryptString: async (plain: string) => {
+        if (plain === apiKey) {
+          entered();
+          await released;
+        }
+        return fakeSafeStorage.encryptString(plain);
+      },
+    },
+  };
+}
+
 const validInput: ProviderProfileInput = {
   name: "GLM",
   baseURL: "https://open.bigmodel.cn/api/paas/v4",
@@ -200,6 +225,142 @@ describe("profile store（safeStorage 加密落盘）", () => {
     expect(
       restored.find((p) => p.id === withoutWindow.id)?.contextWindowTokens
     ).toBeUndefined();
+  });
+
+  it("更新 A 等待加密期间删除 B，提交后 B 仍不存在", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-update-a");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const a = await store.create({ ...validInput, name: "A" });
+    const b = await store.create({ ...validInput, name: "B" });
+    const updating = store.update(a.id, {
+      ...validInput,
+      name: "A 已更新",
+      apiKey: "sk-update-a",
+    });
+    await gate.encrypting;
+    try {
+      expect(await store.remove(b.id)).toBe(true);
+      expect(await store.list()).toEqual([a]);
+    } finally {
+      gate.resume();
+    }
+
+    const updated = await updating;
+    const reopened = createProfileStore({ dir, safeStorage: fakeSafeStorage });
+    expect(await reopened.list()).toEqual([updated]);
+  });
+
+  it("并发创建的加密乱序完成后，两份 Provider Profile 均可重读", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-slow-create");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const creating = store.create({
+      ...validInput,
+      name: "慢创建",
+      apiKey: "sk-slow-create",
+    });
+    await gate.encrypting;
+    let fast;
+    try {
+      fast = await store.create({ ...validInput, name: "快创建" });
+    } finally {
+      gate.resume();
+    }
+    const slow = await creating;
+
+    expect(
+      await createProfileStore({ dir, safeStorage: fakeSafeStorage }).list()
+    ).toEqual([fast, slow]);
+  });
+
+  it("更新目标在加密期间被删除则返回 null，不复活目标", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-deleted");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const target = await store.create(validInput);
+    const updating = store.update(target.id, {
+      ...validInput,
+      apiKey: "sk-deleted",
+    });
+    await gate.encrypting;
+    try {
+      expect(await store.remove(target.id)).toBe(true);
+    } finally {
+      gate.resume();
+    }
+
+    expect(await updating).toBeNull();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("不同 Profile 并发更新不会回滚先提交的字段", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-slow-update");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const a = await store.create({ ...validInput, name: "A" });
+    const b = await store.create({ ...validInput, name: "B" });
+    const updating = store.update(a.id, {
+      ...validInput,
+      name: "A 已更新",
+      apiKey: "sk-slow-update",
+    });
+    await gate.encrypting;
+    let updatedB;
+    try {
+      updatedB = await store.update(b.id, { ...validInput, name: "B 已更新" });
+    } finally {
+      gate.resume();
+    }
+    const updatedA = await updating;
+
+    expect(await store.list()).toEqual([updatedA, updatedB]);
+  });
+
+  it("创建等待加密期间的删除和更新都保留在最终配置", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-new-profile");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const a = await store.create({ ...validInput, name: "A" });
+    const b = await store.create({ ...validInput, name: "B" });
+    const creating = store.create({
+      ...validInput,
+      name: "C",
+      apiKey: "sk-new-profile",
+    });
+    await gate.encrypting;
+    let updatedB;
+    try {
+      expect(await store.remove(a.id)).toBe(true);
+      updatedB = await store.update(b.id, { ...validInput, name: "B 已更新" });
+    } finally {
+      gate.resume();
+    }
+    const c = await creating;
+
+    expect(await store.list()).toEqual([updatedB, c]);
+  });
+
+  it("更新等待加密期间新增的 Profile 不会被覆盖", async () => {
+    const dir = makeTempDir();
+    const gate = pauseEncryptionFor("sk-updating");
+    const store = createProfileStore({ dir, safeStorage: gate.safeStorage });
+    const a = await store.create(validInput);
+    const updating = store.update(a.id, {
+      ...validInput,
+      name: "更新完成",
+      apiKey: "sk-updating",
+    });
+    await gate.encrypting;
+    let created;
+    try {
+      created = await store.create({ ...validInput, name: "新增配置" });
+    } finally {
+      gate.resume();
+    }
+
+    const updated = await updating;
+    expect(await store.list()).toEqual([updated, created]);
   });
 
   it("safeStorage 不可用时 create/update 抛错，绝不写明文 key", async () => {

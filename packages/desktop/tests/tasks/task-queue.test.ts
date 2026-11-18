@@ -247,6 +247,30 @@ describe("createTaskQueueCoordinator（满员入队与 FIFO 自动开跑）", ()
     expect(app.queue.snapshot().map((item) => item.taskId)).toEqual(["task-d"]);
   });
 
+  it("F05 启动拒绝尚未结算时收到 pump，解冻唤醒不会被防重入吞掉", async () => {
+    let reject!: (error: Error) => void;
+    const frozenStart = new Promise<void>((_resolve, fail) => {
+      reject = fail;
+    });
+    let frozen = true;
+    const app = harness({
+      start: () => (frozen ? frozenStart : Promise.resolve()),
+    });
+    app.setExecuting(["task-a", "task-b"]);
+    app.queue.gate("task-c", START_INPUT);
+    app.setExecuting(["task-a"]);
+    const pumping = app.queue.pump();
+    frozen = false;
+    reject(new Error("冻结期间拒绝启动"));
+    await app.queue.pump();
+    await pumping;
+    expect(app.queue.isQueued("task-c")).toBe(false);
+    expect(app.changes.at(-1)).toMatchObject({
+      taskId: "task-c",
+      reason: "dequeue",
+    });
+  });
+
   it("pump 中 remove 落库失败（存储故障）：开跑不重复、错误上抛不吞", async () => {
     // remove 对队首抛错模拟存储故障（如 SQLite 写锁）：与开跑失败不同，
     // 此时消息已进入任务（start 成功）——吞错会让「开跑成功才出队落库」
@@ -275,6 +299,53 @@ describe("createTaskQueueCoordinator（满员入队与 FIFO 自动开跑）", ()
       "task-c",
       "task-d",
     ]);
+  });
+
+  it("F01 旧准备被取消后同任务重新排队，旧完成不能删除新意图或跳过后继", async () => {
+    const store = createMemoryStore();
+    const executing = new Set(["占坑"]);
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let preparingSignal: AbortSignal | undefined;
+    const queue = createTaskQueueCoordinator({
+      store,
+      limit: () => 1,
+      executingTaskIds: () => [...executing],
+      start: async (entry, signal) => {
+        if (entry.text === "旧意图") {
+          preparingSignal = signal;
+          await gate;
+          // 旧异步准备即使正常返回，也不能出队后来的同任务新意图。
+          return;
+        }
+        signal.throwIfAborted();
+        started.push(entry.text);
+        executing.add(entry.taskId);
+      },
+      onChange: () => {},
+    });
+    queue.gate("task-a", { ...START_INPUT, text: "旧意图" });
+    queue.gate("task-b", { ...START_INPUT, text: "原有后继" });
+    executing.clear();
+    const pumping = queue.pump();
+    expect(queue.remove("task-a")).toBe(true);
+    expect(preparingSignal?.aborted).toBe(true);
+    executing.add("暂时占坑");
+    queue.gate("task-a", { ...START_INPUT, text: "新意图" });
+    executing.clear();
+    release();
+    await pumping;
+    expect(started).toEqual(["原有后继"]);
+    expect(queue.snapshot()).toMatchObject([
+      { taskId: "task-a", text: "新意图" },
+    ]);
+    executing.clear();
+    await queue.pump();
+    expect(started).toEqual(["原有后继", "新意图"]);
+    expect(queue.snapshot()).toEqual([]);
   });
 
   it("remove 出队：条目消失并推送通知，pump 跳过被移除任务", async () => {

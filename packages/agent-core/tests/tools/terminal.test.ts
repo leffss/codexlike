@@ -1,15 +1,32 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { createTerminalTool } from "../../src/tools/terminal";
 import type { ToolExecutionContext } from "../../src/tools/types";
 
+const workspaces: string[] = [];
+
 function makeWorkspace(): string {
-  return mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+  const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+  workspaces.push(workspace);
+  return workspace;
 }
+
+afterEach(async () => {
+  for (const workspace of workspaces.splice(0)) {
+    // 超时/abort 的 taskkill 异步退出，不能用同步删除阻塞其收尾事件。
+    await rm(workspace, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  }
+});
 
 function context(workspacePath: string): ToolExecutionContext {
   return {
@@ -21,6 +38,59 @@ function context(workspacePath: string): ToolExecutionContext {
 
 /** 与生产宿主同构：传完整 process.env，工具层做白名单过滤 */
 const baseEnv = { ...process.env };
+
+describe.skipIf(process.platform !== "win32")(
+  "run_terminal_command 真实 Windows cmd 参数",
+  () => {
+    it("带空格绝对路径、带引号参数与 cmd 元字符按原命令执行", async () => {
+      const workspace = makeWorkspace();
+      const directory = join(workspace, "space directory");
+      mkdirSync(directory);
+      const file = join(directory, "quoted & value.txt");
+      writeFileSync(file, "space-path-ok");
+      const cmd = createTerminalTool({ env: baseEnv, shell: "cmd" });
+
+      const result = await cmd.execute(
+        {
+          command: `type "${file}" && echo quoted ^& literal && (echo piped | findstr piped)`,
+        },
+        context(workspace)
+      );
+
+      expect(result.isError, result.output).toBe(false);
+      expect(result.output).toContain("space-path-ok");
+      expect(result.output).toContain("quoted & literal");
+    });
+
+    it("带空格可执行程序路径和参数保留双引号、空格、元字符", async () => {
+      const workspace = makeWorkspace();
+      const directory = join(workspace, "program files");
+      mkdirSync(directory);
+      const executable = join(directory, "node copy.exe");
+      copyFileSync(process.execPath, executable);
+      const script = join(directory, "print args.cjs");
+      writeFileSync(
+        script,
+        "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n"
+      );
+      const cmd = createTerminalTool({ env: baseEnv, shell: "cmd" });
+
+      const result = await cmd.execute(
+        {
+          command: `"${executable}" "${script}" "hello world" "a&b|c" "say \\"hi\\""`,
+        },
+        context(workspace)
+      );
+
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.output)).toEqual([
+        "hello world",
+        "a&b|c",
+        'say "hi"',
+      ]);
+    });
+  }
+);
 
 describe("run_terminal_command 工具（默认 Git Bash）", () => {
   const tool = createTerminalTool({ env: baseEnv });

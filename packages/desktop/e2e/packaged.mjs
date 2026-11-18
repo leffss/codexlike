@@ -25,7 +25,11 @@ assert(existsSync(exe), `打包产物不存在：${exe}（先 pnpm dist）`);
 const homeRoot = join(tmpdir(), `codexlike-packaged-${Date.now()}`);
 const homeDir = join(homeRoot, "nested", "deeper");
 
-const { app, window } = await launchApp({ homeDir });
+const { app, window } = await launchApp({
+  homeDir,
+  // Electron 缓存与业务库分离，不能由测试隔离提前建好缺失的业务父目录。
+  env: { CODEXLIKE_TEST_USER_DATA: join(homeRoot, "electron-user-data") },
+});
 try {
   // firstWindow 已隐含「窗口创建」断言（无窗口则超时抛错）；标题再显式确认
   assert((await window.title()).length > 0, "窗口标题为空（窗口未真正创建）");

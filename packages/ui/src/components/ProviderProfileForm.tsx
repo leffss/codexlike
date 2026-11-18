@@ -83,7 +83,9 @@ export function ProviderProfileForm(props: {
     // 上下文窗口为可选字段：空串 → undefined（走默认 128k），数字随表单提交
     const windowTokens = windowTokensFromText(windowTokensText);
     const submitted: ProviderProfileInput = {
-      ...input,
+      name: input.name,
+      baseURL: input.baseURL,
+      apiKey: input.apiKey,
       models,
       ...(windowTokens !== undefined
         ? { contextWindowTokens: windowTokens }

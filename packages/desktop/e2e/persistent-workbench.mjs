@@ -70,8 +70,52 @@ async function main() {
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);
     await form.getByLabel("API Key").fill("test");
     await form.getByLabel("模型 1").fill("persistent-model");
+    await form.getByLabel("上下文窗口（tokens，可选）").fill("64000");
     await form.getByRole("button", { name: /保存|创建/ }).click();
     await window.getByText("Persistent Mock", { exact: true }).waitFor();
+    // F21：只修改其它字段不能清掉已有上下文窗口；主动清空则应移除配置。
+    const profileCard = window
+      .locator("li")
+      .filter({ hasText: "Persistent Mock" });
+    await profileCard
+      .getByRole("button", { name: "编辑", exact: true })
+      .click();
+    assert(
+      (await form.getByLabel("上下文窗口（tokens，可选）").inputValue()) ===
+        "64000",
+      "Profile 编辑必须恢复已保存的上下文窗口"
+    );
+    await form.getByLabel("API Key").fill("test-updated");
+    await form.getByRole("button", { name: "保存修改", exact: true }).click();
+    await profileCard
+      .getByRole("button", { name: "编辑", exact: true })
+      .waitFor();
+    assert(
+      await window.evaluate(
+        async () =>
+          (await window.codexlike.providerProfiles.list()).find(
+            (profile) => profile.name === "Persistent Mock"
+          )?.contextWindowTokens === 64000
+      ),
+      "只改 API Key 后仍应保留 64000 窗口"
+    );
+    await profileCard
+      .getByRole("button", { name: "编辑", exact: true })
+      .click();
+    await form.getByLabel("上下文窗口（tokens，可选）").fill("");
+    await form.getByRole("button", { name: "保存修改", exact: true }).click();
+    await profileCard
+      .getByRole("button", { name: "编辑", exact: true })
+      .waitFor();
+    assert(
+      await window.evaluate(
+        async () =>
+          (await window.codexlike.providerProfiles.list()).find(
+            (profile) => profile.name === "Persistent Mock"
+          )?.contextWindowTokens === undefined
+      ),
+      "用户主动清空上下文窗口必须回到未配置态"
+    );
     await window.getByTestId("profile-create").click();
     await form.getByLabel("名称").fill("Second Mock");
     await form.getByLabel("baseURL").fill(`http://127.0.0.1:${model.port}/v1`);

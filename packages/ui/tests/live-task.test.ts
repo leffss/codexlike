@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { TaskEventEnvelope, TaskView } from "@codexlike/desktop/ipc";
 import { applyTaskEvent } from "../src/lib/task-view";
 import { hydrateLiveTask, receiveLiveEvent } from "../src/lib/live-task";
+import { groupTurns } from "../src/lib/turn-view";
 
 const activity = {
   running: true,
@@ -489,7 +490,12 @@ it("子代理恢复（票 04）：view 并行快照随 hydrate 重建过程段�
 
   // compact 整体重放（spawn 行在保留轮次内）：消息流位置随新 history，
   // 过程富数据（轮次/工具/起止时间）不因 compact 丢失（ADR 0021：记录与 compact 无关）
-  const compacted = receiveLiveEvent(restored, {
+  const compacting = receiveLiveEvent(restored, {
+    ...delta(2, "", "compact-1"),
+    activity: { ...activity, operation: "compact" },
+    event: { type: "compact-start" },
+  });
+  const compacted = receiveLiveEvent(compacting, {
     ...delta(3, "", "compact-1"),
     activity: { ...activity, running: false, outcome: "completed" },
     event: {
@@ -521,6 +527,139 @@ it("子代理恢复（票 04）：view 并行快照随 hydrate 重建过程段�
       { content: "最终报告：已梳理" },
     ],
   });
+});
+
+it("连续 compact 保留被裁旧轮和无 spawn 的 interrupted 记录，不挤到最新轮之后", () => {
+  const message = (
+    id: string,
+    minute: string,
+    content: string,
+    role: "user" | "assistant" | "compact-summary" = "user"
+  ) => ({
+    kind: "message" as const,
+    message: {
+      id,
+      taskId: "a",
+      role,
+      content,
+      createdAt: `2026-11-14T08:${minute}:00Z`,
+    },
+  });
+  const latest = [
+    message("u2", "10", "第二轮"),
+    message("a2", "11", "最新主正文", "assistant"),
+  ];
+  const spawn = {
+    kind: "tool-call" as const,
+    call: {
+      id: "old-spawn",
+      taskId: "a",
+      toolName: "spawn_subagent",
+      arguments: '{"task":"旧委派"}',
+      output: "旧报告",
+      isError: false,
+      createdAt: "2026-11-14T08:01:00Z",
+    },
+  };
+  const subagents: TaskView["subagents"] = [
+    {
+      record: {
+        id: "old-subagent",
+        taskId: "a",
+        task: "旧委派",
+        status: "completed",
+        queuedAt: "2026-11-14T08:01:00Z",
+        startedAt: "2026-11-14T08:01:01Z",
+        completedAt: "2026-11-14T08:02:00Z",
+      },
+      messages: [
+        {
+          id: "old-msg",
+          taskId: "a",
+          subagentId: "old-subagent",
+          content: "旧报告",
+          createdAt: "2026-11-14T08:02:00Z",
+        },
+      ],
+      toolCalls: [],
+    },
+    {
+      record: {
+        id: "interrupted-subagent",
+        taskId: "a",
+        task: "无 spawn 委派",
+        status: "interrupted",
+        queuedAt: "2026-11-14T08:03:00Z",
+        startedAt: null,
+        completedAt: "2026-11-14T08:04:00Z",
+      },
+      messages: [
+        {
+          id: "partial-msg",
+          taskId: "a",
+          subagentId: "interrupted-subagent",
+          content: "中断前内容",
+          createdAt: "2026-11-14T08:04:00Z",
+        },
+      ],
+      toolCalls: [],
+    },
+  ];
+  const view: TaskView = {
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    events: [],
+    history: [message("u1", "00", "第一轮"), spawn, ...latest],
+    subagents,
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  let state = hydrateLiveTask(view);
+  const history = [
+    message("summary", "20", "旧轮摘要", "compact-summary"),
+    ...latest,
+  ];
+  for (const sequence of [1, 3]) {
+    state = receiveLiveEvent(state, {
+      ...delta(sequence, "", `compact-${sequence}`),
+      event: { type: "compact-start" },
+    });
+    state = receiveLiveEvent(state, {
+      ...delta(sequence + 1, "", `compact-${sequence}`),
+      activity: view.activity,
+      event: { type: "compact-finished", outcome: "completed", history },
+    });
+    expect(
+      state.items.filter((item) => item.kind === "subagent")
+    ).toMatchObject([
+      { id: "old-subagent", report: "旧报告", turns: [{ content: "旧报告" }] },
+      {
+        id: "interrupted-subagent",
+        state: "interrupted",
+        turns: [{ content: "中断前内容" }],
+      },
+    ]);
+    const turns = groupTurns(state.items, { lastTurnRunning: true });
+    expect(turns.at(-1)).toMatchObject({
+      turnId: "u2",
+      running: true,
+      finalAssistantId: "a2",
+    });
+    expect(new Set(turns.map((turn) => turn.turnId)).size).toBe(turns.length);
+    expect(new Set(state.items.map((item) => item.seq)).size).toBe(
+      state.items.length
+    );
+  }
+  const reopened = hydrateLiveTask({ ...view, history });
+  expect(
+    reopened.items
+      .filter((item) => item.kind === "subagent")
+      .map((item) => item.id)
+  ).toEqual(
+    state.items
+      .filter((item) => item.kind === "subagent")
+      .map((item) => item.id)
+  );
 });
 
 it("空闲队列事件按任务水位接续，加载缓冲与重复事件不回退队列", () => {

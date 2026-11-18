@@ -6,11 +6,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   createAgentResourceSnapshot,
   createBuiltinTools,
+  DEFAULT_TASK_CONCURRENCY_LIMIT,
   createTaskManager,
   createSqliteTaskStore,
   createWorktreeService,
 } from "@codexlike/agent-core/node";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
+import { createSqliteInputQueueStore } from "../../src/tasks/input-queue-store";
+import { createSqliteTaskQueueStore } from "../../src/tasks/task-queue-store";
 import { createApplicationExit } from "../../src/lifecycle/application-exit";
 import { createProfileStore } from "../../src/profiles/profile-store";
 import { createLiveTasks } from "../../src/tasks/live-tasks";
@@ -39,16 +42,20 @@ function invoke(name: string, ...args: unknown[]): any {
 // vi.waitFor 默认 1000ms 低于并行负载下 mock 一轮的实际耗时；条件均为终态
 // 信号，预算对齐用例上限内（见 workbench-ipc.test.ts 同说明）。
 const waitFor = (check: () => unknown) => vi.waitFor(check, { timeout: 4000 });
-async function setup() {
+async function setup(options?: { limit?: number }) {
   const root = mkdtempSync(join(tmpdir(), "exit-recovery-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "project");
   mkdirSync(workspace);
   const dbPath = join(root, "fresh", "tasks.db");
   const persistence = createSqliteTaskStore(dbPath);
+  const queueStore = createSqliteInputQueueStore(dbPath);
+  const taskQueueStore = createSqliteTaskQueueStore(dbPath);
   let closed = false;
   const close = () => {
     if (!closed) {
+      taskQueueStore.close();
+      queueStore.close();
       persistence.close();
       closed = true;
     }
@@ -107,6 +114,9 @@ async function setup() {
     profiles,
     getWindow: () => null,
     dataDir: root,
+    queueStore,
+    taskQueueStore,
+    concurrencyLimit: () => options?.limit ?? DEFAULT_TASK_CONCURRENCY_LIMIT,
     worktreeService: createWorktreeService({
       worktreesDir: join(root, "worktrees"),
     }),
@@ -149,6 +159,7 @@ async function setup() {
     project,
     frame,
     exit,
+    runtime,
     finished: () => finished,
     requests: () => requests,
   };
@@ -278,6 +289,43 @@ it("保存失败保留窗口与任务，返回后仍可取消等待；旧保存�
   await app.exit.flushed(app.exit.state().id);
   expect(app.finished()).toBe(true);
 });
+
+it.each(["取消退出", "保存失败"] as const)(
+  "F05 %s 解冻后，冻结期间已空出的名额自动开跑排队队首",
+  async (reason) => {
+    const app = await setup({ limit: 1 });
+    const running = await invoke("tasks:start", {
+      requestId: "thaw-running",
+      projectId: null,
+      text: "冻结前占坑",
+    });
+    await app.frame("冻结前占坑", { content: "尚未结束" });
+    const queued = await invoke("tasks:start", {
+      requestId: "thaw-queued",
+      projectId: null,
+      text: "解冻后排队任务",
+    });
+    app.exit.request();
+    const id = app.exit.state().id;
+    expect(app.exit.state().phase).toBe("confirming");
+    if (reason === "保存失败") app.exit.answer(id, true);
+    await app.frame("冻结前占坑", {}, "stop");
+    await waitFor(() => expect(app.runtime.hasWork()).toBe(false));
+    expect(invoke("tasks:execution", running.id).running).toBe(false);
+    expect(invoke("tasks:view", queued.id).activity.queued).toBe(true);
+    expect(app.requests()).toBe(1);
+
+    if (reason === "取消退出") app.exit.answer(id, false);
+    else await app.exit.flushed(id, "注入保存失败");
+    expect(app.finished()).toBe(false);
+    await waitFor(() => expect(app.requests()).toBe(2));
+    expect(invoke("tasks:view", queued.id).activity.queued).toBe(false);
+    expect(invoke("tasks:execution", queued.id).running).toBe(true);
+    await app.frame("解冻后排队任务", { content: "解冻后完成" }, "stop");
+    await waitFor(() => expect(app.runtime.hasWork()).toBe(false));
+  },
+  15_000
+);
 
 it("退出提示期间不提前取消已接收的准备任务，取消退出后首次发送继续", async () => {
   const app = await setup();

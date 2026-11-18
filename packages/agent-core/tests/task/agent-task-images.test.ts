@@ -195,7 +195,9 @@ describe("工具结果附图（截图回填模型：多模态附图 / 纯文本�
     expect(events.at(-1)?.type).toBe("assistant-done");
     // 工具执行上下文带 taskId / toolCallId（任务级浏览器与截图文件命名依赖它们）
     expect(captured[0]?.taskId).toBe("task-shot");
-    expect(captured[0]?.toolCallId).toBe("call-1");
+    const call = events.find((event) => event.type === "tool-call")?.call;
+    expect(captured[0]?.toolCallId).toBe(call?.id);
+    expect(captured[0]?.toolCallId).not.toBe("call-1");
 
     // 第二轮 prompt：tool 消息的 output 为 content 块（text + file 图片）
     const toolMessage = lastToolMessage(model.doStreamCalls[1]!.prompt);

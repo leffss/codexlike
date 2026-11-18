@@ -22,6 +22,8 @@ export function registerApplicationExit(options: {
    * 「退出」→ app.quit → before-quit 走屏障。未注入维持关闭即退出的旧行为。
    */
   minimizeToTray?(): void;
+  /** 退出需要用户处理时恢复、显示并聚焦主窗口，复用托盘的静默启动恢复逻辑。 */
+  showMainWindow?(): void;
 }) {
   const win = options.window;
   let storageClosed = false;
@@ -35,8 +37,10 @@ export function registerApplicationExit(options: {
   const exit = createApplicationExit({
     runtime: options.runtime,
     publish: (state) => {
-      if (!win.isDestroyed())
-        win.webContents.send(IPC.application.exitChanged, state);
+      if (win.isDestroyed()) return;
+      if (state.phase === "confirming" || state.phase === "error")
+        options.showMainWindow?.();
+      win.webContents.send(IPC.application.exitChanged, state);
     },
     finish: () => {
       void options.releaseResources().finally(() => app.quit());

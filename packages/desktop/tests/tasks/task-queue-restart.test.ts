@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createAgentResourceSnapshot,
@@ -68,14 +69,12 @@ async function setup(limit: number) {
     server.closeAllConnections();
     server.close();
   });
-  const profiles = createProfileStore({
-    dir: root,
-    safeStorage: {
-      isEncryptionAvailable: async () => true,
-      encryptString: async (text) => Buffer.from(text),
-      decryptString: async (bytes) => bytes.toString(),
-    },
-  });
+  const safeStorage = {
+    isEncryptionAvailable: async () => true,
+    encryptString: async (text: string) => Buffer.from(text),
+    decryptString: async (bytes: Buffer) => bytes.toString(),
+  };
+  const profiles = createProfileStore({ dir: root, safeStorage });
   const profile = await profiles.create({
     name: "重启模型",
     models: ["mock"],
@@ -151,7 +150,9 @@ async function setup(limit: number) {
   }
   return {
     open,
+    dbPath,
     profile,
+    safeStorage,
     requests,
     responses,
     holdReply,
@@ -208,6 +209,129 @@ it("排队中重启：启动泵一次后按原顺序自动开跑（上限内）�
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
   expect(queuedCMessages).toEqual(["重启排队丙"]);
+}, 30_000);
+
+it("F06 已排队首次发送重复请求及真实重开均返回原任务，FIFO 无孤儿队首", async () => {
+  const app = await setup(1);
+  const first = app.open();
+  await app.start("幂等占坑");
+  await app.holdReply("幂等占坑");
+  const queued = await app.start("幂等排队首条");
+  const next = await app.start("幂等后继首条");
+  const before = invoke("view", queued);
+  expect(before.activity.queued).toBe(true);
+  // 模拟 start 已成功、完成新建入口时后置 workbench:read 的凭据读取失败。
+  const readFailure = vi
+    .spyOn(app.safeStorage, "decryptString")
+    .mockRejectedValueOnce(new Error("注入后置草稿读取失败"));
+  try {
+    await expect(
+      handlers.get("workbench:read")!({}, { kind: "new", projectId: null })
+    ).rejects.toThrow("注入后置草稿读取失败");
+  } finally {
+    readFailure.mockRestore();
+  }
+  expect(await app.start("幂等排队首条")).toBe(queued);
+  expect(invoke("view", queued)).toEqual(before);
+  expect(invoke("list")).toHaveLength(3);
+  expect(app.requests).toEqual(["幂等占坑"]);
+  await first.close();
+
+  const reopened = app.open();
+  expect(await app.start("幂等排队首条")).toBe(queued);
+  expect(invoke("list")).toHaveLength(3);
+  expect(invoke("view", queued)).toMatchObject({
+    queuedStart: "幂等排队首条",
+    activity: { queued: true },
+  });
+  reopened.runtime.pumpTaskQueue();
+  await app.holdReply("幂等排队首条");
+  expect(app.hasRequest("幂等后继首条")).toBe(false);
+  await app.finish("幂等排队首条");
+  await app.holdReply("幂等后继首条");
+  expect(invoke("execution", next).running).toBe(true);
+  await app.finish("幂等后继首条");
+  await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
+  expect(app.requests).toEqual(["幂等占坑", "幂等排队首条", "幂等后继首条"]);
+  expect(
+    invoke("messages", queued)
+      .filter((item: any) => item.message?.role === "user")
+      .map((item: any) => item.message.content)
+  ).toEqual(["幂等排队首条"]);
+}, 30_000);
+
+it("F06 排队已接受但草稿消费失败，重开补偿保留原任务与后来编辑的草稿", async () => {
+  const app = await setup(1);
+  const first = app.open();
+  await app.start("消费失败占坑");
+  await app.holdReply("消费失败占坑");
+  const readWorkbench = (target: unknown) =>
+    handlers.get("workbench:read")!({}, target);
+  const writeWorkbench = (target: unknown, value: unknown) =>
+    handlers.get("workbench:write")!({}, target, value);
+  const target = { kind: "new", projectId: null };
+  const saved = await readWorkbench(target);
+  const value = {
+    ...saved.value,
+    text: "消费失败已排队",
+    preferences: { ...saved.value.preferences, thinkingEffort: "high" },
+  };
+  writeWorkbench(target, { revision: saved.revision + 1, value });
+  const request = {
+    requestId: value.requestId,
+    projectId: null,
+    text: value.text,
+    ...value.preferences,
+  };
+  // 临时真库仅用 trigger 注入写失败，结果仍只通过公开 IPC 验证。
+  const fault = new DatabaseSync(app.dbPath);
+  try {
+    fault.exec(
+      "CREATE TRIGGER fail_consume BEFORE UPDATE ON workbench_state BEGIN SELECT RAISE(ABORT, 'injected queued consume failure'); END"
+    );
+    await expect(invoke("start", request)).rejects.toThrow(
+      "injected queued consume failure"
+    );
+    fault.exec("DROP TRIGGER fail_consume");
+  } finally {
+    fault.close();
+  }
+  const accepted = invoke("list").find(
+    (task: any) => task.creationRequestId === request.requestId
+  );
+  expect(accepted).toBeDefined();
+  expect(invoke("view", accepted.id)).toMatchObject({
+    queuedStart: "消费失败已排队",
+    activity: { queued: true },
+  });
+  const next = await app.start("消费失败后继");
+  writeWorkbench(target, {
+    revision: saved.revision + 2,
+    value: { ...value, text: "后来编辑的新任务" },
+  });
+  await first.close();
+  const reopened = app.open();
+  expect(
+    (await invoke("start", { ...request, text: "后来编辑的新任务" })).id
+  ).toBe(accepted.id);
+  const compensated = await readWorkbench(target);
+  expect(compensated.value).toMatchObject({ text: "后来编辑的新任务" });
+  expect(compensated.value.requestId).not.toBe(request.requestId);
+  expect(
+    (await readWorkbench({ kind: "task", taskId: accepted.id })).value
+      .preferences.thinkingEffort
+  ).toBe("high");
+  reopened.runtime.pumpTaskQueue();
+  await app.finish("消费失败已排队");
+  await app.holdReply("消费失败后继");
+  expect(invoke("execution", next).running).toBe(true);
+  await app.finish("消费失败后继");
+  await waitFor(() => expect(reopened.runtime.hasWork()).toBe(false));
+  expect(app.requests).toEqual([
+    "消费失败占坑",
+    "消费失败已排队",
+    "消费失败后继",
+  ]);
 }, 30_000);
 
 it("重启后仍排队任务打开可见：view 携带排队首条文本与 queued 活动态（状态条与首条回显的数据源）", async () => {

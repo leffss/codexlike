@@ -209,7 +209,7 @@ async function main() {
     // 工具清单：含 update_plan 行（3 计划 + 1 读文件 = 4 次）
     const tools = panel.getByTestId("subagent-tools");
     await tools.waitFor({ timeout: 10_000 });
-    await tools.locator("summary").click();
+    await tools.getByTestId("subagent-tools-toggle").click();
     const toolsText = await tools.textContent();
     assert(
       toolsText !== null &&
@@ -299,7 +299,7 @@ async function main() {
     // 恢复后工具清单照常含 update_plan 行（快照 tools 通道）
     const restoredTools = restored.getByTestId("subagent-tools");
     await restoredTools.waitFor({ timeout: 10_000 });
-    await restoredTools.locator("summary").click();
+    await restoredTools.getByTestId("subagent-tools-toggle").click();
     assert(
       (await restoredTools.textContent())?.includes("update_plan") === true,
       "重启后工具清单应含 update_plan（子代理工具调用表恢复）"

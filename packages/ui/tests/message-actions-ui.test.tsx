@@ -7,7 +7,12 @@ afterEach(() => vi.useRealTimers());
 import { MessageStream } from "../src/components/MessageStream";
 import { exportFileNameBase } from "../src/components/AssistantActions";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
-import type { AssistantSegment, MessageSegment } from "../src/lib/task-view";
+import {
+  initialTranscript,
+  type AssistantSegment,
+  type MessageSegment,
+} from "../src/lib/task-view";
+import { groupTurns } from "../src/lib/turn-view";
 
 function assistant(
   overrides: Partial<AssistantSegment> = {}
@@ -34,6 +39,58 @@ function render(items: MessageSegment[], streaming = false): string {
 }
 
 describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌面 E2E 验证）", () => {
+  it.each(["interrupted", "queued", "running"] as const)(
+    "恢复 %s 子代理：仅非终态抑制主正文操作",
+    (status) => {
+      const items = initialTranscript(
+        [
+          {
+            kind: "message",
+            message: {
+              id: "restore-user",
+              taskId: "actions-task",
+              role: "user",
+              content: "委派",
+              createdAt: "2026-11-18T08:00:00Z",
+            },
+          },
+          {
+            kind: "message",
+            message: {
+              id: "restore-answer",
+              taskId: "actions-task",
+              role: "assistant",
+              content: "主正文",
+              createdAt: "2026-11-18T08:00:30Z",
+            },
+          },
+        ],
+        [
+          {
+            record: {
+              id: "restore-subagent",
+              taskId: "actions-task",
+              task: "子代理",
+              status,
+              queuedAt: "2026-11-18T08:00:05Z",
+              startedAt: null,
+              completedAt:
+                status === "interrupted" ? "2026-11-18T08:00:20Z" : null,
+            },
+            messages: [],
+            toolCalls: [],
+          },
+        ]
+      );
+      const html = render(items);
+      expect(groupTurns(items)[0]?.running).toBe(status !== "interrupted");
+      if (status === "interrupted") {
+        expect(html).toContain('data-testid="assistant-copy"');
+        expect(html).toContain('data-testid="assistant-export"');
+      } else expect(html).not.toContain('data-testid="assistant-actions"');
+    }
+  );
+
   it("复制入口是有明确名称的 28px 图标按钮，装饰 SVG 不进入无障碍树", () => {
     const html = render([assistant()]);
     const button = html.match(

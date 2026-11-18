@@ -134,6 +134,37 @@ async function main() {
     await untilQueueOrder(window, ["排队甲（修订）", "排队乙"]);
     console.log("[e2e] 取消编辑：条目原文保留，输入框草稿还原");
 
+    // F09：编辑绕行新建入口再回原任务，不能把原草稿永久替换为队列文字。
+    await window
+      .getByTestId("queue-item")
+      .filter({ hasText: "排队乙" })
+      .getByTestId("queue-item-preview")
+      .click();
+    await window.getByTestId("new-task").click();
+    await window.getByTestId("new-task-start").waitFor();
+    await window
+      .getByTestId("task-item")
+      .filter({ hasText: "首轮" })
+      .first()
+      .click();
+    await untilDraft(window, "我的临时草稿", "编辑切到新建后返回丢失原草稿");
+    assert(
+      (await window.getByTestId("composer-save-edit").count()) === 0,
+      "离开后返回不应保留失效的队列编辑状态"
+    );
+    await untilQueueOrder(window, ["排队甲（修订）", "排队乙"]);
+
+    // 设置页会卸载工作台，仍须先恢复草稿再 flush。
+    await window
+      .getByTestId("queue-item")
+      .filter({ hasText: "排队乙" })
+      .getByTestId("queue-item-preview")
+      .click();
+    await window.getByTestId("settings-open").click();
+    await window.getByTestId("settings-back").click();
+    await untilDraft(window, "我的临时草稿", "编辑期间往返设置页丢失原草稿");
+    console.log("[e2e] 队列编辑导航：新建入口与设置页往返均保留原草稿");
+
     // ⑤ 拖拽重排：把「排队乙」拖到「排队甲（修订）」之前，消费顺序随之改变
     const grab = window
       .getByTestId("queue-item")

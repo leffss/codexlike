@@ -1,15 +1,67 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApplyPatchTool } from "../../src/tools/apply-patch";
 import type { ToolExecutionContext } from "../../src/tools/types";
 
+// file symlink 在 Windows 可能需提权：仅在文件系统边界模拟它的跟随语义，
+// 文件内容仍真实落盘；lstat 链接元数据来自本测试创建的真实 junction/目录链接。
+const danglingFile = vi.hoisted(() => ({
+  alias: "",
+  target: "",
+  metadata: "",
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    realpathSync: (...args: Parameters<typeof actual.realpathSync>) => {
+      if (args[0] === danglingFile.alias) args[0] = danglingFile.target;
+      return actual.realpathSync(...args);
+    },
+    lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
+      if (args[0] === danglingFile.alias) args[0] = danglingFile.metadata;
+      return actual.lstatSync(...args);
+    },
+    existsSync: (path: Parameters<typeof actual.existsSync>[0]) =>
+      actual.existsSync(
+        path === danglingFile.alias ? danglingFile.target : path
+      ),
+    writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+      if (args[0] === danglingFile.alias) args[0] = danglingFile.target;
+      return actual.writeFileSync(...args);
+    },
+  };
+});
+
+const workspaces: string[] = [];
+
 function makeWorkspace(): string {
-  return mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+  const workspace = mkdtempSync(join(tmpdir(), "codexlike-ws-"));
+  workspaces.push(workspace);
+  return workspace;
 }
+
+afterEach(() => {
+  danglingFile.alias = "";
+  danglingFile.target = "";
+  danglingFile.metadata = "";
+  for (const workspace of workspaces.splice(0)) {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 function context(workspacePath: string): ToolExecutionContext {
   return {
@@ -178,6 +230,218 @@ describe("apply_patch 工具", () => {
     expect(readFileSync(join(workspace, "a.txt"), "utf8")).toBe("aaa\n");
     expect(readFileSync(join(workspace, "b.txt"), "utf8")).toBe("bbb\n");
   });
+
+  it("重复目标即使使用 ./ 别名也整批拒绝，前面的其它文件零写入", async () => {
+    const workspace = makeWorkspace();
+    writeFileSync(join(workspace, "duplicate.txt"), "one\ntwo\n");
+    writeFileSync(join(workspace, "other.txt"), "original\n");
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: other.txt",
+      "-original",
+      "+changed",
+      "*** Update File: duplicate.txt",
+      "-one",
+      "+ONE",
+      "*** Update File: ./duplicate.txt",
+      "-two",
+      "+TWO",
+      "*** End Patch",
+    ].join("\n");
+
+    const result = await tool.execute({ patch }, context(workspace));
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("重复");
+    expect(readFileSync(join(workspace, "duplicate.txt"), "utf8")).toBe(
+      "one\ntwo\n"
+    );
+    expect(readFileSync(join(workspace, "other.txt"), "utf8")).toBe(
+      "original\n"
+    );
+  });
+
+  it.each(["existing", "missing"])(
+    "full-access 目录链接的 %s 真实目标重复时整批拒绝",
+    async (kind) => {
+      const workspace = makeWorkspace();
+      const real = join(workspace, "real");
+      mkdirSync(real);
+      // Windows junction 不需要创建文件符号链接的管理员权限，不能吞 EPERM 假绿。
+      symlinkSync(
+        real,
+        join(workspace, "alias"),
+        process.platform === "win32" ? "junction" : "dir"
+      );
+      if (kind === "existing") {
+        writeFileSync(join(real, "target.txt"), "one\ntwo\n");
+      }
+      const patch = [
+        "*** Begin Patch",
+        "*** Add File: untouched.txt",
+        "+must-not-exist",
+        ...(kind === "existing"
+          ? [
+              "*** Update File: real/target.txt",
+              "-one",
+              "+ONE",
+              "*** Delete File: alias/target.txt",
+            ]
+          : [
+              "*** Add File: real/nested/new.txt",
+              "+one",
+              "*** Add File: alias/nested/new.txt",
+              "+two",
+            ]),
+        "*** End Patch",
+      ].join("\n");
+
+      const result = await tool.execute(
+        { patch },
+        { ...context(workspace), approvalMode: "full-access" }
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("重复");
+      expect(existsSync(join(workspace, "untouched.txt"))).toBe(false);
+      if (kind === "existing") {
+        expect(readFileSync(join(real, "target.txt"), "utf8")).toBe(
+          "one\ntwo\n"
+        );
+      } else {
+        expect(existsSync(join(real, "nested"))).toBe(false);
+      }
+    }
+  );
+
+  it("full-access 悬空 file symlink 与真实目标同时 Add 时整批拒绝、零写（FS 边界）", async () => {
+    const workspace = makeWorkspace();
+    const metadata = join(workspace, "dangling-link-metadata");
+    symlinkSync(
+      join(workspace, "missing-directory"),
+      metadata,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+    danglingFile.alias = join(workspace, "alias.txt");
+    danglingFile.target = join(workspace, "real.txt");
+    danglingFile.metadata = metadata;
+    writeFileSync(join(workspace, "keep.txt"), "original\n");
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: keep.txt",
+      "-original",
+      "+changed",
+      "*** Add File: alias.txt",
+      "+first",
+      "*** Add File: real.txt",
+      "+second",
+      "*** End Patch",
+    ].join("\n");
+
+    const result = await tool.execute(
+      { patch },
+      { ...context(workspace), approvalMode: "full-access" }
+    );
+
+    expect.soft(result.isError).toBe(true);
+    expect.soft(result.output).toContain("符号链接");
+    expect.soft(existsSync(join(workspace, "real.txt"))).toBe(false);
+    expect
+      .soft(readFileSync(join(workspace, "keep.txt"), "utf8"))
+      .toBe("original\n");
+  });
+
+  it("full-access 真实悬空 junction 后缀路径在任何写入前拒绝", async () => {
+    const workspace = makeWorkspace();
+    const target = join(workspace, "missing-directory");
+    const alias = join(workspace, "dangling-directory");
+    symlinkSync(
+      target,
+      alias,
+      process.platform === "win32" ? "junction" : "dir"
+    );
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: untouched.txt",
+      "+must-not-exist",
+      "*** Add File: dangling-directory/nested/target.txt",
+      "+content",
+      "*** End Patch",
+    ].join("\n");
+
+    const result = await tool.execute(
+      { patch },
+      { ...context(workspace), approvalMode: "full-access" }
+    );
+
+    expect.soft(result.isError).toBe(true);
+    expect.soft(result.output).toContain("符号链接");
+    expect.soft(existsSync(join(workspace, "untouched.txt"))).toBe(false);
+    expect.soft(existsSync(target)).toBe(false);
+    // 同一个真实链接在目标建好后可达，证明不是把任意不存在路径当链接。
+    mkdirSync(target);
+    const reachable = await tool.execute(
+      {
+        patch:
+          "*** Begin Patch\n*** Add File: dangling-directory/ok.txt\n+reachable\n*** End Patch",
+      },
+      { ...context(workspace), approvalMode: "full-access" }
+    );
+    expect(reachable.isError).toBe(false);
+    expect(readFileSync(join(target, "ok.txt"), "utf8")).toBe("reachable\n");
+  });
+
+  it("hard link 的真实文件身份重复时拒绝 Update/Delete 混合", async () => {
+    const workspace = makeWorkspace();
+    writeFileSync(join(workspace, "real.txt"), "original\n");
+    linkSync(join(workspace, "real.txt"), join(workspace, "alias.txt"));
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: real.txt",
+      "-original",
+      "+changed",
+      "*** Delete File: alias.txt",
+      "*** End Patch",
+    ].join("\n");
+
+    const result = await tool.execute(
+      { patch },
+      { ...context(workspace), approvalMode: "full-access" }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("重复");
+    expect(readFileSync(join(workspace, "real.txt"), "utf8")).toBe(
+      "original\n"
+    );
+    expect(readFileSync(join(workspace, "alias.txt"), "utf8")).toBe(
+      "original\n"
+    );
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "Windows 大小写及斜杠别名的新文件重复也零写入",
+    async () => {
+      const workspace = makeWorkspace();
+      const patch = [
+        "*** Begin Patch",
+        "*** Add File: Folder/new.txt",
+        "+one",
+        "*** Add File: folder\\NEW.TXT",
+        "+two",
+        "*** End Patch",
+      ].join("\n");
+
+      const result = await tool.execute(
+        { patch },
+        { ...context(workspace), approvalMode: "full-access" }
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("重复");
+      expect(existsSync(join(workspace, "Folder"))).toBe(false);
+    }
+  );
 
   it("格式非法（缺 Begin/End、段外杂行）拒绝并说明原因", async () => {
     const workspace = makeWorkspace();

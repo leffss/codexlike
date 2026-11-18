@@ -13,6 +13,8 @@ import {
 import type { BrowserWindow } from "electron";
 import type { TaskEventEnvelope } from "../../src/shared/ipc";
 import { registerTaskHandlers } from "../../src/tasks/task-ipc";
+import { createSqliteInputQueueStore } from "../../src/tasks/input-queue-store";
+import { createSqliteTaskQueueStore } from "../../src/tasks/task-queue-store";
 import { createProfileStore } from "../../src/profiles/profile-store";
 import { listenMock } from "./mock-server";
 
@@ -52,8 +54,13 @@ async function setup(options?: { limit?: number }) {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const workspace = join(root, "project");
   mkdirSync(workspace);
-  const persistence = createSqliteTaskStore(join(root, "nested", "tasks.db"));
+  const dbPath = join(root, "nested", "tasks.db");
+  const persistence = createSqliteTaskStore(dbPath);
+  const queueStore = createSqliteInputQueueStore(dbPath);
+  const taskQueueStore = createSqliteTaskQueueStore(dbPath);
   cleanup.push(() => persistence.close());
+  cleanup.push(() => queueStore.close());
+  cleanup.push(() => taskQueueStore.close());
   const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
     createAgentResourceSnapshot({
       workspacePath,
@@ -66,22 +73,26 @@ async function setup(options?: { limit?: number }) {
     resourcesFor,
     tools: createBuiltinTools(),
   });
-  const profiles = createProfileStore({
-    dir: root,
-    safeStorage: {
-      isEncryptionAvailable: async () => true,
-      encryptString: async (text) => Buffer.from(text),
-      decryptString: async (bytes) => bytes.toString(),
-    },
-  });
+  const safeStorage = {
+    isEncryptionAvailable: async () => true,
+    encryptString: async (text: string) => Buffer.from(text),
+    decryptString: async (bytes: Buffer) => bytes.toString(),
+  };
+  const profiles = createProfileStore({ dir: root, safeStorage });
   const responses = new Map<string, ServerResponse>();
+  const compactResponses: ServerResponse[] = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => {
       body += String(chunk);
     });
     req.on("end", () => {
-      const messages = JSON.parse(body).messages;
+      const request = JSON.parse(body);
+      if (!request.stream) {
+        compactResponses.push(res);
+        return;
+      }
+      const messages = request.messages;
       const text = messages.findLast(
         (message: any) => message.role === "user"
       ).content;
@@ -158,6 +169,8 @@ async function setup(options?: { limit?: number }) {
     profiles,
     getWindow: () => window,
     dataDir: root,
+    queueStore,
+    taskQueueStore,
     concurrencyLimit: () => concurrencyLimit,
     worktreeService: createWorktreeService({
       worktreesDir: join(root, "worktrees"),
@@ -165,12 +178,8 @@ async function setup(options?: { limit?: number }) {
     resourcesFor,
   });
   cleanup.push(async () => {
-    for (const task of manager.list()) invoke("interrupt", task.id);
-    await waitFor(() =>
-      expect(
-        manager.list().every((task) => !invoke("execution", task.id).running)
-      ).toBe(true)
-    );
+    runtime.freeze();
+    await runtime.stopAndDrain();
   });
   const project = manager.addProject(workspace);
   /** 对已挂起的响应直接发 finish（让进行中的回复结束） */
@@ -193,6 +202,9 @@ async function setup(options?: { limit?: number }) {
   return {
     profile,
     project,
+    safeStorage,
+    compactResponses,
+    runtime,
     finish,
     holdReply,
     hasRequest: (text: string) => responses.has(text),
@@ -258,6 +270,68 @@ it("上限 2 时第 3 个任务的首条执行入队不执行；结束一个后�
     .filter((item: any) => item.message?.role === "user")
     .map((item: any) => item.message.content);
   expect(thirdMessages).toEqual(["任务丙首条"]);
+}, 30_000);
+
+it("F01 排队启动准备中停止：不请求模型、首条只保留一次且后继自动开跑", async () => {
+  const app = await setup({ limit: 1 });
+  await invoke("start", {
+    requestId: "cancel-preparation-running",
+    projectId: null,
+    text: "准备取消占坑",
+  });
+  await app.holdReply("准备取消占坑");
+  const cancelled = await invoke("start", {
+    requestId: "cancel-preparation-head",
+    projectId: null,
+    text: "准备中被停止",
+  });
+  const next = await invoke("start", {
+    requestId: "cancel-preparation-next",
+    projectId: null,
+    text: "准备取消后继",
+  });
+  let entered!: () => void;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // 只在系统凭据解密边界延迟；Profile store、任务与队列均走真实实现。
+  const decrypt = vi
+    .spyOn(app.safeStorage, "decryptString")
+    .mockImplementationOnce(async (bytes) => {
+      entered();
+      await gate;
+      return bytes.toString();
+    });
+  try {
+    await app.finish("准备取消占坑");
+    await ready;
+    expect(invoke("interrupt", cancelled.id)).toBe(true);
+    expect(invoke("interrupt", cancelled.id)).toBe(false);
+    expect(invoke("view", cancelled.id).activity.queued).toBe(false);
+    release();
+    await waitFor(() =>
+      expect(
+        app.hasRequest("准备中被停止") || app.hasRequest("准备取消后继")
+      ).toBe(true)
+    );
+    expect(app.hasRequest("准备中被停止")).toBe(false);
+    await app.holdReply("准备取消后继");
+    expect(invoke("execution", cancelled.id).running).toBe(false);
+    expect(invoke("execution", next.id).running).toBe(true);
+    expect(
+      invoke("messages", cancelled.id)
+        .filter((item: any) => item.message?.role === "user")
+        .map((item: any) => item.message.content)
+    ).toEqual(["准备中被停止"]);
+    await app.finish("准备取消后继");
+  } finally {
+    release();
+    decrypt.mockRestore();
+  }
 }, 30_000);
 
 it("排队严格 FIFO：两个排队任务按发起顺序先后开跑", async () => {
@@ -411,6 +485,174 @@ it("调大（2→4）排队任务立即补位开跑；调小（4→2）运行中
     expect(invoke("execution", fourth.id).running).toBe(false)
   );
 }, 30_000);
+
+it("F05 排队启动失败保留队首，自身回滚释放名额不产生无限重试", async () => {
+  const app = await setup({ limit: 1 });
+  await invoke("start", {
+    requestId: "failed-start-running",
+    projectId: null,
+    text: "失败队首占坑",
+  });
+  await app.holdReply("失败队首占坑");
+  const failed = await invoke("start", {
+    requestId: "failed-start-head",
+    projectId: null,
+    text: "$missing-queue-skill 无效首条",
+  });
+  await invoke("start", {
+    requestId: "failed-start-next",
+    projectId: null,
+    text: "失败队首后继",
+  });
+  let decryptions = 0;
+  const decrypt = vi
+    .spyOn(app.safeStorage, "decryptString")
+    .mockImplementation(async (bytes) => {
+      // 系统解密边界的额外故障保证坏实现也能有限结束，而非用超时掩盖重试风暴。
+      if (++decryptions > 3) throw new Error("注入解密失败以截住重复重试");
+      return bytes.toString();
+    });
+  try {
+    await app.finish("失败队首占坑");
+    await waitFor(() => {
+      expect(decryptions).toBeGreaterThan(0);
+      expect(app.runtime.hasWork()).toBe(false);
+    });
+    expect(decryptions).toBe(1);
+    expect(invoke("view", failed.id).activity.queued).toBe(true);
+    expect(app.hasRequest("$missing-queue-skill 无效首条")).toBe(false);
+    expect(app.hasRequest("失败队首后继")).toBe(false);
+  } finally {
+    decrypt.mockRestore();
+  }
+  expect(invoke("interrupt", failed.id)).toBe(true);
+  await app.finish("失败队首后继");
+}, 30_000);
+
+it("F07 满员时 Compact 明确拒绝，不请求模型也不突破执行上限", async () => {
+  const app = await setup({ limit: 1 });
+  const history = await invoke("start", {
+    requestId: "compact-history",
+    projectId: null,
+    text: "压缩历史0",
+  });
+  await app.holdReply("压缩历史0");
+  await app.finish("压缩历史0");
+  await waitFor(() =>
+    expect(invoke("execution", history.id).running).toBe(false)
+  );
+  for (let round = 1; round < 4; round++) {
+    await invoke("send", history.id, `压缩历史${round}`, app.profile.id);
+    await app.holdReply(`压缩历史${round}`);
+    await app.finish(`压缩历史${round}`);
+    await waitFor(() =>
+      expect(invoke("execution", history.id).running).toBe(false)
+    );
+  }
+  const before = invoke("messages", history.id);
+  const running = await invoke("start", {
+    requestId: "compact-blocker",
+    projectId: null,
+    text: "压缩满员占坑",
+  });
+  await app.holdReply("压缩满员占坑");
+  let rejection: Error | undefined;
+  const compacting = invoke("compact", history.id, app.profile.id).catch(
+    (error: Error) => {
+      rejection = error;
+    }
+  );
+  await waitFor(() =>
+    expect(rejection !== undefined || app.compactResponses.length > 0).toBe(
+      true
+    )
+  );
+  expect(rejection?.message).toContain("任务并发已满");
+  await compacting;
+  expect(app.compactResponses).toHaveLength(0);
+  expect(
+    invoke("list").filter((task: any) => invoke("execution", task.id).running)
+  ).toHaveLength(1);
+  expect(invoke("execution", running.id).running).toBe(true);
+  expect(invoke("view", history.id).activity.queued).toBe(false);
+  expect(invoke("messages", history.id)).toEqual(before);
+  await app.finish("压缩满员占坑");
+}, 30_000);
+
+it.each(["完成", "失败", "中断"] as const)(
+  "F07 Compact %s 后释放唯一名额，后续排队任务自动执行",
+  async (outcome) => {
+    const app = await setup({ limit: 1 });
+    const task = await invoke("start", {
+      requestId: "compact-release-history",
+      projectId: null,
+      text: "释放压缩历史0",
+    });
+    await app.holdReply("释放压缩历史0");
+    await app.finish("释放压缩历史0");
+    await waitFor(() =>
+      expect(invoke("execution", task.id).running).toBe(false)
+    );
+    for (let round = 1; round < 4; round++) {
+      await invoke("send", task.id, `释放压缩历史${round}`, app.profile.id);
+      await app.holdReply(`释放压缩历史${round}`);
+      await app.finish(`释放压缩历史${round}`);
+      await waitFor(() =>
+        expect(invoke("execution", task.id).running).toBe(false)
+      );
+    }
+    const compacting = invoke("compact", task.id, app.profile.id).catch(
+      (error: Error) => error
+    );
+    await waitFor(() => expect(app.compactResponses).toHaveLength(1));
+    const next = await invoke("start", {
+      requestId: "compact-release-next",
+      projectId: null,
+      text: "压缩释放后继",
+    });
+    expect(invoke("view", next.id).activity.queued).toBe(true);
+    expect(app.hasRequest("压缩释放后继")).toBe(false);
+    expect(
+      invoke("list").filter((item: any) => invoke("execution", item.id).running)
+    ).toHaveLength(1);
+    const response = app.compactResponses[0]!;
+    if (outcome === "中断") {
+      expect(invoke("interrupt", task.id)).toBe(true);
+    } else if (outcome === "失败") {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "注入压缩请求失败" } }));
+    } else {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: "compact-summary",
+          object: "chat.completion",
+          created: 0,
+          model: "mock",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "压缩后的任务摘要" },
+              finish_reason: "stop",
+            },
+          ],
+        })
+      );
+    }
+    const result = await compacting;
+    if (outcome === "完成") expect(result.compactedMessages).toBeGreaterThan(0);
+    else expect(result).toBeInstanceOf(Error);
+    await app.holdReply("压缩释放后继");
+    expect(invoke("execution", task.id).running).toBe(false);
+    expect(invoke("execution", next.id).running).toBe(true);
+    expect(
+      invoke("list").filter((item: any) => invoke("execution", item.id).running)
+    ).toHaveLength(1);
+    await app.finish("压缩释放后继");
+    await waitFor(() => expect(app.runtime.hasWork()).toBe(false));
+  },
+  30_000
+);
 
 it("排队变更作为任务事件信封推送：入队携带 queued 活动态与队列快照", async () => {
   const app = await setup({ limit: 1 });

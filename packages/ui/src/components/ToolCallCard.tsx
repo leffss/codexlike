@@ -7,6 +7,7 @@ import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 
 import { DisclosureArrow } from "./DisclosureArrow";
+import { ToolDetailsBody } from "./ToolDetailsBody";
 
 /** 截图卡片的图片展示：展开时经主进程按 任务+调用 id 读取文件（dataURL） */
 function ScreenshotView(props: { call: ToolCallSegment }) {
@@ -143,21 +144,12 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
 
       {expanded && (
         <div className="border-t border-line py-2 pl-7 pr-3">
-          <details className="group mb-2" open>
-            <summary className="cursor-pointer text-xs text-fg-subtle">
-              参数
-            </summary>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-code-bg p-2 font-mono text-xs text-code-fg">
-              {prettyJson(call.arguments)}
-            </pre>
-          </details>
-          <div className="text-xs text-fg-subtle">输出</div>
-          <pre
-            data-testid="tool-call-output"
-            className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-code-bg p-2 font-mono text-xs text-code-fg"
-          >
-            {call.output === "" && call.running ? "（执行中…）" : call.output}
-          </pre>
+          <ToolDetailsBody
+            arguments={call.arguments}
+            output={call.output}
+            running={call.running}
+            testIdPrefix="tool-call"
+          />
           {call.toolName === "browser_screenshot" && !call.running && (
             <ScreenshotView call={call} />
           )}
@@ -171,12 +163,4 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
 function truncateDetail(text: string): string {
   const single = text.replace(/\s+/g, " ").trim();
   return single.length > 200 ? `${single.slice(0, 200)}…` : single;
-}
-
-function prettyJson(argsJson: string): string {
-  try {
-    return JSON.stringify(JSON.parse(argsJson), null, 2);
-  } catch {
-    return argsJson;
-  }
 }

@@ -252,9 +252,15 @@ describe("AgentTask 的 MCP 工具链路（工单 12）", () => {
             : ""
         )
     ).toEqual(["mcp_fake_echo"]);
+    const mcpCall = events.find(
+      (event): event is Extract<TaskEvent, { type: "tool-call" }> =>
+        event.type === "tool-call" && event.call.toolName === "mcp_fake_echo"
+    );
+    expect(mcpCall).toBeDefined();
     expect(
       events.find(
-        (event) => event.type === "tool-result" && event.call.id === "mcp"
+        (event) =>
+          event.type === "tool-result" && event.call.id === mcpCall?.call.id
       )
     ).toMatchObject({ call: { isError: false, output: "echo: 资源与 MCP" } });
     expect(JSON.stringify(model.doStreamCalls[2]?.prompt)).toContain(

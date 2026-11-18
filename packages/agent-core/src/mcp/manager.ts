@@ -82,6 +82,11 @@ interface Connection {
 /** 每个 server 的管理簿记：活动连接 + 最后已知工具 + 最近错误 */
 interface Entry {
   connection: Connection | null;
+  pending: Promise<Connection> | null;
+  abort: AbortController | null;
+  closing: Promise<void> | null;
+  generation: number;
+  enabled: boolean;
   /** 最后一次成功发现到的工具（断线后保留，支撑惰性重连） */
   tools: McpDiscoveredTool[];
   status: McpServerState["status"];
@@ -150,6 +155,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     if (entry === undefined) {
       entry = {
         connection: null,
+        pending: null,
+        abort: null,
+        closing: null,
+        generation: 0,
+        enabled: false,
         tools: [],
         status: "disconnected",
         error: null,
@@ -162,8 +172,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   /** spawn 子进程并完成 initialize + tools/list；任何失败抛中文错误 */
   async function establish(
     config: McpServerConfig,
-    entry: Entry
+    entry: Entry,
+    signal: AbortSignal
   ): Promise<Connection> {
+    signal.throwIfAborted();
     const transport = new StdioClientTransport({
       command: config.command,
       args: config.args,
@@ -187,10 +199,13 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     try {
       // 连接超时逐次解析：每次 establish（显式 connect 或惰性重连）读当前值
       const connectTimeoutMs = resolveConnectTimeoutMs();
-      await client.connect(transport, { timeout: connectTimeoutMs });
+      await client.connect(transport, { timeout: connectTimeoutMs, signal });
+      signal.throwIfAborted();
       const listed = await client.listTools(undefined, {
         timeout: connectTimeoutMs,
+        signal,
       });
+      signal.throwIfAborted();
       const serverName = normalizeSegment(config.name);
       const tools: McpDiscoveredTool[] = (listed.tools ?? []).map((tool) => ({
         serverId: config.id,
@@ -216,17 +231,87 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   /** 取活动连接；已断开则惰性自动重连（重连失败抛中文错误） */
   async function ensureConnection(
     config: McpServerConfig,
-    entry: Entry
+    entry: Entry,
+    reconnect = false
   ): Promise<Connection> {
-    if (entry.connection !== null) {
-      return entry.connection;
+    if (
+      !entry.enabled ||
+      !options.servers().some((server) => server.id === config.id)
+    ) {
+      throw new Error(`MCP server「${config.name}」已断开`);
     }
-    const connection = await establish(config, entry);
-    entry.connection = connection;
-    entry.tools = connection.tools;
-    entry.status = "connected";
+    if (entry.pending !== null) return await entry.pending;
+    if (entry.connection !== null && !reconnect) return entry.connection;
+
+    const generation = entry.generation;
+    const previous = entry.connection;
+    const closing = entry.closing;
+    const abort = new AbortController();
+    entry.abort = abort;
+    entry.connection = null;
+    entry.status = "connecting";
     entry.error = null;
-    return connection;
+    const current = () => entry.generation === generation && entry.enabled;
+    const pending = (async () => {
+      await closing;
+      await previous?.client.close().catch(() => undefined);
+      abort.signal.throwIfAborted();
+      const connection = await establish(config, entry, abort.signal);
+      if (
+        !current() ||
+        !options.servers().some((server) => server.id === config.id)
+      ) {
+        await connection.client.close().catch(() => undefined);
+        throw new Error(`MCP server「${config.name}」连接已取消`);
+      }
+      entry.connection = connection;
+      entry.tools = connection.tools;
+      entry.status = "connected";
+      entry.error = null;
+      return connection;
+    })()
+      .catch((error: unknown) => {
+        if (current()) {
+          entry.status = "failed";
+          entry.error = error instanceof Error ? error.message : String(error);
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (entry.pending === pending) {
+          entry.pending = null;
+          entry.abort = null;
+        }
+      });
+    entry.pending = pending;
+    return await pending;
+  }
+
+  /** 先同步失效代次，再等待所有旧连接收尾；重新 connect 可等待收尾后打开。 */
+  function disconnectEntry(entry: Entry): Promise<void> {
+    entry.generation += 1;
+    entry.enabled = false;
+    const previous = entry.connection;
+    const pending = entry.pending;
+    const closing = entry.closing;
+    entry.connection = null;
+    entry.pending = null;
+    entry.status = "disconnected";
+    entry.error = null;
+    entry.tools = [];
+    entry.abort?.abort();
+    entry.abort = null;
+    const cleanup = Promise.all([
+      closing,
+      previous?.client.close().catch(() => undefined),
+      pending?.catch(() => undefined),
+    ])
+      .then(() => undefined)
+      .finally(() => {
+        if (entry.closing === cleanup) entry.closing = null;
+      });
+    entry.closing = cleanup;
+    return cleanup;
   }
 
   return {
@@ -236,22 +321,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         throw new Error(`MCP server ${serverId} 不存在`);
       }
       const entry = entryOf(serverId);
-      // 重复连接：先断开旧连接（重连语义）
-      if (entry.connection !== null) {
-        const previous = entry.connection;
-        entry.connection = null;
-        await previous.client.close().catch(() => undefined);
-      }
-      entry.status = "connecting";
-      entry.error = null;
-      try {
-        entry.connection = await establish(config, entry);
-        entry.tools = entry.connection.tools;
-        entry.status = "connected";
-      } catch (error) {
-        entry.status = "failed";
-        entry.error = error instanceof Error ? error.message : String(error);
-      }
+      entry.enabled = true;
+      await ensureConnection(config, entry, true).catch(() => undefined);
       return {
         serverId,
         status: entry.status,
@@ -262,16 +333,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 
     async disconnect(serverId) {
       const entry = entries.get(serverId);
-      if (entry === undefined || entry.connection === null) {
-        return;
-      }
-      const previous = entry.connection;
-      entry.connection = null;
-      entry.status = "disconnected";
-      entry.error = null;
-      // 主动断开（区别于进程崩溃）：工具列表一并清空，不再提供给任务
-      entry.tools = [];
-      await previous.client.close().catch(() => undefined);
+      if (entry !== undefined) await disconnectEntry(entry);
     },
 
     states() {
@@ -310,32 +372,22 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
             continue;
           }
           seen.add(discovered.name);
-          result.push(adaptTool(config, discovered));
+          result.push(adaptTool(config, discovered, entry.generation));
         }
       }
       return result;
     },
 
     async close() {
-      const closing = [...entries.values()]
-        .map((entry) => entry.connection)
-        .filter((connection): connection is Connection => connection !== null);
-      for (const entry of entries.values()) {
-        entry.connection = null;
-        entry.status = "disconnected";
-      }
-      await Promise.all(
-        closing.map((connection) =>
-          connection.client.close().catch(() => undefined)
-        )
-      );
+      await Promise.all([...entries.values()].map(disconnectEntry));
     },
   };
 
   /** 单个 MCP 工具 → ToolDefinition（permission=command：suggest 下走审批链路） */
   function adaptTool(
     config: McpServerConfig,
-    discovered: McpDiscoveredTool
+    discovered: McpDiscoveredTool,
+    generation: number
   ): ToolDefinition {
     return {
       name: discovered.name,
@@ -350,7 +402,17 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         try {
           // 惰性自动重连：连接断开（server 崩溃/重启）时先重建，再转发调用
           const entry = entryOf(config.id);
-          const connection = await ensureConnection(config, entry);
+          if (entry.generation !== generation) {
+            throw new Error(
+              `MCP server「${config.name}」已断开，请重新获取工具`
+            );
+          }
+          const currentConfig = options
+            .servers()
+            .find((server) => server.id === config.id);
+          if (currentConfig === undefined)
+            throw new Error(`MCP server「${config.name}」已删除`);
+          const connection = await ensureConnection(currentConfig, entry);
           const result = await connection.client.callTool(
             { name: discovered.originalName, arguments: asRecord(args) },
             undefined,

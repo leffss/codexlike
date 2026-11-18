@@ -109,7 +109,7 @@ export function RailPanel(props: {
   const [selected, setSelected] = useState<GitFileChange | null>(null);
   const [snapshot, setSnapshot] = useState<SnapshotKey>("preview");
 
-  const { status, loading, error, refresh } = useGitStatus(
+  const { status, loading, error, refresh, version } = useGitStatus(
     taskId,
     props.changesRevision
   );
@@ -177,6 +177,16 @@ export function RailPanel(props: {
     setSelected(null);
   }, [taskId]);
 
+  // 成功刷新后沿当前文件清单对账：消失即取消选择，重命名元数据使用新版本。
+  useEffect(() => {
+    if (status === null) return;
+    setSelected((current) =>
+      current === null
+        ? null
+        : (status.files.find((file) => file.path === current.path) ?? null)
+    );
+  }, [status]);
+
   // 消息流标记行点击定位（ADR 0020）：切到子代理 tab（开右栏由
   // WorkspacePage 侧完成；选中与滚动到项在 SubagentRailPanelBody 内）
   const subagentFocus = props.subagentFocus;
@@ -205,6 +215,8 @@ export function RailPanel(props: {
   }, [changesCount, onChangesCount]);
 
   const files = status?.isGitRepo === true ? status.files : [];
+  const selectedFile =
+    files.find((file) => file.path === selected?.path) ?? null;
   const snapshotSummary =
     props.resources !== null ? props.resources[snapshot] : null;
 
@@ -331,6 +343,7 @@ export function RailPanel(props: {
                 </span>
                 <button
                   type="button"
+                  data-testid="changes-refresh"
                   onClick={refresh}
                   disabled={loading}
                   className="ml-auto shrink-0 text-xs text-fg-muted hover:text-fg disabled:opacity-50"
@@ -398,11 +411,12 @@ export function RailPanel(props: {
                 )}
               </ul>
             )}
-            {selected !== null && taskId !== null ? (
+            {selectedFile !== null && taskId !== null ? (
               <DiffView
-                key={`${taskId}:${selected.path}`}
+                key={`${taskId}:${selectedFile.path}`}
                 taskId={taskId}
-                file={selected}
+                file={selectedFile}
+                version={version}
                 className="min-h-0 flex-1 border-t border-line"
               />
             ) : (
@@ -488,40 +502,91 @@ function useGitStatus(
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  version: number;
 } {
-  const [status, setStatus] = useState<GitStatus | null>(null);
-  const [loading, setLoading] = useState(taskId !== null);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    taskId: string | null;
+    status: GitStatus | null;
+    loading: boolean;
+    error: string | null;
+    version: number;
+  }>({
+    taskId,
+    status: null,
+    loading: taskId !== null,
+    error: null,
+    version: 0,
+  });
+  const request = useRef(0);
+  const currentTask = useRef<string | null | undefined>(taskId);
+
+  useEffect(() => {
+    currentTask.current = taskId;
+    return () => {
+      currentTask.current = undefined;
+      request.current += 1;
+    };
+  }, [taskId]);
 
   const refresh = useCallback(() => {
-    if (taskId === null) {
-      setStatus(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
+    // 旧任务迟到的提交回调也不能重启一轮过期刷新。
+    if (currentTask.current !== taskId) return;
+    const generation = ++request.current;
+    setResult((previous) => ({
+      taskId,
+      status: previous.taskId === taskId ? previous.status : null,
+      loading: taskId !== null,
+      error: null,
+      version: previous.version,
+    }));
+    if (taskId === null) return;
     window.codexlike.git
       .status(taskId)
-      .then((next) => setStatus(next))
-      .catch((err: unknown) => {
-        setStatus(null);
-        setError(err instanceof Error ? err.message : String(err));
+      .then((status) => {
+        if (request.current !== generation) return;
+        setResult((previous) => ({
+          taskId,
+          status,
+          loading: false,
+          error: null,
+          version: previous.version + 1,
+        }));
       })
-      .finally(() => setLoading(false));
+      .catch((err: unknown) => {
+        if (request.current !== generation) return;
+        setResult((previous) => ({
+          ...previous,
+          taskId,
+          status: null,
+          loading: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      });
   }, [taskId]);
 
   useEffect(() => {
     refresh();
+    return () => {
+      request.current += 1;
+    };
   }, [refresh, revision]);
 
-  return { status, loading, error, refresh };
+  const current = result.taskId === taskId;
+  return {
+    status: current ? result.status : null,
+    loading: current ? result.loading : taskId !== null,
+    error: current ? result.error : null,
+    version: result.version,
+    refresh,
+  };
 }
 
 /** 单文件 diff 视图（路径行 + Monaco DiffEditor 懒加载） */
 function DiffView(props: {
   taskId: string;
   file: GitFileChange;
+  /** 最近成功读取的 status 代次：同路径也必须更新内容。 */
+  version: number;
   className?: string;
 }) {
   const [diff, setDiff] = useState<GitFileDiff | null>(null);
@@ -546,7 +611,7 @@ function DiffView(props: {
     return () => {
       active = false;
     };
-  }, [props.taskId, props.file.path, props.file.oldPath]);
+  }, [props.taskId, props.file.path, props.file.oldPath, props.version]);
 
   return (
     <div className={`flex min-h-0 flex-col ${props.className ?? ""}`}>

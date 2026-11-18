@@ -124,7 +124,7 @@ async function main() {
   try {
     const first = await launchApp({ homeDir, workspaceDir });
     app = first.app;
-    const window = first.window;
+    let window = first.window;
 
     await window.evaluate(async (port) => {
       await window.codexlike.providerProfiles.create({
@@ -134,6 +134,18 @@ async function main() {
         models: ["mock-model"],
       });
     }, model.port);
+    // 本场景验证已完成首次配置的用户遇到任务中断后的恢复。
+    // Electron 45 async safeStorage 首次密钥延迟写入 Local State；正常退出确保提交。
+    // 新目录立即强杀的独立问题记录于审计集成报告，不能用丢失密钥误判任务恢复。
+    await closeApp(app);
+    const configured = await launchApp({ homeDir, workspaceDir });
+    app = configured.app;
+    window = configured.window;
+    assert(
+      (await window.evaluate(() => window.codexlike.providerProfiles.list()))
+        .length === 1,
+      "正常配置完成后 Profile 必须可跨进程解密"
+    );
     await prepareDraft(window, { approvalMode: "assist" });
     await window.getByTestId("composer-input").fill(MAIN_TASK);
     await window.getByTestId("composer-send").click();
@@ -239,6 +251,7 @@ async function main() {
     );
     const tools = panel.getByTestId("subagent-tools");
     await tools.waitFor({ timeout: 10_000 });
+    await tools.getByTestId("subagent-tools-toggle").click();
     const toolsText = await tools.textContent();
     assert(
       toolsText !== null && toolsText.includes("read_file"),

@@ -163,15 +163,26 @@ export function WorkspacePage(props: {
    */
   const [queueState, setQueueState] =
     useState<QueueSnapshot>(EMPTY_QUEUE_STATE);
+  // 输入队列有独立水位：IPC 回包先到时，不抬高消息事件水位而吞掉正文事件。
+  const queueSequenceRef = useRef(-1);
   /**
    * 取回编辑任务（票 03）：点击排队消息把内容载入输入框，保存原地更新。
    * originalText 为载入时的原文（主进程 CAS 校验）；savedDraft 为进入编辑前
    * 的输入框草稿，取消编辑或切走任务时还原，不丢用户文字。
    */
-  const [queueEdit, setQueueEdit] = useState<QueueEditTask | null>(null);
-  /** 编辑任务的即时读数：事件回调里不读过期的渲染帧状态 */
+  const [queueEdit, setQueueEditState] = useState<QueueEditTask | null>(null);
+  /** 编辑实例同步切换：同一帧内导航/IPC 回包也不能读到上一份编辑状态。 */
   const queueEditRef = useRef<QueueEditTask | null>(null);
-  queueEditRef.current = queueEdit;
+  const setQueueEdit = useCallback((editing: QueueEditTask | null) => {
+    queueEditRef.current = editing;
+    setQueueEditState(editing);
+  }, []);
+  const restoreQueueEditDraft = useCallback(() => {
+    const editing = queueEditRef.current;
+    if (editing === null) return;
+    setQueueEdit(null);
+    workspaceState.setComposer(editing.taskId, editing.savedDraft);
+  }, [setQueueEdit, workspaceState]);
   /**
    * 任务排队中的首条执行文本（任务并发上限票 03 / ADR 0022）：随 openTask
    * 快照与 task-queue-changed 事件接续（live 状态机单一来源）。非 null 且
@@ -528,11 +539,8 @@ export function WorkspacePage(props: {
       reportWorkbenchTarget({ kind: "task", taskId: id });
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
-      // 编辑中的排队消息随任务归属：切走先还原该任务的输入框草稿，不丢文字（票 03）
-      const editing = queueEditRef.current;
-      if (editing !== null && editing.taskId !== id)
-        workspaceState.setComposer(editing.taskId, editing.savedDraft);
-      setQueueEdit(null);
+      // 打开任务会结束当前编辑实例，包括重新选择同一任务。
+      restoreQueueEditDraft();
       setCurrentId(id);
       workspaceState.activeTaskId = id;
       currentIdRef.current = id;
@@ -540,6 +548,7 @@ export function WorkspacePage(props: {
       const isCurrent = () =>
         currentIdRef.current === id && taskRequestRef.current === request;
       setMessages([]);
+      queueSequenceRef.current = -1;
       setQueueState(EMPTY_QUEUE_STATE);
       // 排队首条（票 03）：随快照恢复，加载期间先清空防上个任务的值闪现
       setQueuedStart(null);
@@ -581,6 +590,7 @@ export function WorkspacePage(props: {
           snapshotVersion
         );
         setMessages(live.items);
+        queueSequenceRef.current = live.sequence;
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
         setStreaming(live.activity.running);
@@ -623,6 +633,7 @@ export function WorkspacePage(props: {
       refreshResources,
       refreshTasks,
       reportWorkbenchTarget,
+      restoreQueueEditDraft,
       workspaceState,
       toastState,
     ]
@@ -712,7 +723,13 @@ export function WorkspacePage(props: {
             ...live.items,
             ...prev.filter((item) => item.kind === "status"),
           ]);
-          setQueueState(live.queueState);
+          if (
+            event.type === "queue-changed" &&
+            envelope.sequence >= queueSequenceRef.current
+          ) {
+            queueSequenceRef.current = envelope.sequence;
+            setQueueState(live.queueState);
+          }
           setQueuedStart(live.queuedStart);
           setStreaming(live.activity.running);
           // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
@@ -785,12 +802,13 @@ export function WorkspacePage(props: {
 
   useEffect(
     () => () => {
-      // 页面卸载后的迟到加载不能写回新工作台页面。
+      // 页面卸载也离开编辑目标：先排入原草稿恢复，再让迟到加载失效。
+      restoreQueueEditDraft();
       taskRequestRef.current += 1;
       resourceRequestRef.current += 1;
       currentIdRef.current = null;
     },
-    []
+    [restoreQueueEditDraft]
   );
 
   /**
@@ -801,6 +819,7 @@ export function WorkspacePage(props: {
     projectId: string | null = null
   ): Promise<void> {
     const request = ++taskRequestRef.current;
+    restoreQueueEditDraft();
     setLoading(true);
     try {
       await workspaceState.flush();
@@ -976,11 +995,23 @@ export function WorkspacePage(props: {
     failure: string,
     invoke: (taskId: string) => Promise<QueueOperationResult>
   ) {
-    const taskId = currentId;
-    if (taskId === null) return;
+    const taskId = currentIdRef.current;
+    if (taskId === null || loadingRef.current !== null) return;
+    const generation = taskRequestRef.current;
+    const isCurrent = () =>
+      currentIdRef.current === taskId && taskRequestRef.current === generation;
     try {
-      setQueueState(await invoke(taskId));
+      const result = await invoke(taskId);
+      if (
+        isCurrent() &&
+        result.taskId === taskId &&
+        result.sequence >= queueSequenceRef.current
+      ) {
+        queueSequenceRef.current = result.sequence;
+        setQueueState(result);
+      }
     } catch (error) {
+      if (!isCurrent()) return;
       pushLocalStatus(
         `${failure}：${error instanceof Error ? error.message : String(error)}`
       );
@@ -1031,7 +1062,7 @@ export function WorkspacePage(props: {
       originalText: item.text,
       savedDraft,
     });
-    workspaceState.setComposer(currentId, item.text);
+    workspaceState.setComposer(currentId, item.text, false);
   }
 
   /** 取消编辑（票 03）：条目原样保留，输入框还原进入编辑前的草稿。 */
@@ -1052,6 +1083,9 @@ export function WorkspacePage(props: {
     const editing = queueEditRef.current;
     if (editing === null) return;
     const { taskId, itemId, originalText } = editing;
+    const generation = taskRequestRef.current;
+    const isCurrent = () =>
+      currentIdRef.current === taskId && taskRequestRef.current === generation;
     const composerSnapshot = workspaceState.composer(taskId);
     try {
       const result = await window.codexlike.tasks.queueUpdate(
@@ -1061,13 +1095,24 @@ export function WorkspacePage(props: {
         originalText,
         mentionPaths.length === 0 ? undefined : mentionPaths
       );
-      if (currentIdRef.current === taskId) setQueueState(result);
+      if (!isCurrent() || result.taskId !== taskId) return;
+      if (result.sequence >= queueSequenceRef.current) {
+        queueSequenceRef.current = result.sequence;
+        setQueueState(result);
+      }
+      if (queueEditRef.current !== editing) return;
       setQueueEdit(null);
-      if (workspaceState.composer(taskId) === composerSnapshot)
-        workspaceState.setComposer(taskId, "");
+      workspaceState.setComposer(
+        taskId,
+        workspaceState.composer(taskId) === composerSnapshot
+          ? ""
+          : workspaceState.composer(taskId)
+      );
     } catch (error) {
-      // 保存被拒：编辑任务结束，文本留在输入框，用户可重新取回或直接发送
+      // 保存被拒：只结束发起保存的实例，取消后重开的编辑不受影响。
+      if (!isCurrent() || queueEditRef.current !== editing) return;
       setQueueEdit(null);
+      workspaceState.setComposer(taskId, workspaceState.composer(taskId));
       if (currentIdRef.current === taskId)
         pushLocalStatus(
           `保存排队消息失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
@@ -1084,6 +1129,7 @@ export function WorkspacePage(props: {
     );
     if (item === undefined) {
       setQueueEdit(null);
+      workspaceState.setComposer(currentId, workspaceState.composer(currentId));
       pushLocalStatus(
         "编辑的排队消息已发出或被移除：编辑未保存，文本保留在输入框"
       );
@@ -1091,6 +1137,7 @@ export function WorkspacePage(props: {
     }
     if (item.id === queueState.sendingId) {
       setQueueEdit(null);
+      workspaceState.setComposer(currentId, workspaceState.composer(currentId));
       pushLocalStatus("编辑的排队消息已开始发送：编辑未保存，文本保留在输入框");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pushLocalStatus 为稳定 useCallback
@@ -1845,7 +1892,11 @@ export function WorkspacePage(props: {
                     }
                     onDraftChange={(text) => {
                       if (currentId !== null)
-                        workspaceState.setComposer(currentId, text);
+                        workspaceState.setComposer(
+                          currentId,
+                          text,
+                          queueEditRef.current?.taskId !== currentId
+                        );
                     }}
                     clearOnSend={false}
                     profiles={profiles}

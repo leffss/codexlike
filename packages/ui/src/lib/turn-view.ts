@@ -1,4 +1,5 @@
 import { PLAN_TOOL_NAME } from "./plan-view";
+import { isTerminalSubagentState } from "./subagent-status";
 import type { MessageSegment, ToolCallSegment, UserSegment } from "./task-view";
 
 /**
@@ -29,7 +30,8 @@ function isSegmentRunning(segment: MessageSegment): boolean {
   if (segment.kind === "assistant" || segment.kind === "thinking")
     return segment.streaming === true;
   if (segment.kind === "tool-call") return segment.running === true;
-  if (segment.kind === "subagent") return segment.state !== "done";
+  if (segment.kind === "subagent")
+    return !isTerminalSubagentState(segment.state);
   return false;
 }
 

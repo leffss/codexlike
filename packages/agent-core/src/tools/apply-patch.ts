@@ -1,11 +1,14 @@
 import {
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
+  statSync,
   unlinkSync,
   writeFileSync,
   existsSync,
 } from "node:fs";
-import { dirname, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import { expectString, parseToolArgs } from "./args";
 import { defineTool } from "./define-tool";
@@ -78,14 +81,26 @@ export function createApplyPatchTool() {
         throw new PatchFormatError("补丁不包含任何文件操作段");
       }
 
-      // 先对全部文件试算（内存变换），全部成功才写盘：拒绝是原子的
-      const applied: { summary: string; write: () => void }[] = [];
-      for (const patch of patches) {
+      const targets = new Set<string>();
+      const resolved = patches.map((patch) => {
         const absolute = resolvePath(
           context.workspacePath,
           patch.path,
           context.approvalMode
         );
+        const identity = targetIdentity(absolute);
+        if (targets.has(identity)) {
+          throw new PatchFormatError(
+            `补丁包含重复目标：${toDisplayPath(patch.path)}`
+          );
+        }
+        targets.add(identity);
+        return { patch, absolute };
+      });
+
+      // 先对全部文件试算（内存变换），全部成功才写盘：拒绝是原子的
+      const applied: { summary: string; write: () => void }[] = [];
+      for (const { patch, absolute } of resolved) {
         const display =
           toDisplayPath(relative(context.workspacePath, absolute)) ||
           toDisplayPath(patch.path);
@@ -151,6 +166,39 @@ export function createApplyPatchTool() {
       };
     },
   });
+}
+
+/** 仅用于去重，不替代 resolvePath 的权限校验，也不改变写入路径语义。 */
+function targetIdentity(absolute: string): string {
+  let anchor = absolute;
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync(anchor);
+      if (missing.length === 0) {
+        const stats = statSync(real, { bigint: true });
+        if (stats.ino !== 0n) {
+          // realpath 不合并硬链接；设备号 + inode 同时识别它们和 Windows 文件别名。
+          return `file:${stats.dev}:${stats.ino}`;
+        }
+      }
+      const target = join(real, ...missing);
+      return `path:${process.platform === "win32" ? target.toLowerCase() : target}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // realpath 的 ENOENT 也可能是悬空链接，不能将其当普通缺失路径拼回。
+      // 否则 Add 链接与 Add 其目标会得到不同身份，却写入同一文件。
+      if (lstatSync(anchor, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        throw new PatchFormatError(
+          `补丁目标包含无法解析的符号链接：${toDisplayPath(anchor)}`
+        );
+      }
+      const parent = dirname(anchor);
+      if (parent === anchor) throw error;
+      missing.unshift(basename(anchor));
+      anchor = parent;
+    }
+  }
 }
 
 // ---------- 解析 ----------

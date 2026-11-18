@@ -34,6 +34,7 @@ const EMPTY_FORM: McpServerForm = {
  */
 export function McpSettingsSection() {
   const [servers, setServers] = useState<McpServerView[] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<McpServerForm>(EMPTY_FORM);
   const [formError, setFormError] = useState("");
@@ -52,6 +53,8 @@ export function McpSettingsSection() {
   const [timeoutMessageError, setTimeoutMessageError] = useState(false);
 
   async function refreshTimeouts() {
+    setTimeoutMessage("");
+    setTimeoutMessageError(false);
     try {
       const settings = await window.codexlike.agentSettings.get();
       setCallTimeout(String(settings.mcpCallTimeoutSeconds));
@@ -68,6 +71,7 @@ export function McpSettingsSection() {
   }, []);
 
   async function saveTimeouts() {
+    if (!timeoutLoaded) return;
     setTimeoutSaving(true);
     setTimeoutMessage("");
     try {
@@ -94,12 +98,12 @@ export function McpSettingsSection() {
   }
 
   async function refresh() {
+    setLoadError("");
     try {
       const overview = await window.codexlike.mcp.overview();
       setServers(overview.servers);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-      setMessageError(true);
+      setLoadError(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -108,6 +112,7 @@ export function McpSettingsSection() {
   }, []);
 
   async function addServer() {
+    if (servers === null) return;
     const parsed = parseMcpServerForm(form);
     if (parsed.error !== undefined) {
       setFormError(parsed.error);
@@ -181,7 +186,8 @@ export function McpSettingsSection() {
           <button
             type="button"
             data-testid="mcp-add-server"
-            className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover"
+            disabled={servers === null}
+            className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
             onClick={() => {
               setShowForm(true);
               setForm(EMPTY_FORM);
@@ -193,6 +199,28 @@ export function McpSettingsSection() {
         )}
       </div>
 
+      {!timeoutLoaded && (
+        <div
+          role={timeoutMessageError ? "alert" : "status"}
+          className="text-sm text-fg-muted"
+        >
+          {timeoutMessageError ? (
+            <>
+              <p className="text-danger-fg">加载失败：{timeoutMessage}</p>
+              <button
+                type="button"
+                data-testid="mcp-timeout-settings-retry"
+                onClick={() => void refreshTimeouts()}
+                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            "正在加载…"
+          )}
+        </div>
+      )}
       {timeoutLoaded && (
         <McpTimeoutSettingsBody
           callTimeout={callTimeout}
@@ -215,6 +243,24 @@ export function McpSettingsSection() {
         </p>
       )}
 
+      {loadError !== "" && (
+        <div role="alert" className="text-sm text-danger-fg">
+          <p>加载失败：{loadError}</p>
+          <button
+            type="button"
+            data-testid="mcp-settings-retry"
+            onClick={() => void refresh()}
+            className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+          >
+            重试
+          </button>
+        </div>
+      )}
+      {servers === null && loadError === "" && (
+        <p role="status" className="text-sm text-fg-muted">
+          正在加载…
+        </p>
+      )}
       <ul className="flex flex-col gap-2" data-testid="mcp-server-list">
         {(servers ?? []).map((view) => {
           const status = STATUS_LABEL[view.status];

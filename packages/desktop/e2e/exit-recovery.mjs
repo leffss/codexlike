@@ -219,10 +219,7 @@ async function main() {
     await window.getByTestId("window-close").click();
     const resided = await app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0];
-      if (win.isVisible()) return false;
-      win.show();
-      win.focus();
-      return true;
+      return !win.isVisible();
     });
     assert(resided, "关闭按钮必须隐藏主窗口（驻留托盘）");
     assert(!childDisconnected, "驻留不停止子代理模型连接");
@@ -230,6 +227,13 @@ async function main() {
       app.quit();
     });
     await window.getByTestId("exit-confirm").waitFor();
+    assert(
+      await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        return win.isVisible() && !win.isMinimized() && win.isFocused();
+      }),
+      "托盘退出必须主动显示、恢复并聚焦确认窗口"
+    );
     await assertSemanticOverlay(
       window.getByTestId("exit-confirm").locator("../..")
     );

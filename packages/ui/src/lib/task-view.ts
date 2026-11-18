@@ -995,30 +995,67 @@ function applySubagentTool(
  * compact 整体重放后的子代理富段回接（ADR 0021：子代理记录与 compact
  * 无关）。compact 事件只携带替换后的 history（spawn 行按旧路径重建为
  * 过程空段），这里按 toolCallId 把 compact 前的过程富数据（轮次/工具/
- * 起止时间/中断态）接回重建段：消息流位置随新 history，过程内容不丢。
- * 无对应行的段（被裁轮次 / interrupted 留痕）随消息流语义移除——
- * 下一次整体 hydrate 会经并行快照重新带回。
+ * 起止时间/中断态）接回重建段。未匹配记录仍保留，按旧时间线的后继锚点
+ * 插回，不能直接堆到最新轮之后（否则 lastTurnRunning 会指向旧轮）。
+ * 不恢复被裁正文/用户消息，不引入并行 store；骨架 id 保持选中与开合身份。
  */
 export function mergeSubagentsAfterCompact(
   rebuilt: MessageSegment[],
   previous: MessageSegment[]
 ): MessageSegment[] {
-  const rich = new Map(
-    previous
-      .filter(
-        (item): item is SubagentSegment =>
-          item.kind === "subagent" && item.toolCallId !== ""
-      )
+  const rich = previous.filter(
+    (item): item is SubagentSegment => item.kind === "subagent"
+  );
+  const byId = new Map(rich.map((item) => [item.id, item]));
+  const byCall = new Map(
+    rich
+      .filter((item) => item.toolCallId !== "")
       .map((item) => [item.toolCallId, item])
   );
-  if (rich.size === 0) return rebuilt;
-  return rebuilt.map((item) => {
+  const retained = new Set<string>();
+  const next = rebuilt.map((item) => {
     if (item.kind !== "subagent") return item;
-    const before = rich.get(item.toolCallId);
+    const before = byId.get(item.id) ?? byCall.get(item.toolCallId);
     if (before === undefined) return item;
-    // 段 id / 时序槽位沿用重建结果，过程富数据沿用 compact 前的段
-    return { ...before, id: item.id, seq: item.seq, turnId: item.turnId };
+    retained.add(before.id);
+    return { ...before, seq: item.seq, turnId: item.turnId };
   });
+  for (let position = 0; position < previous.length; position += 1) {
+    const before = previous[position]!;
+    if (before.kind !== "subagent" || retained.has(before.id)) continue;
+    retained.add(before.id);
+    // 以仍存活的后继段作锚点；正文的流态段 id 与恢复 id 可不同，responseId 同源。
+    let index = -1;
+    for (const following of previous.slice(position + 1)) {
+      index = next.findIndex(
+        (item) =>
+          item.id === following.id ||
+          (following.kind === "assistant" &&
+            item.kind === "assistant" &&
+            following.responseId !== null &&
+            following.responseId === item.responseId)
+      );
+      if (index >= 0) break;
+    }
+    if (index < 0) {
+      // 无后继锚点时按发生时刻找下一轮；compact 摘要生成于现在，不是时间锚点。
+      index = next.findIndex(
+        (item) =>
+          item.kind !== "compact-summary" &&
+          before.at !== undefined &&
+          item.at !== undefined &&
+          item.at > before.at
+      );
+    }
+    if (index < 0) index = next.length;
+    const anchor = next[index];
+    // 被裁旧轮只能在后继整轮之前，不能把后继 user 与正文拆开成同名两轮。
+    if (anchor !== undefined && anchor.turnId !== before.turnId) {
+      while (index > 0 && next[index - 1]?.turnId === anchor.turnId) index -= 1;
+    }
+    next.splice(index, 0, { ...before, seq: nextSeq(next) });
+  }
+  return next;
 }
 
 /** 渲染层本地段（status / error）：不入事件流，尾部追加并归当前轮 */

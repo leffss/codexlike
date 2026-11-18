@@ -61,7 +61,8 @@ describe("read_file 工具", () => {
     expect(result.output).toContain("1\t1\n");
     expect(result.output).toContain("3\t3\n");
     expect(result.output).not.toContain("4\t4");
-    expect(result.output).toContain("[已截断：文件共 7 行，当前显示第 1-3 行]");
+    expect(result.output).toContain("[已截断：达到行数上限，当前显示第 1-3 行");
+    expect(result.output).not.toContain("文件共");
   });
 
   it("offset 起点的截断标记区间正确", async () => {
@@ -73,7 +74,7 @@ describe("read_file 工具", () => {
       { path: "big.txt", offset: 2 },
       context(workspace)
     );
-    expect(result.output).toContain("[已截断：文件共 5 行，当前显示第 2-3 行]");
+    expect(result.output).toContain("[已截断：达到行数上限，当前显示第 2-3 行");
   });
 
   it("文件不存在返回可读错误（模型可据此改用其它工具）", async () => {

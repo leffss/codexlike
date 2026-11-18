@@ -499,15 +499,21 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
     },
     respondInteraction: (id, response) => interactions.respond(id, response),
     cancelInteractions(reason) {
-      interactions.cancel(reason);
-      if (busy) {
-        terminated = true;
-        record.status = "idle";
-        persistence.updateTask(record.id, {
-          status: "idle",
-          updatedAt: now(),
-        });
-        activeController?.abort();
+      try {
+        interactions.cancel(reason);
+      } finally {
+        if (busy) {
+          terminated = true;
+          record.status = "idle";
+          try {
+            persistence.updateTask(record.id, {
+              status: "idle",
+              updatedAt: now(),
+            });
+          } finally {
+            activeController?.abort();
+          }
+        }
       }
     },
     respondApproval(requestId, decision) {
@@ -654,9 +660,12 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
             });
 
             const toolCalls: {
-              toolCallId: string;
+              hostCallId: string;
+              providerCallId: string;
               toolName: string;
               input: unknown;
+              invalid?: boolean;
+              error?: unknown;
             }[] = [];
             for await (const part of result.fullStream) {
               if (part.type === "reasoning-delta") {
@@ -676,10 +685,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                   delta: part.text,
                 };
               } else if (part.type === "tool-call") {
+                // ID 映射只属于当前生成轮的调用实例；provider ID 仅用于协议配对。
                 toolCalls.push({
-                  toolCallId: part.toolCallId,
+                  hostCallId: generateId(),
+                  providerCallId: part.toolCallId,
                   toolName: part.toolName,
                   input: part.input,
+                  invalid: part.invalid,
+                  error: part.error,
                 });
               } else if (part.type === "error") {
                 throw part.error;
@@ -710,17 +723,25 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               break;
             }
 
-            // 本轮 assistant 消息（含 tool-call parts）进入对话上下文
-            pending.push(...(await result.response).messages);
+            // 工具结果由宿主统一回填（工具表不提供 SDK execute）。SDK 会为
+            // unknown/invalid 自动补 tool-error，不能与下方宿主结果重复进入协议。
+            pending.push(
+              ...(await result.response).messages.filter(
+                (message) => message.role === "assistant"
+              )
+            );
 
             // 逐个执行工具：tool-call 事件 → 审批门（工单 04）→ 执行 → tool-result 事件 + 落库。
             // spawn_subagent 委派（工单 13）例外：execute 立即返回（子代理后台运行），
             // tool-result 延迟到本轮全部委派派发完、子代理结束后以真实报告回填。
             const resultParts: ToolModelMessage["content"] = [];
-            const deferredDelegations: { base: ToolCallRecord }[] = [];
+            const deferredDelegations: {
+              base: ToolCallRecord;
+              providerCallId: string;
+            }[] = [];
             for (const call of toolCalls) {
               const base: ToolCallRecord = {
-                id: call.toolCallId,
+                id: call.hostCallId,
                 taskId: record.id,
                 toolName: call.toolName,
                 arguments: safeJsonStringify(call.input),
@@ -747,6 +768,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               } else if (definition === undefined) {
                 output = `工具 ${call.toolName} 未注册，可用工具：${[...toolsByName.keys()].join("、")}`;
                 isError = true;
+              } else if (call.invalid) {
+                // SDK 解析/校验失败的调用不得进入审批，更不能执行副作用。
+                const reason =
+                  call.error instanceof Error
+                    ? call.error.message
+                    : String(call.error);
+                output = `工具 ${call.toolName} 参数无效，未执行：${reason}`;
+                isError = true;
               } else {
                 // 审批门（插在 tool-call 事件与执行之间）：按真实档位判定，不含
                 // autoApprove——ask 全询问 / assist 仅危险命令审批 / full-access 放行
@@ -767,7 +796,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                   const interaction = yield* events.during(
                     requestInteraction({
                       kind: "approval",
-                      toolCallId: call.toolCallId,
+                      toolCallId: call.hostCallId,
                       source: { kind: "main" },
                       toolName: call.toolName,
                       command: command ?? call.toolName,
@@ -792,7 +821,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                         workspacePath: record.workspacePath,
                         taskId: record.id,
                         approvalMode,
-                        toolCallId: call.toolCallId,
+                        toolCallId: call.hostCallId,
                         signal,
                         profile,
                         // 档位快照与模型随 profile 同一通道转发（spawn_subagent 入队捕获）
@@ -809,7 +838,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                       workspacePath: record.workspacePath,
                       taskId: record.id,
                       approvalMode,
-                      toolCallId: call.toolCallId,
+                      toolCallId: call.hostCallId,
                       signal,
                       profile,
                       thinkingEffort: effort,
@@ -827,7 +856,10 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                 executed?.isError === false
               ) {
                 // 仅已接受的委派延迟回填；即时失败保留原始错误，按普通结果落库与回填。
-                deferredDelegations.push({ base });
+                deferredDelegations.push({
+                  base,
+                  providerCallId: call.providerCallId,
+                });
                 continue;
               }
 
@@ -837,7 +869,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               yield { type: "tool-result", call: completed };
               resultParts.push({
                 type: "tool-result",
-                toolCallId: call.toolCallId,
+                toolCallId: call.providerCallId,
                 toolName: call.toolName,
                 ...toolResultOutput(
                   { output, isError, images: executed?.images },
@@ -854,7 +886,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               yield* events.during(orchestrator.wait());
               if (terminated) return;
               // 真实报告作为延迟 tool-result：落库、事件流出、回填下一轮生成
-              for (const { base } of deferredDelegations) {
+              for (const { base, providerCallId } of deferredDelegations) {
                 const reported = orchestrator.resultFor(base.id) ?? {
                   output: "子代理未返回报告（委派未被接受）",
                   isError: true,
@@ -864,10 +896,11 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                 yield { type: "tool-result", call: completed };
                 resultParts.push({
                   type: "tool-result",
-                  toolCallId: base.id,
+                  toolCallId: providerCallId,
                   toolName: base.toolName,
                   output: { type: "text", value: reported.output },
                 });
+                orchestrator.releaseResult(base.id);
               }
             }
 
@@ -926,28 +959,35 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           ? { type: "assistant-aborted", message: assistantMessage }
           : { type: "assistant-done", message: assistantMessage };
       } finally {
-        interactions.cancel("本轮已结束");
-        activeController?.abort();
-        upstreamSignal?.removeEventListener("abort", onAbort);
-        if (orchestrator?.hasPending()) await orchestrator.wait();
-        events.drain();
-        activeUser = undefined;
-        activeUserContext = undefined;
-        activeController = undefined;
         try {
-          if (currentResources !== undefined) {
-            lastResources = currentResources.summary();
+          try {
+            interactions.cancel("本轮已结束");
+          } finally {
+            activeController?.abort();
+            upstreamSignal?.removeEventListener("abort", onAbort);
+            if (orchestrator?.hasPending()) await orchestrator.wait();
           }
         } finally {
-          currentResources = undefined;
-          activeSignal = undefined;
-          busy = false;
-          record.status = "idle";
-          if (!terminated)
-            persistence.updateTask(record.id, {
-              status: "idle",
-              updatedAt: now(),
-            });
+          // 取消已结算后的辅助写入失败，也不能跳过任务互斥与资源的释放。
+          events.drain();
+          activeUser = undefined;
+          activeUserContext = undefined;
+          activeController = undefined;
+          try {
+            if (currentResources !== undefined) {
+              lastResources = currentResources.summary();
+            }
+          } finally {
+            currentResources = undefined;
+            activeSignal = undefined;
+            busy = false;
+            record.status = "idle";
+            if (!terminated)
+              persistence.updateTask(record.id, {
+                status: "idle",
+                updatedAt: now(),
+              });
+          }
         }
       }
     },

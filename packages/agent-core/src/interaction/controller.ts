@@ -23,6 +23,7 @@ export function createInteractionController(options: {
     string,
     {
       record: InteractionRecord;
+      signal?: AbortSignal;
       resolve(record: InteractionRecord): void;
       dispose(): void;
     }
@@ -36,25 +37,29 @@ export function createInteractionController(options: {
     if (!waiter) return false;
     if (!options.persistence.settleInteraction(record, snapshot)) return false;
     waiters.delete(id);
-    waiter.dispose();
-    if (snapshot) options.answered(snapshot);
-    options.waiting(waiters.size > 0);
-    options.emit({
-      type: "interaction-resolved",
-      interaction: structuredClone(record),
-    });
-    waiter.resolve(record);
+    try {
+      waiter.dispose();
+      if (snapshot) options.answered(snapshot);
+      options.waiting(waiters.size > 0);
+      options.emit({
+        type: "interaction-resolved",
+        interaction: structuredClone(record),
+      });
+    } finally {
+      // 结算已经提交：后置状态写入/通知失败仍须唤醒，不能遗失 waiter。
+      waiter.resolve(record);
+    }
     return true;
   }
-  function cancel(id: string, reason: string) {
+  function cancel(id: string, reason: string): boolean {
     const waiter = waiters.get(id);
-    if (waiter)
-      finish(id, {
-        ...waiter.record,
-        status: "cancelled",
-        resolvedAt: options.now(),
-        cancelReason: reason,
-      });
+    if (!waiter) return true;
+    return finish(id, {
+      ...waiter.record,
+      status: "cancelled",
+      resolvedAt: options.now(),
+      cancelReason: reason,
+    });
   }
   return {
     get pending() {
@@ -98,9 +103,30 @@ export function createInteractionController(options: {
         return Promise.resolve(resolved);
       }
       return new Promise((resolve) => {
-        const onAbort = () => cancel(request.id, "本轮已中断");
+        const onAbort = () => {
+          let reason = "本轮已中断";
+          try {
+            if (cancel(request.id, reason)) return;
+            reason += "（取消记录未能结算）";
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            reason += `（取消记录或通知失败：${message}）`;
+          }
+          // abort 是不可重试的终止信号，不同于 respond 保存失败后继续等待。
+          // EventTarget listener 不允许向外抛错；只结束运行时等待，绝不授权。
+          // 保存失败的记录仍是 pending，留给任务 finally/重启收尾补结算。
+          resolve({
+            ...record,
+            status: "cancelled",
+            response: null,
+            resolvedAt: null,
+            cancelReason: reason,
+          });
+        };
         waiters.set(request.id, {
           record,
+          signal,
           resolve,
           dispose: () => signal?.removeEventListener("abort", onAbort),
         });
@@ -115,7 +141,7 @@ export function createInteractionController(options: {
     },
     respond(id: string, input: unknown): boolean {
       const waiter = waiters.get(id);
-      if (!waiter) return false;
+      if (!waiter || waiter.signal?.aborted) return false;
       const response = parseInteractionResponse(waiter.record.request, input);
       if (
         response.kind === "approval" &&
@@ -134,17 +160,21 @@ export function createInteractionController(options: {
           const pending = waiters.get(record.request.id);
           if (!pending || pending.record.request.taskId !== taskId) return [];
           waiters.delete(record.request.id);
-          pending.dispose();
           return [{ record, waiter: pending }];
         });
-        options.autoApproved?.(taskId);
-        options.waiting(waiters.size > 0, true);
-        for (const { record } of completed)
-          options.emit({
-            type: "interaction-resolved",
-            interaction: structuredClone(record),
-          });
-        for (const { record, waiter } of completed) waiter.resolve(record);
+        try {
+          for (const { waiter } of completed) waiter.dispose();
+          options.autoApproved?.(taskId);
+          options.waiting(waiters.size > 0, true);
+          for (const { record } of completed)
+            options.emit({
+              type: "interaction-resolved",
+              interaction: structuredClone(record),
+            });
+        } finally {
+          // 一个通知失败不能阻断同事务内其余已获准调用的唤醒。
+          for (const { record, waiter } of completed) waiter.resolve(record);
+        }
         return true;
       }
       return finish(
@@ -159,7 +189,16 @@ export function createInteractionController(options: {
       );
     },
     cancel(reason: string) {
-      for (const id of [...waiters.keys()]) cancel(id, reason);
+      const errors: unknown[] = [];
+      for (const id of [...waiters.keys()]) {
+        try {
+          cancel(id, reason);
+        } catch (error) {
+          // 单条结算或通知失败不能阻止其余请求收尾；失败结算仍保留 waiter。
+          errors.push(error);
+        }
+      }
+      if (errors.length > 0) throw errors[0];
     },
   };
 }

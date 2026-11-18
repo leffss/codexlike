@@ -42,8 +42,10 @@ export interface BrowserTaskManager {
 }
 
 interface TaskEntry {
-  context: BrowserContext;
-  page: Page;
+  context: BrowserContext | null;
+  page: Page | null;
+  browser: Browser | null;
+  pending: Promise<Page> | null;
 }
 
 export function createBrowserTaskManager(
@@ -52,9 +54,11 @@ export function createBrowserTaskManager(
   const installer = options.installer ?? createCliChromiumInstaller();
   const progress = options.progress ?? (() => {});
   const tasks = new Map<string, TaskEntry>();
+  const cleanups = new Set<Promise<void>>();
 
   let browser: Browser | null = null;
   let launchTask: Promise<Browser> | null = null;
+  let generation = 0;
 
   /** 首次使用前确保 Chromium 可执行就绪（未就绪自动下载，失败中文提示可重试） */
   async function launchBrowser(
@@ -72,17 +76,92 @@ export function createBrowserTaskManager(
     if (launchTask === null) {
       // 并发调用共享同一次启动；启动失败清空任务句柄，下次调用重试
       browser = null;
-      tasks.clear();
-      launchTask = launchBrowser(onProgress)
-        .then((launched) => {
+      const currentGeneration = generation;
+      const operation = launchBrowser(onProgress)
+        .then(async (launched) => {
+          if (generation !== currentGeneration) {
+            await launched.close().catch(() => {});
+            throw new Error("浏览器已关闭，启动已取消");
+          }
           browser = launched;
           return launched;
         })
         .finally(() => {
-          launchTask = null;
+          if (launchTask === operation) launchTask = null;
         });
+      launchTask = operation;
     }
     return launchTask;
+  }
+
+  function trackCleanup(operation: Promise<void>): Promise<void> {
+    const cleanup = operation.finally(() => cleanups.delete(cleanup));
+    cleanups.add(cleanup);
+    return cleanup;
+  }
+
+  function closeEntry(entry: TaskEntry): Promise<void> {
+    // 先关闭已持有的 context；创建中的迟到结果由创建方清理后才结算。
+    return trackCleanup(
+      Promise.all([
+        entry.context?.close().catch(() => {}),
+        entry.pending?.catch(() => {}),
+      ]).then(() => undefined)
+    );
+  }
+
+  function pageFor(taskId: string, reset = false): Promise<Page> {
+    let entry = tasks.get(taskId);
+    if (entry === undefined) {
+      entry = { context: null, page: null, browser: null, pending: null };
+      tasks.set(taskId, entry);
+    }
+    if (entry.pending !== null) return entry.pending;
+    if (
+      !reset &&
+      entry.browser?.isConnected() &&
+      entry.page !== null &&
+      !entry.page.isClosed()
+    ) {
+      return Promise.resolve(entry.page);
+    }
+    const owner = entry;
+    const current = () => tasks.get(taskId) === owner;
+    const operation = (async () => {
+      let context: BrowserContext | null = owner.context;
+      try {
+        const active = await browserReady(progress);
+        if (!current()) throw new Error("任务浏览器已关闭，页面创建已取消");
+        if (owner.browser !== active && context !== null) {
+          await context.close().catch(() => {});
+          context = null;
+        }
+        context ??= await active.newContext();
+        if (!current()) throw new Error("任务浏览器已关闭，页面创建已取消");
+        owner.context = context;
+        owner.browser = active;
+        if (reset) {
+          await owner.page?.close({ runBeforeUnload: false }).catch(() => {});
+          owner.page = null;
+          if (!current()) throw new Error("任务浏览器已关闭，页面重置已取消");
+        }
+        const page = await context.newPage();
+        if (!current()) {
+          await page.close({ runBeforeUnload: false }).catch(() => {});
+          throw new Error("任务浏览器已关闭，页面创建已取消");
+        }
+        owner.page = page;
+        return page;
+      } catch (error) {
+        if (current()) tasks.delete(taskId);
+        await context?.close().catch(() => {});
+        throw error;
+      }
+    })().finally(() => {
+      if (owner.pending === operation) owner.pending = null;
+    });
+    owner.pending = operation;
+    return operation;
   }
 
   return {
@@ -90,42 +169,35 @@ export function createBrowserTaskManager(
       await browserReady(onProgress ?? progress);
     },
 
-    async pageFor(taskId) {
-      const active = await browserReady(progress);
-      const existing = tasks.get(taskId);
-      if (existing !== undefined && !existing.page.isClosed()) {
-        return existing.page;
-      }
-      const context = await active.newContext();
-      const page = await context.newPage();
-      tasks.set(taskId, { context, page });
-      return page;
-    },
+    pageFor,
 
     async closeTask(taskId) {
       const entry = tasks.get(taskId);
-      if (entry === undefined) {
-        return;
-      }
+      if (entry === undefined) return;
       tasks.delete(taskId);
-      await entry.context.close().catch(() => {});
+      await closeEntry(entry);
     },
 
-    async resetPage(taskId) {
-      const entry = tasks.get(taskId);
-      if (entry === undefined) {
-        return await this.pageFor(taskId);
-      }
-      await entry.page.close({ runBeforeUnload: false }).catch(() => {});
-      entry.page = await entry.context.newPage();
-      return entry.page;
+    resetPage(taskId) {
+      return pageFor(taskId, true);
     },
 
     async close() {
+      generation += 1;
+      const entries = [...tasks.values()];
       tasks.clear();
-      const closing = browser;
+      const active = browser;
+      const launching = launchTask;
       browser = null;
-      await closing?.close().catch(() => {});
+      launchTask = null;
+      const closing = trackCleanup(
+        Promise.all([
+          ...entries.map(closeEntry),
+          active?.close().catch(() => {}),
+          launching?.catch(() => {}),
+        ]).then(() => undefined)
+      );
+      await Promise.all([...cleanups, closing]);
     },
   };
 }

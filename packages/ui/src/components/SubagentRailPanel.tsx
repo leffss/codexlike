@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
-import remarkGfm from "remark-gfm";
 
 import { exportFileNameBase } from "./AssistantActions";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { WorkPlanCardFromSubagentTools } from "./WorkPlanCard";
+import { ToolDetailsBody } from "./ToolDetailsBody";
 import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
-import { markdownComponents } from "../lib/markdown";
+import { MarkdownContent } from "../lib/markdown";
 import { subagentExportMarkdown } from "../lib/subagent-export";
 import {
   isTerminalSubagentState,
@@ -19,7 +17,7 @@ import {
 } from "../lib/subagent-status";
 import { thinkingSummary } from "../lib/thinking-summary";
 import { summarizeToolCall } from "../lib/tool-summary";
-import type { SubagentSegment } from "../lib/task-view";
+import type { SubagentSegment, SubagentToolCall } from "../lib/task-view";
 import { formatDurationCn } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 
@@ -286,13 +284,7 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
               subagent.ok === false ? "text-danger-fg" : "text-fg"
             }`}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight]}
-              components={markdownComponents}
-            >
-              {subagent.report ?? ""}
-            </ReactMarkdown>
+            <MarkdownContent content={subagent.report ?? ""} />
           </div>
           <SubagentReportActions subagent={subagent} />
           <ToolsDetails subagent={subagent} />
@@ -450,24 +442,26 @@ function SubagentRoundsDisclosure(props: {
           {summary !== "" && ` · ${summary}`}
         </span>
       </summary>
-      <div
-        data-testid={`subagent-${variant}-content`}
-        className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-sm leading-6 text-fg ${
-          variant === "thinking" ? "max-h-48" : "max-h-64"
-        }`}
-      >
-        {rounds.map((text, index) => (
-          <div
-            key={index}
-            data-testid={`subagent-${variant}-round-${index + 1}`}
-          >
-            {rounds.length > 1 && (
-              <p className="mb-1 text-xs text-fg-subtle">第 {index + 1} 轮</p>
-            )}
-            <p className="mb-3 last:mb-0">{text}</p>
-          </div>
-        ))}
-      </div>
+      {open && (
+        <div
+          data-testid={`subagent-${variant}-content`}
+          className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-sm leading-6 text-fg ${
+            variant === "thinking" ? "max-h-48" : "max-h-64"
+          }`}
+        >
+          {rounds.map((text, index) => (
+            <div
+              key={index}
+              data-testid={`subagent-${variant}-round-${index + 1}`}
+            >
+              {rounds.length > 1 && (
+                <p className="mb-1 text-xs text-fg-subtle">第 {index + 1} 轮</p>
+              )}
+              <p className="mb-3 last:mb-0">{text}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </details>
   );
 }
@@ -501,36 +495,103 @@ function SubagentBody(props: {
   return <SubagentRoundsDisclosure {...props} variant="body" />;
 }
 
-/** 工具清单折叠（行尾耗时：起止对齐全才显示） */
+/** 工具清单与单条详情都按需挂载，长输出不拖慢关闭态详情。 */
 function ToolsDetails(props: { subagent: SubagentSegment }) {
-  if (props.subagent.tools.length === 0) return null;
+  const { subagent } = props;
+  const { open, setOpen } = useCollapseState(
+    `subagent-tools-${subagent.id}`,
+    false
+  );
+  if (subagent.tools.length === 0) return null;
   return (
-    <details data-testid="subagent-tools" className="mt-2">
-      <summary className="cursor-pointer text-xs text-fg-subtle">
-        工具调用（{props.subagent.tools.length} 次）
+    <details
+      data-testid="subagent-tools"
+      className="mt-2"
+      open={open}
+      onToggle={(event) => {
+        if (event.currentTarget.open !== open)
+          setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary
+        data-testid="subagent-tools-toggle"
+        className="cursor-pointer text-xs text-fg-subtle"
+      >
+        工具调用（{subagent.tools.length} 次）
       </summary>
-      <ul className="mt-1 flex flex-col gap-1">
-        {props.subagent.tools.map((tool) => (
-          <li
-            key={tool.id}
-            className="flex items-center gap-2 rounded bg-code-bg px-2 py-1 font-mono text-xs"
-          >
-            <span className="text-accent">{tool.toolName}</span>
-            <span className="min-w-0 flex-1 truncate text-fg-subtle">
-              {summarizeToolCall(tool.toolName, tool.arguments)}
-            </span>
-            <span className={tool.isError ? "text-danger-fg" : "text-ok-fg"}>
-              {tool.isError ? "失败" : "完成"}
-            </span>
-            {tool.startedAt !== undefined && tool.endedAt !== undefined && (
-              <span className="shrink-0 text-fg-subtle">
-                {formatDurationCn(tool.endedAt - tool.startedAt, true)}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+      {open && (
+        <ul className="mt-1 flex flex-col gap-1">
+          {subagent.tools.map((tool) => (
+            <SubagentToolDetails
+              key={tool.id}
+              tool={tool}
+              subagentId={subagent.id}
+            />
+          ))}
+        </ul>
+      )}
     </details>
+  );
+}
+
+function SubagentToolDetails(props: {
+  tool: SubagentToolCall;
+  subagentId: string;
+}) {
+  const { tool } = props;
+  const { open, setOpen } = useCollapseState(
+    `subagent-tool-${props.subagentId}-${tool.id}`,
+    false
+  );
+  return (
+    <li className="rounded bg-code-bg font-mono text-xs">
+      <details
+        data-testid="subagent-tool-details"
+        data-tool-id={tool.id}
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== open)
+            setOpen(event.currentTarget.open);
+        }}
+      >
+        <summary
+          data-testid="subagent-tool-toggle"
+          className="flex cursor-pointer items-center gap-2 px-2 py-1"
+        >
+          <DisclosureArrow open={open} />
+          <span className="text-accent">{tool.toolName}</span>
+          <span className="min-w-0 flex-1 truncate text-fg-subtle">
+            {summarizeToolCall(tool.toolName, tool.arguments)}
+          </span>
+          <span
+            className={
+              tool.running
+                ? "text-warn-fg"
+                : tool.isError
+                  ? "text-danger-fg"
+                  : "text-ok-fg"
+            }
+          >
+            {tool.running ? "运行中" : tool.isError ? "失败" : "完成"}
+          </span>
+          {tool.startedAt !== undefined && tool.endedAt !== undefined && (
+            <span className="shrink-0 text-fg-subtle">
+              {formatDurationCn(tool.endedAt - tool.startedAt, true)}
+            </span>
+          )}
+        </summary>
+        {open && (
+          <div className="border-t border-line px-2 py-2">
+            <ToolDetailsBody
+              arguments={tool.arguments}
+              output={tool.output}
+              running={tool.running}
+              testIdPrefix="subagent-tool"
+            />
+          </div>
+        )}
+      </details>
+    </li>
   );
 }
 

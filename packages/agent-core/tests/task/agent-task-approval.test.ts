@@ -194,13 +194,16 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
         e.type === "interaction-request"
     );
     expect(requests).toHaveLength(2);
+    const calls = events.flatMap((event) =>
+      event.type === "tool-call" ? [event.call] : []
+    );
     expect(requests[0]?.interaction.request).toMatchObject({
-      toolCallId: "c1",
+      toolCallId: calls[0]?.id,
       toolName: "write_file",
       commandWord: "write_file",
     });
     expect(requests[1]?.interaction.request).toMatchObject({
-      toolCallId: "c2",
+      toolCallId: calls[1]?.id,
       toolName: "run_terminal_command",
       command: "echo ask > cmd.txt",
       commandWord: "echo",
@@ -307,7 +310,7 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     expect(readFileSync(join(workspace, "auto.txt"), "utf8")).toBe("自动");
     const commandResult = events.find(
       (e): e is Extract<TaskEvent, { type: "tool-result" }> =>
-        e.type === "tool-result" && e.call.id === "c2"
+        e.type === "tool-result" && e.call.toolName === "run_terminal_command"
     );
     expect(commandResult?.call.isError).toBe(true);
     expect(commandResult?.call.output).toContain(
@@ -316,7 +319,10 @@ describe("AgentTask 审批插点（请求批准 / 帮我批准 / 完全访问）
     // 审批请求恰好一次（只来自危险命令，文件编辑不弹卡）
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      toolCallId: "c2",
+      toolCallId:
+        commandResult?.type === "tool-result"
+          ? commandResult.call.id
+          : "missing",
       toolName: "run_terminal_command",
       command: "rm codexlike-nonexistent-target",
       commandWord: "rm",

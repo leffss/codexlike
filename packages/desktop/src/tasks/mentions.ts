@@ -1,5 +1,6 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import type { MentionAttachment } from "@codexlike/agent-core";
 
@@ -38,19 +39,30 @@ export function readMentionAttachments(
     if (!statSync(real).isFile()) {
       throw new Error(`@引用 的路径不是文件：${raw}`);
     }
-    const buffer = readFileSync(real);
-    if (buffer.byteLength > MENTION_MAX_BYTES) {
-      // 字节截断可能切在多字节字符中间：去掉尾部的半个字符
-      const head = buffer
-        .subarray(0, MENTION_MAX_BYTES)
-        .toString("utf8")
-        .replace(/\uFFFD+$/u, "");
+    // 预算之外只多读一个字节判断是否截断，不随文件大小分配或同步全量读取。
+    const fd = openSync(real, "r");
+    const buffer = Buffer.alloc(MENTION_MAX_BYTES + 1);
+    let total = 0;
+    try {
+      while (total < buffer.length) {
+        const count = readSync(fd, buffer, total, buffer.length - total, total);
+        if (count === 0) break;
+        total += count;
+      }
+    } finally {
+      closeSync(fd);
+    }
+    if (total > MENTION_MAX_BYTES) {
+      // 流式解码暂存末尾半个字符（不调用 end），保留原文中的完整替换符。
+      const head = new StringDecoder("utf8").write(
+        buffer.subarray(0, MENTION_MAX_BYTES)
+      );
       return {
         path: raw,
         content: `${head}\n\n（文件超过 128 KiB，内容已截断）`,
       };
     }
-    return { path: raw, content: buffer.toString("utf8") };
+    return { path: raw, content: buffer.toString("utf8", 0, total) };
   });
 }
 

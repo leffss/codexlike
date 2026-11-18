@@ -413,6 +413,11 @@ async function main() {
 
     // 各段内容归属正确：两段思考独立成段；被隔断的中间正文以过程卡
     // 呈现（默认收起），最终正文单独成段
+    const thinkingBlocks = window.getByTestId("thinking-block");
+    for (const block of await thinkingBlocks.all()) {
+      if (!(await block.evaluate((node) => node.open)))
+        await block.getByTestId("thinking-toggle").click();
+    }
     const thinkingTexts = await window.evaluate(() =>
       [...document.querySelectorAll('[data-testid="thinking-content"]')].map(
         (node) => node.textContent ?? ""
@@ -424,6 +429,11 @@ async function main() {
         thinkingTexts[1].includes("再核对一遍"),
       `两段思考应交错独立存在：${JSON.stringify(thinkingTexts)}`
     );
+    // 完整内容按需挂载；核对后回到默认收起态，保留后续开合交互断言。
+    for (const block of await thinkingBlocks.all()) {
+      if (await block.evaluate((node) => node.open))
+        await block.getByTestId("thinking-toggle").click();
+    }
     const processTextBlock = window.getByTestId("process-text-block");
     assert(
       (await processTextBlock.count()) === 1,
@@ -539,9 +549,10 @@ async function main() {
         ]),
       `重启恢复后的消息段序列不正确：${JSON.stringify(restored)}`
     );
-    const restoredThinking = await window
-      .getByTestId("thinking-block")
-      .first()
+    const restoredThinkingBlock = window.getByTestId("thinking-block").first();
+    if (!(await restoredThinkingBlock.evaluate((node) => node.open)))
+      await restoredThinkingBlock.getByTestId("thinking-toggle").click();
+    const restoredThinking = await restoredThinkingBlock
       .getByTestId("thinking-content")
       .textContent();
     assert(
@@ -550,6 +561,7 @@ async function main() {
         restoredThinking.includes("再核对一遍"),
       `恢复后的思考全文应包含两段：${restoredThinking ?? "(空)"}`
     );
+    await restoredThinkingBlock.getByTestId("thinking-toggle").click();
     const restoredText = await window
       .getByTestId("message-assistant")
       .last()

@@ -340,13 +340,15 @@ export function createWorkspaceState(port?: WorkbenchPort) {
       }
     },
     composer: (taskId: string) => composers.get(taskId) ?? "",
-    setComposer(taskId: string, text: string) {
+    /** 队列编辑临时借用输入框，不覆盖持久原草稿；结束编辑后再显式保存。 */
+    setComposer(taskId: string, text: string, persist = true) {
       if (removedTasks.has(taskId)) return;
       composers.set(taskId, text);
-      persisted.patch(taskTarget(taskId), (value) => ({
-        ...value,
-        text,
-      }));
+      if (persist)
+        persisted.patch(taskTarget(taskId), (value) => ({
+          ...value,
+          text,
+        }));
       notify();
     },
     draft: (taskId: string, requestId: string) =>

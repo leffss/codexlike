@@ -35,6 +35,33 @@ const MAIN_TASK = "委派读取笔记并总结";
 
 async function main() {
   const model = await startMockProvider((ctx, { body }) => {
+    const request = JSON.parse(body);
+    if (request.stream !== true) {
+      ctx.respondJson({
+        id: "compact-subagent-review",
+        object: "chat.completion",
+        created: 0,
+        model: "mock-model",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "已压缩第一轮委派历史。" },
+            finish_reason: "stop",
+          },
+        ],
+      });
+      return;
+    }
+    const lastUser = request.messages.findLast(
+      (entry) => entry.role === "user"
+    );
+    if (
+      typeof lastUser?.content === "string" &&
+      lastUser.content.startsWith("后续问题")
+    ) {
+      ctx.textRound(`续聊完成：${lastUser.content}`);
+      return;
+    }
     const isSub = body.includes(SUBAGENT_SYSTEM_MARK);
     if (isSub && !body.includes(NOTE_CONTENT)) {
       // 子代理第一轮：思考 + 正文 + read_file 工具调用（一轮内三件齐发，
@@ -186,7 +213,7 @@ async function main() {
     // 3) 工具清单：工具名 + 成败标记（旧路径此清单恒空，判别性断言）
     const tools = panel.getByTestId("subagent-tools");
     await tools.waitFor({ timeout: 10_000 });
-    await tools.locator("summary").click();
+    await tools.getByTestId("subagent-tools-toggle").click();
     await tools.getByText("read_file").waitFor({ timeout: 10_000 });
     const toolsText = await tools.textContent();
     assert(
@@ -195,6 +222,23 @@ async function main() {
         !toolsText.includes("失败"),
       `恢复后工具清单成败标记异常：${toolsText ?? "(空)"}`
     );
+    // F26：两级按需展开后，真实工具参数和结果必须完整可读。
+    const toolDetails = tools
+      .getByTestId("subagent-tool-details")
+      .filter({ hasText: "read_file" });
+    await toolDetails.getByTestId("subagent-tool-toggle").click();
+    assert(
+      (
+        await toolDetails.getByTestId("subagent-tool-arguments").textContent()
+      )?.includes("note.txt"),
+      "恢复后的子代理工具完整参数应可展开查看"
+    );
+    assert(
+      (
+        await toolDetails.getByTestId("subagent-tool-output").textContent()
+      )?.includes(NOTE_CONTENT),
+      "恢复后的子代理工具输出应可展开查看"
+    );
     // 报告块照旧（恢复不破坏完成态呈现）
     const reportText = await panel.getByTestId("subagent-report").textContent();
     assert(
@@ -202,6 +246,46 @@ async function main() {
       `重启后报告缺失：${reportText ?? "(空)"}`
     );
     console.log("[e2e] 工具清单恢复：read_file + 成败标记完整");
+
+    // F24：把含委派的首轮压掉，右栏检视数据仍应保留，不必重开任务才能回看。
+    for (let index = 1; index <= 3; index += 1) {
+      await window.getByTestId("composer-input").fill(`后续问题${index}`);
+      await window.getByTestId("composer-send").click();
+      await window
+        .getByTestId("message-assistant")
+        .filter({ hasText: `续聊完成：后续问题${index}` })
+        .waitFor({ timeout: 20_000 });
+      await window.getByTestId("composer-send").waitFor();
+    }
+    await window.getByTestId("composer-input").fill("/compact");
+    await window.getByTestId("composer-input").press("Enter");
+    await window
+      .getByTestId("message-compact-summary")
+      .waitFor({ timeout: 20_000 });
+    await panel
+      .getByTestId("subagent-report")
+      .filter({ hasText: REPORT_TEXT })
+      .waitFor();
+    assert(
+      (await panel.getByTestId("subagent-tool-output").textContent())?.includes(
+        NOTE_CONTENT
+      ),
+      "压缩掉委派轮次后仍应保留已展开工具详情"
+    );
+    const taskId = await window.evaluate(
+      async (title) =>
+        (await window.codexlike.tasks.list()).find(
+          (record) => record.title === title
+        )?.id,
+      MAIN_TASK
+    );
+    assert(typeof taskId === "string", "原任务仍存在");
+    const persistedSubagents = await window.evaluate(
+      async (id) => (await window.codexlike.tasks.view(id)).subagents.length,
+      taskId
+    );
+    assert(persistedSubagents === 1, "压缩不会删除独立子代理记录");
+    console.log("[e2e] 压缩后子代理详情与工具输出仍可检视");
 
     await closeApp(app);
     console.log("[e2e] 工单 05 正常重启回看场景通过 ✅");

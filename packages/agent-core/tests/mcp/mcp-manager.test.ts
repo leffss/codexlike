@@ -1,9 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { runTool } from "../../src/tools/registry";
 
@@ -239,6 +239,153 @@ describe("McpManager 韧性：崩溃/超时/启动失败不拖垮调用方", () 
       serverId: "srv-1",
       status: "disconnected",
     });
+  });
+});
+
+describe("McpManager 并发生命周期（真实 stdio）", () => {
+  const fixtures: { directory: string; manager: McpManager }[] = [];
+  const context = {
+    workspacePath: tmpdir(),
+    taskId: "mcp-lifecycle",
+    approvalMode: "assist" as const,
+  };
+
+  function recordedPids(directory: string, phase = "started"): number[] {
+    return readdirSync(directory)
+      .filter((name) => name.endsWith(`.${phase}`))
+      .map((name) => Number(name.split(".")[0]));
+  }
+
+  function alive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+      throw error;
+    }
+  }
+
+  async function until(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("等待 fake stdio 状态超时");
+      await wait(10);
+    }
+  }
+
+  function lifecycle() {
+    const directory = mkdtempSync(join(tmpdir(), "codexlike-mcp-lifecycle-"));
+    const servers = [
+      fakeServer({ env: { FAKE_MCP_LIFECYCLE_DIR: directory } }),
+    ];
+    const manager = newManager({ servers: () => servers });
+    fixtures.push({ directory, manager });
+    return { directory, manager, servers };
+  }
+
+  afterEach(async () => {
+    for (const { directory, manager } of fixtures.splice(0)) {
+      writeFileSync(join(directory, "release"), "release");
+      await manager.close();
+      // 不能按名称杀进程：只处理该测试夹具记录的 PID，红测泄漏也不留残进程。
+      for (const pid of recordedPids(directory)) {
+        if (alive(pid)) process.kill(pid, "SIGKILL");
+      }
+      await until(() => recordedPids(directory).every((pid) => !alive(pid)));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("并发显式 connect 共用发现中的连接，重复重连也只保留一个进程", async () => {
+    const { directory, manager } = lifecycle();
+    writeFileSync(join(directory, "hold"), "hold");
+    const first = manager.connect("srv-1");
+    await until(() => recordedPids(directory, "listing").length === 1);
+    const second = manager.connect("srv-1");
+    const third = manager.connect("srv-1");
+    writeFileSync(join(directory, "release"), "release");
+    const states = await Promise.all([first, second, third]);
+
+    expect(states.map((state) => state.status)).toEqual([
+      "connected",
+      "connected",
+      "connected",
+    ]);
+    expect(recordedPids(directory)).toHaveLength(1);
+    await Promise.all([manager.connect("srv-1"), manager.connect("srv-1")]);
+    expect(recordedPids(directory)).toHaveLength(2);
+    expect(recordedPids(directory).filter(alive)).toHaveLength(1);
+    await manager.close();
+    expect(recordedPids(directory).filter(alive)).toEqual([]);
+  });
+
+  it.each(["disconnect", "close", "remove"] as const)(
+    "%s 在发现进行中生效：迟到连接不能复活，仍可显式重新连接",
+    async (operation) => {
+      const { directory, manager, servers } = lifecycle();
+      writeFileSync(join(directory, "hold"), "hold");
+      const pending = manager.connect("srv-1");
+      await until(() => recordedPids(directory, "listing").length === 1);
+      const config = servers[0]!;
+      if (operation === "remove") servers.splice(0);
+      const closing =
+        operation === "close" ? manager.close() : manager.disconnect("srv-1");
+      writeFileSync(join(directory, "release"), "release");
+      await closing;
+      const state = await pending;
+
+      expect(state.status).not.toBe("connected");
+      expect(manager.tools()).toEqual([]);
+      expect(recordedPids(directory).filter(alive)).toEqual([]);
+      if (operation === "remove") servers.push(config);
+      expect(manager.states()[0]?.status).toBe("disconnected");
+      expect((await manager.connect("srv-1")).status).toBe("connected");
+      await manager.close();
+      expect(recordedPids(directory).filter(alive)).toEqual([]);
+    }
+  );
+
+  it.each(["disconnect", "close"] as const)(
+    "%s 后缓存的工具不能惰性复活连接",
+    async (operation) => {
+      const { directory, manager } = lifecycle();
+      await manager.connect("srv-1");
+      const echo = manager
+        .tools()
+        .find((tool) => tool.name === "mcp_fake_echo")!;
+      if (operation === "close") await manager.close();
+      else await manager.disconnect("srv-1");
+
+      const result = await echo.execute({ text: "late" }, context);
+
+      expect(result.isError).toBe(true);
+      expect(manager.tools()).toEqual([]);
+      expect(manager.states()[0]?.status).toBe("disconnected");
+      expect(recordedPids(directory)).toHaveLength(1);
+      expect(recordedPids(directory).filter(alive)).toEqual([]);
+    }
+  );
+
+  it("崩溃后并发调用共享一个重连进程，close 回收全部 PID", async () => {
+    const { directory, manager } = lifecycle();
+    await manager.connect("srv-1");
+    const echo = manager.tools().find((tool) => tool.name === "mcp_fake_echo")!;
+    const crash = manager
+      .tools()
+      .find((tool) => tool.name === "mcp_fake_crash")!;
+    await crash.execute({}, context);
+    await until(() => manager.states()[0]?.status === "disconnected");
+
+    const results = await Promise.all(
+      [1, 2, 3].map(() => echo.execute({ text: "pid" }, context))
+    );
+    await manager.close();
+
+    expect(results.every((result) => !result.isError)).toBe(true);
+    expect(new Set(results.map((result) => result.output)).size).toBe(1);
+    expect(recordedPids(directory)).toHaveLength(2);
+    expect(recordedPids(directory).filter(alive)).toEqual([]);
   });
 });
 

@@ -129,14 +129,15 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     );
     expect(html).toMatch(/完成于/);
     expect(html).toMatch(/data-testid="subagent-tools"/);
-    // 工具清单默认收起：details 无 open 属性（内容在 DOM，视觉折叠）
+    // 工具清单默认收起：details 无 open 属性，清单内容按需挂载
     const tools = html.match(
       /<details[^>]*data-testid="subagent-tools"[^>]*>/
     )?.[0];
     expect(tools).not.toContain('open=""');
   });
 
-  it("工具清单计数口径含 update_plan：照常计入次数，行内摘要为中文统计（票 03）", () => {
+  it("展开工具清单计数口径含 update_plan：照常计入次数，行内摘要为中文统计（票 03）", () => {
+    setRememberedOpen("subagent-tools-sa-p", true);
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
         subagents: [
@@ -228,7 +229,9 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(empty).toContain("（任务描述缺失）");
   });
 
-  it("正文折叠块（票 04）：完成态默认收起、逐轮分段、与思考折叠同构；报告块呈现不变", () => {
+  it("正文折叠块（票 04）：记忆展开后逐轮分段、与思考折叠同构；报告块呈现不变", () => {
+    setRememberedOpen("subagent-body-sa-body", true);
+    setRememberedOpen("subagent-thinking-sa-body", true);
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
         subagents: [
@@ -244,12 +247,12 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
         focus: null,
       })
     );
-    // 与思考折叠同构：details/summary 结构，完成态默认收起（无 open）
+    // 已有展开记忆：完成态保持用户选择，逐轮内容可读。
     const block = html.match(
       /<details[^>]*data-testid="subagent-body-block"[^>]*>/
     )?.[0];
     expect(block).toBeDefined();
-    expect(block).not.toContain('open=""');
+    expect(block).toContain('open=""');
     expect(html).toMatch(/data-testid="subagent-body-toggle"/);
     // 逐轮分段：轮次标签 + 各轮正文（最终轮即报告轮，正文内含报告文本）
     expect(html).toMatch(/data-testid="subagent-body-round-1"/);

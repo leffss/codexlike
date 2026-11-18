@@ -8,7 +8,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 pnpm check:adr
 pnpm check:e2e-locators
 pnpm lint
-pnpm lint-staged
+# Windows 命令行长度有限，大批文件按参数长度分批，所有暂存文件仍执行检查。
+pnpm lint-staged --max-arg-length 6000
 # lint-staged 会 touch staged 源文件（含内容未变的重写），commit 后 desktop/ui
 # 的 dist mtime 落后会让 e2e 的 src→dist 新鲜度检查（launchTarget）误拦——
 # 这里顺手重建两个构建产物（esbuild ~0.3s + vite ~2s），保证 commit 后 e2e 即刻可用。

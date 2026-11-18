@@ -147,7 +147,8 @@ function buildSpawnPlan(
     return {
       commandLine: command,
       file: "cmd.exe",
-      args: ["/d", "/s", "/c", command],
+      // /s /c 只剥掉最外层引号；内部命令保持 cmd 原生转义，不走 CRT 参数转义。
+      args: ["/d", "/s", "/c", `"${command}"`],
       cwd,
       env,
       convertPaths: false,
@@ -268,6 +269,7 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
           cwd: plan.cwd,
           env: plan.env,
           windowsHide: true,
+          windowsVerbatimArguments: shell === "cmd",
         });
 
         let stdout = "";

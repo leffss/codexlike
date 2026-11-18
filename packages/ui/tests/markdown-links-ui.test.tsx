@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
+import { setRememberedOpen } from "../src/lib/collapse-memory";
 import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
 import type { MessageSegment, SubagentSegment } from "../src/lib/task-view";
 
@@ -34,6 +35,8 @@ function render(entry: (typeof entries)[number], content: string): string {
       })
     );
   }
+  if (entry === "compact-summary")
+    setRememberedOpen("compact-markdown-links-message", true);
   const segment: MessageSegment = {
     kind: entry,
     id: "markdown-links-message",

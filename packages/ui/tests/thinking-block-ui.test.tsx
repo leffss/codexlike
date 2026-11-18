@@ -14,7 +14,7 @@ import type {
 /**
  * 思考块开合默认值（呈现层内存态 + collapse-memory）：
  * 流式进行中默认展开（实时可见）、思考结束自动收起、
- * 收起态摘要行回看；收起态内容仍留在 DOM（e2e 以 textContent 回读全文）。
+ * 收起态摘要行回看；收起态卸载正文，交互展开后才可读全文。
  * Seam：renderToStaticMarkup（默认值与首帧标记；点击交互由 e2e 覆盖）。
  */
 
@@ -67,13 +67,14 @@ describe("思考块：流式展开 / 完成自动折叠 / 摘要行", () => {
     expect(html).toContain("已思考 · 先读 vite 配置，");
   });
 
-  it("收起态内容仍在 DOM（textContent 可回读全文，e2e 依赖此语义）", () => {
-    const html = streamOf([thinking()]);
-    const content = html.match(
-      /data-testid="thinking-content"[^>]*>((?:[^<]|<(?!\/div))*)/
-    )?.[1];
-    expect(content).toContain("先读 vite 配置，");
-    expect(content).toContain("再数入口与依赖边界");
+  it("收起态不挂载全文，已有展开记忆时完整回看", () => {
+    const closed = streamOf([thinking()]);
+    expect(closed).not.toContain('data-testid="thinking-content"');
+    expect(closed).not.toContain("再数入口与依赖边界");
+    setRememberedOpen("thinking-open-history", true);
+    const opened = streamOf([thinking({ id: "thinking-open-history" })]);
+    expect(opened).toContain('data-testid="thinking-content"');
+    expect(opened).toContain("再数入口与依赖边界");
   });
 
   it("正文流式气泡不再内联转圈：流式指示统一到消息流底部运行行", () => {

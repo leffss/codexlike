@@ -1,11 +1,14 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   ReadingPosition,
   SavedQuestionDraft,
 } from "@codexlike/agent-core";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
-import remarkGfm from "remark-gfm";
 
 import { useCollapseState } from "../lib/collapse-memory";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
@@ -16,7 +19,11 @@ import {
 } from "../lib/plan-view";
 import { useScrollbarGutter } from "../lib/use-scrollbar-gutter";
 import { useLocalDay } from "../lib/use-local-day";
-import { markdownComponents } from "../lib/markdown";
+import {
+  ContentCommitContext,
+  MarkdownContent,
+  StreamingMarkdownContent,
+} from "../lib/markdown";
 import {
   anchorDecisionAfterContentChange,
   backToLatestVisible,
@@ -121,20 +128,20 @@ export function MessageStream(props: {
   }
 
   /** 贴底用直接 scrollTop 赋值（非 smooth，流式期间不抖动），并登记回执 */
-  function snapToBottom(element: HTMLElement) {
+  const snapToBottom = useCallback((element: HTMLElement) => {
     const top = element.scrollHeight - element.clientHeight;
     scriptedScroll.current = { top, at: performance.now() };
     element.scrollTop = top;
-  }
+  }, []);
 
-  function commitMode(next: FollowMode) {
+  const commitMode = useCallback((next: FollowMode) => {
     if (followRef.current === next) return;
     followRef.current = next;
     setMode(next);
-  }
+  }, []);
 
   /** TTL 内最近登记的用户纵向意图；过期视为无登记 */
-  function recentIntent(): VerticalIntent | undefined {
+  const recentIntent = useCallback((): VerticalIntent | undefined => {
     const pending = pendingIntent.current;
     if (pending === null) return undefined;
     if (performance.now() - pending.at > INTENT_TTL_MS) {
@@ -142,7 +149,22 @@ export function MessageStream(props: {
       return undefined;
     }
     return pending.intent;
-  }
+  }, []);
+
+  const followContentCommit = useCallback(() => {
+    if (props.loading || restored.current !== props.taskId) return;
+    const element = container.current;
+    if (
+      !element ||
+      anchorDecisionAfterContentChange(followRef.current) !== "snap"
+    )
+      return;
+    if (recentIntent() === "up") {
+      commitMode("detached");
+      return;
+    }
+    snapToBottom(element);
+  }, [props.loading, props.taskId, recentIntent, commitMode, snapToBottom]);
 
   // 任务打开/切换：恢复阅读位置并建立初始跟随态（贴底记忆 → 定位当前
   // 最新并跟随；否则恢复像素位置按当前高度夹紧；无记忆 → 定位最新）。
@@ -167,7 +189,13 @@ export function MessageStream(props: {
     element.scrollTop = plan.scrollTop;
     commitMode(plan.mode);
     restored.current = props.taskId;
-  }, [props.taskId, props.loading, props.items, props.readingPosition]);
+  }, [
+    props.taskId,
+    props.loading,
+    props.items,
+    props.readingPosition,
+    commitMode,
+  ]);
 
   // 内容变化（流式增量 / 工具卡更新 / 折叠变化 / 压缩指示）：跟随贴底、
   // 脱离保持阅读位置（不夺滚动权）。
@@ -193,7 +221,7 @@ export function MessageStream(props: {
     if (!element) return;
     commitMode("following");
     snapToBottom(element);
-  }, [props.followSignal]);
+  }, [props.followSignal, commitMode, snapToBottom]);
 
   function registerIntent(intent: VerticalIntent) {
     if (intent !== "neutral")
@@ -221,16 +249,6 @@ export function MessageStream(props: {
       index,
     ])
   );
-
-  // 底部「运行中」工时：宿主执行态期间每秒跳动；runStartedAt 缺位时
-  // 只显示状态不显示数字（WorkspacePage 发送/恢复时成对记账，正常不缺）
-  const tickNow = useTickingNow(props.streaming === true);
-  const runElapsedMs =
-    props.streaming === true &&
-    props.runStartedAt !== null &&
-    props.runStartedAt !== undefined
-      ? Math.max(0, tickNow - props.runStartedAt)
-      : null;
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -318,17 +336,22 @@ export function MessageStream(props: {
               data-testid="message-list"
               className={`${contentWidthClass} flex flex-col gap-4`}
             >
-              {turns.map((turn) => (
-                <TurnGroupItem
-                  key={turn.turnId}
-                  turn={turn}
-                  now={now}
-                  questionDraft={props.questionDraft}
-                  taskTitle={props.taskTitle}
-                  planIndexById={planIndexById}
-                  onOpenSubagent={props.onOpenSubagent}
-                />
-              ))}
+              <ContentCommitContext.Provider
+                key={props.taskId}
+                value={followContentCommit}
+              >
+                {turns.map((turn) => (
+                  <TurnGroupItem
+                    key={turn.turnId}
+                    turn={turn}
+                    now={now}
+                    questionDraft={props.questionDraft}
+                    taskTitle={props.taskTitle}
+                    planIndexById={planIndexById}
+                    onOpenSubagent={props.onOpenSubagent}
+                  />
+                ))}
+              </ContentCommitContext.Provider>
               {props.compacting === true && (
                 <li
                   data-testid="compacting-indicator"
@@ -354,14 +377,7 @@ export function MessageStream(props: {
                 aria-hidden="true"
               />
               <span data-testid="running-label">运行中</span>
-              {runElapsedMs !== null && (
-                <span
-                  data-testid="running-elapsed"
-                  className="font-mono text-fg-subtle"
-                >
-                  {formatWorkDuration(runElapsedMs)}
-                </span>
-              )}
+              <RunningElapsed startedAt={props.runStartedAt} />
             </div>
           )}
         </div>
@@ -396,6 +412,17 @@ export function MessageStream(props: {
         </button>
       )}
     </div>
+  );
+}
+
+/** 计时只更新数字叶节点，不驱动消息树每秒重走。 */
+function RunningElapsed(props: { startedAt?: number | null }) {
+  const now = useTickingNow(props.startedAt != null);
+  if (props.startedAt == null) return null;
+  return (
+    <span data-testid="running-elapsed" className="font-mono text-fg-subtle">
+      {formatWorkDuration(Math.max(0, now - props.startedAt))}
+    </span>
   );
 }
 
@@ -635,8 +662,8 @@ function SegmentView(props: {
  * 流式进行中默认展开实时可见，思考结束自动收起，收起后的卡片
  * 以一行摘要回看（thinkingSummary 纯函数）；与正文段分离。
  *
- * 受控 <details open>：内容在收起态仍留在 DOM（e2e 以 textContent
- * 回读收起块全文）；onToggle 只在事件事实与渲染值不一致时写记忆——
+ * 受控 <details open>：关闭时卸载详情，展开才挂载完整内容；
+ * onToggle 只在事件事实与渲染值不一致时写记忆——
  * React 写 open 属性也会触发 toggle 事件，若不区分会把「流式默认展开」
  * 误记为手动展开，导致思考结束时不能自动收起。
  */
@@ -690,12 +717,14 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             </span>
           )}
         </summary>
-        <div
-          data-testid="thinking-content"
-          className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
-        >
-          {segment.content}
-        </div>
+        {open && (
+          <div
+            data-testid="thinking-content"
+            className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
+          >
+            {segment.content}
+          </div>
+        )}
       </details>
     </li>
   );
@@ -706,8 +735,8 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
  * 各自成段，以过程段呈现。流式正文只追加到序列末尾（隔断前它就是轮内
  * 最后一段正文，仍以气泡实时可见），被隔断即失活并打点 endedAt——因此
  * 过程卡默认收起，以首行摘要 + 段耗时回看，展开可读全文；恢复的历史段
- * 缺打点则省略耗时。与思考块同构的受控 <details>：内容在收起态仍留在
- * DOM，onToggle 只在事件事实与渲染值不一致时写记忆。
+ * 缺打点则省略耗时。与思考块同构的受控 <details>：关闭时不解析正文，
+ * onToggle 只在事件事实与渲染值不一致时写记忆。
  */
 function ProcessTextBlock(props: { segment: AssistantSegment }) {
   const { segment } = props;
@@ -750,18 +779,49 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
             </span>
           )}
         </summary>
-        <div
-          data-testid="process-text-content"
-          className="markdown mt-2 border-t border-line pt-2 pl-4 text-sm text-fg"
-        >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
+        {open && (
+          <div
+            data-testid="process-text-content"
+            className="markdown mt-2 border-t border-line pt-2 pl-4 text-sm text-fg"
           >
-            {segment.content}
-          </ReactMarkdown>
-        </div>
+            <MarkdownContent content={segment.content} />
+          </div>
+        )}
+      </details>
+    </li>
+  );
+}
+
+/** 压缩摘要与过程正文同样按需解析，不让关闭的历史承担解析成本。 */
+function CompactSummaryBlock(props: {
+  segment: Extract<MessageSegment, { kind: "compact-summary" }>;
+}) {
+  const { segment } = props;
+  const { open, setOpen } = useCollapseState(`compact-${segment.id}`, false);
+  return (
+    <li data-testid="message-compact-summary">
+      <details
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== open)
+            setOpen(event.currentTarget.open);
+        }}
+        className="rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
+      >
+        <summary
+          data-testid="compact-summary-toggle"
+          className="cursor-pointer select-none"
+        >
+          已压缩的历史（点击展开摘要全文）
+        </summary>
+        {open && (
+          <div
+            data-testid="compact-summary-content"
+            className="markdown mt-2 rounded border border-line bg-surface px-3 py-2 text-sm text-fg"
+          >
+            <MarkdownContent content={segment.content} />
+          </div>
+        )}
       </details>
     </li>
   );
@@ -821,38 +881,17 @@ function MessageBubble(props: {
   }
 
   if (segment.kind === "compact-summary") {
-    // /compact 摘要卡片：被压缩的历史折叠显示，点击展开摘要全文（工单 08）
-    return (
-      <li data-testid="message-compact-summary">
-        <details className="rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg">
-          <summary className="cursor-pointer select-none">
-            已压缩的历史（点击展开摘要全文）
-          </summary>
-          <div className="markdown mt-2 rounded border border-line bg-surface px-3 py-2 text-sm text-fg">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight]}
-              components={markdownComponents}
-            >
-              {segment.content}
-            </ReactMarkdown>
-          </div>
-        </details>
-      </li>
-    );
+    return <CompactSummaryBlock segment={segment} />;
   }
 
   return (
     <li data-testid="message-assistant" className="max-w-full">
       <div className="markdown rounded-lg border border-line bg-surface px-5 py-4 text-sm">
         <div data-testid="assistant-content">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {segment.content}
-          </ReactMarkdown>
+          <StreamingMarkdownContent
+            content={segment.content}
+            streaming={segment.streaming === true}
+          />
         </div>
         {/* 流式指示已统一到消息流底部「运行中」行（running-indicator），
             气泡内不再内联转圈 */}

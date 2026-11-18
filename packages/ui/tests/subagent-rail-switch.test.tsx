@@ -2,11 +2,17 @@
 // 交互回路（列表点击切换详情）：SSR 静态断言测不到 useEffect 与本地
 // state，此处用 jsdom + testing-library 驱动真实点击与流式 rerender，
 // 锁定「运行中流式更新不得覆盖用户的手动列表选择」。
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
-import type { SubagentSegment } from "../src/lib/task-view";
+import { initialTranscript, type SubagentSegment } from "../src/lib/task-view";
 
 function subSeg(
   id: string,
@@ -57,6 +63,71 @@ beforeAll(() => {
 });
 
 describe("SubagentRailPanelBody 列表点击切换详情", () => {
+  it("恢复 interrupted 的工具长输出与完整参数两级按需展开，HTML 只作文本且不请求主工具截图", async () => {
+    const output = `${"日志行\n".repeat(1_000)}唯一错误长尾 <img src=x onerror=alert(1)>`;
+    const args = {
+      command: "检查",
+      cwd: "C:/完整参数/目录",
+      nested: { detail: "不能被摘要隐藏" },
+    };
+    const toolImage = vi.fn();
+    Object.defineProperty(window, "codexlike", {
+      configurable: true,
+      value: { tasks: { toolImage } },
+    });
+    const subagents = initialTranscript(
+      [],
+      [
+        {
+          record: {
+            id: "tool-detail-subagent",
+            taskId: "task-1",
+            task: "恢复工具",
+            status: "interrupted",
+            queuedAt: "2026-11-18T08:00:00Z",
+            startedAt: null,
+            completedAt: "2026-11-18T08:01:00Z",
+          },
+          messages: [],
+          toolCalls: [
+            {
+              id: "sub-shot",
+              taskId: "task-1",
+              subagentId: "tool-detail-subagent",
+              toolName: "browser_screenshot",
+              arguments: JSON.stringify(args),
+              output,
+              isError: true,
+              createdAt: "2026-11-18T08:00:30Z",
+            },
+          ],
+        },
+      ]
+    ).filter((item): item is SubagentSegment => item.kind === "subagent");
+    render(<SubagentRailPanelBody subagents={subagents} focus={null} />);
+    expect(screen.queryByTestId("subagent-tool-details")).toBeNull();
+    fireEvent.click(screen.getByTestId("subagent-tools-toggle"));
+    await screen.findByTestId("subagent-tool-details");
+    expect(screen.queryByTestId("subagent-tool-output")).toBeNull();
+    expect(screen.getByTestId("subagent-tool-toggle").textContent).toContain(
+      "失败"
+    );
+    fireEvent.click(screen.getByTestId("subagent-tool-toggle"));
+    const renderedOutput = await screen.findByTestId("subagent-tool-output");
+    expect(renderedOutput.textContent).toBe(output);
+    expect(
+      JSON.parse(
+        screen.getByTestId("subagent-tool-arguments").textContent ?? ""
+      )
+    ).toEqual(args);
+    expect(renderedOutput.querySelector("img")).toBeNull();
+    expect(toolImage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("subagent-tool-toggle"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-tool-output")).toBeNull()
+    );
+  });
+
   it("点击列表项切换详情到对应子代理（focus 为 null 的基线）", () => {
     const a = subSeg("sa-a");
     const b = subSeg("sa-b");

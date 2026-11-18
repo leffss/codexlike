@@ -71,6 +71,7 @@ import { registerTaskHandlers } from "./tasks/task-ipc";
 import { createSqliteInputQueueStore } from "./tasks/input-queue-store";
 import { createSqliteTaskQueueStore } from "./tasks/task-queue-store";
 import { registerApplicationExit } from "./lifecycle/exit-ipc";
+import { configureTestDataPaths } from "./lifecycle/test-data-paths";
 import {
   createTraySettingsStore,
   type TraySettings,
@@ -130,6 +131,8 @@ const startHidden = shouldStartHidden(process.argv);
 // 任务队列；第二实例的启动意图是把应用调到眼前——激活已有主窗口后自行退出。
 // 仅打包环境启用（与登录项的 dev 防线一致）：开发/e2e 的 electron.exe 共用
 // 默认 userData，启用会把本机并行实例误判成第二实例。
+// 测试路径在 ready 和单实例锁之前配置，避免碰到日常应用的缓存或实例。
+configureTestDataPaths(app, process.env);
 const hasSingleInstanceLock =
   !app.isPackaged || app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
@@ -779,6 +782,7 @@ void app.whenReady().then(async () => {
     minimizeToTray: () => {
       void trayResidency?.minimizeToTray();
     },
+    showMainWindow: () => trayResidency?.showMainWindow(),
     closeStorage: () => {
       persistence.close();
       queueStore.close();

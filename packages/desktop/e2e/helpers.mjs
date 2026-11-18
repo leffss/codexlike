@@ -4,7 +4,7 @@
 import http from "node:http";
 import { execFile } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 
 import { electron, launchTarget } from "./launch-target.mjs";
@@ -482,6 +482,8 @@ export async function launchApp({ homeDir, workspaceDir, env }) {
     CODEXLIKE_HOME: homeDir,
     CODEXLIKE_TEST_AGENTS_HOME: join(homeDir, "compatible-agents"),
     CODEXLIKE_TEST_WORKSPACE: workspaceDir ?? join(homeDir, "workspace"),
+    // 业务目录之外，Chromium 的缓存/localStorage 也必须与用户日常应用隔离。
+    CODEXLIKE_TEST_USER_DATA: join(homeDir, "electron-user-data"),
     // 生产模式：不带 VITE_DEV_SERVER_URL，主进程以 file:// 加载 ui/dist
     VITE_DEV_SERVER_URL: "",
     ...(env ?? {}),
@@ -498,6 +500,21 @@ export async function launchApp({ homeDir, workspaceDir, env }) {
       console.error(`[main:err] ${String(chunk).trimEnd()}`)
     );
   const window = await app.firstWindow();
+  try {
+    const paths = await app.evaluate(({ app: runtime }) => ({
+      userData: runtime.getPath("userData"),
+      sessionData: runtime.getPath("sessionData"),
+    }));
+    const expected = resolve(fullEnv.CODEXLIKE_TEST_USER_DATA);
+    assert(
+      resolve(paths.userData) === expected &&
+        resolve(paths.sessionData) === join(expected, "session"),
+      "Electron 用户数据和会话数据必须使用本场景隔离目录"
+    );
+  } catch (error) {
+    await closeApp(app).catch(() => {});
+    throw error;
+  }
   window.on("console", (message) => {
     if (message.type() === "error") {
       console.log(`[renderer console.error] ${message.text()}`);

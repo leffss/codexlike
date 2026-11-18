@@ -144,6 +144,16 @@ async function main() {
       .waitFor({ timeout: 30_000 });
     console.log("[e2e] Monaco 双栏 diff 渲染（原/新两侧）");
 
+    // 已选路径不变时刷新也必须重读内容，不能只更新文件清单（F23）。
+    writeFileSync(join(repo, "e2e-change.txt"), "同路径刷新后的新版本");
+    await panel.getByTestId("changes-refresh").click();
+    await panel
+      .locator(".editor.modified .view-lines")
+      .filter({ hasText: "同路径刷新后的新版本" })
+      .first()
+      .waitFor({ timeout: 10_000 });
+    console.log("[e2e] 同路径刷新获取新的 diff 内容");
+
     // 4) 一键创建任务分支（类型/<slug>）→ 成功反馈
     await panel.getByTestId("changes-create-branch").click();
     await panel

@@ -68,9 +68,10 @@ export function createTaskQueueCoordinator(deps: {
   executingTaskIds: () => readonly string[];
   /**
    * 开跑排队任务：启动成功（消息已进入任务）即 resolve；启动失败以异常
-   * 抛回（条目保留，等待下一个触发点重试）。
+   * 抛回（条目保留，等待下一个触发点重试）。准备阶段移除条目会取消 signal，
+   * 调用方必须在最终同步占位前复查，不能让已经撤销的排队意图继续执行。
    */
-  start: (entry: QueuedTaskStart) => Promise<void>;
+  start: (entry: QueuedTaskStart, signal: AbortSignal) => Promise<void>;
   /** 队列变更通知：queue 为变更后的完整快照（不含已开跑出队的条目）。 */
   onChange: (
     taskId: string,
@@ -79,28 +80,42 @@ export function createTaskQueueCoordinator(deps: {
   ) => void;
 }) {
   const { store, limit, executingTaskIds, start, onChange } = deps;
-  /** 防重入：pump 进行中（await 开跑）时其余触发点直接返回，循环每轮重新判定名额。 */
+  /** 防重入但不丢唤醒：准备期间的推进请求合并为一次重试，消费后清除。 */
   let pumping = false;
+  let pumpRequested = false;
+  let preparing: { taskId: string; controller: AbortController } | undefined;
 
   function notify(taskId: string, reason: TaskQueueChangeReason): void {
     onChange(taskId, reason, store.list());
   }
 
   async function pump(): Promise<void> {
-    if (pumping) return;
+    if (pumping) {
+      pumpRequested = true;
+      return;
+    }
     pumping = true;
     try {
       for (;;) {
+        pumpRequested = false;
         const head = store.list()[0];
         if (head === undefined) return;
         if (executingTaskIds().length >= limit()) return;
+        const controller = new AbortController();
+        preparing = { taskId: head.taskId, controller };
         try {
-          await start(head);
+          await start(head, controller.signal);
         } catch {
+          // 移除后推进后继；准备期间收到新唤醒则重试队首，不能静默丢掉。
+          if (controller.signal.aborted || pumpRequested) continue;
           // 开跑失败：队首条目保留（消息不丢、FIFO 不跳过），等待下一个
           // 触发点（下一次名额释放或上限调大）重试。
           return;
+        } finally {
+          preparing = undefined;
         }
+        // 旧准备期间同任务可能被移除后重新排队，不能删除新意图。
+        if (controller.signal.aborted) continue;
         // 开跑成功才出队（崩溃重启不重发由持久层保证，与输入队列同构）。
         // 出队落库 / 通知失败（存储故障）与开跑失败是两种错误：消息已进入
         // 任务，吞错会让条目残留待下轮重复开跑同一首条——上抛由调用方
@@ -147,6 +162,7 @@ export function createTaskQueueCoordinator(deps: {
     /** 出队移除（中断排队/归档/项目移除清理）：在队返回 true 并推送通知。 */
     remove(taskId: string): boolean {
       if (!store.remove(taskId)) return false;
+      if (preparing?.taskId === taskId) preparing.controller.abort();
       notify(taskId, "remove");
       return true;
     },

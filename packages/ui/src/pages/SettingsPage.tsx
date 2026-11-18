@@ -36,11 +36,11 @@ export function SettingsPage() {
   const [loadError, setLoadError] = useState("");
 
   async function refresh() {
+    setLoadError("");
     try {
       setProfiles(await window.codexlike.providerProfiles.list());
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
-      setProfiles([]);
     }
   }
 
@@ -67,8 +67,9 @@ export function SettingsPage() {
           {editing === null && (
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover"
+              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               data-testid="profile-create"
+              disabled={profiles === null}
               onClick={() => setEditing("new")}
             >
               + 新建模型
@@ -77,8 +78,24 @@ export function SettingsPage() {
         </div>
 
         {loadError !== "" && (
-          <p className="rounded border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg">
-            加载失败：{loadError}
+          <div
+            role="alert"
+            className="rounded border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg"
+          >
+            <p>加载失败：{loadError}</p>
+            <button
+              type="button"
+              data-testid="profile-settings-retry"
+              onClick={() => void refresh()}
+              className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+            >
+              重试
+            </button>
+          </div>
+        )}
+        {profiles === null && loadError === "" && (
+          <p role="status" className="text-sm text-fg-muted">
+            正在加载…
           </p>
         )}
 
@@ -96,6 +113,7 @@ export function SettingsPage() {
                       baseURL: editingProfile.baseURL,
                       apiKey: editingProfile.apiKey,
                       models: editingProfile.models,
+                      contextWindowTokens: editingProfile.contextWindowTokens,
                     }}
                     submitLabel="保存修改"
                     onCancel={() => setEditing(null)}
@@ -240,10 +258,18 @@ function TraySettingsSection() {
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    void window.codexlike.traySettings.get().then((settings) => {
+  async function refresh() {
+    setMessage(null);
+    try {
+      const settings = await window.codexlike.traySettings.get();
       setLaunchAtLogin(settings.launchAtLogin);
-    });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
     // 托盘菜单切换时（设置页已打开）实时刷新，双入口始终同显
     return window.codexlike.traySettings.onLaunchAtLoginChanged((enabled) => {
       setLaunchAtLogin(enabled);
@@ -251,6 +277,7 @@ function TraySettingsSection() {
   }, []);
 
   function toggle(enabled: boolean) {
+    if (launchAtLogin === null) return;
     setLaunchAtLogin(enabled);
     setMessage(null);
     void window.codexlike.traySettings
@@ -287,8 +314,24 @@ function TraySettingsSection() {
         <p className="text-xs text-fg-muted">
           关闭窗口不会退出应用：它最小化到系统托盘继续运行，从托盘菜单「退出」才会真正退出。
         </p>
+        {launchAtLogin === null &&
+          (message ? (
+            <button
+              type="button"
+              data-testid="tray-settings-retry"
+              onClick={() => void refresh()}
+              className="self-start rounded border border-line px-3 py-1 text-sm hover:bg-hover"
+            >
+              重试
+            </button>
+          ) : (
+            <p role="status" className="text-sm text-fg-muted">
+              正在加载…
+            </p>
+          ))}
         {message && (
           <p
+            role="alert"
             data-testid="tray-settings-message"
             className="text-xs text-danger-fg"
           >
@@ -480,6 +523,8 @@ function ExecutionSettingsSection() {
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
+    setMessage("");
+    setMessageError(false);
     try {
       const settings = await window.codexlike.agentSettings.get();
       setMaxToolRounds(String(settings.maxToolRounds));
@@ -502,6 +547,7 @@ function ExecutionSettingsSection() {
   }, []);
 
   async function save() {
+    if (!loaded) return;
     setSaving(true);
     setMessage("");
     try {
@@ -556,6 +602,28 @@ function ExecutionSettingsSection() {
         </p>
       </div>
 
+      {!loaded && (
+        <div
+          role={messageError ? "alert" : "status"}
+          className="text-sm text-fg-muted"
+        >
+          {messageError ? (
+            <>
+              <p className="text-danger-fg">加载失败：{message}</p>
+              <button
+                type="button"
+                data-testid="execution-settings-retry"
+                onClick={() => void refresh()}
+                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            "正在加载…"
+          )}
+        </div>
+      )}
       {loaded && (
         <ExecutionSettingsBody
           maxToolRounds={maxToolRounds}
@@ -599,6 +667,8 @@ function TerminalSettingsSection() {
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
+    setMessage("");
+    setMessageError(false);
     try {
       const settings: TerminalSettings =
         await window.codexlike.terminalSettings.get();
@@ -619,6 +689,7 @@ function TerminalSettingsSection() {
   }, []);
 
   async function save() {
+    if (!loaded) return;
     // 联动校验先于请求：越界/非法输入在 UI 层即被阻止（渲染层同样不可信的
     // 最终把关在主进程 IPC 边界）
     const validationError = validateTerminalTimeouts(
@@ -664,6 +735,28 @@ function TerminalSettingsSection() {
         </p>
       </div>
 
+      {!loaded && (
+        <div
+          role={messageError ? "alert" : "status"}
+          className="text-sm text-fg-muted"
+        >
+          {messageError ? (
+            <>
+              <p className="text-danger-fg">加载失败：{message}</p>
+              <button
+                type="button"
+                data-testid="terminal-settings-retry"
+                onClick={() => void refresh()}
+                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            "正在加载…"
+          )}
+        </div>
+      )}
       {loaded && (
         <div
           data-testid="terminal-settings"
@@ -753,6 +846,8 @@ function SubagentSettingsSection() {
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
+    setMessage("");
+    setMessageError(false);
     try {
       const [profileList, settings] = await Promise.all([
         window.codexlike.providerProfiles.list(),
@@ -799,6 +894,7 @@ function SubagentSettingsSection() {
       : undefined;
 
   async function save() {
+    if (!loaded) return;
     setSaving(true);
     setMessage("");
     try {
@@ -830,6 +926,28 @@ function SubagentSettingsSection() {
         </p>
       </div>
 
+      {!loaded && (
+        <div
+          role={messageError ? "alert" : "status"}
+          className="text-sm text-fg-muted"
+        >
+          {messageError ? (
+            <>
+              <p className="text-danger-fg">加载失败：{message}</p>
+              <button
+                type="button"
+                data-testid="subagent-settings-retry"
+                onClick={() => void refresh()}
+                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            "正在加载…"
+          )}
+        </div>
+      )}
       {loaded && (
         <div
           data-testid="subagent-settings"
@@ -910,6 +1028,8 @@ function SearchSettingsSection() {
   const [messageError, setMessageError] = useState(false);
 
   async function refresh() {
+    setMessage("");
+    setMessageError(false);
     try {
       const settings = await window.codexlike.searchSettings.get();
       setApiKey(settings.apiKey);
@@ -925,6 +1045,7 @@ function SearchSettingsSection() {
   }, []);
 
   async function save(nextKey: string) {
+    if (configured === null) return;
     setSaving(true);
     setMessage("");
     try {
@@ -956,6 +1077,28 @@ function SearchSettingsSection() {
         </p>
       </div>
 
+      {configured === null && (
+        <div
+          role={messageError ? "alert" : "status"}
+          className="text-sm text-fg-muted"
+        >
+          {messageError ? (
+            <>
+              <p className="text-danger-fg">加载失败：{message}</p>
+              <button
+                type="button"
+                data-testid="search-settings-retry"
+                onClick={() => void refresh()}
+                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              >
+                重试
+              </button>
+            </>
+          ) : (
+            "正在加载…"
+          )}
+        </div>
+      )}
       {configured !== null && (
         <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface px-4 py-3">
           <div className="flex items-center gap-2 text-sm">

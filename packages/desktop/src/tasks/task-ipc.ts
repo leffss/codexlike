@@ -166,7 +166,7 @@ export function registerTaskHandlers(options: {
         .map((record) => record.id),
     // 开跑排队任务：走发送主路径的内部消费（跳过用户路径检查与闸门入队，
     // 满员竞态由 deliverMessage 复查兜底），参数取入队时的快照。
-    start: (entry) => sendInternal(entry.taskId, entry),
+    start: (entry, signal) => track(sendInternal(entry.taskId, entry, signal)),
     onChange: (taskId, reason, queue) => {
       // 排队变更经任务事件信封推送（空闲任务无执行现场也延续水位，与
       // 输入队列 queue-changed 同构），所有工作台窗口收到同一权威快照。
@@ -275,6 +275,7 @@ export function registerTaskHandlers(options: {
   // 消息与Compact共用占位、现场起点及中断清理，避免两套运行状态分叉。
   function beginExecution(taskId: string) {
     management.assertCanExecute(taskId);
+    if (taskQueue.isFull()) throw new Error("任务并发已满，请等待空位后重试");
     const executionId = randomUUID();
     executions.set(taskId, executionId);
     const rollbackLive = liveTasks.begin(taskId, executionId);
@@ -283,7 +284,7 @@ export function registerTaskHandlers(options: {
       executionId,
       controller,
       rollbackLive,
-      end() {
+      end({ advanceTaskQueue = true } = {}) {
         interrupts.end(taskId, controller);
         if (executions.get(taskId) === executionId) executions.delete(taskId);
         // 流结束（完成/出错/中断）：唤醒等待本轮的消费循环并尝试取队首（票 01）
@@ -294,7 +295,7 @@ export function registerTaskHandlers(options: {
           // 名额释放（票 02 / ADR 0022）：任务排队按 FIFO 推进；同时重泵
           // 各任务输入队列——此前被满员拦下的内部消费（条目保留）在此重试。
           continueInputQueues();
-          runQueuePump();
+          if (advanceTaskQueue) runQueuePump();
         }
       },
     };
@@ -436,13 +437,16 @@ export function registerTaskHandlers(options: {
     const previous = manager
       .list()
       .find((task) => task.creationRequestId === request.requestId);
-    if (previous && manager.messages(previous.id).length) {
+    if (
+      previous &&
+      (manager.messages(previous.id).length || taskQueue.isQueued(previous.id))
+    ) {
       const task = (async () => {
         const draft = manager.readWorkbench(
           workbenchKey({ kind: "new", projectId: request.projectId })
         );
         if (draft?.value.requestId === request.requestId) {
-          // 首条消息是已接受意图的凭证。消费落盘失败可以补偿，绝不再发首条。
+          // 已发首条或持久排队快照均是已接受意图。消费落盘失败只补偿，不重发。
           const available = await profiles.list();
           await resumeAcceptedStart();
           const saved = manager.readWorkbench(
@@ -456,7 +460,9 @@ export function registerTaskHandlers(options: {
             available[0]?.id ?? "",
             manager
               .messages(previous.id)
-              .find((message) => message.role === "user")?.content
+              .find((message) => message.role === "user")?.content ??
+              taskQueue.snapshot().find((entry) => entry.taskId === previous.id)
+                ?.text
           );
         }
         const current = manager.list().find((item) => item.id === previous.id);
@@ -565,15 +571,14 @@ export function registerTaskHandlers(options: {
         if (!current) throw new Error("原任务已移除，请新建任务后发送");
         return current;
       } catch (error) {
+        // 已持久排队与已发消息同样代表接受；草稿消费失败不能撤销意图。
         // 删除记录也会让历史为空；已成功的意图墓碑绝不能误当成创建失败并回收磁盘。
         if (
           !manager.isRemovedCreationRequest(request.requestId) &&
-          !manager.messages(id).length
+          !manager.messages(id).length &&
+          !taskQueue.isQueued(id)
         ) {
           manager.removeUnstarted(id);
-          // 回收未开始的任务时同步出队（票 02）：满员入队后的后续步骤失败
-          // 也会走到这里，残留条目会在开跑重试时永远失败堵住 FIFO 队列。
-          taskQueue.remove(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
               `${error instanceof Error ? error.message : String(error)}；无法确认副本可安全回收，已保留目录：${preparedPath}（未创建正式任务，可重试）`,
@@ -640,6 +645,8 @@ export function registerTaskHandlers(options: {
     mentionPaths?: unknown;
     thinkingEffort?: unknown;
     approvalMode?: unknown;
+    /** 任务排队的准备意图；执行占位后改由 interrupts 接管取消。 */
+    preparationSignal?: AbortSignal;
   }) {
     const { source, taskId, text } = input;
     const fromUser = source === "user";
@@ -730,6 +737,8 @@ export function registerTaskHandlers(options: {
     // await 后复查退出闸门；已到达的异步发送不能在 flush 期间偷启动。
     await resumeAcceptedStart();
     assertOpen();
+    // 准备期间的停止/归档/移除已经撤销这次意图；必须与占位在同一同步段复查。
+    input.preparationSignal?.throwIfAborted();
     // 全局任务并发闸门（任务并发上限票 02，ADR 0022）：任何执行开始前判定，
     // 与下方 beginExecution 占坑在同一同步段（无交错窗口，判定后立即占坑）。
     // 用户直发满员：连同参数快照入任务排队静默返回（排队而非拒绝），
@@ -805,7 +814,8 @@ export function registerTaskHandlers(options: {
     } catch (error) {
       // 启动失败：注销中断登记后再抛回渲染进程
       rollbackLive();
-      end();
+      // 排队启动失败由当前 pump 保留队首，不能把自己的回滚当成新唤醒反复重试。
+      end({ advanceTaskQueue: input.preparationSignal === undefined });
       throw error;
     }
   }
@@ -849,7 +859,8 @@ export function registerTaskHandlers(options: {
       | "model"
       | "thinkingEffort"
       | "approvalMode"
-    >
+    >,
+    preparationSignal?: AbortSignal
   ): Promise<void> {
     return deliverMessage({
       source: "queue",
@@ -860,6 +871,7 @@ export function registerTaskHandlers(options: {
       mentionPaths: snapshot.mentionPaths,
       thinkingEffort: snapshot.thinkingEffort,
       approvalMode: snapshot.approvalMode,
+      preparationSignal,
     });
   }
   ipcMain.handle(IPC.tasks.send, (_e, ...args: Parameters<typeof send>) =>
@@ -1402,8 +1414,9 @@ export function registerTaskHandlers(options: {
       exiting = false;
       stopping = false;
       releaseDeferredStarts();
-      // 冻结期间已自然结束的轮次没有后续空闲事件，取消退出需重新触发。
+      // 冻结期间已自然结束的轮次没有后续空闲事件，取消退出需重泵两个队列。
       continueInputQueues();
+      runQueuePump();
     },
     async stopAndDrain() {
       stopping = true;

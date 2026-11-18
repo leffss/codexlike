@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ToolDefinition } from "../../src/tools/types";
 import type { InteractionRecord } from "../../src/interaction/types";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createInteractionController } from "../../src/interaction/controller";
 import { createTaskManager } from "../../src/task/manager";
@@ -102,6 +102,503 @@ async function collect(iterable: AsyncIterable<TaskEvent>) {
 }
 
 describe("用户交互公开 seam", () => {
+  it.each(["settle", "waiting"] as const)(
+    "R1：AbortSignal 期间 %s 单次故障不抛 uncaught、不执行工具且结束后可再次发送",
+    async (fault) => {
+      const store = createSqliteTaskStore(":memory:");
+      let fail = false;
+      let executed = 0;
+      const uncaught: unknown[] = [];
+      const onUncaught = (error: unknown) => {
+        uncaught.push(error);
+      };
+      process.on("uncaughtExceptionMonitor", onUncaught);
+      const model = modelFor(
+        [{ toolCallId: "write", toolName: "write", input: {} }],
+        "下一轮完成"
+      );
+      const task = createTaskManager({
+        persistence: {
+          ...store,
+          settleInteraction(...args) {
+            if (fail && fault === "settle") {
+              fail = false;
+              throw new Error("abort 结算保存失败");
+            }
+            return store.settleInteraction(...args);
+          },
+          updateTask(...args) {
+            if (fail && fault === "waiting" && args[1].status === "streaming") {
+              fail = false;
+              throw new Error("abort 后置状态保存失败");
+            }
+            store.updateTask(...args);
+          },
+        },
+        languageModelFor: () => model,
+        tools: [
+          {
+            name: "write",
+            description: "受审批的副作用",
+            permission: "write",
+            parameters: { type: "object" },
+            async execute() {
+              executed++;
+              return { output: "不应执行", isError: false };
+            },
+          },
+        ],
+      }).create({ workspacePath: "C:/work", approvalMode: "ask" });
+      const abort = new AbortController();
+      const events: TaskEvent[] = [];
+      let completed = false;
+      let failure: unknown;
+      const running = (async () => {
+        for await (const event of task.sendMessage({
+          text: "等待审批后中断",
+          profile,
+          signal: abort.signal,
+        })) {
+          events.push(event);
+          if (event.type === "interaction-request") {
+            fail = true;
+            abort.abort();
+            expect(
+              task.respondInteraction(event.interaction.request.id, {
+                kind: "approval",
+                decision: "approve",
+                scope: "task",
+              })
+            ).toBe(false);
+          }
+        }
+      })().then(
+        () => {
+          completed = true;
+        },
+        (error) => {
+          failure = error;
+          completed = true;
+        }
+      );
+      try {
+        await vi.waitFor(() => expect(completed).toBe(true), { timeout: 500 });
+        await running;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(uncaught).toEqual([]);
+        expect(failure).toBeUndefined();
+        expect(executed).toBe(0);
+        expect(events.at(-1)?.type).toBe("assistant-aborted");
+        expect(task.pendingInteractions).toEqual([]);
+        expect(task.record.status).toBe("idle");
+        expect(task.record.autoApprove).toBe(false);
+        expect(store.listInteractions(task.id)[0]?.response).toBeNull();
+        expect(model.doStreamCalls).toHaveLength(1);
+        expect(
+          (await collect(task.sendMessage({ text: "下一轮", profile }))).at(-1)
+            ?.type
+        ).toBe("assistant-done");
+      } finally {
+        process.removeListener("uncaughtExceptionMonitor", onUncaught);
+        store.close();
+      }
+    }
+  );
+
+  it.each(["approve", "reject", "questions"] as const)(
+    "F19：%s 结算后任务状态写失败仍唤醒执行，停止与后续发送可完成",
+    async (decision) => {
+      const store = createSqliteTaskStore(":memory:");
+      let failStatus = false;
+      let executed = 0;
+      const model = modelFor(
+        decision === "questions"
+          ? [ask]
+          : [{ toolCallId: "write", toolName: "write", input: {} }],
+        "本轮完成",
+        "后续完成"
+      );
+      const manager = createTaskManager({
+        persistence: {
+          ...store,
+          updateTask(...args) {
+            if (failStatus && args[1].status === "streaming") {
+              failStatus = false;
+              throw new Error("结算后状态写失败");
+            }
+            store.updateTask(...args);
+          },
+        },
+        languageModelFor: () => model,
+        tools: [
+          {
+            name: "write",
+            description: "受审批的写入",
+            permission: "write",
+            parameters: { type: "object" },
+            async execute() {
+              executed++;
+              return { output: "完成", isError: false };
+            },
+          },
+        ],
+      });
+      const task = manager.create({
+        workspacePath: "C:/work",
+        approvalMode: "ask",
+      });
+      const iterator = task
+        .sendMessage({ text: "开始", profile })
+        [Symbol.asyncIterator]();
+      try {
+        let id = "";
+        for (
+          let next = await iterator.next();
+          !next.done;
+          next = await iterator.next()
+        ) {
+          if (next.value.type === "interaction-request") {
+            id = next.value.interaction.request.id;
+            break;
+          }
+        }
+        expect(id).not.toBe("");
+        failStatus = true;
+        expect(() =>
+          task.respondInteraction(
+            id,
+            decision === "questions"
+              ? answer
+              : {
+                  kind: "approval",
+                  decision,
+                }
+          )
+        ).toThrow("结算后状态写失败");
+        expect(store.listInteractions(task.id)[0]?.status).toBe("resolved");
+        expect(task.pendingInteractions).toEqual([]);
+        const completed: TaskEvent[] = [];
+        const draining = (async () => {
+          for (
+            let next = await iterator.next();
+            !next.done;
+            next = await iterator.next()
+          )
+            completed.push(next.value);
+        })();
+        await vi.waitFor(
+          () => expect(completed.at(-1)?.type).toBe("assistant-done"),
+          { timeout: 500 }
+        );
+        await draining;
+        expect(executed).toBe(decision === "approve" ? 1 : 0);
+        task.cancelInteractions("停止已完成轮");
+        const next = await collect(task.sendMessage({ text: "继续", profile }));
+        expect(next.at(-1)?.type).toBe("assistant-done");
+        expect(task.record.status).toBe("idle");
+        if (decision === "questions")
+          expect(JSON.stringify(model.doStreamCalls.at(-1)?.prompt)).toContain(
+            "仅本地"
+          );
+      } finally {
+        store.close();
+      }
+    }
+  );
+
+  it.each(["autoApproved", "waiting", "emit"] as const)(
+    "F19：批量授权提交后 %s 通知失败仍唤醒全部已结算 waiter",
+    async (fault) => {
+      const store = createSqliteTaskStore(":memory:");
+      const task = createTaskManager({ persistence: store }).create({
+        workspacePath: "C:/work",
+      });
+      let committed = false;
+      const fail = (point: typeof fault) => {
+        if (committed && point === fault)
+          throw new Error(`后置通知失败：${point}`);
+      };
+      const controller = createInteractionController({
+        persistence: store,
+        now: () => "2026-11-18T00:00:00.000Z",
+        answered() {},
+        autoApproved() {
+          fail("autoApproved");
+        },
+        waiting() {
+          fail("waiting");
+        },
+        emit() {
+          fail("emit");
+        },
+      });
+      const resolved: string[] = [];
+      const promises = ["a", "b"].map((id) =>
+        controller
+          .request({
+            id,
+            taskId: task.id,
+            turnId: "turn",
+            toolCallId: `host-${id}`,
+            kind: "approval",
+            source: { kind: "main" },
+            createdAt: "2026-11-18",
+            toolName: "write",
+            command: "write",
+            commandWord: "write",
+          })
+          .then((record) => {
+            resolved.push(record.request.id);
+            return record;
+          })
+      );
+      try {
+        committed = true;
+        expect(() =>
+          controller.respond("a", {
+            kind: "approval",
+            decision: "approve",
+            scope: "task",
+          })
+        ).toThrow("后置通知失败");
+        expect(controller.pending).toEqual([]);
+        expect(
+          store.listInteractions(task.id).map((record) => record.status)
+        ).toEqual(["resolved", "resolved"]);
+        await vi.waitFor(() => expect(resolved).toEqual(["a", "b"]), {
+          timeout: 500,
+        });
+        expect(
+          (await Promise.all(promises)).every(
+            (record) => record.response?.kind === "approval"
+          )
+        ).toBe(true);
+      } finally {
+        store.close();
+      }
+    }
+  );
+
+  it.each(["false", "throw"] as const)(
+    "F19：settleInteraction %s 保留 waiter 与中断通道",
+    async (failure) => {
+      const store = createSqliteTaskStore(":memory:");
+      const task = createTaskManager({ persistence: store }).create({
+        workspacePath: "C:/work",
+      });
+      let fail = true;
+      const controller = createInteractionController({
+        persistence: {
+          ...store,
+          settleInteraction(...args) {
+            if (!fail) return store.settleInteraction(...args);
+            if (failure === "throw") throw new Error("结算保存失败");
+            return false;
+          },
+        },
+        now: () => "2026-11-18",
+        waiting() {},
+        answered() {},
+        emit() {},
+      });
+      const abort = new AbortController();
+      let settled = false;
+      const pending = controller
+        .request(
+          {
+            id: "request",
+            taskId: task.id,
+            turnId: "turn",
+            toolCallId: "host-call",
+            kind: "approval",
+            source: { kind: "main" },
+            createdAt: "2026-11-18",
+            toolName: "write",
+            command: "write",
+            commandWord: "write",
+          },
+          abort.signal
+        )
+        .then((record) => {
+          settled = true;
+          return record;
+        });
+      try {
+        const respond = () =>
+          controller.respond("request", {
+            kind: "approval",
+            decision: "approve",
+          });
+        if (failure === "throw") expect(respond).toThrow("结算保存失败");
+        else expect(respond()).toBe(false);
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        expect(controller.pending).toHaveLength(1);
+        expect(store.listInteractions(task.id)[0]?.status).toBe("pending");
+        fail = false;
+        abort.abort();
+        expect((await pending).status).toBe("cancelled");
+        expect(controller.pending).toEqual([]);
+      } finally {
+        store.close();
+      }
+    }
+  );
+
+  it.each(["answered", "emit"] as const)(
+    "F19：单次问答结算后 %s 失败仍返回已保存答案",
+    async (fault) => {
+      const store = createSqliteTaskStore(":memory:");
+      const task = createTaskManager({ persistence: store }).create({
+        workspacePath: "C:/work",
+      });
+      store.insertMessage({
+        id: "turn",
+        taskId: task.id,
+        role: "user",
+        content: "选择",
+        createdAt: "2026-11-18",
+      });
+      const controller = createInteractionController({
+        persistence: store,
+        now: () => "2026-11-18",
+        waiting() {},
+        answered() {
+          if (fault === "answered") throw new Error("回答通知失败");
+        },
+        emit(event) {
+          if (event.type === "interaction-resolved" && fault === "emit")
+            throw new Error("事件通知失败");
+        },
+      });
+      const pending = controller.request({
+        id: "request",
+        taskId: task.id,
+        turnId: "turn",
+        toolCallId: "host-call",
+        kind: "questions",
+        questions,
+        source: { kind: "main" },
+        createdAt: "2026-11-18",
+      });
+      try {
+        expect(() => controller.respond("request", answer)).toThrow("通知失败");
+        expect((await pending).response).toEqual(answer);
+        expect(store.listMessages(task.id)[0]?.questionAnswers).toHaveLength(1);
+        expect(controller.pending).toEqual([]);
+      } finally {
+        store.close();
+      }
+    }
+  );
+
+  it("F19：关闭迭代器时取消已结算但状态写失败，仍释放 busy 允许再次发送", async () => {
+    const store = createSqliteTaskStore(":memory:");
+    let failStatus = false;
+    const model = modelFor([ask], "后续完成");
+    const task = createTaskManager({
+      persistence: {
+        ...store,
+        updateTask(...args) {
+          if (failStatus && args[1].status === "streaming") {
+            failStatus = false;
+            throw new Error("取消后状态写失败");
+          }
+          store.updateTask(...args);
+        },
+      },
+      languageModelFor: () => model,
+    }).create({ workspacePath: "C:/work" });
+    try {
+      const iterator = task
+        .sendMessage({ text: "等待回答", profile })
+        [Symbol.asyncIterator]();
+      for (
+        let next = await iterator.next();
+        !next.done;
+        next = await iterator.next()
+      ) {
+        if (next.value.type === "interaction-request") break;
+      }
+      failStatus = true;
+      await expect(iterator.return?.()).rejects.toThrow("取消后状态写失败");
+      expect(store.listInteractions(task.id)[0]?.status).toBe("cancelled");
+      expect(task.pendingInteractions).toEqual([]);
+      const next = await collect(
+        task.sendMessage({ text: "再次发送", profile })
+      );
+      expect(next.at(-1)?.type).toBe("assistant-done");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("F19：停止时首个取消通知失败仍取消全部等待并中断本轮，不再请求模型", async () => {
+    const store = createSqliteTaskStore(":memory:");
+    let failStatus = false;
+    const main = modelFor(
+      [
+        {
+          toolCallId: "delegate",
+          toolName: "spawn_subagent",
+          input: { task: "子代理问答" },
+        },
+        ask,
+      ],
+      "后续完成"
+    );
+    const sub = modelFor([ask], "不应请求");
+    const task = createTaskManager({
+      persistence: {
+        ...store,
+        updateTask(...args) {
+          if (
+            failStatus &&
+            (args[1].status === "streaming" ||
+              args[1].status === "waiting-user")
+          ) {
+            failStatus = false;
+            throw new Error("取消通知状态写失败");
+          }
+          store.updateTask(...args);
+        },
+      },
+      languageModelFor: () => main,
+      subagents: {
+        tools: [],
+        languageModelFor: () => sub,
+        settings: () => ({ maxConcurrent: 1 }),
+        resolveModel: async () => ({ profile, model: profile.models[0]! }),
+      },
+    }).create({ workspacePath: "C:/work" });
+    try {
+      let requests = 0;
+      for await (const event of task.sendMessage({
+        text: "并行等待",
+        profile,
+      })) {
+        if (event.type === "interaction-request" && ++requests === 2) {
+          failStatus = true;
+          expect(() => task.cancelInteractions("用户停止")).toThrow(
+            "取消通知状态写失败"
+          );
+          expect(task.pendingInteractions).toEqual([]);
+        }
+      }
+      expect(
+        store.listInteractions(task.id).map((record) => record.status)
+      ).toEqual(["cancelled", "cancelled"]);
+      expect(main.doStreamCalls).toHaveLength(1);
+      expect(sub.doStreamCalls).toHaveLength(1);
+      expect(
+        (await collect(task.sendMessage({ text: "再次发送", profile }))).at(-1)
+          ?.type
+      ).toBe("assistant-done");
+    } finally {
+      store.close();
+    }
+  });
+
   it("任务授权与全部当前审批同事务落库，失败回滚且不处理问答或其他任务", () => {
     const directory = mkdtempSync(join(tmpdir(), "approval-atomic-"));
     const path = join(directory, "task.db");
@@ -379,8 +876,7 @@ describe("用户交互公开 seam", () => {
         const prompt = JSON.stringify(options.prompt);
         if (options.prompt.some((m) => m.role === "tool"))
           return stream("完成");
-        // toolCallId 逐子代理唯一（真实 provider 跨对话生成唯一 id）：
-        // 票 02 起工具完成即写 subagent_tool_calls，复用 id 会撞行主键
+        // 协议 ID 仅区分脚本调用；持久记录与交互使用运行时独立生成的宿主 ID。
         return stream(
           prompt.includes("问答")
             ? [ask]
@@ -1509,8 +2005,7 @@ describe("用户交互公开 seam", () => {
         const key = isApproval ? "a" : "b";
         const step = counts.get(key) ?? 0;
         counts.set(key, step + 1);
-        // toolCallId 逐子代理唯一（真实 provider 跨对话生成唯一 id）：
-        // 票 02 起工具完成即写 subagent_tool_calls，复用 id 会撞行主键
+        // 协议 ID 仅区分脚本调用；持久记录与交互使用运行时独立生成的宿主 ID。
         return stream(
           step === 0
             ? [
@@ -1548,14 +2043,14 @@ describe("用户交互公开 seam", () => {
       text: "并行工作",
       profile,
     })) {
-      if (event.type === "tool-result" && event.call.id === "slow-call")
+      if (event.type === "tool-result" && event.call.toolName === "slow")
         slowDone = true;
       if (event.type === "interaction-request") {
         const request = event.interaction.request;
         requests.push(event.interaction);
         if (request.source.kind === "subagent") {
           expect(slowDone).toBe(false);
-          expect(request.toolCallId).toMatch(
+          expect(request.toolCallId).not.toMatch(
             /^(approval-sub-call|questions-sub-call)$/
           );
           expect(request.source.task).toMatch(/任务/);
@@ -1687,7 +2182,8 @@ describe("用户交互公开 seam", () => {
         expect(request).toMatchObject({
           kind: "questions",
           source: { kind: "main" },
-          toolCallId: "model-call",
+          toolCallId: events.find((event) => event.type === "tool-call")?.call
+            .id,
         });
         expect(persistence.listInteractions(task.id)).toEqual([
           event.interaction,

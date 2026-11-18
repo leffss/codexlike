@@ -44,8 +44,8 @@ export interface ToolExecutionContext {
    */
   thinkingEffort?: ThinkingEffort;
   /**
-   * 模型给定的 tool call id：spawn_subagent 委派与报告回流的绑定键（工单 13）、
-   * 截图文件命名（工单 11）；测试注入固定值
+   * 宿主为本次调用生成的独立 ID：绑定记录、交互、委派报告及截图文件名。
+   * 不使用 provider 的协议 ID（它可能跨生成轮或任务重复）；协议配对由循环独立维护。
    */
   toolCallId?: string;
 }
@@ -93,7 +93,7 @@ export interface ToolDefinition {
 
 /** 工具调用记录（tool_calls 表一行；任务事件与 UI 卡片共用形状） */
 export interface ToolCallRecord {
-  /** 模型给定的 tool call id */
+  /** 宿主调用实例 ID（旧记录可能使用 provider ID，读取保持原样） */
   id: string;
   taskId: string;
   toolName: string;

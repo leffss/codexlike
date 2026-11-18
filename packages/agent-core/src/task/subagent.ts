@@ -190,7 +190,7 @@ const SUBAGENT_SYSTEM_PROMPT = [
 
 interface SubagentEntry {
   subagentId: string;
-  /** 主任务的 spawn_subagent tool call id（报告回流绑定键） */
+  /** 主任务 spawn_subagent 的宿主调用 ID（报告回流绑定键） */
   toolCallId: string;
   task: string;
   state: "queued" | "running" | "done";
@@ -216,6 +216,8 @@ export interface SubagentOrchestrator {
    * 作为 spawn_subagent 的延迟 tool-result 落库并回填模型。
    */
   resultFor(toolCallId: string): ToolResult | undefined;
+  /** 调用方完成持久化与协议回填后释放结果；resultFor 本身仍是非消费式读取。 */
+  releaseResult(toolCallId: string): void;
 }
 
 /** 从工具参数中读取 command 字段（与 agent-task 的审批门同构） */
@@ -398,6 +400,8 @@ export function createSubagentOrchestrator(
     // （票 04 contract 步：双份存储无消费者）
     let roundText = "";
     let roundReasoning = "";
+    // 持久化失败不能因为 signal 已中断而被归类成正常取消。
+    let roundPersistenceFailure: { error: unknown } | undefined;
 
     /**
      * 轮终态即写（票 02）：本轮正文与思考落一行，任意时刻强杀应用，
@@ -512,52 +516,60 @@ export function createSubagentOrchestrator(
         });
 
         const toolCalls: {
-          toolCallId: string;
+          hostCallId: string;
+          providerCallId: string;
           toolName: string;
           input: unknown;
+          invalid?: boolean;
+          error?: unknown;
         }[] = [];
-        for await (const part of result.fullStream) {
-          if (part.type === "reasoning-delta") {
-            // 思考与报告分离：作为事件流出（嵌套卡片流式展示）并累积进本轮
-            // 缓冲（轮终态随 subagent_messages 落库，票 02）；不进入子代理
-            // 消息上下文，也不随 spawn 行回流（票 04 contract 步）
-            roundReasoning += part.text;
-            emit({
-              type: "subagent-reasoning",
-              subagentId: entry.subagentId,
-              delta: part.text,
-              // 显式轮键（0 起 = 本轮流式生成序）：ui 侧按它归并轮次，
-              // 与 flushRound 的行边界同源（round 在工具轮后才递增）
-              roundIndex: round,
-            });
-          } else if (part.type === "text-delta") {
-            output += part.text;
-            roundText += part.text;
-            // 正文流式增量（票 02，形态对齐 subagent-reasoning）：
-            // 驱动右栏「正文」折叠块逐轮流式出现；轮终态随 subagent_messages 落库
-            emit({
-              type: "subagent-text-delta",
-              subagentId: entry.subagentId,
-              delta: part.text,
-              roundIndex: round,
-            });
-          } else if (part.type === "tool-call") {
-            toolCalls.push({
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              input: part.input,
-            });
-          } else if (part.type === "error") {
-            throw part.error;
-          } else if (part.type === "abort") {
-            aborted = true;
+        try {
+          for await (const part of result.fullStream) {
+            if (part.type === "reasoning-delta") {
+              // 思考与报告分离：只进子代理记录与展示，不进入模型上下文。
+              roundReasoning += part.text;
+              emit({
+                type: "subagent-reasoning",
+                subagentId: entry.subagentId,
+                delta: part.text,
+                // 轮键与 flushRound 的行边界同源（round 在工具轮后才递增）。
+                roundIndex: round,
+              });
+            } else if (part.type === "text-delta") {
+              output += part.text;
+              roundText += part.text;
+              emit({
+                type: "subagent-text-delta",
+                subagentId: entry.subagentId,
+                delta: part.text,
+                roundIndex: round,
+              });
+            } else if (part.type === "tool-call") {
+              // 每次调用独立生成宿主 ID，不把 provider ID 当作跨轮/跨代理主键。
+              toolCalls.push({
+                hostCallId: port.generateId(),
+                providerCallId: part.toolCallId,
+                toolName: part.toolName,
+                input: part.input,
+                invalid: part.invalid,
+                error: part.error,
+              });
+            } else if (part.type === "error") {
+              throw part.error;
+            } else if (part.type === "abort") {
+              aborted = true;
+            }
+          }
+        } finally {
+          // 一次生成轮只有这一个收尾点：成功、abort、error part、迭代抛错
+          // 都保存已展示内容；工具执行在此之后，异常不会重复写上一轮。
+          try {
+            flushRound();
+          } catch (error) {
+            roundPersistenceFailure = { error };
           }
         }
-
-        // 轮终态即写（票 02）：本轮流结束即落一行，先于工具执行与下一轮生成；
-        // abort part 也走本点（AI SDK 将 AbortError 收敛为 abort part 正常结束迭代），
-        // 中断轮已流出的部分内容同样落库
-        flushRound();
+        if (roundPersistenceFailure) throw roundPersistenceFailure.error;
 
         if (aborted || toolCalls.length === 0) {
           settled = true;
@@ -569,13 +581,18 @@ export function createSubagentOrchestrator(
           break;
         }
 
-        messages.push(...(await result.response).messages);
+        // 与主任务一致：SDK 只提供 assistant 调用，结果由宿主唯一回填。
+        messages.push(
+          ...(await result.response).messages.filter(
+            (message) => message.role === "assistant"
+          )
+        );
 
         // 逐个执行工具：进度事件 → 审批门 → 执行 → 进度事件
         const resultParts: ToolModelMessage["content"] = [];
         for (const call of toolCalls) {
           const base: ToolCallRecord = {
-            id: call.toolCallId,
+            id: call.hostCallId,
             taskId: port.taskId,
             toolName: call.toolName,
             arguments: safeJsonStringify(call.input),
@@ -597,13 +614,22 @@ export function createSubagentOrchestrator(
               output: `工具 ${call.toolName} 未注册（子代理不能再委派子代理），可用工具：${subagentTools.map((t) => t.name).join("、")}`,
               isError: true,
             };
+          } else if (call.invalid) {
+            const reason =
+              call.error instanceof Error
+                ? call.error.message
+                : String(call.error);
+            executed = {
+              output: `工具 ${call.toolName} 参数无效，未执行：${reason}`,
+              isError: true,
+            };
           } else {
             executed = await gateAndRun(
               definition,
               call.input,
               entry,
               signal,
-              call.toolCallId
+              call.hostCallId
             );
           }
 
@@ -632,7 +658,7 @@ export function createSubagentOrchestrator(
           });
           resultParts.push({
             type: "tool-result",
-            toolCallId: call.toolCallId,
+            toolCallId: call.providerCallId,
             toolName: call.toolName,
             output: { type: "text", value: executed.output },
           });
@@ -642,7 +668,13 @@ export function createSubagentOrchestrator(
         messages.push({ role: "tool", content: resultParts });
       }
     } catch (error) {
-      if (isAbortLike(error, signal)) {
+      if (roundPersistenceFailure) {
+        const failure = roundPersistenceFailure.error;
+        const reason =
+          failure instanceof Error ? failure.message : String(failure);
+        output = `子代理过程保存失败：${reason}`;
+        isError = true;
+      } else if (isAbortLike(error, signal)) {
         aborted = true;
       } else {
         // 子代理失败不崩主任务：失败原因作为报告回流，isError 标记
@@ -787,6 +819,14 @@ export function createSubagentOrchestrator(
         }
       }
       return undefined;
+    },
+    releaseResult(toolCallId) {
+      for (const [id, entry] of entries) {
+        if (entry.toolCallId === toolCallId && entry.state === "done") {
+          entries.delete(id);
+          return;
+        }
+      }
     },
   };
 }
