@@ -10,9 +10,9 @@ import {
 
 import { useComposerMenu } from "../lib/use-composer-menu";
 import { APPROVAL_MODE_OPTIONS } from "../lib/composer-options";
-import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
 import { ComposerMenuList } from "./ComposerMenuList";
+import { ComposerRegion } from "./ComposerRegion";
 import { ApprovalModeIcon, ArrowUpIcon } from "./ComposerIcons";
 import { ModelThinkingSelect } from "./ModelThinkingSelect";
 import { QueueBar } from "./QueueBar";
@@ -95,7 +95,6 @@ export function MessageComposer(props: {
   /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿；按钮与 Esc 共用 */
   onQueueCancelEdit?: () => void;
 }) {
-  const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   const [localValue, setLocalValue] = useState("");
   const value = props.draftValue ?? localValue;
   function setValue(next: string) {
@@ -193,174 +192,167 @@ export function MessageComposer(props: {
     ) : null;
 
   return (
-    // 补偿消息流原生滚动条占宽，基准列对齐后输入卡片左右各外扩 8px。
-    <div
-      data-testid="composer-region"
-      className="bg-canvas px-4 py-3"
-      style={{
-        paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
-      }}
+    // 外壳（画布背景 / px-4 py-3 / 滚动槽右缘补偿 / contentWidthClass 居中
+    // 收窄 / @container 基准）收拢进 ComposerRegion，与交互面板共用同一
+    // 插槽外壳，宽度完全一致（2026-11-19 交互面板整合轮）。
+    <ComposerRegion
+      testId="composer-region"
+      contentWidthClass={props.contentWidthClass}
     >
-      {/* @container：工具栏窄宽降级（下行注释）以内容列实际宽度为基准——
-          挂 /task 容器不行的原因：右栏开合不改变 @container/task 宽度
-          （ADR 0011），但会挤压内容列实际渲染宽，断点必须跟着内容列走。 */}
-      <div className={`${contentWidthClass} @container`}>
-        {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
+      {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
             暂停态（停止保留队列）显示「恢复」「清空」操作 */}
-        <QueueBar
-          queueState={props.queueState}
-          editingItemId={props.queueEditingItemId}
-          onResume={props.onQueueResume}
-          onClear={props.onQueueClear}
-          onRemove={props.onQueueRemove}
-          onEditItem={props.onQueueEditItem}
-          onReorder={props.onQueueReorder}
-          onCancelEdit={props.onQueueCancelEdit}
-        />
-        {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
-        <form
-          data-testid="composer-card"
-          className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
-          <div className="relative">
-            {menu !== null && (
-              <ComposerMenuList
-                menu={menu}
-                onSelectItem={selectItem}
-                caretIndex={() =>
-                  textareaRef.current?.selectionStart ?? value.length
-                }
-              />
-            )}
-            <textarea
-              ref={textareaRef}
-              readOnly={props.readOnly}
-              data-testid="composer-input"
-              value={value}
-              onChange={(event) => {
-                handleTyping(
-                  event.target.value,
-                  event.target.selectionStart ?? event.target.value.length
-                );
-              }}
-              onClick={(event) => {
-                const caret =
-                  event.currentTarget.selectionStart ?? value.length;
-                syncMenu(value, caret);
-              }}
-              onKeyDown={onKeyDown}
-              placeholder={props.hint}
-              rows={2}
-              className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+      <QueueBar
+        queueState={props.queueState}
+        editingItemId={props.queueEditingItemId}
+        onResume={props.onQueueResume}
+        onClear={props.onQueueClear}
+        onRemove={props.onQueueRemove}
+        onEditItem={props.onQueueEditItem}
+        onReorder={props.onQueueReorder}
+        onCancelEdit={props.onQueueCancelEdit}
+      />
+      {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
+      <form
+        data-testid="composer-card"
+        className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <div className="relative">
+          {menu !== null && (
+            <ComposerMenuList
+              menu={menu}
+              onSelectItem={selectItem}
+              caretIndex={() =>
+                textareaRef.current?.selectionStart ?? value.length
+              }
             />
-          </div>
-          {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。
+          )}
+          <textarea
+            ref={textareaRef}
+            readOnly={props.readOnly}
+            data-testid="composer-input"
+            value={value}
+            onChange={(event) => {
+              handleTyping(
+                event.target.value,
+                event.target.selectionStart ?? event.target.value.length
+              );
+            }}
+            onClick={(event) => {
+              const caret = event.currentTarget.selectionStart ?? value.length;
+              syncMenu(value, caret);
+            }}
+            onKeyDown={onKeyDown}
+            placeholder={props.hint}
+            rows={2}
+            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+          />
+        </div>
+        {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。
               内容列 <560px（窗口收窄或右栏挤压）时降级为两行流式：审批整行
               左对齐、其余从左换行——两端分布在放不下时会把两行错开成斜的
               （审批独占一行、右组右对齐起点更靠右），流式才整齐。 */}
-          <div className="flex flex-wrap items-center gap-2 px-3 pb-2.5 @min-[560px]:justify-between">
-            <div className="flex w-full min-w-0 items-center gap-2 @min-[560px]:w-auto">
-              <ComposerSelect
-                testId="approval-mode-select"
-                label="审批模式"
-                value={props.approvalMode ?? "assist"}
-                disabled={props.readOnly || props.approvalMode === null}
-                options={APPROVAL_MODE_OPTIONS}
-                onSelect={props.onSelectApprovalMode}
-                className="min-w-0 shrink"
-                renderIcon={(mode) => (
-                  <ApprovalModeIcon
-                    mode={mode}
-                    className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
-                  />
-                )}
-              />
-            </div>
-            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 @min-[560px]:ml-auto @min-[560px]:w-auto @min-[560px]:justify-end">
-              {/* 模型与思考统一选择器（ADR 0024 呈现修订）：单入口收起
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-2.5 @min-[560px]:justify-between">
+          <div className="flex w-full min-w-0 items-center gap-2 @min-[560px]:w-auto">
+            <ComposerSelect
+              testId="approval-mode-select"
+              label="审批模式"
+              value={props.approvalMode ?? "assist"}
+              disabled={props.readOnly || props.approvalMode === null}
+              options={APPROVAL_MODE_OPTIONS}
+              onSelect={props.onSelectApprovalMode}
+              className="min-w-0 shrink"
+              renderIcon={(mode) => (
+                <ApprovalModeIcon
+                  mode={mode}
+                  className={`h-3 w-3 ${mode === "full-access" ? "text-warn-fg" : ""}`}
+                />
+              )}
+            />
+          </div>
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 @min-[560px]:ml-auto @min-[560px]:w-auto @min-[560px]:justify-end">
+            {/* 模型与思考统一选择器（ADR 0024 呈现修订）：单入口收起
                   「模型名 · 档位」；无任务（approvalMode=null）与恢复中整体
                   禁用（与审批/技能同源），运行中允许改选，只对下一条消息生效。 */}
-              <ModelThinkingSelect
-                className="min-w-0 max-w-56 shrink"
-                profiles={props.profiles}
-                selectedProfileId={props.selectedProfileId}
-                selectedModel={props.selectedModel}
-                thinkingEffort={props.thinkingEffort}
-                disabled={props.readOnly || props.approvalMode === null}
-                onSelectModel={props.onSelectModel}
-                onSelectThinkingEffort={props.onSelectThinkingEffort}
-              />
-              <button
-                type="button"
-                data-testid="composer-skills"
-                disabled={props.readOnly || props.approvalMode === null}
-                onClick={openSkills}
-                className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
-                title="插入 $技能引用（仅写回输入框，不发送）"
-              >
-                技能
-              </button>
-              {props.queueEditingItemId != null ? (
-                <>
-                  {/* 票 03：取回编辑中的主操作——保存原地更新，取消保留原文并还原草稿 */}
-                  <button
-                    type="button"
-                    data-testid="composer-cancel-edit"
-                    onClick={() => props.onQueueCancelEdit?.()}
-                    className="h-8 shrink-0 rounded-full border border-line px-3 text-xs text-fg-muted hover:bg-hover"
-                    title="取消编辑：条目原样保留，输入框还原先前草稿"
-                  >
-                    取消编辑
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="composer-save-edit"
-                    disabled={props.disabled}
-                    onClick={submit}
-                    className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
-                    title="保存编辑（与 Enter 等效）：原地更新该条排队消息，不改变顺序"
-                  >
-                    保存编辑
-                  </button>
-                  {stopButton}
-                </>
-              ) : props.streaming === true ? (
-                <>
-                  {/* 票 05：忙且有输入 →「加入队列」主操作与「停止」并排（spec 用户故事 5）；
-                      无输入或禁用（等待用户交互等）不提供入队，仅停止（用户故事 6 / 17）。 */}
-                  {value.trim() !== "" && !props.disabled && (
-                    <button
-                      type="button"
-                      data-testid="composer-enqueue"
-                      onClick={submit}
-                      className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover"
-                      title="加入队列（与 Enter 等效）：回复结束后自动逐条发出"
-                    >
-                      加入队列
-                    </button>
-                  )}
-                  {stopButton}
-                </>
-              ) : (
+            <ModelThinkingSelect
+              className="min-w-0 max-w-56 shrink"
+              profiles={props.profiles}
+              selectedProfileId={props.selectedProfileId}
+              selectedModel={props.selectedModel}
+              thinkingEffort={props.thinkingEffort}
+              disabled={props.readOnly || props.approvalMode === null}
+              onSelectModel={props.onSelectModel}
+              onSelectThinkingEffort={props.onSelectThinkingEffort}
+            />
+            <button
+              type="button"
+              data-testid="composer-skills"
+              disabled={props.readOnly || props.approvalMode === null}
+              onClick={openSkills}
+              className="shrink-0 rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-accent disabled:opacity-50"
+              title="插入 $技能引用（仅写回输入框，不发送）"
+            >
+              技能
+            </button>
+            {props.queueEditingItemId != null ? (
+              <>
+                {/* 票 03：取回编辑中的主操作——保存原地更新，取消保留原文并还原草稿 */}
                 <button
-                  type="submit"
-                  data-testid="composer-send"
-                  disabled={props.disabled}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
-                  title="发送（Enter 发送，Shift+Enter 换行）"
+                  type="button"
+                  data-testid="composer-cancel-edit"
+                  onClick={() => props.onQueueCancelEdit?.()}
+                  className="h-8 shrink-0 rounded-full border border-line px-3 text-xs text-fg-muted hover:bg-hover"
+                  title="取消编辑：条目原样保留，输入框还原先前草稿"
                 >
-                  <ArrowUpIcon className="h-4 w-4" />
+                  取消编辑
                 </button>
-              )}
-            </div>
+                <button
+                  type="button"
+                  data-testid="composer-save-edit"
+                  disabled={props.disabled}
+                  onClick={submit}
+                  className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
+                  title="保存编辑（与 Enter 等效）：原地更新该条排队消息，不改变顺序"
+                >
+                  保存编辑
+                </button>
+                {stopButton}
+              </>
+            ) : props.streaming === true ? (
+              <>
+                {/* 票 05：忙且有输入 →「加入队列」主操作与「停止」并排（spec 用户故事 5）；
+                      无输入或禁用（等待用户交互等）不提供入队，仅停止（用户故事 6 / 17）。 */}
+                {value.trim() !== "" && !props.disabled && (
+                  <button
+                    type="button"
+                    data-testid="composer-enqueue"
+                    onClick={submit}
+                    className="h-8 shrink-0 rounded-full bg-accent px-3 text-xs text-on-accent hover:bg-accent-hover"
+                    title="加入队列（与 Enter 等效）：回复结束后自动逐条发出"
+                  >
+                    加入队列
+                  </button>
+                )}
+                {stopButton}
+              </>
+            ) : (
+              <button
+                type="submit"
+                data-testid="composer-send"
+                disabled={props.disabled}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-hover disabled:text-fg-subtle"
+                title="发送（Enter 发送，Shift+Enter 换行）"
+              >
+                <ArrowUpIcon className="h-4 w-4" />
+              </button>
+            )}
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </form>
+    </ComposerRegion>
   );
 }
 

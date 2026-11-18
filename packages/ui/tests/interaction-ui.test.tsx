@@ -8,6 +8,7 @@ import { MessageStream } from "../src/components/MessageStream";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createQuestionDraft } from "../src/lib/interaction-draft";
+import { TASK_CONTENT_WIDTH_CLASS } from "../src/lib/content-width";
 
 const approval: InteractionRecord = {
   request: {
@@ -354,5 +355,21 @@ describe("唯一底部 InteractionPanel", () => {
       /<button[^>]*data-testid="composer-stop"[^>]*disabled/
     );
     expect(html).toContain('data-interaction-id="approval-1"');
+  });
+  it("问题区域与输入框共用 ComposerRegion 外壳，宽度收窄不再占满中栏", () => {
+    const html = renderToStaticMarkup(
+      createElement(InteractionPanel, { ...props, record: approval })
+    );
+    // 外壳与 composer-region 同构：画布背景 + px-4 py-3 + 滚动槽右缘补偿
+    expect(html).toMatch(
+      /data-testid="interaction-region"[^>]*class="bg-canvas px-4 py-3"/
+    );
+    expect(html).toContain("var(--task-scrollbar-gutter");
+    // 内容列宽度类与消息流/输入区同一基准（TASK_CONTENT_WIDTH_CLASS +
+    // @container），居中收窄；面板本体在壳内。
+    expect(html).toContain(`class="${TASK_CONTENT_WIDTH_CLASS} @container"`);
+    expect(html.indexOf('data-testid="interaction-region"')).toBeLessThan(
+      html.indexOf('data-testid="interaction-panel"')
+    );
   });
 });

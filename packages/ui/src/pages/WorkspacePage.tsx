@@ -1852,6 +1852,7 @@ export function WorkspacePage(props: {
                     key={interaction.request.id}
                     record={interaction}
                     count={pending.length}
+                    contentWidthClass={contentWidthClass}
                     draft={workspaceState.draft(
                       interaction.request.taskId,
                       interaction.request.id
