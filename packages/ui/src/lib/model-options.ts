@@ -65,6 +65,29 @@ export function subagentSettingsOfValue(value: string): {
   };
 }
 
+/**
+ * composer 模型选择器的受控 value（票 01 抽共享，逻辑原样移自
+ * MessageComposer 内联计算）：未显式选模型时显示所选 Profile 第一项
+ * （回退预览）；未选 Profile 或无 Profile 落空串（占位/未配置项）。
+ * 正式任务 composer 与新建起点页决策行共用。
+ */
+export function composerModelValue(
+  profiles: readonly ProviderProfile[],
+  selectedProfileId: string,
+  selectedModel: string | null | undefined
+): string {
+  if (profiles.length === 0) return "";
+  if (selectedModel) {
+    return modelOptionValue(selectedProfileId, selectedModel);
+  }
+  if (selectedProfileId === "") return "";
+  return modelOptionValue(
+    selectedProfileId,
+    profiles.find((profile) => profile.id === selectedProfileId)?.models[0] ??
+      ""
+  );
+}
+
 /** Profile 是否提供 (id, 模型名) 这个组合 */
 function hasModel(
   profiles: readonly ProviderProfile[],

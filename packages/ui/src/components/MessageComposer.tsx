@@ -24,74 +24,19 @@ import {
 } from "../lib/composer-menu";
 import {
   composerModelOptions,
-  modelOptionValue,
+  composerModelValue,
   parseModelOptionValue,
 } from "../lib/model-options";
+import {
+  APPROVAL_MODE_OPTIONS,
+  THINKING_EFFORT_OPTIONS,
+} from "../lib/composer-options";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { ComposerSelect } from "./ComposerSelect";
+import { ComposerMenuList } from "./ComposerMenuList";
+import { ApprovalModeIcon, ArrowUpIcon, BrainIcon } from "./ComposerIcons";
 import { QueueBar } from "./QueueBar";
 import type { QueuedMessage, QueueSnapshot } from "@codexlike/desktop/ipc";
-
-/** 审批模式 → 选择器文案（GLOSSARY「审批模式」三档：请求批准 / 帮我批准 / 完全访问） */
-const APPROVAL_MODE_OPTIONS: {
-  value: ApprovalMode;
-  label: string;
-  title: string;
-}[] = [
-  {
-    value: "ask",
-    label: "请求批准",
-    title: "ask：编辑文件、执行命令与联网搜索前先询问我",
-  },
-  {
-    value: "assist",
-    label: "帮我批准",
-    title: "assist：文件编辑与联网自动放行，仅危险命令（rm、强推等）询问我",
-  },
-  {
-    value: "full-access",
-    label: "完全访问",
-    title: "full-access：全自动执行，且可不受限读写本地任意文件（切换需确认）",
-  },
-];
-
-/**
- * 思考档位（GLOSSARY「思考档位」）→ 胶囊选项文案。
- * 与 Provider Profile 选择一样属于「下一条消息怎么发」的临时设置：
- * 只对下一条发送的消息生效，不做任务级记忆；「关」是显式发送关闭请求，
- * 不保证强制思考模型实际停止思考（以服务端行为为准）。
- */
-const THINKING_EFFORT_OPTIONS: {
-  value: ThinkingEffort;
-  label: string;
-  title: string;
-}[] = [
-  {
-    value: "auto",
-    label: "思考：自动",
-    title: "自动：不附加控制参数，由服务端决定思考行为（默认）",
-  },
-  {
-    value: "low",
-    label: "思考：低",
-    title: "低：请求较浅的思考强度（下一条消息生效）",
-  },
-  {
-    value: "medium",
-    label: "思考：中",
-    title: "中：请求中等思考强度（下一条消息生效）",
-  },
-  {
-    value: "high",
-    label: "思考：高",
-    title: "高：请求更深思考强度（下一条消息生效）",
-  },
-  {
-    value: "off",
-    label: "思考：关",
-    title: "关：显式请求关闭思考；服务端可能忽略，不保证强制停止",
-  },
-];
 
 /**
  * 中栏底部：消息输入区（卡片式 composer：上行输入、下行工具栏）。
@@ -385,76 +330,13 @@ export function MessageComposer(props: {
         >
           <div className="relative">
             {menu !== null && (
-              <ul
-                data-testid="composer-menu"
-                role="listbox"
-                aria-label={
-                  menu.kind === "skills" ? "下轮技能预览" : "输入补全"
+              <ComposerMenuList
+                menu={menu}
+                onSelectItem={selectItem}
+                caretIndex={() =>
+                  textareaRef.current?.selectionStart ?? value.length
                 }
-                className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-xl border border-line bg-surface shadow-xl"
-              >
-                {menu.items.map((item, index) => {
-                  const isCommand = menu.kind === "slash-commands";
-                  const command = isCommand ? (item as SlashCommandDef) : null;
-                  const skill =
-                    menu.kind === "skills" ? (item as SkillDescriptor) : null;
-                  const path =
-                    menu.kind === "mentions" ? (item as string) : null;
-                  return (
-                    <li
-                      key={command?.name ?? skill?.path ?? path}
-                      role="option"
-                      aria-selected={index === menu.activeIndex}
-                      data-testid={
-                        skill ? `composer-skill-${skill.name}` : undefined
-                      }
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() =>
-                        selectItem(
-                          item,
-                          textareaRef.current?.selectionStart ?? value.length
-                        )
-                      }
-                      className={
-                        index === menu.activeIndex
-                          ? "bg-selected px-3 py-1.5 text-sm text-fg"
-                          : "px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
-                      }
-                    >
-                      {command !== null ? (
-                        <span className="flex items-baseline gap-2">
-                          <code className="text-accent">/{command.name}</code>
-                          <span className="text-xs text-fg-subtle">
-                            {command.description}
-                            {command.argumentHint !== null
-                              ? `（参数：${command.argumentHint}）`
-                              : ""}
-                          </span>
-                        </span>
-                      ) : skill !== null ? (
-                        <span className="block" title={skill.path}>
-                          <code className="text-accent">${skill.name}</code>
-                          <span className="ml-2 text-xs text-fg-muted">
-                            {skill.description}
-                          </span>
-                          <span className="block truncate text-xs text-fg-subtle">
-                            下轮预览 ·{" "}
-                            {skill.scope === "project" ? "项目" : "全局"} ·{" "}
-                            {skill.source} · {skill.path}
-                          </span>
-                        </span>
-                      ) : (
-                        <span
-                          className="block truncate font-mono text-xs"
-                          title={path ?? ""}
-                        >
-                          {path}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              />
             )}
             <textarea
               ref={textareaRef}
@@ -505,27 +387,11 @@ export function MessageComposer(props: {
               <ComposerSelect
                 testId="profile-select"
                 label="模型"
-                value={
-                  // 选中值：未显式选模型时显示所选 Profile 第一项（回退预览）；
-                  // 保存组合失效（Profile/模型被删）时 options 里的不可用项承接；
-                  // 无 Profile（全部被删）落在「未配置模型」占位
-                  props.profiles.length === 0
-                    ? ""
-                    : props.selectedModel
-                      ? modelOptionValue(
-                          props.selectedProfileId,
-                          props.selectedModel
-                        )
-                      : props.selectedProfileId === ""
-                        ? ""
-                        : modelOptionValue(
-                            props.selectedProfileId,
-                            props.profiles.find(
-                              (profile) =>
-                                profile.id === props.selectedProfileId
-                            )?.models[0] ?? ""
-                          )
-                }
+                value={composerModelValue(
+                  props.profiles,
+                  props.selectedProfileId,
+                  props.selectedModel
+                )}
                 disabled={props.readOnly}
                 options={composerModelOptions(
                   props.profiles,
@@ -618,84 +484,6 @@ export function MessageComposer(props: {
         </form>
       </div>
     </div>
-  );
-}
-
-function ApprovalModeIcon(props: { mode: ApprovalMode; className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      className={props.className}
-      aria-hidden="true"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {props.mode === "full-access" ? (
-        <>
-          <path d="M6 7V4a3 3 0 0 1 6 0" />
-          <rect x="3" y="7" width="10" height="7" rx="1.5" />
-          <path d="M8 10v1" />
-        </>
-      ) : (
-        <>
-          <path d="M8 1.5 13 3.4V7c0 3.1-2.1 5.8-5 6.9C5.1 12.8 3 10.1 3 7V3.4L8 1.5Z" />
-          {props.mode === "ask" ? (
-            <>
-              <path d="M6.5 6a1.5 1.5 0 0 1 3 0c0 1-1.5 1-1.5 2" />
-              <circle
-                cx="8"
-                cy="10.5"
-                r="0.75"
-                fill="currentColor"
-                stroke="none"
-              />
-            </>
-          ) : (
-            <path d="m5.5 7.5 1.5 1.5 3.5-3.5" />
-          )}
-        </>
-      )}
-    </svg>
-  );
-}
-
-function BrainIcon(props: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      className={props.className}
-      aria-hidden="true"
-    >
-      <path
-        d="M6 2.5a2 2 0 0 0-2 2c-1.1.2-2 1.1-2 2.3 0 .8.4 1.5 1 1.9v.6c0 1.7 1.3 3.2 3 3.2h1V2.5H6ZM10 2.5a2 2 0 0 1 2 2c1.1.2 2 1.1 2 2.3 0 .8-.4 1.5-1 1.9v.6c0 1.7-1.3 3.2-3 3.2H9V2.5h1Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ArrowUpIcon(props: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      className={props.className}
-      aria-hidden="true"
-    >
-      <path
-        d="M8 13V3.5M3.8 7.7 8 3.5l4.2 4.2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 

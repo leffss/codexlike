@@ -13,7 +13,6 @@ import {
 } from "../lib/workspace-state";
 import { InteractionPanel } from "../components/InteractionPanel";
 import { ToastHost } from "../components/ToastHost";
-import { WorkspaceModeSelector } from "../components/WorkspaceModeSelector";
 import {
   createToastManager,
   type ToastContent,
@@ -49,6 +48,7 @@ import { contextWarningMessage } from "../lib/context-warning";
 import { RailPanel } from "../components/RailPanel";
 import type { SubagentFocus } from "../components/SubagentRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
+import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { TaskQueuedNotice } from "../components/TaskQueuedNotice";
@@ -1625,87 +1625,10 @@ export function WorkspacePage(props: {
             } as CSSProperties
           }
         >
-          {/* 草稿场景就地收纳（票01）：workspace-info 整行取消后，新建草稿的
-              目录选择与工作区模式入口保留在本列（仅草稿期间渲染，非常驻行）；
-              正式任务的路径/模式/来源目录收进标题栏徽章。内容与消息流、
-              输入区共用同一内容列宽度类，左右缘对齐。 */}
-          {draft && (
-            <div
-              data-testid="draft-workspace-info"
-              className="shrink-0 border-b border-line px-4 py-2 text-xs text-fg-muted"
-              style={contentPadding}
-            >
-              <div className={contentWidthClass}>
-                <div
-                  data-testid="workspace-path"
-                  title={
-                    draft.workspacePath ??
-                    projects.find((p) => p.id === draft.projectId)
-                      ?.workspacePath
-                  }
-                  className="flex flex-wrap items-center gap-x-2 gap-y-1"
-                >
-                  <span className="min-w-0 break-all">
-                    {draft.workspaceMode === "worktree"
-                      ? "来源目录（发送后使用隔离工作区）："
-                      : "工作区："}
-                    {draft.workspacePath ??
-                      projects.find((p) => p.id === draft.projectId)
-                        ?.workspacePath ??
-                      "应用专用持久目录（首次发送时分配）"}
-                  </span>
-                  {draft.projectId !== null && (
-                    <WorkspaceModeSelector
-                      mode={draft.workspaceMode ?? "local"}
-                      busy={creating}
-                      onModeChange={(workspaceMode) => {
-                        if (!draft.busy)
-                          workspaceState.editNewDraft(draft.projectId, {
-                            workspaceMode,
-                            error: null,
-                          });
-                      }}
-                    />
-                  )}
-                </div>
-                {draft.projectId === null && (
-                  <button
-                    type="button"
-                    data-testid="draft-select-workspace"
-                    disabled={creating}
-                    onClick={() => void selectDraftWorkspace()}
-                    className="ml-3 text-accent"
-                  >
-                    选择已有目录
-                  </button>
-                )}
-                {draft.workspacePath && (
-                  <button
-                    type="button"
-                    data-testid="draft-managed-workspace"
-                    disabled={creating}
-                    onClick={() =>
-                      workspaceState.editNewDraft(null, {
-                        workspacePath: undefined,
-                      })
-                    }
-                    className="ml-3 text-accent"
-                  >
-                    使用专用目录
-                  </button>
-                )}
-                {draft.error && (
-                  <p
-                    data-testid="draft-error"
-                    role="alert"
-                    className="mt-2 text-danger-fg"
-                  >
-                    {draft.error}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
+          {/* 草稿态（票 01 居中起点式）：新建任务主列整体替换为居中起点页
+              （工作区卡/决策行/专属输入卡见 NewTaskStart），原草稿就地收纳行
+              与底部 composer 不再渲染；正式任务的消息流与 composer 零波及。 */}
+
           {/* 任务排队状态条（任务并发上限票 03 / ADR 0022）：满员排队期间
               显示等待原因与当前执行数（首条消息本地回显进消息流）；开跑后
               随 queuedStart 清空卸载。仅任务态渲染（草稿无排队）。 */}
@@ -1727,231 +1650,231 @@ export function WorkspacePage(props: {
               不受右栏开合影响（三档分档行为保持稳定）。票02：原消息流上方
               的五类常驻横条已迁为右下角 toast，不再占行。 */}
           <div className="flex min-h-0 flex-1">
-            {/* relative：收拢主列内部的绝对定位悬浮元素（工作计划
-                进度环为 fixed，仍锚视口） */}
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-              <MessageStream
-                key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
-                taskId={currentId}
-                questionDraft={(requestId) =>
-                  currentId === null
-                    ? undefined
-                    : workspaceState.draft(currentId, requestId)
+            {draft ? (
+              <NewTaskStart
+                draft={draft}
+                projects={projects}
+                profiles={profiles}
+                workspaceFiles={workspaceFiles}
+                skills={resources?.preview.catalog.skills}
+                onOpenSkills={refreshResourcesForView}
+                onEditDraft={(patch) =>
+                  workspaceState.editNewDraft(draft.projectId, patch)
                 }
-                loading={loading}
-                onScrollbarGutterChange={setScrollbarGutter}
-                readingPosition={
-                  currentId === null
-                    ? null
-                    : workspaceState.readingPosition(currentId)
-                }
-                onReadingPosition={(position) => {
-                  if (currentId !== null)
-                    workspaceState.setReadingPosition(currentId, position);
-                }}
-                items={displayMessages}
-                streaming={streaming}
-                runStartedAt={runStartedAt}
-                compacting={compacting}
-                contentWidthClass={contentWidthClass}
-                followSignal={followSignal}
-                taskTitle={current?.title ?? null}
-                onOpenSubagent={openSubagentFromStream}
-                emptyHint={
-                  profiles.length === 0 ? (
-                    <button
-                      type="button"
-                      className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
-                      onClick={props.onOpenSettings}
-                    >
-                      前往设置配置模型
-                    </button>
-                  ) : undefined
-                }
+                onSelectWorkspace={() => void selectDraftWorkspace()}
+                onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
+                onSend={handleSubmit}
+                onOpenSettings={props.onOpenSettings}
               />
-              {/* 工作计划进度折叠卡（GLOSSARY「工作计划」，ADR 0019，原型
+            ) : (
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                <MessageStream
+                  key={`stream-${currentId ?? `draft-${draftProjectId}`}`}
+                  taskId={currentId}
+                  questionDraft={(requestId) =>
+                    currentId === null
+                      ? undefined
+                      : workspaceState.draft(currentId, requestId)
+                  }
+                  loading={loading}
+                  onScrollbarGutterChange={setScrollbarGutter}
+                  readingPosition={
+                    currentId === null
+                      ? null
+                      : workspaceState.readingPosition(currentId)
+                  }
+                  onReadingPosition={(position) => {
+                    if (currentId !== null)
+                      workspaceState.setReadingPosition(currentId, position);
+                  }}
+                  items={displayMessages}
+                  streaming={streaming}
+                  runStartedAt={runStartedAt}
+                  compacting={compacting}
+                  contentWidthClass={contentWidthClass}
+                  followSignal={followSignal}
+                  taskTitle={current?.title ?? null}
+                  onOpenSubagent={openSubagentFromStream}
+                  emptyHint={
+                    profiles.length === 0 ? (
+                      <button
+                        type="button"
+                        className="rounded border border-line px-4 py-2 text-sm text-fg-muted hover:border-accent hover:text-accent"
+                        onClick={props.onOpenSettings}
+                      >
+                        前往设置配置模型
+                      </button>
+                    ) : undefined
+                  }
+                />
+                {/* 工作计划进度折叠卡（GLOSSARY「工作计划」，ADR 0019，原型
                   变体 C 转正）：位于消息正文与消息队列/输入框（或交互面板）
                   之间——取代退役的 fixed 悬浮进度环徽章（ADR 0016）。宽度
                   对齐正文列：左右 padding 对齐消息流滚动容器的 px-4（右缘再
                   补滚动槽宽），contentWidthClass 的居中基准与消息列、输入区
                   完全一致（同下方自动批准卡先例）。无计划时渲染 null 不占
                   布局行。 */}
-              <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
-                <div className={contentWidthClass}>
-                  {/* 草稿态（currentId === null）无 update_plan 段，卡本就
-                      渲染 null；条件短路使 FromSegments 的 taskId 收紧为
-                      非空（开合记忆作用域二选一，见 WorkPlanCardScope） */}
-                  {currentId !== null && (
-                    <WorkPlanCardFromSegments
-                      items={displayMessages}
-                      taskId={currentId}
-                    />
-                  )}
-                </div>
-              </div>
-              {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
-               *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
-               *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），
-               *  contentWidthClass 的居中基准与消息列、输入区完全一致。 */}
-              {current !== null && autoApproveOn && (
                 <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
                   <div className={contentWidthClass}>
-                    <div
-                      data-testid="task-auto-approve"
-                      role="status"
-                      className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
-                    >
-                      <span
-                        className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
-                        aria-hidden="true"
+                    {/* 草稿态（currentId === null）无 update_plan 段，卡本就
+                      渲染 null；条件短路使 FromSegments 的 taskId 收紧为
+                      非空（开合记忆作用域二选一，见 WorkPlanCardScope） */}
+                    {currentId !== null && (
+                      <WorkPlanCardFromSegments
+                        items={displayMessages}
+                        taskId={currentId}
                       />
-                      <div className="min-w-0 flex-1">
-                        <p
-                          data-testid="task-auto-approve-content"
-                          className="break-words"
-                        >
-                          本任务已开启自动批准
-                        </p>
-                        <p className="break-words opacity-80">
-                          取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
-                        </p>
-                        {autoApproveError !== null && (
-                          <p role="alert">{autoApproveError}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        data-testid="task-auto-approve-revoke"
-                        disabled={autoApproveBusy}
-                        // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
-                        onClick={() => {
-                          const id = currentIdRef.current;
-                          if (id !== null) void revokeAutoApprove(id);
-                        }}
-                        className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
-                      >
-                        {autoApproveBusy ? "取消中…" : "取消自动批准"}
-                      </button>
-                    </div>
+                    )}
                   </div>
                 </div>
-              )}
-              {interaction ? (
-                <InteractionPanel
-                  key={interaction.request.id}
-                  record={interaction}
-                  count={pending.length}
-                  draft={workspaceState.draft(
-                    interaction.request.taskId,
-                    interaction.request.id
-                  )}
-                  {...workspaceState.submission(
-                    interaction.request.taskId,
-                    interaction.request.id
-                  )}
-                  onChange={(action) =>
-                    workspaceState.edit(
+                {/* 「已开启自动批准」提示卡：位于消息正文与消息队列/输入框（或
+                 *  交互面板）之间，靠近取消操作的发生点。宽度对齐正文列：左右
+                 *  padding 对齐消息流滚动容器的 px-4（右缘再补滚动槽宽），
+                 *  contentWidthClass 的居中基准与消息列、输入区完全一致。 */}
+                {current !== null && autoApproveOn && (
+                  <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
+                    <div className={contentWidthClass}>
+                      <div
+                        data-testid="task-auto-approve"
+                        role="status"
+                        className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
+                      >
+                        <span
+                          className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p
+                            data-testid="task-auto-approve-content"
+                            className="break-words"
+                          >
+                            本任务已开启自动批准
+                          </p>
+                          <p className="break-words opacity-80">
+                            取消后恢复基础审批模式的允许策略，不撤回已批准的执行。
+                          </p>
+                          {autoApproveError !== null && (
+                            <p role="alert">{autoApproveError}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid="task-auto-approve-revoke"
+                          disabled={autoApproveBusy}
+                          // 读 ref 不闭包捕获：切换任务后不重渲染也不会撤错任务
+                          onClick={() => {
+                            const id = currentIdRef.current;
+                            if (id !== null) void revokeAutoApprove(id);
+                          }}
+                          className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                        >
+                          {autoApproveBusy ? "取消中…" : "取消自动批准"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {interaction ? (
+                  <InteractionPanel
+                    key={interaction.request.id}
+                    record={interaction}
+                    count={pending.length}
+                    draft={workspaceState.draft(
                       interaction.request.taskId,
-                      interaction.request.id,
-                      action
-                    )
-                  }
-                  onRespond={(response) =>
-                    void workspaceState.submit(
+                      interaction.request.id
+                    )}
+                    {...workspaceState.submission(
                       interaction.request.taskId,
-                      interaction.request.id,
-                      response,
-                      (taskId, requestId, payload) =>
-                        window.codexlike.tasks.respondInteraction(
-                          taskId,
-                          requestId,
-                          payload
-                        )
-                    )
-                  }
-                  onStop={() => void stop()}
-                />
-              ) : (
-                <MessageComposer
-                  key={currentId ?? `draft-${draftProjectId}`}
-                  draftValue={
-                    draft?.text ??
-                    (currentId === null
-                      ? ""
-                      : workspaceState.composer(currentId))
-                  }
-                  onDraftChange={(text) => {
-                    if (draft)
-                      workspaceState.editNewDraft(draft.projectId, { text });
-                    else if (currentId !== null)
-                      workspaceState.setComposer(currentId, text);
-                  }}
-                  clearOnSend={false}
-                  profiles={profiles}
-                  selectedProfileId={
-                    draft?.providerProfileId ?? selectedProfileId
-                  }
-                  selectedModel={draft ? draft.model : selectedModel || null}
-                  onSelectModel={(profileId, model) =>
-                    draft
-                      ? workspaceState.editNewDraft(draft.projectId, {
-                          providerProfileId: profileId,
-                          model,
-                        })
-                      : setSelectedModel(profileId, model)
-                  }
-                  onSend={handleSubmit}
-                  contentWidthClass={contentWidthClass}
-                  workspaceFiles={workspaceFiles}
-                  skills={resources?.preview.catalog.skills}
-                  onOpenSkills={refreshResourcesForView}
-                  readOnly={loading || creating}
-                  disabled={
-                    (currentId === null && !draft) ||
-                    current?.archivedAt != null ||
-                    creating ||
-                    profiles.length === 0 ||
-                    // streaming 不再禁用（票 01 输入队列）：忙时 Enter 直接入队；
-                    // 等待用户交互（pending）期间维持禁用（spec 用户故事 17）。
-                    compacting ||
-                    loading ||
-                    pending.length > 0
-                  }
-                  streaming={streaming}
-                  queueState={
-                    currentId === null ? EMPTY_QUEUE_STATE : queueState
-                  }
-                  queueEditingItemId={
-                    queueEdit !== null && queueEdit.taskId === currentId
-                      ? queueEdit.itemId
-                      : null
-                  }
-                  onQueueResume={() => void resumeQueue()}
-                  onQueueClear={() => void clearQueue()}
-                  onQueueRemove={(itemId) => void removeQueueItem(itemId)}
-                  onQueueEditItem={startQueueItemEdit}
-                  onQueueReorder={(orderedIds) => void reorderQueue(orderedIds)}
-                  onQueueCancelEdit={cancelQueueEdit}
-                  onStop={() => void stop()}
-                  hint={composerHint}
-                  approvalMode={
-                    draft?.approvalMode ?? preferences?.approvalMode ?? null
-                  }
-                  onSelectApprovalMode={(mode) => void selectApprovalMode(mode)}
-                  thinkingEffort={
-                    draft?.thinkingEffort ??
-                    (currentId === null ? null : thinkingEffort)
-                  }
-                  onSelectThinkingEffort={(effort) =>
-                    draft
-                      ? workspaceState.editNewDraft(draft.projectId, {
-                          thinkingEffort: effort,
-                        })
-                      : setThinkingEffort(effort)
-                  }
-                />
-              )}
-            </div>
+                      interaction.request.id
+                    )}
+                    onChange={(action) =>
+                      workspaceState.edit(
+                        interaction.request.taskId,
+                        interaction.request.id,
+                        action
+                      )
+                    }
+                    onRespond={(response) =>
+                      void workspaceState.submit(
+                        interaction.request.taskId,
+                        interaction.request.id,
+                        response,
+                        (taskId, requestId, payload) =>
+                          window.codexlike.tasks.respondInteraction(
+                            taskId,
+                            requestId,
+                            payload
+                          )
+                      )
+                    }
+                    onStop={() => void stop()}
+                  />
+                ) : (
+                  <MessageComposer
+                    key={currentId ?? "no-task"}
+                    draftValue={
+                      currentId === null
+                        ? ""
+                        : workspaceState.composer(currentId)
+                    }
+                    onDraftChange={(text) => {
+                      if (currentId !== null)
+                        workspaceState.setComposer(currentId, text);
+                    }}
+                    clearOnSend={false}
+                    profiles={profiles}
+                    selectedProfileId={selectedProfileId}
+                    selectedModel={selectedModel || null}
+                    onSelectModel={(profileId, model) =>
+                      setSelectedModel(profileId, model)
+                    }
+                    onSend={handleSubmit}
+                    contentWidthClass={contentWidthClass}
+                    workspaceFiles={workspaceFiles}
+                    skills={resources?.preview.catalog.skills}
+                    onOpenSkills={refreshResourcesForView}
+                    readOnly={loading}
+                    disabled={
+                      currentId === null ||
+                      current?.archivedAt != null ||
+                      profiles.length === 0 ||
+                      // streaming 不再禁用（票 01 输入队列）：忙时 Enter 直接入队；
+                      // 等待用户交互（pending）期间维持禁用（spec 用户故事 17）。
+                      compacting ||
+                      loading ||
+                      pending.length > 0
+                    }
+                    streaming={streaming}
+                    queueState={
+                      currentId === null ? EMPTY_QUEUE_STATE : queueState
+                    }
+                    queueEditingItemId={
+                      queueEdit !== null && queueEdit.taskId === currentId
+                        ? queueEdit.itemId
+                        : null
+                    }
+                    onQueueResume={() => void resumeQueue()}
+                    onQueueClear={() => void clearQueue()}
+                    onQueueRemove={(itemId) => void removeQueueItem(itemId)}
+                    onQueueEditItem={startQueueItemEdit}
+                    onQueueReorder={(orderedIds) =>
+                      void reorderQueue(orderedIds)
+                    }
+                    onQueueCancelEdit={cancelQueueEdit}
+                    onStop={() => void stop()}
+                    hint={composerHint}
+                    approvalMode={preferences?.approvalMode ?? null}
+                    onSelectApprovalMode={(mode) =>
+                      void selectApprovalMode(mode)
+                    }
+                    thinkingEffort={currentId === null ? null : thinkingEffort}
+                    onSelectThinkingEffort={(effort) =>
+                      setThinkingEffort(effort)
+                    }
+                  />
+                )}
+              </div>
+            )}
             <RailPanel
               open={railOpen}
               taskId={currentId}

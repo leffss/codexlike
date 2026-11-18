@@ -95,6 +95,8 @@ function installBrowserStub(): void {
       archive: async () => null,
       status: async () => null,
       resources: async () => RESOURCES,
+      // draft 态资源预览（tasks:draft-resources）：与 resources 的 preview 同构
+      draftResources: async () => RESOURCES,
       compact: async () => ({ compactedMessages: 0 }),
       workspaceFiles: async () => WORKSPACE_FILES,
       toolImage: async () => null,
@@ -165,6 +167,21 @@ function installBrowserStub(): void {
       setToolEnabled: async () => {},
     },
     onTaskEvent: () => () => {},
+    openers: {
+      // 形状对齐真实 IPC 契约（工作区打开器）：资源管理器恒在，
+      // 另给终端/VS Code 两个探测项样例呈现下拉密度；open 不真启动程序
+      list: async () => ({
+        openers: [
+          { id: "explorer", label: "资源管理器" },
+          { id: "terminal", label: "终端" },
+          { id: "vscode", label: "VS Code" },
+        ],
+        defaultId: "explorer",
+      }),
+      open: async (input: { openerId?: string }) => ({
+        defaultId: input.openerId ?? "explorer",
+      }),
+    },
     files: {
       // 原型环境不出保存对话框，也不落盘
       saveText: async () => ({ saved: false }),
