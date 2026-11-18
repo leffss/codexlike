@@ -63,6 +63,23 @@ async function main() {
       env: { CODEXLIKE_TEST_OPENER_LOG: logFile },
     }));
 
+    // 新建任务页无 Profile 时整页为引导卡（票 04 / ADR 0026），工作区卡与
+    // 归属选择器不渲染——先建一个 Profile 再进入草稿（本场景不发模型请求，
+    // baseURL 不需要可达）。
+    await window.getByTestId("settings-open").click();
+    await window.getByTestId("profile-create").click();
+    const profileForm = window.locator("form");
+    await profileForm.getByLabel("名称").fill("Opener");
+    await profileForm.getByLabel("baseURL").fill("http://127.0.0.1:9/v1");
+    await profileForm.getByLabel("API Key").fill("sk-e2e");
+    await profileForm.getByLabel("模型 1").fill("opener-model");
+    await window
+      .locator("form")
+      .getByRole("button", { name: /保存|创建/ })
+      .click();
+    await window.getByText("Opener").first().waitFor();
+    await window.getByTestId("settings-back").click();
+
     // 建项目并进入项目草稿：标题栏打开器随草稿工作区可用
     await window.getByTestId("add-project").click();
     await projectAction(window);
