@@ -25,9 +25,18 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const { triggerRef, popoverRef, popoverStyle } = useStablePopover(open, {
-    // 列表区至少 220px 可视：单模型 Profile 打开后切长列表仍有足够滚动区，
-    // 弹层总高一次锁定不跳（稳定与可用同时成立，见 use-stable-popover）。
-    minScrollHeight: 220,
+    // 列表区最小可视高按「所有 Profile 中最长模型列表」动态预留（行高 ~36px）：
+    // 少模型时弹层紧凑不虚高，存在长列表 Profile 时才预留到上限，切换仍一次
+    // 锁定不跳（稳定与可用同时成立，见 use-stable-popover）。
+    minScrollHeight: Math.min(
+      220,
+      Math.max(
+        88,
+        Math.max(...props.profiles.map((profile) => profile.models.length)) *
+          32 +
+          16
+      )
+    ),
   });
   const [browsedProfileId, setBrowsedProfileId] = useState(
     props.selectedProfileId
@@ -221,10 +230,10 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
             aria-label="模型与思考"
             data-testid="model-thinking-popover"
             style={popoverStyle}
-            className="z-50 flex w-[340px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs text-fg shadow-lg"
+            className="z-50 flex w-[220px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs text-fg shadow-lg"
           >
-            <label className="block p-3">
-              提供商
+            <label className="flex items-center gap-2 px-2.5 py-1.5">
+              <span className="shrink-0 text-fg-subtle">提供商</span>
               <select
                 disabled={props.profiles.length === 0}
                 data-testid="model-thinking-provider"
@@ -246,7 +255,7 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
                     triggerRef.current
                   )?.focus({ preventScroll: true });
                 }}
-                className="mt-1 block w-full rounded border border-line bg-surface-muted p-2"
+                className="min-w-0 flex-1 truncate rounded border border-line bg-surface-muted px-1.5 py-1"
               >
                 {props.profiles.length === 0 && (
                   <option value="">未配置模型</option>
@@ -337,7 +346,7 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
                     data-testid={`model-thinking-model-option-${optionValue}`}
                     data-value={optionValue}
                     aria-pressed={optionValue === value}
-                    className={`block w-full rounded p-2 text-left hover:bg-hover ${
+                    className={`block w-full rounded px-2 py-1.5 text-left hover:bg-hover ${
                       optionValue === value ? "bg-hover text-fg" : ""
                     }`}
                     onClick={() =>
@@ -398,7 +407,7 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
                         : buttons.length - 1;
                 buttons[next]?.focus();
               }}
-              className="flex gap-1 p-3"
+              className="flex gap-1 px-2 py-1.5"
             >
               {THINKING_EFFORT_OPTIONS.map((option) => (
                 <button
@@ -415,7 +424,7 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
                   data-effort={option.value}
                   aria-pressed={props.thinkingEffort === option.value}
                   title={option.title}
-                  className={`min-w-0 flex-1 rounded px-2 py-1.5 hover:bg-hover ${
+                  className={`min-w-0 flex-1 rounded px-1.5 py-1 hover:bg-hover ${
                     props.thinkingEffort === option.value
                       ? "bg-hover text-fg"
                       : ""
