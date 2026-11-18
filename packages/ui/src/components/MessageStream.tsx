@@ -886,7 +886,9 @@ function MessageBubble(props: {
 
   return (
     <li data-testid="message-assistant" className="max-w-full">
-      <div className="markdown rounded-lg border border-line bg-surface px-5 py-4 text-sm">
+      {/* 正文无框纯文本流：与子代理报告（SubagentRailPanel）同构，
+          不再以边框气泡呈现；左右与工具卡对齐，段间距由流 gap-3 提供 */}
+      <div className="markdown text-sm leading-6">
         <div data-testid="assistant-content">
           <StreamingMarkdownContent
             content={segment.content}
