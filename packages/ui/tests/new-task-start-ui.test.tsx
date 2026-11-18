@@ -351,11 +351,41 @@ describe("NewTaskStart 居中起点页", () => {
     render(createElement(NewTaskStart, props));
     const guide = screen.getByTestId("draft-empty-start");
     expect(guide.textContent).toContain("CodexLike");
-    expect(guide.textContent).toContain("Provider Profile");
+    // 文案与设置页用户可见语汇一致（「模型接入」），不出现内部术语
+    expect(guide.textContent).toContain("尚未配置模型");
+    expect(guide.textContent).not.toContain("Provider Profile");
     expect(screen.queryByTestId("composer-input")).toBeNull();
     expect(screen.queryByTestId("draft-workspace-info")).toBeNull();
     fireEvent.click(screen.getByTestId("draft-goto-settings"));
     expect(props.onOpenSettings).toHaveBeenCalled();
+  });
+
+  it("空态恢复（票 04）：配置 Profile 后（设置页返回重挂重拉 profiles）起点页整体恢复，引导卡卸载，入口已写文字保留", () => {
+    // profiles 空：引导卡占位
+    const props = baseProps({
+      profiles: [],
+      draft: baseDraft({ projectId: null, text: "配置前的文字" }),
+    });
+    const view = render(createElement(NewTaskStart, props));
+    expect(screen.getByTestId("draft-empty-start")).toBeTruthy();
+
+    // 配置 Profile 后返回：WorkspacePage 重挂并重拉 profiles（props 层面
+    // 即 profiles 到位重渲染），起点页恢复——标题、工作区卡、输入卡回归，
+    // 草稿文字（持久层恢复）不丢
+    view.rerender(
+      createElement(
+        NewTaskStart,
+        baseProps({
+          draft: baseDraft({ projectId: null, text: "配置前的文字" }),
+        })
+      )
+    );
+    expect(screen.queryByTestId("draft-empty-start")).toBeNull();
+    expect(screen.getByText("新建任务")).toBeTruthy();
+    expect(screen.getByTestId("draft-workspace-info")).toBeTruthy();
+    expect(
+      (screen.getByTestId("composer-input") as HTMLTextAreaElement).value
+    ).toBe("配置前的文字");
   });
 
   it("输入 `/` 弹命令菜单；输入 `$` 弹技能菜单并触发候选重新发现", () => {

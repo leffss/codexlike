@@ -104,7 +104,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
               CodexLike
             </div>
             <p className="mt-3 text-sm text-fg-muted">
-              还没有配置模型接入——新建任务需要一个可用的 Provider Profile。
+              尚未配置模型，新建任务需要至少一个可用的模型接入。
             </p>
             <button
               type="button"

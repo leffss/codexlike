@@ -105,11 +105,12 @@ describe("RailPanel（SSR 静态结构）", () => {
     expect(html).toMatch(/data-testid="subagent-rail-badge"[^>]*>2</);
   });
 
-  it("改动 tab（无任务）：草稿态提示占位，不渲染分支行与提交动作", () => {
+  it("改动 tab（无任务）：新建任务提示占位（零「草稿」文案），不渲染分支行与提交动作", () => {
     const html = renderToStaticMarkup(
       createElement(RailPanel, railProps({ taskId: null, taskTitle: null }))
     );
-    expect(html).toContain("草稿态暂无任务改动");
+    expect(html).toContain("新建任务暂无改动，发送第一条消息后可检视");
+    expect(html).not.toContain("草稿");
     expect(html).not.toMatch(/data-testid="changes-branch"/);
     expect(html).not.toMatch(/data-testid="changes-create-branch"/);
   });

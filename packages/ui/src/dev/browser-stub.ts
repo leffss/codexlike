@@ -148,6 +148,17 @@ function installBrowserStub(): void {
         return theme;
       },
     },
+    traySettings: {
+      // 形状对齐真实 IPC 契约（托盘轮）：get/set 往返样例值（气泡标志置
+      // 已展示，dev 预览不弹）；无 Electron 托盘菜单，订阅恒空——设置页
+      // 「启动与托盘」分区挂载即读，缺它纯浏览器预览打开设置页整树崩
+      get: async () => ({ launchAtLogin: false, residencyHintShown: true }),
+      set: async (settings: { launchAtLogin: boolean }) => ({
+        launchAtLogin: settings.launchAtLogin,
+        residencyHintShown: true,
+      }),
+      onLaunchAtLoginChanged: () => () => {},
+    },
     launchState: {
       get: async () => null,
       setWorkbenchTarget: async (target: unknown) => ({
