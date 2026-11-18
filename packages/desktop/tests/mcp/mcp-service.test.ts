@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runTool } from "@codexlike/agent-core/node";
 import type { ToolDefinition } from "@codexlike/agent-core";
@@ -41,10 +41,11 @@ const fakeSafeStorage = {
 const services: McpService[] = [];
 let tempDir = "";
 
-afterAll(async () => {
-  await Promise.all(services.map((service) => service.shutdown()));
+afterEach(async () => {
+  await Promise.all(services.splice(0).map((service) => service.shutdown()));
   if (tempDir) {
     rmSync(tempDir, { recursive: true, force: true });
+    tempDir = "";
   }
 });
 
@@ -90,6 +91,123 @@ describe("mcp service（desktop 装配：store + McpManager + 任务工具工厂
     ]);
     expect(server.tools.every((tool) => tool.enabled)).toBe(true);
   });
+
+  it("配置解密失败时 startup/overview 拒绝且撤下旧工具，读取恢复后可重试连接", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "codexlike-mcp-service-"));
+    let readable = true;
+    const store = createMcpStore({
+      dir: tempDir,
+      safeStorage: {
+        ...fakeSafeStorage,
+        decryptString: async (encrypted: Buffer) => {
+          if (!readable) throw new Error("凭据读取失败，请重试");
+          return fakeSafeStorage.decryptString(encrypted);
+        },
+      },
+    });
+    const service = createMcpService({ store });
+    services.push(service);
+    await service.addServer({
+      ...fakeServerInput,
+      env: { FAKE_TOKEN: "test-secret" },
+    });
+    await service.setToolEnabled("mcp_fake_crash", false);
+    const path = join(tempDir, "mcp-servers.json");
+    const before = readFileSync(path, "utf8");
+    const builtin: ToolDefinition = {
+      name: "builtin",
+      description: "内置工具不受凭据读取失败影响",
+      parameters: { type: "object" },
+      permission: "readonly",
+      execute: async () => ({ output: "builtin", isError: false }),
+    };
+    expect(service.taskTools().map((tool) => tool.name)).toContain(
+      "mcp_fake_echo"
+    );
+
+    readable = false;
+    // main 捕获 startup 的受控错误后仍可建窗；overview 继续拒绝交给现有错误 UI。
+    await expect(service.startup()).rejects.toThrow("凭据读取失败");
+    expect(service.taskTools([builtin])).toEqual([builtin]);
+    await expect(service.overview()).rejects.toThrow("凭据读取失败");
+    expect(readFileSync(path, "utf8")).toBe(before);
+
+    readable = true;
+    const recovered = await service.overview();
+    expect(recovered.servers[0]?.status).toBe("disconnected");
+    expect(recovered.servers[0]?.tools).toEqual([]);
+    expect(service.taskTools([builtin])).toEqual([builtin]);
+    await service.reconnect(recovered.servers[0]!.config.id);
+    const restored = await service.overview();
+    expect(restored.servers[0]?.status).toBe("connected");
+    expect(service.taskTools().map((tool) => tool.name)).toContain(
+      "mcp_fake_echo"
+    );
+    expect(service.taskTools().map((tool) => tool.name)).not.toContain(
+      "mcp_fake_crash"
+    );
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it.each(["add", "remove", "toggle"] as const)(
+    "配置不可读时 %s 拒绝且不覆盖原文件，读取恢复后才允许修改",
+    async (operation) => {
+      tempDir = mkdtempSync(join(tmpdir(), "codexlike-mcp-service-"));
+      let readable = true;
+      const store = createMcpStore({
+        dir: tempDir,
+        safeStorage: {
+          ...fakeSafeStorage,
+          decryptString: async (encrypted: Buffer) => {
+            if (!readable) throw new Error("凭据读取失败，请重试");
+            return fakeSafeStorage.decryptString(encrypted);
+          },
+        },
+      });
+      const saved = await store.createServer({
+        ...fakeServerInput,
+        env: { FAKE_TOKEN: "test-secret" },
+      });
+      const path = join(tempDir, "mcp-servers.json");
+      const before = readFileSync(path, "utf8");
+      const service = createMcpService({ store });
+      services.push(service);
+      const mutate = () => {
+        switch (operation) {
+          case "add":
+            return service.addServer({ ...fakeServerInput, name: "new" });
+          case "remove":
+            return service.removeServer(saved.id);
+          case "toggle":
+            return service.setToolEnabled("mcp_fake_echo", false);
+        }
+      };
+
+      readable = false;
+      await expect(service.startup()).rejects.toThrow("凭据读取失败");
+      await expect(mutate()).rejects.toThrow("凭据读取失败");
+      expect(readFileSync(path, "utf8")).toBe(before);
+      await expect(service.overview()).rejects.toThrow("凭据读取失败");
+      expect(service.taskTools()).toEqual([]);
+
+      readable = true;
+      expect(
+        (await service.overview()).servers.map((view) => view.config.id)
+      ).toEqual([saved.id]);
+      await mutate();
+      const restored = await store.snapshot();
+      if (operation === "add") {
+        expect(restored.servers.map((server) => server.name)).toEqual([
+          "fake",
+          "new",
+        ]);
+      } else if (operation === "remove") {
+        expect(restored.servers).toEqual([]);
+      } else {
+        expect(restored.disabledTools).toEqual(["mcp_fake_echo"]);
+      }
+    }
+  );
 
   it("setToolEnabled(false) 后任务工具工厂不再提供该工具；再启用恢复", async () => {
     const service = newService();

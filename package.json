@@ -37,6 +37,7 @@
     "test:e2e:input-queue-composer": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-composer",
     "test:e2e:process-segments": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:process-segments",
     "test:e2e:packaged": "pnpm --filter @codexlike/desktop run test:e2e:packaged",
+    "test:e2e:credentials": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:credentials",
     "prepare": "husky",
     "test:e2e:projects": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:projects",
     "test:e2e:sidebar": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:sidebar",

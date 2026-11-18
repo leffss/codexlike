@@ -4,12 +4,16 @@
 
 ## 运行方式
 
-- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按下表顺序依次跑 33 个场景，任一失败即停）。
+- 全量链：根目录 `pnpm test:e2e:all`（先 `pnpm build`，再按 `packages/desktop/package.json` 的场景链顺序执行，任一失败即停）。
 - 单跑：根目录 `pnpm test:e2e:<场景名>`（同样先 build）。场景名列与下表一一对应。
 - 链外：`pnpm test:e2e:packaged` 需要 `CODEXLIKE_PACKAGED_EXE` 指向打包产物 exe（冷启动冒烟，不进 all 链）。
 - 定位器规范：场景文件受 `pnpm check:e2e-locators`（pre-commit）约束，见 CODING_STANDARDS.md「E2E 定位器」。
 
-## 场景索引（34 个，按 test:e2e:all 链序）
+## 场景索引（实际完整清单以 package scripts 为准）
+
+全量链首先运行 `credentials`（`credential-durability.mjs`，ADR 0027）：Profile、Search、MCP 分别在全新隔离目录首次保存成功后立即强杀，下一进程必须解密相同假凭据；禁止预热正常退出或固定等待。另验证旧格式只读兼容和损坏配置不阻止建窗且原文件不变。单跑用 `pnpm test:e2e:credentials`；设置 `CODEXLIKE_PACKAGED_EXE` 可对最终产物执行。
+
+下面保留其它场景的功能索引：
 
 | #   | 场景名              | 文件                       | 一行断言要点                                                                                                                                                                 |
 | --- | ------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

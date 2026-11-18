@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderProfileInput } from "@codexlike/agent-core";
 
 import { createProfileStore } from "../../src/profiles/profile-store";
+import { createCredentialStorage } from "../../src/storage/credential-storage";
 
 /** 测试用安全存储替身：base64 可逆变换，保证明文不直接落盘 */
 const fakeSafeStorage = {
@@ -361,6 +362,104 @@ describe("profile store（safeStorage 加密落盘）", () => {
 
     const updated = await updating;
     expect(await store.list()).toEqual([updated, created]);
+  });
+
+  it.each([
+    { operation: "create", method: "encryptString" },
+    { operation: "create", method: "decryptString" },
+    { operation: "update", method: "encryptString" },
+    { operation: "update", method: "decryptString" },
+  ] as const)(
+    "$operation 的凭据 $method 失败时拒绝保存，原 Profile 文件及可读值保持不变",
+    async ({ operation, method }) => {
+      const dir = makeTempDir();
+      const original = createProfileStore({
+        dir,
+        safeStorage: fakeSafeStorage,
+      });
+      const saved = await original.create(validInput);
+      const path = join(dir, "provider-profiles.json");
+      const before = readFileSync(path, "utf8");
+      const failing = createProfileStore({
+        dir,
+        safeStorage: {
+          ...fakeSafeStorage,
+          [method]: async () => {
+            throw new Error("凭据处理失败，请重试");
+          },
+        },
+      });
+      const input = { ...validInput, apiKey: "sk-replacement", name: "新配置" };
+
+      await expect(
+        operation === "create"
+          ? failing.create(input)
+          : failing.update(saved.id, input)
+      ).rejects.toThrow("凭据处理失败");
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(await original.list()).toEqual([saved]);
+    }
+  );
+
+  it("新 adapter 混读旧新密文不迁移，旧 key 丢失时保留文件且仅显式更新替换该项", async () => {
+    const dir = makeTempDir();
+    const legacy = createProfileStore({ dir, safeStorage: fakeSafeStorage });
+    const old = await legacy.create(validInput);
+    const path = join(dir, "provider-profiles.json");
+    const original = readFileSync(path, "utf8");
+    let legacyReadable = true;
+    const makeStorage = () =>
+      createCredentialStorage({
+        platform: "win32",
+        legacy: {
+          ...fakeSafeStorage,
+          decryptString: async (encrypted: Buffer) => {
+            if (!legacyReadable)
+              throw new Error("不可展示的原始错误 sk-legacy-secret");
+            return fakeSafeStorage.decryptString(encrypted);
+          },
+        },
+        protector: {
+          protect: async (plain: Buffer) => Buffer.from(plain).reverse(),
+          unprotect: async (encrypted: Buffer) =>
+            Buffer.from(encrypted).reverse(),
+        },
+      });
+    const store = createProfileStore({ dir, safeStorage: makeStorage() });
+    expect(await store.list()).toEqual([old]);
+    expect(readFileSync(path, "utf8")).toBe(original);
+    const fresh = await store.create({
+      ...validInput,
+      name: "新凭据",
+      apiKey: "sk-fresh",
+    });
+    const mixed = readFileSync(path, "utf8");
+    expect(mixed).not.toContain(validInput.apiKey);
+    expect(mixed).not.toContain("sk-fresh");
+    expect(JSON.parse(mixed).profiles[0]).toEqual(
+      JSON.parse(original).profiles[0]
+    );
+    const reopened = createProfileStore({ dir, safeStorage: makeStorage() });
+    expect(await reopened.list()).toEqual([old, fresh]);
+    expect(readFileSync(path, "utf8")).toBe(mixed);
+
+    legacyReadable = false;
+    // 新实例模拟重启，不能借成功解密缓存掩盖旧 Electron key 丢失。
+    const failed = createProfileStore({ dir, safeStorage: makeStorage() });
+    await expect(failed.list()).rejects.toThrow(
+      /^系统凭据加密存储不可用或数据损坏，已拒绝处理凭据$/
+    );
+    expect(readFileSync(path, "utf8")).toBe(mixed);
+    const replacement = await failed.update(old.id, {
+      ...validInput,
+      apiKey: "sk-replacement",
+    });
+    expect(
+      await createProfileStore({ dir, safeStorage: makeStorage() }).list()
+    ).toEqual([replacement, fresh]);
+    expect(JSON.parse(readFileSync(path, "utf8")).profiles[1]).toEqual(
+      JSON.parse(mixed).profiles[1]
+    );
   });
 
   it("safeStorage 不可用时 create/update 抛错，绝不写明文 key", async () => {

@@ -122,10 +122,12 @@ export function createProfileStore(options: {
     async create(input) {
       await requireEncryption();
       const stored = await toStored(randomUUID(), input);
-      // 从重读到写回之间没有 await，合并加密期间已完成的新增、更新与删除。
+      // 返回值的解密也可能失败，必须在提交前完成，不能报错却已覆盖原文件。
+      const profile = await toProfile(stored);
+      // 从重读到写回之间没有 await，合并凭据处理期间已完成的新增、更新与删除。
       const file = loadFile();
       saveFile({ profiles: [...file.profiles, stored] });
-      return toProfile(stored);
+      return profile;
     },
 
     async update(id, input) {
@@ -134,7 +136,8 @@ export function createProfileStore(options: {
         return null;
       }
       const updated = await toStored(id, input);
-      // 加密期间其它操作可以提交；同步提交段重读，不能带回旧快照或已删除项。
+      const profile = await toProfile(updated);
+      // 凭据处理期间其它操作可以提交；同步提交段重读，不能带回旧快照或已删除项。
       const file = loadFile();
       const index = file.profiles.findIndex((p) => p.id === id);
       if (index === -1) {
@@ -143,7 +146,7 @@ export function createProfileStore(options: {
       const profiles = [...file.profiles];
       profiles[index] = updated;
       saveFile({ profiles });
-      return toProfile(updated);
+      return profile;
     },
 
     async remove(id) {

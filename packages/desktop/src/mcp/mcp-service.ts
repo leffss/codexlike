@@ -39,7 +39,7 @@ export interface McpService {
    * 交给 TaskManager 的 tools 选项，每条消息逐次解析。
    */
   taskTools(builtin?: ToolDefinition[]): ToolDefinition[];
-  /** 应用启动时连接全部已配置 server（失败不抛，状态可见） */
+  /** 应用启动时连接全部配置；连接失败留状态，配置读取失败拒绝，由宿主捕获后建窗 */
   startup(): Promise<void>;
   /** 应用退出时断开全部子进程 */
   shutdown(): Promise<void>;
@@ -73,9 +73,17 @@ export function createMcpService(options: {
   });
 
   async function reload(): Promise<void> {
-    const snapshot = await store.snapshot();
-    configs = snapshot.servers;
-    disabledTools = new Set(snapshot.disabledTools);
+    try {
+      const snapshot = await store.snapshot();
+      configs = snapshot.servers;
+      disabledTools = new Set(snapshot.disabledTools);
+    } catch (error) {
+      // 配置不可读不是空配置：撤下工具并关闭旧连接，磁盘不动，错误交给设置页重试。
+      configs = [];
+      disabledTools.clear();
+      await manager.close();
+      throw error;
+    }
   }
 
   async function viewOf(config: McpServerConfig): Promise<McpServerView> {
@@ -101,6 +109,8 @@ export function createMcpService(options: {
     },
 
     async addServer(input) {
+      // 先确认原配置可读，不能在读取失败时以空缓存继续修改。
+      await reload();
       const config = await store.createServer(input);
       await reload();
       await manager.connect(config.id); // 立即连接；失败状态可见
@@ -108,6 +118,7 @@ export function createMcpService(options: {
     },
 
     async removeServer(id) {
+      await reload();
       await manager.disconnect(id);
       await store.removeServer(id);
       await reload();
@@ -124,6 +135,7 @@ export function createMcpService(options: {
     },
 
     async setToolEnabled(toolName, enabled) {
+      await reload();
       await store.setToolEnabled(toolName, enabled);
       await reload();
     },

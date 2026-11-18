@@ -1,8 +1,10 @@
 # 08：新发现——Electron 首次加密密钥延迟持久化窗口
 
-Status: needs-info
+Status: done
 Priority: P2
-Blocked by: 需要明确密钥持久化方案，不属于原F01–F26修复项
+Blocked by: none
+
+用户后续已批准并实施 ADR 0027 的 Windows DPAPI CurrentUser 新格式方案；新鲜目录三种凭据首次save→立即kill→重启解密、原 launch-state-target ⑥、去预热的子代理强杀恢复均已通过。专项review三个边界已整改并确认关闭，全仓检查通过；打包/推送交付进度见 `.scratch/credential-durability/verification.md`。以下保留最初发现记录。
 
 ## 发现与影响
 
@@ -29,7 +31,7 @@ Blocked by: 需要明确密钥持久化方案，不属于原F01–F26修复项
 
 本机声明与运行时没有公开app.flushLocalState/prefs提交API。分离目录时Local State在sessionData，不在userData根；未读取真实密钥或用户文件。
 
-## 处理边界
+## 最初审计轮的处理边界（历史记录）
 
 本轮**不把它标成修复完成**。不采用明文、删配置、切换弃用同步API、固定sleep或猜私有Local State格式作为修复。
 

@@ -58,6 +58,7 @@
 ## 环境要求
 
 - Windows 10/11 x64
+- 保存凭据使用系统自带 Windows PowerShell 5.1 调用 DPAPI（CurrentUser）；若被企业策略禁用则明确拒绝保存，不改策略、不降级明文
 - 使用终端命令工具需 Git Bash（默认探测常见安装路径）或 PowerShell/cmd
 - MCP server、`node calc.js` 类命令依赖系统 Node.js（可选）
 - 首次使用浏览器工具会自动下载 Chromium（默认走 npmmirror 镜像）
@@ -120,6 +121,10 @@
 ```
 
 新任务管理数据与旧库隔离，不提供旧数据迁移；旧库和旧 Worktree 不会被自动清理。**不要通过删除整个数据目录整理任务**：其中可能包含独立任务专用目录和 Worktree 内尚未收回的真实工作成果。应用内归档/项目移除只处理记录，不删除这些文件。
+
+### 凭据格式与降级注意
+
+Windows 的新 Profile、搜索 API key 与 MCP 环境变量使用带版本标记的 DPAPI `CurrentUser` 密文，保存成功后无需正常退出即可跨进程恢复。原 Electron safeStorage 密文仍兼容读取，读取不会自动迁移；用户明确保存时才使用新格式。旧版本应用不能读取新密文，降级前请备份配置。若旧密钥已经丢失，新版本也不能恢复旧密文：会保留文件并显示读取错误，不会自动清空、改明文或覆盖默认值。详情见 [ADR 0027](docs/adr/0027-durable-windows-credentials-with-dpapi.md)。
 
 ## 规范与按需技能
 

@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
-import type { McpServerConfig } from '@codexlike/agent-core';
+import type { McpServerConfig } from "@codexlike/agent-core";
 
-import type { SafeStorageLike } from '../profiles/profile-store';
-import { readJsonFile, writeJsonFile } from '../storage/json-file';
+import type { SafeStorageLike } from "../profiles/profile-store";
+import { readJsonFile, writeJsonFile } from "../storage/json-file";
 
 /** 新增/编辑 server 的输入（IPC 边界校验后进入存储层） */
 export interface McpServerInput {
@@ -40,46 +40,51 @@ export interface McpStore {
   /** 新建 server 并落盘；env 非空且 safeStorage 不可用时拒绝（不落明文） */
   createServer(input: McpServerInput): Promise<McpServerConfig>;
   /** 删除 server；不存在返回 not-found */
-  removeServer(id: string): Promise<{ status: 'removed' | 'not-found' }>;
+  removeServer(id: string): Promise<{ status: "removed" | "not-found" }>;
   /** 工具启停（设置页逐工具开关）；enabled=true 时从禁用表移除 */
   setToolEnabled(toolName: string, enabled: boolean): Promise<void>;
 }
 
-const FILE_NAME = 'mcp-servers.json';
+const FILE_NAME = "mcp-servers.json";
 
 /** 输入校验（IPC 边界不信任渲染进程） */
 export function validateMcpServerInput(input: unknown): McpServerInput {
-  if (typeof input !== 'object' || input === null) {
-    throw new Error('MCP server 配置不合法');
+  if (typeof input !== "object" || input === null) {
+    throw new Error("MCP server 配置不合法");
   }
   const { name, command, args, env } = input as Record<string, unknown>;
-  const parsedName = typeof name === 'string' ? name.trim() : '';
-  const parsedCommand = typeof command === 'string' ? command.trim() : '';
-  if (parsedName === '') {
-    throw new Error('MCP server 名称不能为空');
+  const parsedName = typeof name === "string" ? name.trim() : "";
+  const parsedCommand = typeof command === "string" ? command.trim() : "";
+  if (parsedName === "") {
+    throw new Error("MCP server 名称不能为空");
   }
-  if (parsedCommand === '') {
-    throw new Error('MCP server 启动命令不能为空');
+  if (parsedCommand === "") {
+    throw new Error("MCP server 启动命令不能为空");
   }
   if (args !== undefined && !Array.isArray(args)) {
-    throw new Error('MCP server 参数必须是字符串数组');
+    throw new Error("MCP server 参数必须是字符串数组");
   }
-  if (env !== undefined && typeof env !== 'object') {
-    throw new Error('MCP server 环境变量必须是键值对对象');
+  if (env !== undefined && typeof env !== "object") {
+    throw new Error("MCP server 环境变量必须是键值对对象");
   }
-  const parsedArgs = (args === undefined ? [] : (args as unknown[])).map((arg) =>
-    typeof arg === 'string' ? arg : String(arg),
+  const parsedArgs = (args === undefined ? [] : (args as unknown[])).map(
+    (arg) => (typeof arg === "string" ? arg : String(arg))
   );
   const parsedEnv: Record<string, string> = {};
   if (env !== undefined && env !== null) {
     for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
-      if (typeof value !== 'string') {
+      if (typeof value !== "string") {
         throw new Error(`环境变量 ${key} 的值必须是字符串`);
       }
       parsedEnv[key] = value;
     }
   }
-  return { name: parsedName, command: parsedCommand, args: parsedArgs, env: parsedEnv };
+  return {
+    name: parsedName,
+    command: parsedCommand,
+    args: parsedArgs,
+    env: parsedEnv,
+  };
 }
 
 /** 基于 JSON 文件 + safeStorage 的 MCP server 配置存储（设置页「MCP servers」区） */
@@ -91,24 +96,32 @@ export function createMcpStore(options: {
   const filePath = join(dir, FILE_NAME);
 
   function loadFile(): StoredFile {
-    return readJsonFile<StoredFile>(filePath, { servers: [], disabledTools: [] });
+    return readJsonFile<StoredFile>(filePath, {
+      servers: [],
+      disabledTools: [],
+    });
   }
 
   function saveFile(file: StoredFile): void {
     writeJsonFile(filePath, file);
   }
 
-  async function toStored(input: McpServerInput, id: string): Promise<StoredServer> {
+  async function toStored(
+    input: McpServerInput,
+    id: string
+  ): Promise<StoredServer> {
     const encryptedEnv: Record<string, string> = {};
     const entries = Object.entries(input.env);
     if (entries.length > 0) {
       if (!(await safeStorage.isEncryptionAvailable())) {
         throw new Error(
-          '系统加密存储（safeStorage）不可用，为避免环境变量明文落盘已拒绝保存（请清空环境变量后重试）',
+          "系统加密存储（safeStorage）不可用，为避免环境变量明文落盘已拒绝保存（请清空环境变量后重试）"
         );
       }
       for (const [key, value] of entries) {
-        encryptedEnv[key] = (await safeStorage.encryptString(value)).toString('base64');
+        encryptedEnv[key] = (await safeStorage.encryptString(value)).toString(
+          "base64"
+        );
       }
     }
     return {
@@ -123,7 +136,9 @@ export function createMcpStore(options: {
   async function toConfig(stored: StoredServer): Promise<McpServerConfig> {
     const env: Record<string, string> = {};
     for (const [key, encrypted] of Object.entries(stored.encryptedEnv)) {
-      env[key] = await safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+      env[key] = await safeStorage.decryptString(
+        Buffer.from(encrypted, "base64")
+      );
     }
     return {
       id: stored.id,
@@ -145,20 +160,23 @@ export function createMcpStore(options: {
 
     async createServer(input) {
       const validated = validateMcpServerInput(input);
-      const file = loadFile();
       const stored = await toStored(validated, randomUUID());
+      // 全部新 env 可解密后再提交，失败不能留下半成功的 server 配置。
+      const config = await toConfig(stored);
+      // 凭据处理期间的删除与工具启停可能已提交；重读到写回之间不再 await。
+      const file = loadFile();
       saveFile({ ...file, servers: [...file.servers, stored] });
-      return toConfig(stored);
+      return config;
     },
 
     async removeServer(id) {
       const file = loadFile();
       const remaining = file.servers.filter((server) => server.id !== id);
       if (remaining.length === file.servers.length) {
-        return { status: 'not-found' as const };
+        return { status: "not-found" as const };
       }
       saveFile({ servers: remaining, disabledTools: file.disabledTools });
-      return { status: 'removed' as const };
+      return { status: "removed" as const };
     },
 
     async setToolEnabled(toolName, enabled) {

@@ -36,10 +36,8 @@ import {
 } from "./profiles/profile-store";
 import { registerFileHandlers } from "./files/file-ipc";
 import { registerGitHandlers } from "./git/git-ipc";
-import {
-  createSearchSettingsStore,
-  type SearchSettingsStore,
-} from "./search/search-settings-store";
+import { createSearchSettingsStore } from "./search/search-settings-store";
+import { registerSearchSettingsHandlers } from "./search/search-settings-ipc";
 import {
   createTerminalSettingsStore,
   resolveTerminalShell,
@@ -94,6 +92,7 @@ import { normalizeModelInput } from "./shared/model-value";
 import { createMcpStore } from "./mcp/mcp-store";
 import { createMcpService } from "./mcp/mcp-service";
 import { registerMcpHandlers } from "./mcp/mcp-ipc";
+import { createCredentialStorage } from "./storage/credential-storage";
 
 /**
  * 把 Electron safeStorage（async API，Electron 45 起同步版已弃用）
@@ -297,39 +296,6 @@ function assertValidInput(input: unknown) {
 }
 
 /**
- * 注册搜索源设置的 IPC 指令（工单 10）。
- * web_search 工具的 searchSource 每次调用时解析内存缓存，
- * 因此设置页保存/清除 key 后无需重启即可对进行中的任务生效。
- */
-function registerSearchSettingsHandlers(
-  store: SearchSettingsStore,
-  onSaved: () => Promise<void>
-): void {
-  ipcMain.handle(IPC.searchSettings.get, () => store.get());
-  ipcMain.handle(
-    IPC.searchSettings.set,
-    (_e: IpcMainInvokeEvent, input: unknown) => {
-      if (typeof input !== "object" || input === null) {
-        throw new Error("搜索源设置输入不合法");
-      }
-      const apiKey = (input as Record<string, unknown>)["apiKey"];
-      if (typeof apiKey !== "string") {
-        throw new Error("apiKey 必须是字符串（空字符串表示清除配置）");
-      }
-      return store
-        .set({ apiKey })
-        .then(async (settings) => {
-          await onSaved();
-          return settings;
-        })
-        .catch((error: unknown) => {
-          throw error instanceof Error ? error : new Error(String(error));
-        });
-    }
-  );
-}
-
-/**
  * 注册子代理全局设置的 IPC 指令（工单 13；票 02 升级模型级）。
  * 设置经内存缓存注入 SubagentsConfig（逐次解析），保存后对下一次委派即时生效；
  * providerProfileId 非空时必须在 Provider Profile 列表中真实存在（引用有效性在边界校验），
@@ -456,6 +422,10 @@ void app.whenReady().then(async () => {
   // 单实例锁未抢到（第二实例）：不装配（app.quit 已在途），立即返回
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
+  // 三种凭据共享格式分派、在途去重与有限缓存（ADR 0027）；只在需要时调用系统加密。
+  const credentialStorage = createCredentialStorage({
+    legacy: asSafeStorageLike(),
+  });
   // ADR 0014：session→task 改名启用新库文件（task-workbench.db），旧 session-workbench.db
   // 不读、不删、不迁移；启动现场（workbench_state）在新库从零开始。
   const persistence = createSqliteTaskStore(
@@ -466,11 +436,22 @@ void app.whenReady().then(async () => {
   // 未配置时 searchSource 为 null → 工具返回「未配置搜索源」中文指引，任务不崩。
   const searchSettings = createSearchSettingsStore({
     dir: dataDir(),
-    safeStorage: asSafeStorageLike(),
+    safeStorage: credentialStorage,
   });
   let searchSource: SearchSource | null = null;
+  let searchSettingsError: Error | null = null;
   const refreshSearchSource = async () => {
-    const settings = await searchSettings.get();
+    searchSource = null;
+    let settings;
+    try {
+      settings = await searchSettings.get();
+      searchSettingsError = null;
+    } catch {
+      searchSettingsError = new Error(
+        "搜索配置无法读取或解密，请在设置页检查；原配置已保留"
+      );
+      throw searchSettingsError;
+    }
     searchSource =
       settings.apiKey === ""
         ? null
@@ -479,8 +460,12 @@ void app.whenReady().then(async () => {
             // E2E 隔离钩子（与 CODEXLIKE_TEST_WORKSPACE 同款模式）：指向本地 mock
             baseUrl: process.env["CODEXLIKE_TAVILY_URL"],
           });
+    return settings;
   };
-  await refreshSearchSource();
+  // 配置不可解密时仍建窗：设置读取保留错误，禁止把损坏数据当未配置而覆写。
+  await refreshSearchSource().catch(() => {
+    console.warn("[search] 配置读取失败，搜索已停用；请在设置页检查");
+  });
 
   // 终端设置（code review 修复 1 + 执行设置票04）：shell 偏好与命令超时两项，
   // 内存缓存逐次解析注入终端工具——设置页保存后无需重启即对下一次命令生效；
@@ -515,7 +500,12 @@ void app.whenReady().then(async () => {
     // 命令超时逐次解析（执行设置票04，与 shell 注入同构）：秒 → 毫秒换算后注入
     defaultTimeoutMs: () => terminalSettings.commandTimeoutSeconds * 1000,
     maxTimeoutMs: () => terminalSettings.maxCommandTimeoutSeconds * 1000,
-    webSearch: { searchSource: () => searchSource },
+    webSearch: {
+      searchSource: () => {
+        if (searchSettingsError) throw searchSettingsError;
+        return searchSource;
+      },
+    },
   });
 
   // 子代理全局设置（工单 13）：内存缓存注入 SubagentsConfig（逐次解析），
@@ -523,7 +513,7 @@ void app.whenReady().then(async () => {
   const subagentSettingsStore = createSubagentSettingsStore({ dir: dataDir() });
   const profileStore = createProfileStore({
     dir: dataDir(),
-    safeStorage: asSafeStorageLike(),
+    safeStorage: credentialStorage,
   });
   let subagentSettings = await subagentSettingsStore.get();
   const refreshSubagentSettings = async () => {
@@ -545,13 +535,16 @@ void app.whenReady().then(async () => {
   // server（失败不拖垮应用，状态在设置页可见）。任务工具 = 内置 + 启用的 MCP 工具，
   // 工厂逐次解析——设置页启停/断线重连对后续消息即时生效。
   const mcpService = createMcpService({
-    store: createMcpStore({ dir: dataDir(), safeStorage: asSafeStorageLike() }),
+    store: createMcpStore({ dir: dataDir(), safeStorage: credentialStorage }),
     // MCP 超时逐次解析（执行设置票 07，ADR 0017）：秒 → 毫秒换算在宿主侧
     // （与终端超时注入同构），设置页保存后对下一次连接/工具调用即时生效
     callTimeoutMs: () => agentSettings.mcpCallTimeoutSeconds * 1000,
     connectTimeoutMs: () => agentSettings.mcpConnectTimeoutSeconds * 1000,
   });
-  await mcpService.startup();
+  await mcpService.startup().catch(() => {
+    // overview 保持读取错误，旧配置不清空；service 已关闭失效配置的工具入口。
+    console.warn("[mcp] 配置读取失败，MCP 已停用；请在设置页检查");
+  });
 
   // 任务工具工厂（主任务与子代理共用）：MCP 启用集 + 浏览器五件工具（工单 11）
   const taskTools = () => [
