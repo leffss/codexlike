@@ -20,7 +20,7 @@ Single-context 布局：根目录一个 `GLOSSARY.md` + `docs/adr/`。见 `docs/
 
 #### Worktree
 
-新 worktree 先 `pnpm install --frozen-lockfile` 再跑任何检查；清理时 `git worktree remove` 报 `Directory not empty` 说明 git 侧已注销、磁盘残留 node_modules，`rm -rf <dir>` 单独收尾即可。
+新 worktree 先 `pnpm install --frozen-lockfile` 再跑任何检查；清理时 `git worktree remove` 报 `Directory not empty` 说明 git 侧已注销、磁盘残留 node_modules，`rm -rf <dir>` 单独收尾即可；`rm -rf` 报 `Device or resource busy` 是残留 node 进程占着目录（dev server / vite 不随会话退场）——先 `powershell -Command 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*<worktree目录>*" } | Select-Object ProcessId,CommandLine'` 按命令行定位（勿按进程名盲杀），`taskkill //PID <pid> //F` 逐个终止后重删（2026-11-18 新建任务轮：两个实现者走查 vite 残留）。
 
 ## Git 提交
 

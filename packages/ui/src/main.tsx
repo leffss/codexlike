@@ -13,6 +13,19 @@ import "./styles.css";
 // 生产构建不含此分支（动态引入 + DEV 门控）。见 dev/browser-stub.ts。
 if (import.meta.env.DEV && window.codexlike === undefined) {
   await import("./dev/browser-stub");
+  // dev 预览错误浮层：React 渲染期异常会卸载 root 且无 vite overlay，无此
+  // 浮层时崩溃只剩空白页、错误发生在任何捕获器装上之前（stub 缺口类问题的
+  // 真实诊断成本，2026-11-18 新建任务轮）。红条显示消息与 stack 次行，点击关闭。
+  window.addEventListener("error", (event) => {
+    if (document.getElementById("dev-error-banner") !== null) return;
+    const banner = document.createElement("div");
+    banner.id = "dev-error-banner";
+    banner.style.cssText =
+      "position:fixed;top:0;left:0;right:0;z-index:9999;background:#cf222e;color:#fff;font:12px/1.6 ui-monospace,monospace;padding:8px 12px;white-space:pre-wrap;word-break:break-all;cursor:pointer";
+    banner.textContent = `DEV 预览未处理错误：${event.message}\n${String(event.error?.stack ?? "").split("\n")[1] ?? ""}（点击关闭）`;
+    banner.addEventListener("click", () => banner.remove());
+    document.body.appendChild(banner);
+  });
 }
 
 const container = document.getElementById("root");
