@@ -32,16 +32,21 @@ const EFFORT_BODIES = [
   ["off", { thinking: { type: "disabled" }, reasoningEffort: undefined }],
 ];
 
-/** 允许窄窗口换行，但控件不能相互遮挡或越出 composer / 视口。 */
+/** 允许窄窗口换行，但控件不能相互遮挡或越出 composer / 视口。
+ *  新建任务态与任务态工具栏形态不同（ADR 0026 变体 A：决策行在输入卡外、
+ *  技能不入一级）——新建态以整页 new-task-start 为界容器（覆盖决策行与
+ *  输入卡），任务态仍是 composer-card 含技能按钮。 */
 async function assertToolbarBounds(window) {
-  const layout = await window.getByTestId("composer-card").evaluate((card) => {
-    const ids = [
-      "approval-mode-select",
-      "profile-select",
-      "thinking-effort-select",
-      "composer-skills",
-      "composer-send",
-    ];
+  const inTaskView = (await window.getByTestId("composer-card").count()) > 0;
+  const cardTestid = inTaskView ? "composer-card" : "new-task-start";
+  const ids = [
+    "approval-mode-select",
+    "profile-select",
+    "thinking-effort-select",
+    ...(inTaskView ? ["composer-skills"] : []),
+    "composer-send",
+  ];
+  const layout = await window.getByTestId(cardTestid).evaluate((card, ids) => {
     const rect = card.getBoundingClientRect();
     const controls = ids.map((id) => {
       const node = card.querySelector(`[data-testid="${id}"]`);
@@ -74,10 +79,10 @@ async function assertToolbarBounds(window) {
       expectedOrder: ids,
       noOverflow: card.scrollWidth <= card.clientWidth + 1,
     };
-  });
+  }, ids);
   assert(
     JSON.stringify(layout.order) === JSON.stringify(layout.expectedOrder),
-    "工具栏 DOM 顺序为审批、模型、思考、技能、发送"
+    "工具栏 DOM 顺序与控件清单一致（任务态含技能、新建态无技能）"
   );
   assert(layout.noOverflow, "长模型名称不撑出 composer 横向滚动");
   for (const [index, control] of layout.controls.entries()) {
@@ -408,10 +413,15 @@ async function main() {
     await effortSelect.press("Enter");
     await effortSelect.press("Tab");
     await effortMenu.waitFor({ state: "hidden" });
+    // 新建任务态无技能按钮（ADR 0026：技能经输入框 $ 直调），Tab 下一站为输入区
+    const nextControl =
+      (await window.getByTestId("composer-skills").count()) > 0
+        ? window.getByTestId("composer-skills")
+        : window.getByTestId("composer-input");
     assert(
-      await window
-        .getByTestId("composer-skills")
-        .evaluate((element) => element === document.activeElement),
+      await nextControl.evaluate(
+        (element) => element === document.activeElement
+      ),
       "Tab 关闭并前进到下一控件"
     );
     await effortSelect.click();

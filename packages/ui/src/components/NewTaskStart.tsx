@@ -208,8 +208,9 @@ export function NewTaskStart(props: NewTaskStartProps) {
           </div>
 
           {/* 决策行：审批/模型/思考一级呈现（与正式任务 composer 同款选择器；
-              技能不入一级——输入框 `$` 直调，placeholder 承载发现性） */}
-          <div className="mb-5 flex flex-wrap items-center gap-2">
+              技能不入一级——输入框 `$` 直调，placeholder 承载发现性）。
+              min-w-0：允许长模型名随容器收缩不横向撑出（任务态 composer 同款） */}
+          <div className="mb-5 flex min-w-0 flex-wrap items-center gap-2">
             <ComposerSelect
               testId="approval-mode-select"
               label="审批模式"
@@ -227,6 +228,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
             <ComposerSelect
               testId="profile-select"
               label="模型"
+              className="min-w-0 max-w-56 shrink"
               value={composerModelValue(
                 props.profiles,
                 draft.providerProfileId,
@@ -250,6 +252,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
             <ComposerSelect
               testId="thinking-effort-select"
               label="思考档位"
+              className="min-w-0 shrink"
               value={draft.thinkingEffort}
               disabled={draft.busy}
               options={THINKING_EFFORT_OPTIONS}
