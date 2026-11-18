@@ -3,7 +3,13 @@
 // → 最终文本。断言：工具卡片渲染、截图真实落盘到任务数据目录、截图卡片内嵌图片
 // （IPC 读回 dataURL）回填给模型的 tool result 为文本降级（未设附图开关）。
 // 运行：pnpm test:e2e:browser（先全仓 build；本机需已有 Chromium 缓存或首次自动下载）。
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -110,29 +116,37 @@ async function main() {
       .waitFor({ timeout: 60_000 });
     console.log("[e2e] 截图卡片内嵌图片渲染（写盘 → toolImage IPC → img）");
 
-    // 3) 截图真实落盘到任务数据目录（约定路径，票 03 换 tasks 系）
-    const tasksDir = join(homeDir, "tasks");
-    const shotFile = await (async () => {
-      const fs = await import("node:fs");
-      for (const entry of fs.readdirSync(tasksDir, {
-        withFileTypes: true,
-      })) {
-        if (!entry.isDirectory()) continue;
-        const candidate = join(
-          tasksDir,
-          entry.name,
-          "screenshots",
-          "call-e2e-shot.png"
-        );
-        if (existsSync(candidate)) return candidate;
-      }
-      return null;
-    })();
-    assert(
-      shotFile !== null,
-      `截图未落盘到 ${tasksDir}/*/screenshots/call-e2e-shot.png`
+    // 3) 按公开历史中的宿主调用 ID 定位截图；provider ID 只用于模型协议配对。
+    const screenshotCall = await window.evaluate(async () => {
+      const tasks = await window.codexlike.tasks.list();
+      if (tasks.length !== 1) throw new Error("本场景必须只有一个任务");
+      const history = await window.codexlike.tasks.messages(tasks[0].id);
+      const shots = history.filter(
+        (entry) =>
+          entry.kind === "tool-call" &&
+          entry.call.toolName === "browser_screenshot"
+      );
+      if (shots.length !== 1) throw new Error("应持久化唯一一条截图调用");
+      return shots[0].call;
+    });
+    assert(!screenshotCall.isError, "截图工具记录不得标记为失败");
+    const shotFile = join(
+      homeDir,
+      "tasks",
+      screenshotCall.taskId,
+      "screenshots",
+      `${screenshotCall.id}.png`
     );
-    console.log(`[e2e] 截图已落盘：${shotFile}`);
+    assert(existsSync(shotFile), `截图未按宿主调用 ID 落盘：${shotFile}`);
+    const imageUrl = await shotCard
+      .getByTestId("tool-call-screenshot")
+      .getAttribute("src");
+    assert(
+      imageUrl ===
+        `data:image/png;base64,${readFileSync(shotFile).toString("base64")}`,
+      "卡片图片必须对应该条持久化调用的真实截图文件"
+    );
+    console.log(`[e2e] 截图已按宿主调用 ID 落盘并与卡片图片一致：${shotFile}`);
 
     // 4) 最终回复可见；第三轮请求体里工具结果以文本回填（默认降级：无 image_url）
     await window
@@ -141,6 +155,14 @@ async function main() {
       .waitFor({ timeout: 30_000 });
     assert(receivedBodies.length >= 3, "模型请求数不足三轮");
     const third = receivedBodies[2];
+    const screenshotResults = JSON.parse(third).messages.filter(
+      (message) =>
+        message.role === "tool" && message.tool_call_id === "call-e2e-shot"
+    );
+    assert(
+      screenshotResults.length === 1,
+      "截图工具结果仍须按原 provider 调用 ID 恰好回填一次"
+    );
     assert(
       third.includes("browser_screenshot"),
       "第三轮请求未回填截图工具结果"
