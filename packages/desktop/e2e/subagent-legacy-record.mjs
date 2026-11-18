@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   assert,
   closeApp,
+  createMockProfile,
   collapseSubagentList,
   launchApp,
   openSubagentDetail,
@@ -81,14 +82,7 @@ async function main() {
     const first = await launchApp({ homeDir, workspaceDir });
     app = first.app;
     let window = first.window;
-    await window.evaluate(async (port) => {
-      await window.codexlike.providerProfiles.create({
-        name: "Legacy Mock",
-        baseURL: `http://127.0.0.1:${port}/v1`,
-        apiKey: "sk-e2e",
-        models: ["mock-model"],
-      });
-    }, model.port);
+    await createMockProfile(window, { name: "Legacy Mock", port: model.port });
     await prepareDraft(window, { approvalMode: "assist" });
     await window.getByTestId("composer-input").fill(FIRST_MESSAGE);
     await window.getByTestId("composer-send").click();

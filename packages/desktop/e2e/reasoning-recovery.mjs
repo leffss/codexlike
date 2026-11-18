@@ -18,6 +18,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  createMockProfile,
   collapseSubagentList,
   launchApp,
   openSubagentDetail,
@@ -107,14 +108,10 @@ async function main() {
     let window = first.window;
 
     // 准备：Profile（mock 端点）→ 任务 A
-    await window.evaluate(async (port) => {
-      await window.codexlike.providerProfiles.create({
-        name: "Reasoning Mock",
-        baseURL: `http://127.0.0.1:${port}/v1`,
-        apiKey: "sk-e2e",
-        models: ["mock-model"],
-      });
-    }, model.port);
+    await createMockProfile(window, {
+      name: "Reasoning Mock",
+      port: model.port,
+    });
     await prepareDraft(window);
 
     // ---- 场景 1a：任务 A 主任务 reasoning + 正文 ----

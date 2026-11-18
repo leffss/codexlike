@@ -21,6 +21,7 @@ import process from "node:process";
 import {
   assert,
   closeApp,
+  createMockProfile,
   launchApp,
   openSubagentDetail,
   collapseSubagentList,
@@ -134,14 +135,10 @@ async function main() {
     let window = first.window;
 
     // 建 Profile → 建任务 → 委派 → 等运行期完成（标记行转 done）
-    await window.evaluate(async (port) => {
-      await window.codexlike.providerProfiles.create({
-        name: "Sub Plan Mock",
-        baseURL: `http://127.0.0.1:${port}/v1`,
-        apiKey: "sk-e2e",
-        models: ["mock-model"],
-      });
-    }, model.port);
+    await createMockProfile(window, {
+      name: "Sub Plan Mock",
+      port: model.port,
+    });
     await prepareDraft(window, { approvalMode: "assist" });
     await window.getByTestId("composer-input").fill(MAIN_TASK);
     await window.getByTestId("composer-send").click();

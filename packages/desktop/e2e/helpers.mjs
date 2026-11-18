@@ -273,6 +273,20 @@ export async function closeApp(app) {
   }
 }
 
+/** 首次配置经真实设置页完成，避免后台 IPC 写入与工作台初次读取竞态。 */
+export async function createMockProfile(window, { name, port }) {
+  await window.getByTestId("settings-open").click();
+  await window.getByTestId("profile-create").click();
+  const form = window.locator("form");
+  await form.getByLabel("名称").fill(name);
+  await form.getByLabel("baseURL").fill(`http://127.0.0.1:${port}/v1`);
+  await form.getByLabel("API Key").fill("sk-e2e");
+  await form.getByLabel("模型 1").fill("mock-model");
+  await form.getByRole("button", { name: /保存|创建/ }).click();
+  await window.getByText(name, { exact: true }).waitFor();
+  await window.getByTestId("settings-back").click();
+}
+
 /** 仅准备新草稿；不预造空任务，也不发送额外模型请求。权限必须由场景显式选择。 */
 export async function prepareDraft(
   window,
