@@ -202,10 +202,9 @@ async function main() {
       .filter({ hasText: "A问答之后" })
       .waitFor();
     await window.getByTestId("composer-stop").click();
-    await a
-      .getByTestId("task-activity")
-      .filter({ hasText: "已中断" })
-      .waitFor();
+    // 停止时任务正被查看：中断只作短暂未读提醒，markViewed 落地后
+    // 徽章熄灭（2026-11-19 未读口径——常驻断言翻转为终态隐藏）
+    await a.getByTestId("task-activity").waitFor({ state: "hidden" });
     await until(() => gates.get("A-final").res.destroyed, "显式停止关闭模型流");
     const stopped = await window.evaluate(
       (id) => window.codexlike.tasks.view(id),

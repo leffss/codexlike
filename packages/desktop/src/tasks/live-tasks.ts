@@ -28,6 +28,11 @@ interface LiveExecution {
  */
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();
+  // 恢复态中断任务的「本会话已查看」记账：无执行现场的任务没有 viewed
+  // 水位可推进，单独记集合——重启恢复的 interrupted 在查看一次后不再以
+  // 未读提醒（与中断徽章的未读口径配套，2026-11-19；会话内有效，再次
+  // 重启重新提醒一次）
+  const recoveredViewed = new Set<string>();
   const idle = (): TaskActivity => ({
     running: false,
     waitingForUser: false,
@@ -37,8 +42,12 @@ export function createLiveTasks(manager: TaskManager) {
   function activity(id: string): TaskActivity {
     const live = tasks.get(id);
     if (!live) {
-      const last = manager.messages(id).at(-1);
-      return { ...idle(), outcome: last?.aborted ? "interrupted" : null };
+      const aborted = manager.messages(id).at(-1)?.aborted === true;
+      return {
+        ...idle(),
+        outcome: aborted ? "interrupted" : null,
+        unread: aborted && !recoveredViewed.has(id),
+      };
     }
     return { ...live.activity, unread: live.terminalAt > live.viewed };
   }
@@ -202,14 +211,17 @@ export function createLiveTasks(manager: TaskManager) {
     };
   }
   function markViewed(id: string, sequence: number) {
-    const live = tasks.get(id);
     if (
       !Number.isSafeInteger(sequence) ||
       sequence < 0 ||
-      sequence > (live?.sequence ?? 0)
+      sequence > (tasks.get(id)?.sequence ?? 0)
     )
       throw new Error("查看水位不合法");
+    const live = tasks.get(id);
     if (live) live.viewed = Math.max(live.viewed, sequence);
+    // 无执行现场（重启恢复的历史任务）没有水位可推进：记入集合即视为
+    // 已查看，恢复态中断的未读提醒随之熄灭
+    else recoveredViewed.add(id);
   }
   function stop(id: string) {
     const live = tasks.get(id);
@@ -233,6 +245,7 @@ export function createLiveTasks(manager: TaskManager) {
     stop,
     forget(id: string) {
       tasks.delete(id);
+      recoveredViewed.delete(id);
     },
   };
 }

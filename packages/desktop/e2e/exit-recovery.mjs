@@ -405,13 +405,20 @@ async function main() {
       responses.every((accepted) => accepted === false),
       "失效请求不可经IPC回应，always也不授永久许可"
     );
-    for (const title of ["项目慢任务", "独立问答", "后台审批", "子代理任务"]) {
+    // 恢复为中断：未查看的行以「已中断」未读提醒（2026-11-19 口径）；
+    // 已查看的「独立问答」（上方 select 过）提醒熄灭
+    for (const title of ["项目慢任务", "后台审批", "子代理任务"]) {
       const item = window.getByTestId("task-item").filter({ hasText: title });
       assert(
         (await item.getByTestId("task-activity").textContent()) === "已中断",
-        `${title}恢复为中断`
+        `${title}恢复为中断（未读提醒）`
       );
     }
+    await window
+      .getByTestId("task-item")
+      .filter({ hasText: "独立问答" })
+      .getByTestId("task-activity")
+      .waitFor({ state: "hidden" });
     await select(window, "子代理任务");
     await window.getByTestId("subagent-stream-marker-toggle").waitFor();
     await delay(300);
@@ -446,13 +453,15 @@ async function main() {
     await crashed;
     app = null;
     ({ app, window } = await launchApp({ homeDir, workspaceDir }));
+    // 崩溃恢复同归一为中断；打开（查看）后未读提醒熄灭（2026-11-19
+    // 口径；重启后列表不自发刷新，「未查看先见提醒」路径由上方正常退出
+    // 段三任务断言与 subagent-interrupted 场景覆盖）
     await select(window, "异常慢任务");
     await window
       .getByTestId("task-item")
       .filter({ hasText: "异常慢任务" })
       .getByTestId("task-activity")
-      .filter({ hasText: "已中断" })
-      .waitFor();
+      .waitFor({ state: "hidden" });
     await delay(300);
     assert(model.requestCount() === crashCount, "异常重启没有自动模型请求");
     assert(

@@ -16,6 +16,10 @@ export function TaskActivityBadge({
   // 排队中（任务并发上限票 03 / ADR 0022）排在运行之后：开跑瞬间信封可能
   // 短暂 queued 与 running 并存，以运行中为准（排队徽章弱于运行中转圈）。
   const queued = activity?.queued === true;
+  // 终态提醒口径（2026-11-19）：中断是「用户主动停止、还没看结果」的
+  // 未读提醒——查看过后不再显示（与「完成未查看」同口径）；失败是
+  // 结果性状态，常显供回看定位，不随已读消失。
+  const interrupted = activity?.outcome === "interrupted";
   const label = waiting
     ? "等待用户"
     : running
@@ -24,8 +28,10 @@ export function TaskActivityBadge({
         ? "排队中"
         : activity?.outcome === "failed"
           ? "失败"
-          : activity?.outcome === "interrupted"
-            ? "已中断"
+          : interrupted
+            ? activity?.unread
+              ? "已中断"
+              : null
             : activity?.unread
               ? "完成未查看"
               : null;
