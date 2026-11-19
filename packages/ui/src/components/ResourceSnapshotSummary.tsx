@@ -36,7 +36,7 @@ const SKILL_STATUS_TEXT: Record<SkillDescriptor["status"], string> = {
   excluded: "已排除",
 };
 
-/** 三档快照切换 chips（紧凑分段控件） */
+/** 三档快照切换 chips（与右栏 tab 同语言：去描边，激活 = 暖灰底 + 字重） */
 export function SnapshotSwitcher(props: {
   value: SnapshotKey;
   onChange: (key: SnapshotKey) => void;
@@ -46,7 +46,7 @@ export function SnapshotSwitcher(props: {
       role="tablist"
       aria-label="快照档位"
       data-testid="snapshot-switcher"
-      className="flex shrink-0 gap-1 rounded border border-line bg-surface-muted p-0.5"
+      className="flex shrink-0 gap-1"
     >
       {SNAPSHOT_TABS.map(({ key, label }) => (
         <button
@@ -56,10 +56,10 @@ export function SnapshotSwitcher(props: {
           aria-selected={props.value === key}
           data-testid={`snapshot-tab-${key}`}
           onClick={() => props.onChange(key)}
-          className={`rounded px-2 py-0.5 text-xs ${
+          className={`rounded-md px-2 py-0.5 text-xs ${
             props.value === key
-              ? "bg-accent/15 font-medium text-accent"
-              : "text-fg-muted hover:text-fg"
+              ? "bg-surface-muted font-semibold text-fg"
+              : "text-fg-muted hover:bg-hover hover:text-fg"
           }`}
         >
           {label}

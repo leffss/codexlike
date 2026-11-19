@@ -100,7 +100,7 @@ export function GitActions(props: {
         data-testid="changes-create-branch"
         onClick={() => void createBranch()}
         disabled={branchBusy || disabled}
-        className="w-full rounded border border-line px-3 py-1.5 text-sm text-fg hover:border-accent hover:text-accent disabled:opacity-50"
+        className="w-full rounded-md px-3 py-1.5 text-sm text-fg hover:bg-hover disabled:opacity-50"
         title={`创建并切换到分支 ${taskBranchName(props.taskTitle)}`}
       >
         {branchBusy ? "创建中…" : `创建分支 ${taskBranchName(props.taskTitle)}`}
@@ -117,7 +117,7 @@ export function GitActions(props: {
         onChange={(event) => setCommitDraft(event.target.value)}
         placeholder="提交消息（可由模型生成，可编辑）"
         rows={2}
-        className="w-full resize-none rounded border border-line bg-code-bg p-2 text-sm text-fg placeholder:text-fg-subtle focus:border-accent focus:outline-none"
+        className="w-full resize-none rounded-lg border border-transparent bg-surface-muted p-2 text-sm text-fg transition-colors placeholder:text-fg-subtle focus:border-accent focus:outline-none"
       />
       <div className="flex gap-2">
         <button
@@ -125,7 +125,7 @@ export function GitActions(props: {
           data-testid="changes-generate-message"
           onClick={() => void generateMessage()}
           disabled={commitBusy !== null || disabled}
-          className="flex-1 rounded border border-line px-3 py-1.5 text-sm text-fg hover:border-accent hover:text-accent disabled:opacity-50"
+          className="flex-1 rounded-md px-3 py-1.5 text-sm text-fg hover:bg-hover disabled:opacity-50"
         >
           {commitBusy === "generate" ? "生成中…" : "生成提交消息"}
         </button>
@@ -134,7 +134,7 @@ export function GitActions(props: {
           data-testid="changes-commit"
           onClick={() => void commit()}
           disabled={commitBusy !== null || disabled}
-          className="flex-1 rounded border border-ok-fg/40 bg-ok-bg px-3 py-1.5 text-sm text-ok-fg hover:border-ok-fg disabled:opacity-50"
+          className="flex-1 rounded-md bg-ok-bg px-3 py-1.5 text-sm text-ok-fg hover:opacity-85 disabled:opacity-50"
         >
           {commitBusy === "commit" ? "提交中…" : "提交全部变更"}
         </button>
