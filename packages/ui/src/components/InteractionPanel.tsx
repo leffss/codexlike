@@ -12,7 +12,7 @@ import {
 import { ComposerRegion } from "./ComposerRegion";
 
 const actionClass =
-  "rounded border border-line px-3 py-2 text-sm text-fg hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md px-3 py-2 text-sm text-fg hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
  * 每题选项数上限：与 agent-core 侧 ask_user_question 工具 schema /
@@ -63,10 +63,11 @@ export function InteractionPanel(props: {
   }
   return (
     // 外壳与消息输入框共用同一插槽容器（ComposerRegion）：画布背景、
-    // px-4 py-3、滚动槽右缘补偿、contentWidthClass 居中收窄；面板本体
-    // 复用 composer-card 的卡片形态（rounded-2xl 边框浮卡，宽度=输入
-    // 卡片宽、高度随内容增加，上限 65vh）——问题区域直接「就是」输入框
-    // 位置上的卡片，输入框原组件全部隐藏（2026-11-19 整合轮）。
+    // 水平内边距、滚动槽右缘补偿、contentWidthClass 居中收窄；面板本体
+    // 与 composer-card 三壳同形（ADR 0028 D 语言）：无边框暖灰块 +
+    // 12px 圆角、聚焦深色细描边淡入，宽度=输入卡片宽、高度随内容增加、
+    // 上限 65vh——问题区域直接「就是」输入框位置上的卡片，输入框原组件
+    // 全部隐藏（2026-11-19 整合轮）。
     <ComposerRegion
       testId="interaction-region"
       contentWidthClass={props.contentWidthClass}
@@ -77,7 +78,7 @@ export function InteractionPanel(props: {
         data-interaction-kind={request.kind}
         aria-label="等待用户交互"
         aria-busy={props.busy}
-        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col rounded-2xl border border-line bg-surface px-4 py-3 text-fg shadow-lg transition-colors focus-within:border-fg-muted"
+        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col rounded-xl bg-surface-muted px-4 py-4 text-fg transition-shadow duration-150 ease-out focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--fg)_32%,transparent),0_0_0_5px_color-mix(in_oklab,var(--fg)_5%,transparent)]"
       >
         <header className="mb-2 flex flex-wrap items-center gap-2 text-xs">
           <span
@@ -106,7 +107,7 @@ export function InteractionPanel(props: {
               <h2 className="text-sm font-medium">
                 执行审批 · {request.toolName}
               </h2>
-              <pre className="my-3 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-code-bg p-3 font-mono text-xs text-code-fg">
+              <pre className="my-3 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-surface p-3 font-mono text-xs text-code-fg">
                 {request.command}
               </pre>
               <div className="flex flex-wrap gap-2">
@@ -151,7 +152,7 @@ export function InteractionPanel(props: {
               </div>
               <p
                 id="task-approval-warning"
-                className="mt-2 text-xs text-warn-fg"
+                className="mt-2 rounded-md bg-warn-bg px-3 py-2 text-xs text-warn-fg"
               >
                 将批量批准本任务主代理与子代理当前排队及后续执行审批，危险命令也会自动执行。重启后保留，直到手动取消；不代答问答、不影响其他任务，不切换完全访问或放宽文件工具边界。
               </p>
@@ -201,12 +202,20 @@ export function InteractionPanel(props: {
                     aria-labelledby="interaction-question-title"
                     className="min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overscroll-contain"
                   >
+                    {/* 问答选项白卡（ADR 0028）：bg-surface 浮在暖灰面板上
+                        （浅色=白卡、深色=暗一档凹片，同一「卡上内容片」语义，
+                        免主题分支）；选中态 bg-surface + inset 1.5px var(--fg)
+                        描边（浅黑深亮随 token），不引入彩色 accent */}
                     {question.options
                       .slice(0, MAX_QUESTION_OPTIONS)
                       .map((option, index) => (
                         <label
                           key={option.id}
-                          className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${answer.selectedOptionIds.includes(option.id) ? "border-accent bg-selected" : "border-line hover:bg-hover"}`}
+                          className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg p-3 text-sm transition-colors ${
+                            answer.selectedOptionIds.includes(option.id)
+                              ? "bg-surface shadow-[inset_0_0_0_1.5px_var(--fg)]"
+                              : "bg-surface hover:bg-hover"
+                          }`}
                         >
                           <input
                             data-testid={`question-option-${option.id}`}
@@ -256,7 +265,7 @@ export function InteractionPanel(props: {
                         })
                       }
                       placeholder="输入你的回答（不会按 Enter 提交）"
-                      className="mt-1 block max-h-40 w-full resize-y rounded border border-line bg-surface-muted p-2 text-sm text-fg focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mt-1 block max-h-40 w-full resize-y rounded-lg bg-surface p-2 text-sm text-fg transition-shadow duration-150 ease-out focus:shadow-[0_0_0_1.5px_color-mix(in_oklab,var(--fg)_45%,transparent)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </label>
                   <div className="mt-3 flex shrink-0 flex-wrap gap-2">
@@ -298,7 +307,7 @@ export function InteractionPanel(props: {
                           disabled ||
                           questionResponse(request, props.draft) === null
                         }
-                        className="ml-auto rounded border border-line px-3 py-2 text-sm text-on-accent bg-accent hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        className="ml-auto rounded-md px-3 py-2 text-sm text-on-accent bg-accent hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                           const response = questionResponse(
                             request,
