@@ -458,10 +458,13 @@ body {
  * 全局滚动条（透明 thumb 方案，安装器见 lib/scrollbar-visibility.ts）：
  * 轨道恒占 8px + 滚动容器恒留滚动槽（scrollbar-gutter: stable）——滚动条
  * 出现/消失不再挤压内容，各列宽度稳定无跳变（消息流的 useScrollbarGutter
- * 测量补偿随之收敛到恒定值）。thumb 默认透明（视觉隐藏），两类信号显色：
+ * 测量补偿随之收敛到恒定值）。thumb 默认透明（视觉隐藏），三类信号显色：
  * - 鼠标移到滚动条位置：::-webkit-scrollbar-thumb:hover（thumb 自身命中）
  *   与 mousemove 边缘检测挂的 .scrollbar-live（整条轨道区域命中）；
- * - 正在滚动：scroll 捕获监听挂 .scrollbar-live（停止后由安装器移除）。
+ * - 正在滚动：scroll 捕获监听挂 .scrollbar-live（停止后由安装器移除）；
+ * - 内容变化（2026-11-19）：ResizeObserver 观察内容根，scrollHeight 变化
+ *   即挂 .scrollbar-live——上翻看历史、窗口隐藏期间消息自动刷新等无滚动
+ *   位移的场景，滚动条同样短暂显色（visibilitychange 恢复可见时补比对）。
  */
 ::-webkit-scrollbar {
   width: 8px;
