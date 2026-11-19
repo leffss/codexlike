@@ -109,7 +109,7 @@ export function ProviderProfileForm(props: {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4"
+      className="flex flex-col gap-3 rounded-lg bg-surface-muted p-4"
       onSubmit={handleSubmit}
     >
       <Field
@@ -133,14 +133,14 @@ export function ProviderProfileForm(props: {
         error={errors.apiKey}
         onChange={(v) => setField("apiKey", v)}
       />
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-sm text-fg-muted">
             模型（每行一个，第一项为新建任务的默认回退）
           </span>
           <button
             type="button"
-            className="rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg"
+            className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg"
             onClick={addModel}
           >
             添加模型
@@ -157,7 +157,7 @@ export function ProviderProfileForm(props: {
                 模型 {index + 1}
                 {index === 0 && (
                   <span
-                    className="rounded-sm bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent"
+                    className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted"
                     data-testid="default-model-badge"
                   >
                     默认
@@ -168,7 +168,7 @@ export function ProviderProfileForm(props: {
                 <button
                   type="button"
                   disabled={index === 0}
-                  className="rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-30"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-30"
                   onClick={() => moveModel(index, -1)}
                 >
                   上移
@@ -176,14 +176,14 @@ export function ProviderProfileForm(props: {
                 <button
                   type="button"
                   disabled={index === models.length - 1}
-                  className="rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-30"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-30"
                   onClick={() => moveModel(index, 1)}
                 >
                   下移
                 </button>
                 <button
                   type="button"
-                  className="rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
+                  className="rounded-md px-1.5 py-0.5 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
                   onClick={() => removeModel(index)}
                 >
                   删除
@@ -195,10 +195,10 @@ export function ProviderProfileForm(props: {
               placeholder={index === 0 ? "如：glm-4.7" : "追加模型名"}
               aria-label={`模型 ${index + 1}`}
               onChange={(event) => setModelAt(index, event.target.value)}
-              className={`rounded border bg-code-bg px-3 py-2 text-fg placeholder:text-fg-subtle ${
+              className={`rounded-md bg-surface px-3 py-2 text-fg placeholder:text-fg-subtle ${
                 errors.models !== undefined
-                  ? "border-danger-fg"
-                  : "border-line focus:border-accent"
+                  ? "ring-1 ring-danger-fg"
+                  : "focus:ring-[1.5px] focus:ring-fg/50"
               } outline-none`}
             />
           </div>
@@ -216,7 +216,7 @@ export function ProviderProfileForm(props: {
       />
 
       {submitError !== "" && (
-        <p className="rounded border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg">
+        <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger-fg">
           {submitError}
         </p>
       )}
@@ -224,7 +224,7 @@ export function ProviderProfileForm(props: {
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
+          className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
           onClick={props.onCancel}
         >
           取消
@@ -232,7 +232,7 @@ export function ProviderProfileForm(props: {
         <button
           type="submit"
           disabled={saving}
-          className="rounded bg-accent px-4 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+          className="rounded-md bg-accent px-4 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
         >
           {saving ? "保存中…" : props.submitLabel}
         </button>
@@ -255,10 +255,10 @@ function Field(props: {
         value={props.value}
         placeholder={props.placeholder}
         onChange={(event) => props.onChange(event.target.value)}
-        className={`rounded border bg-code-bg px-3 py-2 text-fg placeholder:text-fg-subtle ${
+        className={`rounded-md bg-surface px-3 py-2 text-fg placeholder:text-fg-subtle ${
           props.error !== undefined
-            ? "border-danger-fg"
-            : "border-line focus:border-accent"
+            ? "ring-1 ring-danger-fg"
+            : "focus:ring-[1.5px] focus:ring-fg/50"
         } outline-none`}
       />
       {props.error !== undefined && (
