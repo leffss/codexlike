@@ -4,41 +4,59 @@
 
 ## 界面截图
 
-![使用截图 1](docs/img/ScreenShot_2026-11-16_100233_728.png)
+### 新建任务
 
-![使用截图 2](docs/img/ScreenShot_2026-11-16_100240_463.png)
+草稿先行：输入前只准备草稿，首次发送才创建任务与目录；可选已有工作区（或 Worktree）、审批模式与模型。
 
-![使用截图 3](docs/img/ScreenShot_2026-11-16_100251_803.png)
+![新建任务起始页](docs/img/01-new-task-start.png)
 
-![使用截图 4](docs/img/ScreenShot_2026-11-16_100259_311.png)
+### 对话与工具调用
 
-![使用截图 5](docs/img/ScreenShot_2026-11-16_100305_574.png)
+agent 自主读写文件、跑命令；工具调用以可展开卡片呈现，同名连续调用自动归组计数，正文 Markdown 渲染，随时打断。
 
-![使用截图 6](docs/img/ScreenShot_2026-11-16_100315_348.png)
+![对话消息流与工具卡片](docs/img/02-message-stream.png)
 
-![使用截图 7](docs/img/ScreenShot_2026-11-16_100343_952.png)
+### 三档审批模式
 
-![使用截图 8](docs/img/ScreenShot_2026-11-16_100920_299.png)
+`ask` 模式下写入、联网与命令执行前在底部交互区询问；可批准本次、批准本任务后续所有请求，或拒绝。
 
-![使用截图 9](docs/img/ScreenShot_2026-11-16_100929_941.png)
+![写入审批卡片](docs/img/03-approval-card.png)
 
-![使用截图 10](docs/img/ScreenShot_2026-11-16_100947_281.png)
+### 对话内交互问答
 
-![使用截图 11](docs/img/ScreenShot_2026-11-16_101050_480.png)
+agent 通过 `ask_user_question` 主动提问：逐题作答，支持预设选项、自定义回答与多选，主/子代理请求同区排队。
 
-![使用截图 12](docs/img/ScreenShot_2026-11-16_101105_928.png)
+![交互问答卡片](docs/img/04-ask-user-question.png)
 
-![使用截图 13](docs/img/ScreenShot_2026-11-16_101132_944.png)
+### git 集成
 
-![使用截图 14](docs/img/ScreenShot_2026-11-16_101142_880.png)
+右栏改动面板：`git status` 变更列表 + Monaco 行内 diff（红删绿增）；一键创建任务分支、模型生成可编辑的提交消息。
 
-![使用截图 15](docs/img/ScreenShot_2026-11-16_101213_429.png)
+![右栏改动面板与 diff](docs/img/05-rail-changes.png)
 
-![使用截图 16](docs/img/ScreenShot_2026-11-16_101238_959.png)
+### 子代理委派
 
-![使用截图 17](docs/img/ScreenShot_2026-11-16_101250_855.png)
+`spawn_subagent` 委派调研：消息流嵌套卡片跟踪进度，右栏查看完整报告；子代理独立上下文、不可再递归委派。
 
-![使用截图 18](docs/img/ScreenShot_2026-11-16_101302_239.png)
+![子代理嵌套卡片与右栏详情](docs/img/06-subagent-rail.png)
+
+### 任务工作台
+
+项目与独立任务两组并行执行，运行中/等待用户状态实时可见，切回任务立即恢复现场。
+
+![任务侧栏与运行中任务](docs/img/07-task-sidebar.png)
+
+### 输入区
+
+`@` 引用工作区文件、`$` 按需选择技能、`/` 斜杠命令（`/new` `/compact` `/model` 等）。
+
+![输入区 @ 文件引用菜单](docs/img/08-composer-at-menu.png)
+
+### 设置页
+
+任意 OpenAI 兼容端点多 Profile 管理，API key 经 Windows DPAPI 加密落盘；搜索源、子代理、托盘驻留等配置。
+
+![设置页](docs/img/09-settings.png)
 
 ## 功能一览
 
