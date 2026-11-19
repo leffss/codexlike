@@ -9,7 +9,7 @@
 //    删除线）——与主任务卡同款 testid（plan-card 系），容器限定右栏；
 // 2) 三次 update_plan 的中文统计摘要都真实执行并逐轮回传子代理模型
 //    （报告轮请求体含全部三版统计串，步骤推进链路证据）；
-// 3) 工具清单含 update_plan 行（计数 4 次：3 计划 + 1 读文件）；
+// 3) 工具卡（主代理同款）：read_file 出卡、update_plan 不出卡（计划卡承担）；
 // 4) 重启后计划卡照常回看（已完成子代理，数据走子代理工具调用表恢复
 //    快照，不依赖运行期内存）；开合记忆是渲染进程内存，重启回默认收起。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:subagent-work-plan（先 pnpm build）。
@@ -24,7 +24,6 @@ import {
   createMockProfile,
   launchApp,
   openSubagentDetail,
-  collapseSubagentList,
   prepareDraft,
   startMockProvider,
 } from "./helpers.mjs";
@@ -155,8 +154,7 @@ async function main() {
 
     // ---- 运行期：右栏详情底部计划卡终态 ----
     const panel = await openSubagentDetail(window);
-    // focus 定位自动展开的浮层盖住详情区，收起后详情才可点击
-    await collapseSubagentList(window);
+    // focus 定位直接显示详情（不展开列表浮层），详情可直接交互
     // 与主任务卡同款 testid，容器限定子代理详情（本轮主任务未建计划）
     await panel.getByTestId("plan-card").waitFor({ timeout: 10_000 });
     assert(
@@ -203,22 +201,19 @@ async function main() {
     );
     console.log("[e2e] 运行期详情：计划卡终态 3/3（100%）+ 展开清单删除线");
 
-    // 工具清单：含 update_plan 行（3 计划 + 1 读文件 = 4 次）
-    const tools = panel.getByTestId("subagent-tools");
-    await tools.waitFor({ timeout: 10_000 });
-    await tools.getByTestId("subagent-tools-toggle").click();
-    const toolsText = await tools.textContent();
+    // 工具卡（主代理同款，2026-11-19 呈现对齐轮）：read_file 出卡；
+    // update_plan 不出卡（计划由计划卡承担，主消息流同源口径）
+    const readCard = panel
+      .getByTestId("tool-call-card")
+      .filter({ hasText: "read_file" });
+    await readCard.waitFor({ timeout: 10_000 });
     assert(
-      toolsText !== null &&
-        toolsText.includes("update_plan") &&
-        toolsText.includes("read_file"),
-      `工具清单应含 update_plan 与 read_file：${toolsText ?? "(空)"}`
+      (await panel
+        .locator('[data-testid="tool-call-card"][data-tool-name="update_plan"]')
+        .count()) === 0,
+      "update_plan 不应以通用工具卡呈现（计划卡承担）"
     );
-    assert(
-      toolsText.includes("工具调用（4 次）") === true,
-      `工具调用计数应为 4 次：${toolsText}`
-    );
-    console.log("[e2e] 工具清单：update_plan ×3 + read_file（4 次计数）");
+    console.log("[e2e] 工具卡：read_file 出卡；update_plan 走计划卡");
 
     // 步骤推进链路证据：子代理报告轮请求体含全部三版中文统计摘要
     // （三次 update_plan 都真实执行并逐轮回传模型）
@@ -252,7 +247,6 @@ async function main() {
       )
       .waitFor({ timeout: 15_000 });
     const restored = await openSubagentDetail(window);
-    await collapseSubagentList(window);
 
     // 恢复路径计划卡：数据走子代理工具调用表快照（subagent_tool_calls），
     // 不依赖运行期内存；开合记忆是渲染进程内存，重启回默认收起
@@ -293,13 +287,14 @@ async function main() {
       restoredLineThrough === 3,
       `重启后三个完成项都应有删除线，实际 ${restoredLineThrough}`
     );
-    // 恢复后工具清单照常含 update_plan 行（快照 tools 通道）
-    const restoredTools = restored.getByTestId("subagent-tools");
-    await restoredTools.waitFor({ timeout: 10_000 });
-    await restoredTools.getByTestId("subagent-tools-toggle").click();
+    // 恢复后工具卡照常（快照 tools 通道）：read_file 可见、update_plan 仍走计划卡
+    await restored
+      .getByTestId("tool-call-card")
+      .filter({ hasText: "read_file" })
+      .waitFor({ timeout: 10_000 });
     assert(
-      (await restoredTools.textContent())?.includes("update_plan") === true,
-      "重启后工具清单应含 update_plan（子代理工具调用表恢复）"
+      (await restored.getByTestId("plan-card").count()) === 1,
+      "重启后计划卡应照常呈现（子代理工具调用表恢复）"
     );
     console.log("[e2e] 重启回看：计划卡 3/3 终态照常（恢复快照路径）");
 

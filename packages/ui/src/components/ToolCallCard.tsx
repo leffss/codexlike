@@ -9,8 +9,27 @@ import { useTickingNow } from "../lib/use-ticking-now";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { ToolDetailsBody } from "./ToolDetailsBody";
 
+/**
+ * 工具卡数据面（结构子类型）：主任务工具段（ToolCallSegment）与子代理
+ * 内嵌工具调用（SubagentToolCall）共用同一张卡——字段取两者交集，主流
+ * 特有的 seq/turnId/responseId 等流上下文字段不进接口（SubagentToolCall
+ * 天然满足本形状，无需适配层）。
+ */
+export type ToolCallCardData = Pick<
+  ToolCallSegment,
+  | "id"
+  | "taskId"
+  | "toolName"
+  | "arguments"
+  | "output"
+  | "isError"
+  | "running"
+  | "startedAt"
+  | "endedAt"
+>;
+
 /** 截图卡片的图片展示：展开时经主进程按 任务+调用 id 读取文件（dataURL） */
-function ScreenshotView(props: { call: ToolCallSegment }) {
+function ScreenshotView(props: { call: ToolCallCardData }) {
   const { call } = props;
   const [image, setImage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -71,7 +90,7 @@ function ScreenshotView(props: { call: ToolCallSegment }) {
  * 实时可见），完成自动收起——默认值随事实翻转（运行中→完成）对未手动
  * 操作过的键立即生效；开合为渲染层内存态（滚动、切换任务不丢手动开合）。
  */
-export function ToolCallCard(props: { call: ToolCallSegment }) {
+export function ToolCallCard(props: { call: ToolCallCardData }) {
   const { call } = props;
   const { open: expanded, toggle } = useCollapseState(
     `tool-${call.id}`,

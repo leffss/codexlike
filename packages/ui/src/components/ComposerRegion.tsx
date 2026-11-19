@@ -25,7 +25,8 @@ export function ComposerRegion(props: {
 }) {
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   return (
-    // 补偿消息流原生滚动条占宽，基准列对齐后输入卡片左右各外扩 8px。
+    // 补偿消息流原生滚动条占宽，基准列对齐（2026-11-19 起输入卡本体在
+    // 列内再左右各外扩 12px，比正文列宽一点；见 MessageComposer 输入卡）。
     <div
       data-testid={props.testId}
       className="bg-canvas px-4 pt-2.5 pb-4"

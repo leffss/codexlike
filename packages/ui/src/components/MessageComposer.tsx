@@ -213,10 +213,13 @@ export function MessageComposer(props: {
       />
       {/* 输入卡（ADR 0028 D 语言）：无边框暖灰块（surface-muted）+ 10px 圆角，
           聚焦时深色细描边与极淡外晕经 box-shadow 淡入（描边色取 --fg 低透明，
-          浅色黑主张 / 深色亮主张随 token 自适应） */}
+          浅色黑主张 / 深色亮主张随 token 自适应）。
+          左右各外扩 12px（-mx-3，2026-11-19 呈现对齐轮定案）：输入卡有意
+          比上方消息正文列宽一点，输入区与阅读区的视觉宽度拉开层次；壳层
+          px-4 仍以正文列为基准，队列条等内容列元素不外扩 */}
       <form
         data-testid="composer-card"
-        className="rounded-[10px] bg-surface-muted transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
+        className="-mx-3 rounded-[10px] bg-surface-muted transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
         onSubmit={(event) => {
           event.preventDefault();
           submit();

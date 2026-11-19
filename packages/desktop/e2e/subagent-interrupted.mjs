@@ -4,8 +4,8 @@
 // 第二轮请求在 mock 挂起（应用停在运行中）→ taskkill /T /F 强杀进程树
 // （真实被杀路径，先例 exit-recovery：不走退出确认屏障）→ 同 homeDir 重启：
 // 1) 主任务列表项「已中断」；四条委派标记行与列表项全部 interrupted；
-// 2) 运行中被杀（甲）：已发生部分完整回看（思考/正文/工具清单）+ 留痕提示；
-// 3) 排队中被杀（丁）：留痕 + 委派说明可读，无正文/思考/工具（未启动），
+// 2) 运行中被杀（甲）：已发生部分完整回看（思考/正文/工具卡）+ 留痕提示；
+// 3) 排队中被杀（丁）：留痕 + 委派说明可读，无正文/思考/工具卡（未启动），
 //    且无起止时间（startedAt 缺失）——与运行中被杀（有起止时间）判别。
 // 运行：pnpm --filter @codexlike/desktop run test:e2e:subagent-interrupted（先 pnpm build）。
 import { execFile } from "node:child_process";
@@ -185,10 +185,12 @@ async function main() {
         .count()) === 4,
       "重启后四条委派标记行应全部为 interrupted"
     );
-    // 点击甲的标记行打开右栏定位详情
+    // 点击甲的标记行打开右栏定位详情（focus 直接显示详情，不展开列表）
     await markerOf(restored, TASKS[0]).click();
     const panel = restored.getByTestId("subagents-panel-body");
     await panel.waitFor({ timeout: 10_000 });
+    // 列表行只在浮层展开时渲染——手动展开摘要行做列表级断言
+    await panel.getByTestId("subagent-rail-summary").click();
     await until(
       async () =>
         (await panel
@@ -212,8 +214,8 @@ async function main() {
       `甲的委派说明缺失：${delegationText ?? "(空)"}`
     );
     // 起止时间对齐全（启动收尾补记 completedAt）：列表行已用时定格。
-    // 列表行（subagent-rail-item）只在浮层展开时渲染——先在浮层展开态
-    // 断言，再收浮层做详情内点击（浮层遮罩盖住详情区拦截点击）
+    // 列表浮层仍展开（列表行可断言），断言完收浮层再做详情内点击
+    // （浮层遮罩盖住详情区拦截点击）
     const elapsedJia = panel
       .getByTestId("subagent-rail-item")
       .getByTestId("subagent-elapsed");
@@ -242,15 +244,12 @@ async function main() {
       bodyText !== null && bodyText.includes(SUB_TEXT_1),
       `运行中被杀的正文不可回看：${bodyText ?? "(空)"}`
     );
-    const tools = panel.getByTestId("subagent-tools");
-    await tools.waitFor({ timeout: 10_000 });
-    await tools.getByTestId("subagent-tools-toggle").click();
-    const toolsText = await tools.textContent();
-    assert(
-      toolsText !== null && toolsText.includes("read_file"),
-      `运行中被杀的工具清单不可回看：${toolsText ?? "(空)"}`
-    );
-    console.log("[e2e] 运行中被杀（甲）：思考/正文/工具清单/起止时间完整回看");
+    // 工具调用（主代理同款卡，2026-11-19 呈现对齐轮）：卡头直接可见工具名
+    const toolCard = panel
+      .getByTestId("tool-call-card")
+      .filter({ hasText: "read_file" });
+    await toolCard.waitFor({ timeout: 10_000 });
+    console.log("[e2e] 运行中被杀（甲）：思考/正文/工具卡/起止时间完整回看");
 
     // 4) 排队中被杀（丁）：留痕 + 委派说明可读，未启动（无任何过程内容）
     await markerOf(restored, TASKS[3]).click();
@@ -269,10 +268,13 @@ async function main() {
     assert(
       (await panel.getByTestId("subagent-body-block").count()) === 0 &&
         (await panel.getByTestId("subagent-thinking-block").count()) === 0 &&
-        (await panel.getByTestId("subagent-tools").count()) === 0,
-      "排队中被杀的委派未启动，不应有正文/思考/工具清单"
+        (await panel.getByTestId("tool-call-card").count()) === 0,
+      "排队中被杀的委派未启动，不应有正文/思考/工具卡"
     );
-    // 排队未启动 → 无 startedAt → 该列表行无已用时（与运行中被杀判别）
+    // 排队未启动 → 无 startedAt → 该列表行无已用时（与运行中被杀判别）。
+    // 列表浮层已收起（focus 不再自动展开）——重新展开做列表行断言
+    await panel.getByTestId("subagent-rail-summary").click();
+    await panel.getByTestId("subagent-rail-item").first().waitFor();
     assert(
       (await panel.getByTestId("subagent-rail-item").count()) === 4,
       "列表应仍含四个委派"

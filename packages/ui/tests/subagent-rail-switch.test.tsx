@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// 交互回路（列表点击切换详情）：SSR 静态断言测不到 useEffect 与本地
-// state，此处用 jsdom + testing-library 驱动真实点击与流式 rerender，
-// 锁定「运行中流式更新不得覆盖用户的手动列表选择」。
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// 交互回路（列表点击切换详情 / 标记行定位直接显示详情）：SSR 静态断言
+// 测不到 useEffect 与本地 state，此处用 jsdom + testing-library 驱动真实
+// 点击与流式 rerender，锁定「运行中流式更新不得覆盖用户的手动列表选择」。
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -57,13 +57,8 @@ function openList(): void {
 
 afterEach(() => cleanup());
 
-beforeAll(() => {
-  // jsdom 未实现 scrollIntoView（focus 定位滚动用）：stub 成空函数
-  window.HTMLElement.prototype.scrollIntoView = () => {};
-});
-
 describe("SubagentRailPanelBody 列表点击切换详情", () => {
-  it("恢复 interrupted 的工具长输出与完整参数两级按需展开，HTML 只作文本且不请求主工具截图", async () => {
+  it("恢复 interrupted 的工具长输出与完整参数按需展开（主代理同款单卡），HTML 只作文本且失败卡不请求截图", async () => {
     const output = `${"日志行\n".repeat(1_000)}唯一错误长尾 <img src=x onerror=alert(1)>`;
     const args = {
       command: "检查",
@@ -105,26 +100,23 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
       ]
     ).filter((item): item is SubagentSegment => item.kind === "subagent");
     render(<SubagentRailPanelBody subagents={subagents} focus={null} />);
-    expect(screen.queryByTestId("subagent-tool-details")).toBeNull();
-    fireEvent.click(screen.getByTestId("subagent-tools-toggle"));
-    await screen.findByTestId("subagent-tool-details");
-    expect(screen.queryByTestId("subagent-tool-output")).toBeNull();
-    expect(screen.getByTestId("subagent-tool-toggle").textContent).toContain(
+    // 主代理同款工具卡（2026-11-19 呈现对齐轮）：终态默认收起，展开按需挂载
+    expect(screen.queryByTestId("tool-call-arguments")).toBeNull();
+    expect(screen.getByTestId("tool-call-toggle").textContent).toContain(
       "失败"
     );
-    fireEvent.click(screen.getByTestId("subagent-tool-toggle"));
-    const renderedOutput = await screen.findByTestId("subagent-tool-output");
+    fireEvent.click(screen.getByTestId("tool-call-toggle"));
+    const renderedOutput = await screen.findByTestId("tool-call-output");
     expect(renderedOutput.textContent).toBe(output);
     expect(
-      JSON.parse(
-        screen.getByTestId("subagent-tool-arguments").textContent ?? ""
-      )
+      JSON.parse(screen.getByTestId("tool-call-arguments").textContent ?? "")
     ).toEqual(args);
     expect(renderedOutput.querySelector("img")).toBeNull();
+    // 失败卡（isError）不渲染截图视图：不发起 toolImage 请求
     expect(toolImage).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("subagent-tool-toggle"));
+    fireEvent.click(screen.getByTestId("tool-call-toggle"));
     await waitFor(() =>
-      expect(screen.queryByTestId("subagent-tool-output")).toBeNull()
+      expect(screen.queryByTestId("tool-call-output")).toBeNull()
     );
   });
 
@@ -169,9 +161,10 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
       />
     );
     expect(selectedTask()).toContain("sa-done");
-    // focus 定位自动展开浮层（消息流标记行进来要找的就是那一项）
-    expect(screen.getAllByTestId("subagent-rail-item").length).toBe(2);
-    // 用户点击列表中正在运行的子代理，查看其流式详情
+    // focus 定位不再自动展开列表浮层：直接显示详情（2026-11-19 起定案）
+    expect(screen.queryAllByTestId("subagent-rail-item")).toHaveLength(0);
+    // 用户展开列表、点击正在运行的子代理，查看其流式详情
+    openList();
     fireEvent.click(listItemAt(1));
     expect(selectedTask()).toContain("sa-run");
     // 流式事件到达：subagents 全量重建（新数组 + 新对象引用，内容增量）
@@ -208,6 +201,7 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
         focus={{ id: "sa-done", seq: 1 }}
       />
     );
+    openList();
     fireEvent.click(listItemAt(1));
     expect(selectedTask()).toContain("sa-run");
     // 用户再次点击消息流标记行（seq 递增）：应重新定位到 sa-done

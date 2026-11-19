@@ -53,6 +53,16 @@ it("忙且有输入（票 05）：「加入队列」主操作与「停止」并�
   expect(openTag(html, "composer-stop")).toContain("bg-danger-solid");
 });
 
+it("输入卡左右各外扩 12px（2026-11-19 呈现对齐轮）：比消息正文列宽一点", () => {
+  const html = composer();
+  const card = new RegExp(`<form[^>]*data-testid="composer-card"[^>]*>`).exec(
+    html
+  )?.[0];
+  expect(card).toBeDefined();
+  // -mx-3：基准列内向两侧各破格 12px（壳层 px-4 与队列条仍以正文列为基准）
+  expect(card).toContain("-mx-3");
+});
+
 it("忙且无输入：仅停止按钮，外观与现状一致", () => {
   const html = composer({ streaming: true, onStop: () => {}, draftValue: "" });
   expect(html).toContain('data-testid="composer-stop"');

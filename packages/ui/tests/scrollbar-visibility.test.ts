@@ -213,6 +213,45 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
     expect(container.classList.contains("scrollbar-live")).toBe(true);
   });
 
+  it("豁免容器（data-scrollbar-content-signal=off）内容增长不显色，滚动信号照常", () => {
+    vi.useFakeTimers();
+    const observer = fakeResizeObserver();
+    const { container, content, heights } = makeContainer(1000);
+    container.setAttribute("data-scrollbar-content-signal", "off");
+    const uninstall = installScrollbarVisibility();
+    teardowns.push(uninstall);
+
+    // 豁免容器不登记内容根：流式自动刷新改高度不触发显色（防闪烁）
+    expect(observer.observed.has(content)).toBe(false);
+    heights.scrollHeight = 1500;
+    observer.fire(content);
+
+    expect(container.classList.contains("scrollbar-live")).toBe(false);
+
+    // 滚动信号不受豁免影响：用户真实滚动仍显色
+    container.dispatchEvent(new Event("scroll"));
+    expect(container.classList.contains("scrollbar-live")).toBe(true);
+    vi.advanceTimersByTime(SCROLL_IDLE_MS);
+    expect(container.classList.contains("scrollbar-live")).toBe(false);
+  });
+
+  it("豁免标记在祖先上同样生效（面板内嵌滚动区随根豁免）", () => {
+    vi.useFakeTimers();
+    const observer = fakeResizeObserver();
+    const panel = document.createElement("div");
+    panel.setAttribute("data-scrollbar-content-signal", "off");
+    document.body.appendChild(panel);
+    const { container, content, heights } = makeContainer(1000);
+    panel.appendChild(container); // 滚动容器移入豁免祖先（子代理详情形态）
+    const uninstall = installScrollbarVisibility();
+    teardowns.push(uninstall);
+
+    expect(observer.observed.has(content)).toBe(false);
+    heights.scrollHeight = 1800;
+    observer.fire(content);
+    expect(container.classList.contains("scrollbar-live")).toBe(false);
+  });
+
   it("卸载后内容信号停止（观察器断开、回调不再显色）", () => {
     vi.useFakeTimers();
     const observer = fakeResizeObserver();

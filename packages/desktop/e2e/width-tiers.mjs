@@ -1,6 +1,7 @@
 // E2E 容器分档宽度（票 05，spec「宽度与布局」用户故事 31–35）：
 // 内容列以任务容器（中栏，而非浏览器视口）为断点三档分宽，
-// 头部 / 消息流共用同一内容列，输入卡片与消息列同宽，
+// 头部 / 消息流共用同一内容列；输入卡片以正文列基准左右各外扩
+// 12px（2026-11-19 呈现对齐轮定案，比正文列宽一点），
 // 用户消息限宽右对齐，宽表格与代码块横向滚动内聚在自身容器。
 // 场景：
 // 1) 新建、已有与加载中使用同一三档内容列；草稿场景的就地收纳行（票01）
@@ -8,7 +9,7 @@
 // 2) 窗口内容区 1280px（任务容器 992px ≥864）→ 4xl 档：
 //    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
 // 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
-//    头部 / 消息流左右缘对齐，输入卡片同宽；用户气泡右对齐内容列右缘。
+//    头部 / 消息流左右缘对齐，输入卡片左右各外扩 12px；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
 // 5) 窗口内容区 1060px（容器 772px <864）→ 基础档：内容列回落全宽（<896px）；
 //    票04 窗口底线（1000）之上留出夹紧/取整余量，窄档基线不再压 minWidth 线。
@@ -33,6 +34,8 @@ import {
 /** 档位换算依据：侧栏固定 w-80（320px），窗口内容区宽 - 320 = 任务容器宽 */
 const SIDEBAR_WIDTH = 320;
 const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
+/** 输入卡左右各比正文列外扩的宽度（-mx-3，2026-11-19 呈现对齐轮定案） */
+const COMPOSER_BREAKOUT = 12;
 
 /** 宽内容回复：12 列宽表格 + 220 字符长代码行，在任何档位都超出内容列宽。
  *  表格数据用不可断 token（长无空格字符串）撑宽——可折行文本（如中文）
@@ -140,10 +143,15 @@ async function assertAligned(window, contentTestId, label) {
   }
   const composer = await window.getByTestId("composer-card").boundingBox();
   assert(composer !== null, `${label}：输入卡片必须可见`);
+  // 输入卡左右各比消息列外扩 12px（2026-11-19 起取代「同宽」口径）
   assert(
-    Math.abs(content.x - composer.x) <= 1 &&
-      Math.abs(composer.x + composer.width - content.x - content.width) <= 1,
-    `${label}：输入卡片应与消息列左右缘一致（同宽），实际 ${JSON.stringify({ composer, content })}`
+    Math.abs(composer.x - (content.x - COMPOSER_BREAKOUT)) <= 1 &&
+      Math.abs(
+        composer.x +
+          composer.width -
+          (content.x + content.width + COMPOSER_BREAKOUT)
+      ) <= 1,
+    `${label}：输入卡片应比消息列左右各宽 ${COMPOSER_BREAKOUT}px，实际 ${JSON.stringify({ composer, content })}`
   );
   return content;
 }
@@ -286,7 +294,7 @@ async function main() {
       `容器放宽后内容列应变宽：${tier6.width} > ${tier4.width}`
     );
 
-    // 头部与消息列对齐，输入卡片同宽。
+    // 头部与消息列对齐，输入卡片左右各外扩 12px。
     await assertAligned(window, "message-list", "6xl 档");
 
     // 用户气泡限宽右对齐：右缘与 assistant 内容列右缘对齐

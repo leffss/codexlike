@@ -13,6 +13,8 @@
  *   滚动容器的内容根，scrollHeight 变化且纵向可滚动时同样挂
  *   scrollbar-live；隐藏期间的 ResizeObserver 回调会被渲染节流吞掉，
  *   visibilitychange 恢复可见时对全部已登记容器补一次高度比对。
+ *   流式自动刷新的面板可标记 data-scrollbar-content-signal="off" 豁免
+ *   本信号（见 CONTENT_SIGNAL_OFF_SELECTOR）。
  * main.tsx 先安装后渲染（初始扫描扑空），滚动容器由 MutationObserver
  * 持续发现；SSR 测试只覆盖纯函数 scrollbarHit，装配层回归见
  * tests/scrollbar-visibility.test.ts（jsdom + 假 ResizeObserver）。
@@ -30,6 +32,15 @@ export const SCROLLBAR_EDGE_PX = 10;
  */
 const SCROLL_CONTAINER_SELECTOR =
   ".overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll";
+
+/**
+ * 内容变化信号豁免（2026-11-19 子代理详情轮）：流式自动刷新的检视面板
+ * 标记 data-scrollbar-content-signal="off"——运行中正文/工具卡每秒改
+ * scrollHeight，内容信号会让滚动条反复显色闪烁；滚动与悬停信号照常
+ * （用户真实交互仍显色）。标记在滚动容器自身或其任意祖先上均生效
+ * （面板内嵌滚动区随根豁免一并覆盖）。
+ */
+const CONTENT_SIGNAL_OFF_SELECTOR = "[data-scrollbar-content-signal='off']";
 
 /** 滚动条命中判定用的矩形（DOMRect 的最小面） */
 export interface EdgeBox {
@@ -134,9 +145,11 @@ export function installScrollbarVisibility(): () => void {
     touchLive(container);
   }
 
-  /** 登记滚动容器：观察其内容根（首个元素子节点）的尺寸变化 */
+  /** 登记滚动容器：观察其内容根（首个元素子节点）的尺寸变化；带豁免
+   *  标记的容器（自身或祖先）不登记内容信号——滚动/悬停信号不受影响 */
   function trackContent(container: Element) {
     if (!container.matches(SCROLL_CONTAINER_SELECTOR)) return;
+    if (container.closest(CONTENT_SIGNAL_OFF_SELECTOR) !== null) return;
     const root = container.firstElementChild ?? container;
     if (containerRoots.get(container) === root) return;
     const previousRoot = containerRoots.get(container);

@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { exportFileNameBase } from "./AssistantActions";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { WorkPlanCardFromSubagentTools } from "./WorkPlanCard";
-import { ToolDetailsBody } from "./ToolDetailsBody";
+import { ToolCallCard } from "./ToolCallCard";
+import { ToolGroupView } from "./ToolSequence";
 import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
 import { MarkdownContent } from "../lib/markdown";
+import { PLAN_TOOL_NAME } from "../lib/plan-view";
 import { subagentExportMarkdown } from "../lib/subagent-export";
 import {
   isTerminalSubagentState,
@@ -16,9 +18,8 @@ import {
   statusText,
 } from "../lib/subagent-status";
 import { thinkingSummary } from "../lib/thinking-summary";
-import { summarizeToolCall } from "../lib/tool-summary";
-import type { SubagentSegment, SubagentToolCall } from "../lib/task-view";
-import { formatDurationCn } from "../lib/turn-view";
+import type { SubagentSegment, ToolCallSegment } from "../lib/task-view";
+import { groupConsecutiveTools } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 
 /**
@@ -32,8 +33,8 @@ import { useTickingNow } from "../lib/use-ticking-now";
  * + 当前选中行常驻；完整列表点开浮层按需展开（遮罩/Escape/再点收起，
  * 点选即选中并收起），详情独占剩余全部高度。无选中（或选中者已不在
  * 列表）时默认选中最后一个（最新）；消息流标记行点击经 focus prop
- * 定位——选中并自动展开浮层滚动到对应项（用户从消息流进来要找的就是
- * 那一项，浮层可见才可定位）。
+ * 定位——直接选中并显示详情（不展开列表浮层：用户从消息流进来要读的
+ * 是那一项的详情，浮层反而多一步收起；要横向比对再手动展开列表）。
  */
 
 /** 消息流标记行点击的定位信号（seq 递增触发 effect，id 为目标） */
@@ -50,14 +51,12 @@ export function SubagentRailPanelBody(props: {
   const { subagents } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  // focus 定位目标：listOpen 置位与浮层挂载不同帧，滚动延到浮层渲染后
-  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
-  const listRef = useRef<HTMLUListElement | null>(null);
-  // 标记行点击定位：focus 信号变化时选中对应子代理、展开浮层并滚动到
-  // 列表项。每个 focus.seq 只消费一次（ref 幂等）：依赖里保留 subagents
-  // 是为「段晚于点击到达列表」的重试，但运行中流式会持续产生新数组引用，
-  // 无幂等守卫时每次流式事件都重放 setSelectedId(focus.id)，把用户在
-  // 列表里手动点选的子代理强行拉回 focus 目标（点击无法切换的回归）。
+  // 标记行点击定位：focus 信号变化时选中对应子代理、直接显示详情（不
+  // 展开列表浮层，2026-11-19 呈现对齐轮）。每个 focus.seq 只消费一次
+  // （ref 幂等）：依赖里保留 subagents 是为「段晚于点击到达列表」的
+  // 重试，但运行中流式会持续产生新数组引用，无幂等守卫时每次流式事件
+  // 都重放 setSelectedId(focus.id)，把用户在列表里手动点选的子代理
+  // 强行拉回 focus 目标（点击无法切换的回归）。
   const focus = props.focus;
   const consumedFocusSeqRef = useRef(-1);
   useEffect(() => {
@@ -66,17 +65,7 @@ export function SubagentRailPanelBody(props: {
     if (!subagents.some((item) => item.id === focus.id)) return;
     consumedFocusSeqRef.current = focus.seq;
     setSelectedId(focus.id);
-    setListOpen(true);
-    setPendingScrollId(focus.id);
   }, [focus, subagents]);
-  // 浮层挂载后定位滚动（focus effect 与浮层渲染之间隔一帧）
-  useEffect(() => {
-    if (!listOpen || pendingScrollId === null) return;
-    listRef.current
-      ?.querySelector(`[data-subagent-id="${pendingScrollId}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-    setPendingScrollId(null);
-  }, [listOpen, pendingScrollId]);
   // Escape 收起浮层（浮层标准交互；摘要行/遮罩/点选之外补键盘出口）
   useEffect(() => {
     if (!listOpen) return;
@@ -178,7 +167,6 @@ export function SubagentRailPanelBody(props: {
               className="absolute inset-0 z-10 cursor-default bg-overlay/50"
             />
             <ul
-              ref={listRef}
               data-testid="subagent-rail-list"
               className="absolute inset-x-0 top-0 z-20 max-h-[85%] overflow-auto rounded-lg border border-line bg-surface py-0.5 shadow-popover"
             >
@@ -222,7 +210,15 @@ export function SubagentRailPanelBody(props: {
   );
 }
 
-/** 详情区：委派要求块 + 三态内容（排队提示 / 运行进度 / 报告与操作行；interrupted 留痕回看） */
+/**
+ * 详情区（2026-11-19 呈现对齐轮起与主代理轮内时序同构）：委派要求块 →
+ * 思考折叠 → 正文折叠 → 工具调用（主代理同款卡）→ 终态块（排队提示 /
+ * 运行指示 / 中断留痕 / 报告与操作行）→ 工作计划卡。工具卡在正文流中、
+ * 报告与操作行之前（过程段先于终态），不再终态堆在复制按钮之下。
+ * 滚动容器标记 data-scrollbar-content-signal="off"：运行中流式内容
+ * 每秒改高度，豁免内容变化显色信号（滚动/悬停信号照旧），否则滚动条
+ * 反复闪烁显色（lib/scrollbar-visibility 的豁免约定）。
+ */
 function SubagentDetail(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
   // 分轮呈现（票 04）：turns 逐轮重建/流式；旧记录（无快照）回退拼接种思考单段
@@ -242,7 +238,10 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
     .filter((content) => content !== "");
   const streaming = subagent.state === "running";
   return (
-    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
+    <div
+      data-scrollbar-content-signal="off"
+      className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2"
+    >
       <DelegationBrief subagent={subagent} />
       {thinkingRounds.length > 0 && (
         <SubagentThinking
@@ -258,22 +257,20 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
           subagentId={subagent.id}
         />
       )}
-      {subagent.state === "running" && <RunningStatus subagent={subagent} />}
+      <SubagentToolSequence subagent={subagent} />
+      {subagent.state === "running" && <SubagentRunningIndicator />}
       {subagent.state === "queued" && (
         <p className="text-xs text-warn-fg">
           并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
         </p>
       )}
       {subagent.state === "interrupted" && (
-        <>
-          <p
-            data-testid="subagent-interrupted-note"
-            className="text-xs text-warn-fg"
-          >
-            应用在该委派运行中退出：此委派被中断，以上为已发生的部分记录。
-          </p>
-          <ToolsDetails subagent={subagent} />
-        </>
+        <p
+          data-testid="subagent-interrupted-note"
+          className="text-xs text-warn-fg"
+        >
+          应用在该委派运行中退出：此委派被中断，以上为已发生的部分记录。
+        </p>
       )}
       {subagent.state === "done" && (
         <>
@@ -287,7 +284,6 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
             <MarkdownContent content={subagent.report ?? ""} />
           </div>
           <SubagentReportActions subagent={subagent} />
-          <ToolsDetails subagent={subagent} />
         </>
       )}
       {/* 工作计划卡（ADR 0023）：详情滚动容器末尾常驻——运行中随子代理
@@ -298,6 +294,70 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
         tools={subagent.tools}
         subagentId={subagent.id}
       />
+    </div>
+  );
+}
+
+/**
+ * 子代理工具调用序列（主代理同款呈现，2026-11-19 呈现对齐轮）：内嵌
+ * 工具进度以主消息流同款 ToolCallCard 呈现（运行中默认展开、完成收起、
+ * 连续同名成组 ToolGroupView），挂在详情正文流——报告与操作行之前，
+ * 不再以终态折叠清单堆在复制按钮之下。update_plan 排除出卡片序列：
+ * 计划由底部工作计划卡呈现（与主消息流「计划不走通用卡」同源口径）。
+ */
+function SubagentToolSequence(props: { subagent: SubagentSegment }) {
+  const { subagent } = props;
+  // 适配成主流工具段形状以复用分组：seq/turnId/responseId 是流上下文
+  // 字段，卡片与分组都不读，占位不参与呈现；id 保留真实调用 id（开合
+  // 记忆键与截图请求按调用 id 作用域）
+  const calls = useMemo(
+    () =>
+      subagent.tools
+        .filter((tool) => tool.toolName !== PLAN_TOOL_NAME)
+        .map<ToolCallSegment>((tool) => ({
+          kind: "tool-call",
+          id: tool.id,
+          seq: 0,
+          turnId: "",
+          responseId: null,
+          taskId: tool.taskId,
+          toolName: tool.toolName,
+          arguments: tool.arguments,
+          output: tool.output,
+          isError: tool.isError,
+          running: tool.running,
+          startedAt: tool.startedAt,
+          endedAt: tool.endedAt,
+        })),
+    [subagent.tools]
+  );
+  if (calls.length === 0) return null;
+  return (
+    <ul data-testid="subagent-tool-sequence" className="flex flex-col gap-2">
+      {groupConsecutiveTools(calls).map((item) =>
+        item.kind === "group" ? (
+          <ToolGroupView key={`group-${item.segments[0]?.id}`} item={item} />
+        ) : item.kind === "single" ? (
+          <ToolCallCard key={item.segment.id} call={item.segment} />
+        ) : null
+      )}
+    </ul>
+  );
+}
+
+/**
+ * 运行指示（消息流底部 running-indicator 同款语汇）：子代理运行中详情
+ * 底部常驻转圈行，位于工具卡之后（正文流最末尾）。已用时不在详情内
+ * 重复跳动——右栏当前行/列表行的 Elapsed 已每秒刷新。
+ */
+function SubagentRunningIndicator() {
+  return (
+    <div
+      data-testid="subagent-running-indicator"
+      className="flex items-center gap-2 text-xs text-fg-muted"
+    >
+      <span className="generating-spinner shrink-0" aria-hidden="true" />
+      <span>运行中</span>
     </div>
   );
 }
@@ -330,7 +390,8 @@ function DelegationBrief(props: { subagent: SubagentSegment }) {
       className="rounded border-l-2 border-accent bg-surface-muted py-2 pl-3 pr-2"
     >
       <div className="flex items-center gap-2">
-        <StatusDot subagent={subagent} />
+        {/* 状态在行尾以文字呈现；行首不放状态圆点——引述块以左边框定性，
+            圆点与列表行状态点语汇重复（2026-11-19 呈现对齐轮去除） */}
         <span className="text-xs text-fg-subtle">主代理的委派说明</span>
         <span className={`ml-auto shrink-0 text-xs ${statusClass(subagent)}`}>
           {statusText(subagent)}
@@ -354,36 +415,6 @@ function DelegationBrief(props: { subagent: SubagentSegment }) {
         >
           {open ? "收起" : "展开全部"}
         </button>
-      )}
-    </div>
-  );
-}
-
-/** 运行态进度：当前活动工具 + 已执行次数（已用时在列表行跳动显示） */
-function RunningStatus(props: { subagent: SubagentSegment }) {
-  const { subagent } = props;
-  const activeTool = [...subagent.tools]
-    .reverse()
-    .find((tool) => tool.running === true);
-  return (
-    <div className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted">
-      {activeTool !== undefined ? (
-        <p>
-          当前工具：
-          <span className="ml-1 rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
-            {activeTool.toolName}
-          </span>
-          <span className="ml-2 font-mono text-fg-subtle">
-            {summarizeToolCall(activeTool.toolName, activeTool.arguments)}
-          </span>
-        </p>
-      ) : (
-        <p>正在思考…</p>
-      )}
-      {subagent.tools.length > 0 && (
-        <p className="mt-1 text-fg-subtle">
-          已执行 {subagent.tools.length} 次工具调用
-        </p>
       )}
     </div>
   );
@@ -493,106 +524,6 @@ function SubagentBody(props: {
   subagentId: string;
 }) {
   return <SubagentRoundsDisclosure {...props} variant="body" />;
-}
-
-/** 工具清单与单条详情都按需挂载，长输出不拖慢关闭态详情。 */
-function ToolsDetails(props: { subagent: SubagentSegment }) {
-  const { subagent } = props;
-  const { open, setOpen } = useCollapseState(
-    `subagent-tools-${subagent.id}`,
-    false
-  );
-  if (subagent.tools.length === 0) return null;
-  return (
-    <details
-      data-testid="subagent-tools"
-      className="mt-2"
-      open={open}
-      onToggle={(event) => {
-        if (event.currentTarget.open !== open)
-          setOpen(event.currentTarget.open);
-      }}
-    >
-      <summary
-        data-testid="subagent-tools-toggle"
-        className="cursor-pointer text-xs text-fg-subtle"
-      >
-        工具调用（{subagent.tools.length} 次）
-      </summary>
-      {open && (
-        <ul className="mt-1 flex flex-col gap-1">
-          {subagent.tools.map((tool) => (
-            <SubagentToolDetails
-              key={tool.id}
-              tool={tool}
-              subagentId={subagent.id}
-            />
-          ))}
-        </ul>
-      )}
-    </details>
-  );
-}
-
-function SubagentToolDetails(props: {
-  tool: SubagentToolCall;
-  subagentId: string;
-}) {
-  const { tool } = props;
-  const { open, setOpen } = useCollapseState(
-    `subagent-tool-${props.subagentId}-${tool.id}`,
-    false
-  );
-  return (
-    <li className="rounded-md bg-code-bg font-mono text-xs">
-      <details
-        data-testid="subagent-tool-details"
-        data-tool-id={tool.id}
-        open={open}
-        onToggle={(event) => {
-          if (event.currentTarget.open !== open)
-            setOpen(event.currentTarget.open);
-        }}
-      >
-        <summary
-          data-testid="subagent-tool-toggle"
-          className="flex cursor-pointer items-center gap-2 px-2 py-1"
-        >
-          <DisclosureArrow open={open} />
-          <span className="text-accent">{tool.toolName}</span>
-          <span className="min-w-0 flex-1 truncate text-fg-subtle">
-            {summarizeToolCall(tool.toolName, tool.arguments)}
-          </span>
-          <span
-            className={
-              tool.running
-                ? "text-warn-fg"
-                : tool.isError
-                  ? "text-danger-fg"
-                  : "text-ok-fg"
-            }
-          >
-            {tool.running ? "运行中" : tool.isError ? "失败" : "完成"}
-          </span>
-          {tool.startedAt !== undefined && tool.endedAt !== undefined && (
-            <span className="shrink-0 text-fg-subtle">
-              {formatDurationCn(tool.endedAt - tool.startedAt, true)}
-            </span>
-          )}
-        </summary>
-        {open && (
-          <div className="border-t border-line px-2 py-2">
-            <ToolDetailsBody
-              arguments={tool.arguments}
-              output={tool.output}
-              running={tool.running}
-              testIdPrefix="subagent-tool"
-            />
-          </div>
-        )}
-      </details>
-    </li>
-  );
 }
 
 /**

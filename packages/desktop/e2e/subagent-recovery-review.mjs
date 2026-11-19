@@ -16,7 +16,6 @@ import {
   assert,
   closeApp,
   createMockProfile,
-  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -146,9 +145,9 @@ async function main() {
       .waitFor({ timeout: 15_000 });
     const panel = await openSubagentDetail(window);
 
-    // 1) 起止时间：列表行已用时定格（mm:ss）+ 详情完成时刻（起止对齐产物）
+    // 1) 起止时间：当前行已用时定格（mm:ss）+ 详情完成时刻（起止对齐产物）
     const elapsed = panel
-      .getByTestId("subagent-rail-item")
+      .getByTestId("subagent-rail-current")
       .getByTestId("subagent-elapsed");
     await elapsed.waitFor({ timeout: 10_000 });
     assert(
@@ -164,9 +163,7 @@ async function main() {
     console.log("[e2e] 起止时间恢复：已用时定格 + 完成时刻可读");
 
     // 2) 逐轮正文：两轮轮边界保留（第一轮过程正文 + 第二轮报告）。
-    //    focus 定位展开的浮层盖住详情区拦截点击——列表行断言已完成，
-    //    收起浮层（Escape 标准出口）再做详情内展开交互
-    await collapseSubagentList(window);
+    //    focus 定位直接显示详情（不展开列表浮层），详情可直接交互
     const bodyBlock = panel.getByTestId("subagent-body-block");
     await bodyBlock.waitFor({ timeout: 10_000 });
     await bodyBlock.getByTestId("subagent-body-toggle").click();
@@ -207,34 +204,46 @@ async function main() {
     );
     console.log("[e2e] 逐轮正文/思考恢复：两轮边界完整保留");
 
-    // 3) 工具清单：工具名 + 成败标记（旧路径此清单恒空，判别性断言）
-    const tools = panel.getByTestId("subagent-tools");
-    await tools.waitFor({ timeout: 10_000 });
-    await tools.getByTestId("subagent-tools-toggle").click();
-    await tools.getByText("read_file").waitFor({ timeout: 10_000 });
-    const toolsText = await tools.textContent();
+    // 3) 工具卡（主代理同款，2026-11-19 呈现对齐轮）：工具名 + 成败标记
+    //    （旧路径工具记录恒空，判别性断言）；位于报告与操作行之前
+    const toolCard = panel
+      .getByTestId("tool-call-card")
+      .filter({ hasText: "read_file" });
+    await toolCard.waitFor({ timeout: 10_000 });
+    const toolsText = await toolCard.textContent();
     assert(
       toolsText !== null &&
         toolsText.includes("完成") &&
         !toolsText.includes("失败"),
-      `恢复后工具清单成败标记异常：${toolsText ?? "(空)"}`
+      `恢复后工具卡成败标记异常：${toolsText ?? "(空)"}`
     );
-    // F26：两级按需展开后，真实工具参数和结果必须完整可读。
-    const toolDetails = tools
-      .getByTestId("subagent-tool-details")
-      .filter({ hasText: "read_file" });
-    await toolDetails.getByTestId("subagent-tool-toggle").click();
+    const sequenceText = await panel
+      .getByTestId("subagent-tool-sequence")
+      .textContent();
+    assert(
+      sequenceText !== null && sequenceText.includes("read_file"),
+      `恢复后工具序列应含 read_file：${sequenceText ?? "(空)"}`
+    );
+    // F26：按需展开后，真实工具参数和结果必须完整可读。
+    await toolCard.getByTestId("tool-call-toggle").click();
     assert(
       (
-        await toolDetails.getByTestId("subagent-tool-arguments").textContent()
+        await toolCard.getByTestId("tool-call-arguments").textContent()
       )?.includes("note.txt"),
       "恢复后的子代理工具完整参数应可展开查看"
     );
     assert(
-      (
-        await toolDetails.getByTestId("subagent-tool-output").textContent()
-      )?.includes(NOTE_CONTENT),
+      (await toolCard.getByTestId("tool-call-output").textContent())?.includes(
+        NOTE_CONTENT
+      ),
       "恢复后的子代理工具输出应可展开查看"
+    );
+    // 工具卡在报告与复制操作行之前（过程段先于终态，主代理轮内时序同构）
+    const detailHtml = await panel.evaluate((node) => node.innerHTML);
+    assert(
+      detailHtml.indexOf('data-testid="tool-call-card"') <
+        detailHtml.indexOf('data-testid="subagent-report-actions"'),
+      "工具卡应位于报告操作行之前"
     );
     // 报告块照旧（恢复不破坏完成态呈现）
     const reportText = await panel.getByTestId("subagent-report").textContent();
@@ -242,7 +251,7 @@ async function main() {
       reportText !== null && reportText.includes(REPORT_TEXT),
       `重启后报告缺失：${reportText ?? "(空)"}`
     );
-    console.log("[e2e] 工具清单恢复：read_file + 成败标记完整");
+    console.log("[e2e] 工具卡恢复：read_file + 成败标记完整");
 
     // F24：把含委派的首轮压掉，右栏检视数据仍应保留，不必重开任务才能回看。
     for (let index = 1; index <= 3; index += 1) {
@@ -264,7 +273,7 @@ async function main() {
       .filter({ hasText: REPORT_TEXT })
       .waitFor();
     assert(
-      (await panel.getByTestId("subagent-tool-output").textContent())?.includes(
+      (await panel.getByTestId("tool-call-output").textContent())?.includes(
         NOTE_CONTENT
       ),
       "压缩掉委派轮次后仍应保留已展开工具详情"

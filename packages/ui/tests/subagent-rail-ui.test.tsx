@@ -120,7 +120,7 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(html).toContain("API 429");
   });
 
-  it("事件态完成（含 endedAt）：显示完成于时间；工具清单折叠在报告后", () => {
+  it("事件态完成（含 endedAt）：工具卡在正文流中、报告与操作行之前（主代理同款）", () => {
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
         subagents: [subSeg("sa-e", { tools: [TOOL] })],
@@ -128,16 +128,24 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       })
     );
     expect(html).toMatch(/完成于/);
-    expect(html).toMatch(/data-testid="subagent-tools"/);
-    // 工具清单默认收起：details 无 open 属性，清单内容按需挂载
-    const tools = html.match(
-      /<details[^>]*data-testid="subagent-tools"[^>]*>/
-    )?.[0];
-    expect(tools).not.toContain('open=""');
+    // 主代理同款工具卡（2026-11-19 呈现对齐轮）：不再是终态折叠清单
+    expect(html).toMatch(/data-testid="subagent-tool-sequence"/);
+    expect(html).toMatch(
+      /data-testid="tool-call-card"[^>]*data-tool-name="read_file"/
+    );
+    expect(html).not.toMatch(/data-testid="subagent-tools"/);
+    // 位置：正文流中、报告操作行（复制按钮）之前
+    expect(html.indexOf('data-testid="tool-call-card"')).toBeLessThan(
+      html.indexOf('data-testid="subagent-report"')
+    );
+    expect(html.indexOf('data-testid="tool-call-card"')).toBeLessThan(
+      html.indexOf('data-testid="subagent-report-actions"')
+    );
+    // 完成态卡片默认收起：参数/输出详情按需挂载
+    expect(html).not.toMatch(/data-testid="tool-call-arguments"/);
   });
 
-  it("展开工具清单计数口径含 update_plan：照常计入次数，行内摘要为中文统计（票 03）", () => {
-    setRememberedOpen("subagent-tools-sa-p", true);
+  it("update_plan 不出工具卡：计划由底部工作计划卡承担（主消息流同源口径）", () => {
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
         subagents: [
@@ -154,15 +162,16 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
         focus: null,
       })
     );
-    // 计数口径不变（ADR 0023）：update_plan 照常计入调用次数
-    expect(html).toContain("工具调用（2 次）");
-    // update_plan 行内摘要与工具执行输出同口径的中文统计，不走压缩 JSON
-    expect(html).toContain(
-      "工作计划已更新（共 2 项：1 已完成、0 进行中、1 待办）"
+    // 只有 read_file 出卡；update_plan 不以通用卡呈现
+    expect(html).not.toMatch(/data-tool-name="update_plan"/);
+    expect(html).toMatch(
+      /data-testid="tool-call-card"[^>]*data-tool-name="read_file"/
     );
+    // 计划内容仍可见（计划卡 + 中文统计摘要）
+    expect(html).toContain('data-testid="plan-card"');
   });
 
-  it("运行中：当前活动工具与思考块默认展开（流式），无报告操作行", () => {
+  it("运行中：工具卡默认展开实时可见 + 底部运行指示转圈，无报告操作行", () => {
     const running = subSeg("sa-run", {
       state: "running",
       endedAt: null,
@@ -181,10 +190,14 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       /data-testid="subagent-rail-current"[^>]*data-subagent-state="running"/
     );
     expect(html).toContain("read_file");
+    // 工具卡运行中默认展开：参数与输出实时可见（与主代理卡同款行为）
+    expect(html).toMatch(/data-testid="tool-call-arguments"/);
     const block = html.match(
       /<details[^>]*data-testid="subagent-thinking-block"[^>]*>/
     )?.[0];
     expect(block).toContain('open=""');
+    // 底部运行指示（消息流 running-indicator 同款转圈行）
+    expect(html).toMatch(/data-testid="subagent-running-indicator"/);
     expect(html).not.toMatch(/data-testid="subagent-report-actions"/);
   });
 
@@ -199,6 +212,12 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(html).toContain("主代理的委派说明");
     // accent 左边框引述样式（与子代理自身产出区分）
     expect(html).toMatch(/data-testid="subagent-delegation"[^>]*border-accent/);
+    // 头行不放状态圆点（2026-11-19 呈现对齐轮：状态以行尾文字呈现）
+    const header = html.slice(
+      html.indexOf('data-testid="subagent-delegation"'),
+      html.indexOf("主代理的委派说明")
+    );
+    expect(header).not.toContain("rounded-full");
     // 默认收起：正文带 line-clamp-3；SSR 无测量，切换按钮不渲染
     expect(html).toMatch(
       /data-testid="subagent-delegation-text"[^>]*line-clamp-3/
@@ -332,11 +351,17 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       /data-testid="subagent-rail-current"[^>]*data-subagent-state="interrupted"/
     );
     expect(html.match(/运行中被中断/g)?.length).toBeGreaterThanOrEqual(2);
-    // 中断说明 + 已发生过程内容可回看（正文折叠 + 工具清单）
+    // 中断说明 + 已发生过程内容可回看（正文折叠 + 工具卡）
     expect(html).toMatch(/data-testid="subagent-interrupted-note"/);
     expect(html).toMatch(/data-testid="subagent-body-block"/);
     expect(html).toContain("中断前已写出的部分正文");
-    expect(html).toMatch(/data-testid="subagent-tools"/);
+    expect(html).toMatch(
+      /data-testid="tool-call-card"[^>]*data-tool-name="read_file"/
+    );
+    // 工具卡在中断说明之前（过程段先于终态，主代理轮内时序同构）
+    expect(html.indexOf('data-testid="tool-call-card"')).toBeLessThan(
+      html.indexOf('data-testid="subagent-interrupted-note"')
+    );
     // 无报告块与操作行（未产出报告）
     expect(html).not.toMatch(/data-testid="subagent-report"/);
     expect(html).not.toMatch(/data-testid="subagent-report-actions"/);
@@ -370,10 +395,7 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
     expect(html).toContain("下一步：补测试");
     // 默认收起：完整清单不渲染
     expect(html).not.toContain('data-testid="plan-card-panel"');
-    // 槽位：滚动容器末尾，状态区（工具清单）之后
-    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
-      html.indexOf('data-testid="subagent-tools"')
-    );
+    // 槽位：滚动容器末尾（报告操作行之后；工具卡之前不占位）
     expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
       html.indexOf('data-testid="subagent-report-actions"')
     );
@@ -467,9 +489,6 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
     expect(html).toContain('data-testid="plan-card-done"');
     expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
       html.indexOf('data-testid="subagent-interrupted-note"')
-    );
-    expect(html.indexOf('data-testid="plan-card"')).toBeGreaterThan(
-      html.indexOf('data-testid="subagent-tools"')
     );
   });
 
