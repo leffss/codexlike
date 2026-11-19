@@ -35,7 +35,7 @@ export function InteractionHistory({
       data-interaction-id={request.id}
       data-interaction-kind={request.kind}
       data-interaction-status={record.status}
-      className="min-w-0 rounded-lg border border-line bg-surface-muted p-3 text-xs text-fg-muted"
+      className="min-w-0 rounded-lg bg-surface-muted p-3 text-xs text-fg-muted"
     >
       <details>
         <summary className="cursor-pointer break-words [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-accent">
@@ -53,7 +53,8 @@ export function InteractionHistory({
         </summary>
         <div className="mt-2 max-h-80 space-y-2 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {request.kind === "approval" ? (
-            <pre className="whitespace-pre-wrap break-all rounded bg-code-bg p-2 text-code-fg">
+            /* 命令 pre 白卡呈现（bg-surface），避免与暖灰块同底色灰上加灰 */
+            <pre className="whitespace-pre-wrap break-all rounded-lg bg-surface p-2 text-code-fg">
               {request.command}
             </pre>
           ) : (

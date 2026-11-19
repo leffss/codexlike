@@ -360,9 +360,10 @@ describe("唯一底部 InteractionPanel", () => {
     const html = renderToStaticMarkup(
       createElement(InteractionPanel, { ...props, record: approval })
     );
-    // 外壳与 composer-region 同构：画布背景 + px-4 py-3 + 滚动槽右缘补偿
+    // 外壳与 composer-region 同构：画布背景 + px-4 水平内边距与
+    // pt-2.5/pb-4 上下呼吸（ADR 0028 原型定案 10px/16px）+ 滚动槽右缘补偿
     expect(html).toMatch(
-      /data-testid="interaction-region"[^>]*class="bg-canvas px-4 py-3"/
+      /data-testid="interaction-region"[^>]*class="bg-canvas px-4 pt-2.5 pb-4"/
     );
     expect(html).toContain("var(--task-scrollbar-gutter");
     // 内容列宽度类与消息流/输入区同一基准（TASK_CONTENT_WIDTH_CLASS +
@@ -371,14 +372,16 @@ describe("唯一底部 InteractionPanel", () => {
     expect(html.indexOf('data-testid="interaction-region"')).toBeLessThan(
       html.indexOf('data-testid="interaction-panel"')
     );
-    // 面板本体复用 composer-card 卡片形态：rounded-2xl 浮卡带边框阴影，
-    // 高度上限 65vh 随内容增加；不再是 border-t 全宽条带。
+    // 面板本体与 composer-card 三壳同形（ADR 0028 D 语言）：无边框暖灰块
+    // （bg-surface-muted + rounded-xl 12px 圆角），高度上限 65vh 随内容
+    // 增加；不再是 border-t 全宽条带，也非旧边框浮卡（阴影只给悬浮物）。
     const panel =
       html.match(/<section[^>]*data-testid="interaction-panel"[^>]*>/)?.[0] ??
       "";
-    expect(panel).toContain("rounded-2xl");
-    expect(panel).toContain("shadow-lg");
+    expect(panel).toContain("rounded-xl");
+    expect(panel).toContain("bg-surface-muted");
     expect(panel).toContain("max-h-[65vh]");
     expect(panel).not.toContain("border-t");
+    expect(panel).not.toContain("shadow-lg");
   });
 });
