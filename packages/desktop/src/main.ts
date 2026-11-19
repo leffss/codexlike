@@ -150,10 +150,10 @@ app.on("second-instance", () => {
   win.focus();
 });
 
-/** 各主题的窗口底色（页面加载前可见；与 styles.css 的 --canvas 保持一致） */
+/** 各主题的窗口底色（页面加载前可见；与 styles.css 的 --canvas 保持一致，ADR 0028 暖白/暖深灰） */
 const WINDOW_BACKGROUND: Record<ThemeName, string> = {
-  light: "#f8fafc",
-  dark: "#0f172a",
+  light: "#ffffff",
+  dark: "#1f1e1c",
 };
 
 /** 原生侧同步（原生控件/滚动条跟随应用主题而非系统；未配置默认浅色，ADR 0006） */

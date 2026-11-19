@@ -73,8 +73,8 @@ async function main() {
     await window.getByTestId("theme-toggle").click();
     assert((await themeOf(window)) === "dark", "点击切换后应为深色");
     assert(
-      (await bodyBackground(window)) === "rgb(15, 23, 42)",
-      `深色下 body 背景应为 canvas 色，实际 ${await bodyBackground(window)}`
+      (await bodyBackground(window)) === "rgb(31, 30, 28)",
+      `深色下 body 背景应为 canvas 色（暖深灰 #1f1e1c，ADR 0028），实际 ${await bodyBackground(window)}`
     );
     await assertComposerSurface(window, "深色");
     await closeApp(first.app);
