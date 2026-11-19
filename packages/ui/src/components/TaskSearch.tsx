@@ -98,7 +98,8 @@ export function TaskSearch(props: {
       {open && (
         <section
           aria-label="跨项目任务搜索"
-          className="fixed z-20 w-96 max-w-[80vw] whitespace-normal rounded-lg border border-line bg-surface p-3 shadow-xl"
+          // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+          className="fixed z-20 w-96 max-w-[80vw] whitespace-normal rounded-[10px] border border-line bg-surface p-3 shadow-popover"
           style={{ left: panelPos.left, top: panelPos.top }}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
@@ -119,7 +120,7 @@ export function TaskSearch(props: {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="输入标题或消息正文"
-                className="mt-2 block w-full rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+                className="mt-2 block w-full rounded-md border border-transparent bg-surface-muted px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
               />
             </label>
             <div className="mt-2 flex items-center justify-between text-xs text-fg-muted">

@@ -62,7 +62,9 @@ export function FullAccessConfirmDialog(props: {
       data-testid="full-access-confirm-dialog"
       className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
     >
-      <div className="w-[28rem] rounded-lg border border-warn-fg/50 bg-surface p-5 shadow-xl">
+      {/* 模态卡统一语汇（ADR 0028）：白卡 12px 圆角 + shadow-modal 档，无边框（层次靠投影）；
+          风险语义保留在标题与正文文字色，不再用警示色描边 */}
+      <div className="w-[28rem] rounded-xl bg-surface p-5 shadow-modal">
         <h3 id={titleId} className="text-base font-medium text-warn-fg">
           切换到完全访问？
         </h3>
