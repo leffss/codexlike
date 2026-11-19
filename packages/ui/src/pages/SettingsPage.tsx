@@ -54,7 +54,7 @@ export function SettingsPage() {
       : null;
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
@@ -67,7 +67,7 @@ export function SettingsPage() {
           {editing === null && (
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               data-testid="profile-create"
               disabled={profiles === null}
               onClick={() => setEditing("new")}
@@ -80,14 +80,14 @@ export function SettingsPage() {
         {loadError !== "" && (
           <div
             role="alert"
-            className="rounded border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg"
+            className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger-fg"
           >
             <p>加载失败：{loadError}</p>
             <button
               type="button"
               data-testid="profile-settings-retry"
               onClick={() => void refresh()}
-              className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+              className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
             >
               重试
             </button>
@@ -103,7 +103,11 @@ export function SettingsPage() {
           {(profiles ?? []).map((profile) => (
             <li
               key={profile.id}
-              className="flex items-center justify-between rounded-lg border border-line bg-surface px-4 py-3"
+              className={
+                editing === profile.id
+                  ? "flex items-center justify-between"
+                  : "flex items-center justify-between rounded-lg bg-surface-muted px-4 py-3"
+              }
             >
               {editing === profile.id && editingProfile !== null ? (
                 <div className="flex-1">
@@ -140,14 +144,14 @@ export function SettingsPage() {
                   <div className="flex shrink-0 gap-1">
                     <button
                       type="button"
-                      className="rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg"
+                      className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg"
                       onClick={() => setEditing(profile.id)}
                     >
                       编辑
                     </button>
                     <button
                       type="button"
-                      className="rounded px-2 py-1 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
+                      className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
                       onClick={() => {
                         if (window.confirm(`确定删除「${profile.name}」吗？`)) {
                           void window.codexlike.providerProfiles
@@ -178,7 +182,7 @@ export function SettingsPage() {
         )}
 
         {profiles !== null && profiles.length === 0 && editing === null && (
-          <p className="rounded border border-dashed border-line px-4 py-6 text-center text-sm text-fg-subtle">
+          <p className="rounded-lg bg-surface-muted px-4 py-6 text-center text-sm text-fg-muted">
             尚未配置模型，点击「新建模型」配置第一个模型接入
           </p>
         )}
@@ -216,16 +220,16 @@ function ThemeSettingsSection() {
 
       <div
         data-testid="theme-settings"
-        className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+        className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3"
       >
         <div className="flex items-center gap-2">
           <button
             type="button"
             data-testid="theme-option-light"
-            className={`rounded px-3 py-1.5 text-sm ${
+            className={`rounded-md px-3 py-1.5 text-sm ${
               theme === "light"
                 ? "bg-accent text-on-accent"
-                : "border border-line text-fg-muted hover:bg-hover hover:text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
             onClick={() => setTheme("light")}
           >
@@ -234,10 +238,10 @@ function ThemeSettingsSection() {
           <button
             type="button"
             data-testid="theme-option-dark"
-            className={`rounded px-3 py-1.5 text-sm ${
+            className={`rounded-md px-3 py-1.5 text-sm ${
               theme === "dark"
                 ? "bg-accent text-on-accent"
-                : "border border-line text-fg-muted hover:bg-hover hover:text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
             onClick={() => setTheme("dark")}
           >
@@ -299,12 +303,13 @@ function TraySettingsSection() {
 
       <div
         data-testid="tray-settings"
-        className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+        className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3"
       >
         <label className="flex cursor-pointer items-center gap-2 text-sm text-fg">
           <input
             type="checkbox"
             data-testid="tray-launch-at-login"
+            className="accent-accent"
             checked={launchAtLogin === true}
             disabled={launchAtLogin === null}
             onChange={(e) => toggle(e.target.checked)}
@@ -320,7 +325,7 @@ function TraySettingsSection() {
               type="button"
               data-testid="tray-settings-retry"
               onClick={() => void refresh()}
-              className="self-start rounded border border-line px-3 py-1 text-sm hover:bg-hover"
+              className="self-start rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
             >
               重试
             </button>
@@ -375,7 +380,7 @@ export function ExecutionSettingsBody(props: {
   return (
     <div
       data-testid="execution-settings"
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+      className="flex flex-col gap-4 rounded-lg bg-surface-muted px-4 py-3"
     >
       <label className="flex flex-col gap-1 text-sm text-fg-muted">
         主任务工具轮次上限（10-1000）
@@ -385,7 +390,7 @@ export function ExecutionSettingsBody(props: {
           max={1000}
           step={1}
           data-testid="execution-tool-rounds-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.maxToolRounds}
           onChange={(e) => props.onInput(e.target.value)}
         />
@@ -403,7 +408,7 @@ export function ExecutionSettingsBody(props: {
           max={1000}
           step={1}
           data-testid="execution-subagent-tool-rounds-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.maxSubagentToolRounds}
           onChange={(e) => props.onSubagentInput(e.target.value)}
         />
@@ -421,7 +426,7 @@ export function ExecutionSettingsBody(props: {
           max={10}
           step={1}
           data-testid="execution-compact-keep-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.compactKeepRounds}
           onChange={(e) => props.onCompactKeepInput(e.target.value)}
         />
@@ -439,7 +444,7 @@ export function ExecutionSettingsBody(props: {
           max={95}
           step={1}
           data-testid="execution-context-warning-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.contextWarningThresholdPercent}
           onChange={(e) => props.onContextWarningInput(e.target.value)}
         />
@@ -457,7 +462,7 @@ export function ExecutionSettingsBody(props: {
           max={8}
           step={1}
           data-testid="execution-task-concurrency-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.taskConcurrencyLimit}
           onChange={(e) => props.onTaskConcurrencyInput(e.target.value)}
         />
@@ -475,7 +480,7 @@ export function ExecutionSettingsBody(props: {
           max={10}
           step={1}
           data-testid="execution-model-retries-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
           value={props.modelMaxRetries}
           onChange={(e) => props.onModelRetriesInput(e.target.value)}
         />
@@ -490,7 +495,7 @@ export function ExecutionSettingsBody(props: {
           type="button"
           data-testid="execution-settings-save"
           disabled={props.saving}
-          className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
           onClick={props.onSave}
         >
           {props.saving ? "保存中…" : "保存"}
@@ -614,7 +619,7 @@ function ExecutionSettingsSection() {
                 type="button"
                 data-testid="execution-settings-retry"
                 onClick={() => void refresh()}
-                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+                className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               >
                 重试
               </button>
@@ -747,7 +752,7 @@ function TerminalSettingsSection() {
                 type="button"
                 data-testid="terminal-settings-retry"
                 onClick={() => void refresh()}
-                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+                className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               >
                 重试
               </button>
@@ -760,13 +765,13 @@ function TerminalSettingsSection() {
       {loaded && (
         <div
           data-testid="terminal-settings"
-          className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+          className="flex flex-col gap-4 rounded-lg bg-surface-muted px-4 py-3"
         >
           <label className="flex flex-col gap-1 text-sm text-fg-muted">
             Shell
             <select
               data-testid="terminal-shell-select"
-              className="rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+              className="w-48 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               value={shell}
               onChange={(e) => setShell(e.target.value as typeof shell)}
             >
@@ -784,7 +789,7 @@ function TerminalSettingsSection() {
               max={600}
               step={1}
               data-testid="terminal-command-timeout-input"
-              className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               value={commandTimeout}
               onChange={(e) => setCommandTimeout(e.target.value)}
             />
@@ -798,7 +803,7 @@ function TerminalSettingsSection() {
               max={1800}
               step={1}
               data-testid="terminal-max-command-timeout-input"
-              className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               value={maxCommandTimeout}
               onChange={(e) => setMaxCommandTimeout(e.target.value)}
             />
@@ -809,7 +814,7 @@ function TerminalSettingsSection() {
               type="button"
               data-testid="terminal-settings-save"
               disabled={saving}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               onClick={() => void save()}
             >
               {saving ? "保存中…" : "保存"}
@@ -938,7 +943,7 @@ function SubagentSettingsSection() {
                 type="button"
                 data-testid="subagent-settings-retry"
                 onClick={() => void refresh()}
-                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+                className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               >
                 重试
               </button>
@@ -951,13 +956,13 @@ function SubagentSettingsSection() {
       {loaded && (
         <div
           data-testid="subagent-settings"
-          className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+          className="flex flex-col gap-4 rounded-lg bg-surface-muted px-4 py-3"
         >
           <label className="flex flex-col gap-1 text-sm text-fg-muted">
             子代理模型
             <select
               data-testid="subagent-profile-select"
-              className="rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+              className="w-80 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               value={modelValue}
               onChange={(e) => setModelValue(e.target.value)}
             >
@@ -988,7 +993,7 @@ function SubagentSettingsSection() {
               max={8}
               step={1}
               data-testid="subagent-concurrency-input"
-              className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
             />
@@ -999,7 +1004,7 @@ function SubagentSettingsSection() {
               type="button"
               data-testid="subagent-settings-save"
               disabled={saving}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               onClick={() => void save()}
             >
               {saving ? "保存中…" : "保存"}
@@ -1089,7 +1094,7 @@ function SearchSettingsSection() {
                 type="button"
                 data-testid="search-settings-retry"
                 onClick={() => void refresh()}
-                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+                className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               >
                 重试
               </button>
@@ -1100,9 +1105,9 @@ function SearchSettingsSection() {
         </div>
       )}
       {configured !== null && (
-        <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface px-4 py-3">
+        <div className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3">
           <div className="flex items-center gap-2 text-sm">
-            <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
+            <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-xs text-fg-muted">
               Tavily
             </span>
             <span className={configured ? "text-ok-fg" : "text-warn-fg"}>
@@ -1115,7 +1120,7 @@ function SearchSettingsSection() {
             <input
               type="password"
               data-testid="search-api-key-input"
-              className="min-w-0 flex-1 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="min-w-0 flex-1 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
               placeholder="Tavily API key（tvly-…）"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -1124,7 +1129,7 @@ function SearchSettingsSection() {
               <button
                 type="button"
                 disabled={saving}
-                className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-danger-bg hover:text-danger-fg disabled:opacity-50"
+                className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-danger-bg hover:text-danger-fg disabled:opacity-50"
                 onClick={() => void save("")}
               >
                 清除
@@ -1134,7 +1139,7 @@ function SearchSettingsSection() {
               type="button"
               data-testid="search-api-key-save"
               disabled={saving || apiKey.trim() === ""}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               onClick={() => void save(apiKey.trim())}
             >
               {saving ? "保存中…" : "保存"}
