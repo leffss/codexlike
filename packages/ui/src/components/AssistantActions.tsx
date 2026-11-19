@@ -147,7 +147,7 @@ export function AssistantActions(props: {
         disabled={copyState === "copying"}
         aria-label={copyLabel}
         title={copyLabel}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
       >
         <svg
           viewBox="0 0 24 24"
@@ -189,7 +189,7 @@ export function AssistantActions(props: {
         disabled={exportState === "exporting"}
         aria-label={exportLabel}
         title={exportLabel}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
       >
         {/* 下载（向下箭头 + 托盘，lucide download 官方 path）。旧版托盘弧
             命令多写一位参数，Chromium 解析到 h 处断链只渲染出左下小碎片。 */}

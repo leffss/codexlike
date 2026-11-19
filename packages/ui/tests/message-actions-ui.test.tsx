@@ -99,7 +99,8 @@ describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌�
     expect(button).toContain('aria-label="复制"');
     expect(button).toContain('title="复制"');
     expect(button).toContain("h-7 w-7");
-    expect(button).toContain("border border-line bg-surface-muted");
+    // D 设计语言：暖灰底无边框图标钮（className 镜像同步，原型 variant-d）
+    expect(button).toContain("rounded-md bg-surface-muted");
     expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
     expect(button).not.toContain(">复制<");
     expect(html).toMatch(
