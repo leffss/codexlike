@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { exportFileNameBase } from "./AssistantActions";
+import { BackToLatestButton } from "./BackToLatestButton";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { WorkPlanCardFromSubagentTools } from "./WorkPlanCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -9,6 +17,19 @@ import { formatCompletedTime } from "../lib/completed-time";
 import { useCollapseState } from "../lib/collapse-memory";
 import { MarkdownContent } from "../lib/markdown";
 import { PLAN_TOOL_NAME } from "../lib/plan-view";
+import {
+  anchorDecisionAfterContentChange,
+  backToLatestVisible,
+  followModeAfterScroll,
+  INTENT_TTL_MS,
+  keyVerticalIntent,
+  SCRIPTED_SCROLL_TTL_MS,
+  touchVerticalIntent,
+  wheelVerticalIntent,
+  type FollowMode,
+  type ScrollGeometry,
+  type VerticalIntent,
+} from "../lib/scroll-follow";
 import { subagentExportMarkdown } from "../lib/subagent-export";
 import {
   isTerminalSubagentState,
@@ -215,12 +236,79 @@ export function SubagentRailPanelBody(props: {
  * 思考折叠 → 正文折叠 → 工具调用（主代理同款卡）→ 终态块（排队提示 /
  * 运行指示 / 中断留痕 / 报告与操作行）→ 工作计划卡。工具卡在正文流中、
  * 报告与操作行之前（过程段先于终态），不再终态堆在复制按钮之下。
+ *
+ * 滚动跟随（与主代理 MessageStream 同构，接线见其注释；裁决计算同在
+ * lib/scroll-follow）：流式内容跟随贴底，用户上翻立即脱离并出「回到
+ * 最新」入口（2026-11-19 起与主代理对齐）；切换子代理重置贴底跟随
+ * （详情无阅读位置记忆，最新即默认）。
  * 滚动容器标记 data-scrollbar-content-signal="off"：运行中流式内容
  * 每秒改高度，豁免内容变化显色信号（滚动/悬停信号照旧），否则滚动条
  * 反复闪烁显色（lib/scrollbar-visibility 的豁免约定）。
  */
 function SubagentDetail(props: { subagent: SubagentSegment }) {
   const { subagent } = props;
+  // ===== 滚动跟随状态机（票 03 FOLLOWING/DETACHED 语汇）=====
+  const container = useRef<HTMLDivElement | null>(null);
+  const followRef = useRef<FollowMode>("following");
+  // 跟随态的渲染镜像（驱动「回到最新」入口可见性，ref 不触发渲染）
+  const [mode, setMode] = useState<FollowMode>("following");
+  const pendingIntent = useRef<{ intent: VerticalIntent; at: number } | null>(
+    null
+  );
+  const scriptedScroll = useRef<{ top: number; at: number } | null>(null);
+  const lastTouchY = useRef<number | null>(null);
+
+  /** 贴底用直接 scrollTop 赋值（非 smooth，流式期间不抖动），并登记回执 */
+  const snapToBottom = useCallback((element: HTMLElement) => {
+    const top = element.scrollHeight - element.clientHeight;
+    scriptedScroll.current = { top, at: performance.now() };
+    element.scrollTop = top;
+  }, []);
+
+  const commitMode = useCallback((next: FollowMode) => {
+    if (followRef.current === next) return;
+    followRef.current = next;
+    setMode(next);
+  }, []);
+
+  /** TTL 内最近登记的用户纵向意图；过期视为无登记 */
+  const recentIntent = useCallback((): VerticalIntent | undefined => {
+    const pending = pendingIntent.current;
+    if (pending === null) return undefined;
+    if (performance.now() - pending.at > INTENT_TTL_MS) {
+      pendingIntent.current = null;
+      return undefined;
+    }
+    return pending.intent;
+  }, []);
+
+  function registerIntent(intent: VerticalIntent) {
+    if (intent !== "neutral")
+      pendingIntent.current = { intent, at: performance.now() };
+  }
+
+  // 切换子代理：重置贴底跟随（详情切换不保留上一个的阅读位置）
+  useLayoutEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    followRef.current = "following";
+    setMode("following");
+    snapToBottom(element);
+  }, [subagent.id, snapToBottom]);
+
+  // 内容变化（流式增量 / 工具卡更新）：跟随贴底、脱离保持阅读位置；
+  // 上翻瞬间恰逢流式内容 commit 时用户的滚动意图优先（同主代理口径）。
+  useLayoutEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    if (anchorDecisionAfterContentChange(followRef.current) !== "snap") return;
+    if (recentIntent() === "up") {
+      commitMode("detached");
+      return;
+    }
+    snapToBottom(element);
+  }, [subagent, commitMode, snapToBottom, recentIntent]);
+
   // 分轮呈现（票 04）：turns 逐轮重建/流式；旧记录（无快照）回退拼接种思考单段
   const thinkingRounds =
     subagent.turns !== undefined
@@ -238,62 +326,134 @@ function SubagentDetail(props: { subagent: SubagentSegment }) {
     .filter((content) => content !== "");
   const streaming = subagent.state === "running";
   return (
-    <div
-      data-scrollbar-content-signal="off"
-      className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2"
-    >
-      <DelegationBrief subagent={subagent} />
-      {thinkingRounds.length > 0 && (
-        <SubagentThinking
-          rounds={thinkingRounds}
-          streaming={streaming}
-          subagentId={subagent.id}
-        />
-      )}
-      {bodyRounds.length > 0 && (
-        <SubagentBody
-          rounds={bodyRounds}
-          streaming={streaming}
-          subagentId={subagent.id}
-        />
-      )}
-      <SubagentToolSequence subagent={subagent} />
-      {subagent.state === "running" && <SubagentRunningIndicator />}
-      {subagent.state === "queued" && (
-        <p className="text-xs text-warn-fg">
-          并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
-        </p>
-      )}
-      {subagent.state === "interrupted" && (
-        <p
-          data-testid="subagent-interrupted-note"
-          className="text-xs text-warn-fg"
-        >
-          应用在该委派运行中退出：此委派被中断，以上为已发生的部分记录。
-        </p>
-      )}
-      {subagent.state === "done" && (
-        <>
-          <div className="text-xs text-fg-subtle">最终报告</div>
-          <div
-            data-testid="subagent-report"
-            className={`markdown text-sm leading-6 ${
-              subagent.ok === false ? "text-danger-fg" : "text-fg"
-            }`}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={container}
+        data-scrollbar-content-signal="off"
+        onWheelCapture={(event) =>
+          registerIntent(wheelVerticalIntent(event.deltaY))
+        }
+        onTouchStart={(event) => {
+          lastTouchY.current = event.touches[0]?.clientY ?? null;
+        }}
+        onTouchMove={(event) => {
+          const y = event.touches[0]?.clientY;
+          if (y === undefined || lastTouchY.current === null) {
+            lastTouchY.current = y ?? null;
+            return;
+          }
+          registerIntent(touchVerticalIntent(lastTouchY.current, y));
+          lastTouchY.current = y;
+        }}
+        onKeyDownCapture={(event) => {
+          const target = event.target as HTMLElement | null;
+          const editable =
+            target !== null &&
+            (target.tagName === "TEXTAREA" ||
+              target.tagName === "INPUT" ||
+              target.isContentEditable);
+          registerIntent(
+            keyVerticalIntent({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              editable,
+            })
+          );
+        }}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          const geometry: ScrollGeometry = {
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+            clientHeight: element.clientHeight,
+          };
+          // 程序化贴底的回执（值匹配 + 短有效期）不动状态机（同主代理）
+          const scripted = scriptedScroll.current;
+          const isScripted =
+            scripted !== null &&
+            performance.now() - scripted.at <= SCRIPTED_SCROLL_TTL_MS &&
+            Math.abs(element.scrollTop - scripted.top) <= 1;
+          if (isScripted) {
+            scriptedScroll.current = null;
+          } else {
+            const next = followModeAfterScroll({
+              mode: followRef.current,
+              cause: "user-input",
+              intent: recentIntent(),
+              geometry,
+            });
+            pendingIntent.current = null; // 意图已被本次 scroll 消费
+            commitMode(next);
+          }
+        }}
+        className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2"
+      >
+        <DelegationBrief subagent={subagent} />
+        {thinkingRounds.length > 0 && (
+          <SubagentThinking
+            rounds={thinkingRounds}
+            streaming={streaming}
+            subagentId={subagent.id}
+          />
+        )}
+        {bodyRounds.length > 0 && (
+          <SubagentBody
+            rounds={bodyRounds}
+            streaming={streaming}
+            subagentId={subagent.id}
+          />
+        )}
+        <SubagentToolSequence subagent={subagent} />
+        {subagent.state === "running" && <SubagentRunningIndicator />}
+        {subagent.state === "queued" && (
+          <p className="text-xs text-warn-fg">
+            并发上限已满：该委派在队列中等待，前面的子代理结束后自动开跑。
+          </p>
+        )}
+        {subagent.state === "interrupted" && (
+          <p
+            data-testid="subagent-interrupted-note"
+            className="text-xs text-warn-fg"
           >
-            <MarkdownContent content={subagent.report ?? ""} />
-          </div>
-          <SubagentReportActions subagent={subagent} />
-        </>
-      )}
-      {/* 工作计划卡（ADR 0023）：详情滚动容器末尾常驻——运行中随子代理
+            应用在该委派运行中退出：此委派被中断，以上为已发生的部分记录。
+          </p>
+        )}
+        {subagent.state === "done" && (
+          <>
+            <div className="text-xs text-fg-subtle">最终报告</div>
+            <div
+              data-testid="subagent-report"
+              className={`markdown text-sm leading-6 ${
+                subagent.ok === false ? "text-danger-fg" : "text-fg"
+              }`}
+            >
+              <MarkdownContent content={subagent.report ?? ""} />
+            </div>
+            <SubagentReportActions subagent={subagent} />
+          </>
+        )}
+        {/* 工作计划卡（ADR 0023）：详情滚动容器末尾常驻——运行中随子代理
           工具调用实时刷新（tools 逐次归并）、已完成回看终态、已中断回看
           最后快照；开合记忆按 subagentId 各自记忆（默认收起）。子代理
           没建计划时组件内部渲染 null 不占布局行。 */}
-      <WorkPlanCardFromSubagentTools
-        tools={subagent.tools}
-        subagentId={subagent.id}
-      />
+        <WorkPlanCardFromSubagentTools
+          tools={subagent.tools}
+          subagentId={subagent.id}
+        />
+      </div>
+      {/* 「回到最新」入口（与主代理同款，2026-11-19 起）：脱离跟随时可见，
+          点击回底并恢复跟随。详情恒有内容（委派说明块保底），计数恒真 */}
+      {backToLatestVisible(mode, 1) && (
+        <BackToLatestButton
+          testId="subagent-back-to-latest"
+          onClick={() => {
+            const element = container.current;
+            if (!element) return;
+            commitMode("following");
+            snapToBottom(element);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -387,7 +547,9 @@ function DelegationBrief(props: { subagent: SubagentSegment }) {
   return (
     <div
       data-testid="subagent-delegation"
-      className="rounded border-l-2 border-accent bg-surface-muted py-2 pl-3 pr-2"
+      // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言
+      // 基准；accent 左边框保留引述语义）
+      className="rounded border-l-2 border-accent bg-surface-muted px-3.5 py-[9px]"
     >
       <div className="flex items-center gap-2">
         {/* 状态在行尾以文字呈现；行首不放状态圆点——引述块以左边框定性，
@@ -457,7 +619,9 @@ function SubagentRoundsDisclosure(props: {
           setOpen(event.currentTarget.open);
         }
       }}
-      className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+      // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言
+      // 折叠摘要行基准，2026-11-19 起与主代理思考/过程段卡同口径）
+      className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
     >
       <summary
         data-testid={`subagent-${variant}-toggle`}
@@ -476,7 +640,8 @@ function SubagentRoundsDisclosure(props: {
       {open && (
         <div
           data-testid={`subagent-${variant}-content`}
-          className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pl-4 text-sm leading-6 text-fg ${
+          // 展开体缩进与工具卡展开区对齐（pl-7 ≈ 摘要行文字起点）
+          className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pb-2 pl-7 pr-3 text-sm leading-6 text-fg ${
             variant === "thinking" ? "max-h-48" : "max-h-64"
           }`}
         >

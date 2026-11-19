@@ -3,9 +3,9 @@ import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskActivityBadge } from "../src/components/TaskActivityBadge";
-import { TaskSidebar } from "../src/components/TaskSidebar";
+import { TaskSidebar, clampSidebarWidth } from "../src/components/TaskSidebar";
 
 /** 侧栏交互测试用基础 props（jsdom + @testing-library 直达回调断言） */
 function sidebarProps(
@@ -455,7 +455,7 @@ const activityCases: {
     },
   },
   {
-    name: "中断优先于未读",
+    name: "中断未读提醒（查看后熄灭，2026-11-19 口径）",
     label: "已中断",
     overrides: {
       activity: {
@@ -463,18 +463,6 @@ const activityCases: {
         waitingForUser: false,
         outcome: "interrupted",
         unread: true,
-      },
-    },
-  },
-  {
-    name: "中断已读仍保留结果",
-    label: "已中断",
-    overrides: {
-      activity: {
-        running: false,
-        waitingForUser: false,
-        outcome: "interrupted",
-        unread: false,
       },
     },
   },
@@ -540,6 +528,19 @@ it.each(activityCases)(
 
 it.each([
   { name: "空闲", overrides: {} },
+  {
+    // 中断是用户主动停止的未读提醒（与「完成未查看」同口径）：查看过后
+    // 不再显示；失败仍是结果性状态常显（见上方「失败已读仍保留结果」）
+    name: "中断已读不再提醒",
+    overrides: {
+      activity: {
+        running: false,
+        waitingForUser: false,
+        outcome: "interrupted",
+        unread: false,
+      },
+    },
+  },
   {
     name: "完成已读",
     overrides: {
@@ -691,3 +692,33 @@ it.each([false, true])(
     expect(buttonDepth).toBe(0);
   }
 );
+
+describe("clampSidebarWidth（左栏宽度双端夹取，右栏 clampRailWidth 同款）", () => {
+  it("下限 240、上限 max 生效，上限优先于下限", () => {
+    expect(clampSidebarWidth(100, 640)).toBe(240);
+    expect(clampSidebarWidth(240, 640)).toBe(240);
+    expect(clampSidebarWidth(320, 640)).toBe(320);
+    expect(clampSidebarWidth(9999, 640)).toBe(640);
+    // 上限低于下限（正文被压到最小宽）：上限优先，跟随容器收窄
+    expect(clampSidebarWidth(240, 100)).toBe(100);
+  });
+});
+
+it("侧栏右缘拖拽分隔条：separator 语义 + 可聚焦，aside 默认 320px（原 w-80）", () => {
+  const html = renderSidebar(task());
+  // 分隔条：separator 语义 + 可聚焦（键盘微调入口，右栏同款）
+  expect(html).toMatch(
+    /<div[^>]*role="separator"[^>]*aria-label="调整任务列表宽度"/
+  );
+  expect(html).toMatch(/data-testid="sidebar-separator"[^>]*tabindex="0"/);
+  // aside 默认宽 320px：与原 w-80 一致（e2e sidebar-archive 断言同值）
+  expect(html).toMatch(/<aside[^>]*style="width:320px"/);
+});
+
+it("置顶图标列在任务标题之前（2026-11-19 前置）：pin-button 先于 task-item 出现", () => {
+  const html = renderSidebar(task({ pinned: true }));
+  const pinIndex = html.indexOf('data-testid="pin-button"');
+  const selectIndex = html.indexOf('data-testid="task-item"');
+  expect(pinIndex).toBeGreaterThan(-1);
+  expect(pinIndex).toBeLessThan(selectIndex);
+});

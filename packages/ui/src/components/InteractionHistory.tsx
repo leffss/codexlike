@@ -35,7 +35,8 @@ export function InteractionHistory({
       data-interaction-id={request.id}
       data-interaction-kind={request.kind}
       data-interaction-status={record.status}
-      className="min-w-0 rounded-lg bg-surface-muted p-3 text-xs text-fg-muted"
+      // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言基准）
+      className="min-w-0 rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
     >
       <details>
         <summary className="cursor-pointer break-words [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-accent">

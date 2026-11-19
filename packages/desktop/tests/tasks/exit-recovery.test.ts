@@ -460,3 +460,45 @@ it("异常结束的持久执行归一为中断；二次重开不重复追加标�
     }
   }
 });
+
+it("恢复态中断未读提醒（2026-11-19 口径）：重启后 unread，查看一次后熄灭", async () => {
+  const app = await setup();
+  const task = app.manager.create({
+    projectId: app.project.id,
+    workspacePath: app.project.workspacePath,
+  });
+  app.persistence.insertMessage({
+    id: "unread-user",
+    taskId: task.id,
+    role: "user",
+    content: "中断前输入",
+    createdAt: "2026-11-11T00:00:00.000Z",
+  });
+  app.persistence.updateTask(task.id, { status: "streaming" });
+  app.close();
+  const store = createSqliteTaskStore(app.dbPath);
+  try {
+    const restored = createTaskManager({
+      persistence: store,
+      languageModelFor: () => {
+        throw new Error("重启不得调用模型");
+      },
+    });
+    const live = createLiveTasks(restored);
+    // 重启恢复的中断：本会话未查看 → 未读提醒（侧栏「已中断」徽章数据面）
+    expect(live.activity(task.id)).toMatchObject({
+      outcome: "interrupted",
+      unread: true,
+    });
+    // 无现场水位恒为 0：越界水位仍拒绝；合法水位（view 返回 sequence=0）
+    // 记为已查看，提醒熄灭（再次重启重新提醒，会话内不复活）
+    expect(() => live.markViewed(task.id, 1)).toThrow("查看水位");
+    live.markViewed(task.id, 0);
+    expect(live.activity(task.id)).toMatchObject({
+      outcome: "interrupted",
+      unread: false,
+    });
+  } finally {
+    store.close();
+  }
+});

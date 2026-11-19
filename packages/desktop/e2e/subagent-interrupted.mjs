@@ -3,7 +3,7 @@
 // 三个运行中子代理各完成第一轮（思考 + 正文 + read_file 工具，均已落库）→
 // 第二轮请求在 mock 挂起（应用停在运行中）→ taskkill /T /F 强杀进程树
 // （真实被杀路径，先例 exit-recovery：不走退出确认屏障）→ 同 homeDir 重启：
-// 1) 主任务列表项「已中断」；四条委派标记行与列表项全部 interrupted；
+// 1) 主任务列表项查看前「已中断」未读提醒、查看后熄灭；四条委派标记行与列表项全部 interrupted；
 // 2) 运行中被杀（甲）：已发生部分完整回看（思考/正文/工具卡）+ 留痕提示；
 // 3) 排队中被杀（丁）：留痕 + 委派说明可读，无正文/思考/工具卡（未启动），
 //    且无起止时间（startedAt 缺失）——与运行中被杀（有起止时间）判别。
@@ -159,20 +159,26 @@ async function main() {
     const second = await launchApp({ homeDir, workspaceDir });
     app = second.app;
     const restored = second.window;
-    await restored
-      .getByTestId("task-item")
-      .filter({ hasText: MAIN_TASK })
-      .first()
-      .click();
-    await restored.getByTestId("message-stream").waitFor({ timeout: 20_000 });
-
-    // 1) 主任务被杀恢复为「已中断」
+    // 1) 主任务被杀恢复为「已中断」：未查看先见未读提醒（2026-11-19
+    //    口径——徽章是未读提醒而非常驻状态）
     await restored
       .getByTestId("task-item")
       .filter({ hasText: MAIN_TASK })
       .getByTestId("task-activity")
       .filter({ hasText: "已中断" })
       .waitFor({ timeout: 15_000 });
+    await restored
+      .getByTestId("task-item")
+      .filter({ hasText: MAIN_TASK })
+      .first()
+      .click();
+    await restored.getByTestId("message-stream").waitFor({ timeout: 20_000 });
+    // 打开即视为查看：中断提醒熄灭（留痕本身在消息流与委派记录里）
+    await restored
+      .getByTestId("task-item")
+      .filter({ hasText: MAIN_TASK })
+      .getByTestId("task-activity")
+      .waitFor({ state: "hidden", timeout: 15_000 });
 
     // 2) 四条委派全部 interrupted：标记行 + 列表项（残留 queued/running
     //    行都被启动收尾补记 interrupted；spawn 行未落 → 标记行来自快照末尾留痕）

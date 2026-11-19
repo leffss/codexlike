@@ -214,3 +214,75 @@ describe("SubagentRailPanelBody 列表点击切换详情", () => {
     expect(selectedTask()).toContain("sa-done");
   });
 });
+
+describe("详情滚动跟随（与主代理 MessageStream 同构，2026-11-19）", () => {
+  /** jsdom 无布局：为滚动容器伪装修征几何（scrollHeight/clientHeight/
+   *  scrollTop 是只读 getter，实例级 defineProperty 覆盖后方可驱动状态机） */
+  function fakeGeometry(scroller: HTMLElement, scrollHeight: number) {
+    Object.defineProperty(scroller, "scrollHeight", {
+      value: scrollHeight,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "clientHeight", {
+      value: 400,
+      configurable: true,
+    });
+    // 初始 scrollTop 取 100：挂载贴底回执在 TTL 内值为 0，与用户滚动
+    // 同值会被误吞为程序化滚动（MessageStream 同款回执口径）
+    Object.defineProperty(scroller, "scrollTop", {
+      value: 100,
+      writable: true,
+      configurable: true,
+    });
+    return scroller;
+  }
+
+  function detailScroller(): HTMLElement {
+    const scroller = screen
+      .getByTestId("subagents-panel-body")
+      .querySelector("[data-scrollbar-content-signal='off']");
+    if (!(scroller instanceof HTMLElement)) {
+      throw new Error("详情滚动容器未找到");
+    }
+    return scroller;
+  }
+
+  it("上翻脱离跟随出「回到最新」，脱离期间流式内容不拉回；点击回底并恢复跟随", () => {
+    const base = subSeg("s1");
+    const { rerender } = render(
+      <SubagentRailPanelBody subagents={[base]} focus={null} />
+    );
+    // 默认跟随：无「回到最新」入口
+    expect(screen.queryByTestId("subagent-back-to-latest")).toBeNull();
+    // 用户上翻（scrollTop=100，离底 500px > 48px 容差）：脱离跟随，入口出现
+    const scroller = fakeGeometry(detailScroller(), 1_000);
+    fireEvent.scroll(scroller);
+    expect(screen.getByTestId("subagent-back-to-latest")).toBeTruthy();
+    // 脱离期间内容变化（流式增量）：保持阅读位置，不贴底、入口仍在
+    rerender(
+      <SubagentRailPanelBody
+        subagents={[subSeg("s1", { report: "报告 s1 —— 更长的流式正文" })]}
+        focus={null}
+      />
+    );
+    expect(scroller.scrollTop).toBe(100);
+    expect(screen.getByTestId("subagent-back-to-latest")).toBeTruthy();
+    // 点击回底：贴底（1000-400=600）并恢复跟随，入口消失
+    fireEvent.click(screen.getByTestId("subagent-back-to-latest"));
+    expect(scroller.scrollTop).toBe(600);
+    expect(screen.queryByTestId("subagent-back-to-latest")).toBeNull();
+    // 跟随期间内容变化（内容更高）：自动贴底到新底部（1200-400=800）
+    Object.defineProperty(scroller, "scrollHeight", {
+      value: 1_200,
+      configurable: true,
+    });
+    rerender(
+      <SubagentRailPanelBody
+        subagents={[subSeg("s1", { report: "报告 s1 —— 再次增高的正文" })]}
+        focus={null}
+      />
+    );
+    expect(scroller.scrollTop).toBe(800);
+    expect(screen.queryByTestId("subagent-back-to-latest")).toBeNull();
+  });
+});

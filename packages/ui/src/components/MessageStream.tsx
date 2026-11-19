@@ -28,9 +28,11 @@ import {
   anchorDecisionAfterContentChange,
   backToLatestVisible,
   followModeAfterScroll,
+  INTENT_TTL_MS,
   keyVerticalIntent,
   readingSpotOnLeave,
   restoreReadingPlan,
+  SCRIPTED_SCROLL_TTL_MS,
   touchVerticalIntent,
   wheelVerticalIntent,
   type FollowMode,
@@ -53,17 +55,13 @@ import {
 } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 import { AssistantActions } from "./AssistantActions";
+import { BackToLatestButton } from "./BackToLatestButton";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentStreamMarker } from "./SubagentStreamMarker";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolGroupView } from "./ToolSequence";
 import { PlanMarkerRow } from "./WorkPlanCard";
-
-/** 登记的用户输入意图有效期：覆盖 scroll 事件滞后一帧的竞争窗口 */
-const INTENT_TTL_MS = 500;
-/** 程序化贴底回执的有效期：过期不再拦截 scroll 裁决，防误吞用户滚动 */
-const SCRIPTED_SCROLL_TTL_MS = 500;
 
 /**
  * 中栏上部：消息流（GLOSSARY「消息流」「消息段」「轮次」「过程段」「跟随」）。
@@ -385,32 +383,15 @@ export function MessageStream(props: {
       </div>
       {/* 「回到最新」入口：脱离跟随且有消息时可见；点击回底并恢复跟随 */}
       {backToLatestVisible(mode, props.items.length) && (
-        <button
-          type="button"
-          data-testid="back-to-latest"
-          aria-label="回到最新"
-          title="回到最新"
+        <BackToLatestButton
+          testId="back-to-latest"
           onClick={() => {
             const element = container.current;
             if (!element) return;
             commitMode("following");
             snapToBottom(element);
           }}
-          className="absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-surface text-fg-muted shadow-floating hover:border-fg/30 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 5v14m-6-6 6 6 6-6" />
-          </svg>
-        </button>
+        />
       )}
     </div>
   );
@@ -626,7 +607,9 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+        // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言
+        // 折叠摘要行基准），相邻卡片文字起点一致
+        className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
       >
         <summary
           data-testid="thinking-toggle"
@@ -654,7 +637,8 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
         {open && (
           <div
             data-testid="thinking-content"
-            className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pl-4 text-fg"
+            // 展开体缩进与工具卡展开区对齐（pl-7 ≈ 摘要行文字起点）
+            className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pb-2 pl-7 pr-3 text-fg"
           >
             {segment.content}
           </div>
@@ -691,7 +675,8 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+        // 卡片内距与工具卡统一（同 ThinkingBlock）
+        className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
       >
         <summary
           data-testid="process-text-toggle"
@@ -716,7 +701,7 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
         {open && (
           <div
             data-testid="process-text-content"
-            className="markdown mt-2 border-t border-line pt-2 pl-4 text-sm text-fg"
+            className="markdown mt-2 border-t border-line pt-2 pb-2 pl-7 pr-3 text-sm text-fg"
           >
             <MarkdownContent content={segment.content} />
           </div>
@@ -740,7 +725,8 @@ function CompactSummaryBlock(props: {
           if (event.currentTarget.open !== open)
             setOpen(event.currentTarget.open);
         }}
-        className="rounded-lg bg-info-bg px-3 py-2 text-xs text-info-fg"
+        // 卡片内距与工具卡统一（同 ThinkingBlock；info 底色区分语义）
+        className="rounded-lg bg-info-bg px-3.5 py-[9px] text-xs text-info-fg"
       >
         <summary
           data-testid="compact-summary-toggle"

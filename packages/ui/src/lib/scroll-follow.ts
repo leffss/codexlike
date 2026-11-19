@@ -9,6 +9,14 @@
 /** 距底 ≤48px 视为贴底：容差覆盖亚像素滚动与末行 padding */
 export const BOTTOM_SNAP_EPSILON_PX = 48;
 
+/** 登记的用户输入意图有效期：覆盖 scroll 事件滞后一帧的竞争窗口。
+ *  接线层（MessageStream / SubagentRailPanel）共用的接线常量收在
+ *  本模块单一来源，防止两处漂移。 */
+export const INTENT_TTL_MS = 500;
+
+/** 程序化贴底回执的有效期：过期不再拦截 scroll 裁决，防误吞用户滚动 */
+export const SCRIPTED_SCROLL_TTL_MS = 500;
+
 /** 跟随状态机：following=贴近底部自动追踪最新；detached=用户翻阅历史 */
 export type FollowMode = "following" | "detached";
 
