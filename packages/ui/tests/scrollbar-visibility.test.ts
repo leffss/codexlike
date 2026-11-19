@@ -62,24 +62,29 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
     document.body.innerHTML = "";
   });
 
-  /** 可滚动容器：overflowY 内联 + 可覆写的 scrollHeight/clientHeight */
+  /** 可滚动容器：overflowY 内联 + 可覆写的几何属性（sizes 可整体改写） */
   function makeContainer(initialScrollHeight: number, clientHeight = 400) {
     const container = document.createElement("div");
     container.style.overflowY = "auto";
     container.className = "overflow-y-auto";
     const content = document.createElement("div");
     container.appendChild(content);
-    const heights = { scrollHeight: initialScrollHeight };
+    // clientWidth 默认 800：重排用例整体改写，避免与快照比较撞 0
+    const sizes = { scrollHeight: initialScrollHeight, clientWidth: 800 };
     Object.defineProperty(container, "scrollHeight", {
       configurable: true,
-      get: () => heights.scrollHeight,
+      get: () => sizes.scrollHeight,
     });
     Object.defineProperty(container, "clientHeight", {
       configurable: true,
       get: () => clientHeight,
     });
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      get: () => sizes.clientWidth,
+    });
     document.body.appendChild(container);
-    return { container, content, heights };
+    return { container, content, sizes };
   }
 
   /** 假 ResizeObserver：记录 observe 目标，fire() 手动派发回调 */
@@ -123,16 +128,39 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
   it("内容增长（内容根 resize）挂 scrollbar-live，闲置后摘除", () => {
     vi.useFakeTimers();
     const observer = fakeResizeObserver();
-    const { container, content, heights } = makeContainer(1000);
+    const { container, content, sizes } = makeContainer(1000);
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
     expect(observer.observed.has(content)).toBe(true); // 初始扫描登记内容根
     expect(container.classList.contains("scrollbar-live")).toBe(false);
 
-    heights.scrollHeight = 1500; // 内容自动刷新增长
+    sizes.scrollHeight = 1500; // 内容自动刷新增长
     observer.fire(content);
 
+    expect(container.classList.contains("scrollbar-live")).toBe(true);
+
+    vi.advanceTimersByTime(SCROLL_IDLE_MS);
+    expect(container.classList.contains("scrollbar-live")).toBe(false);
+  });
+
+  it("宽度变化引起的重排（右栏开合）不显色，宽度稳定后的内容增长恢复显色", () => {
+    vi.useFakeTimers();
+    const observer = fakeResizeObserver();
+    const { container, content, sizes } = makeContainer(1000);
+    const uninstall = installScrollbarVisibility();
+    teardowns.push(uninstall);
+
+    // 右栏开/合：正文容器变窄，文本重排使 scrollHeight 变化——非内容增长，
+    // 显色即「滚动条自动闪烁」（2026-11-20 右栏开关正文滚动条误显色）
+    sizes.clientWidth = 600;
+    sizes.scrollHeight = 1200;
+    observer.fire(content);
+    expect(container.classList.contains("scrollbar-live")).toBe(false);
+
+    // 宽度稳定后内容真实增长：显色照常（快照已随重排重置，不被吞掉）
+    sizes.scrollHeight = 1500;
+    observer.fire(content);
     expect(container.classList.contains("scrollbar-live")).toBe(true);
 
     vi.advanceTimersByTime(SCROLL_IDLE_MS);
@@ -154,11 +182,11 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
   it("不可滚动容器（内容未超出）的内容增长不显色", () => {
     vi.useFakeTimers();
     const observer = fakeResizeObserver();
-    const { container, content, heights } = makeContainer(300, 400);
+    const { container, content, sizes } = makeContainer(300, 400);
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
-    heights.scrollHeight = 350; // 仍小于 clientHeight，无滚动条可言
+    sizes.scrollHeight = 350; // 仍小于 clientHeight，无滚动条可言
     observer.fire(content);
 
     expect(container.classList.contains("scrollbar-live")).toBe(false);
@@ -167,12 +195,12 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
   it("窗口隐藏期间增长、恢复可见时补显色（visibilitychange 兜底）", () => {
     vi.useFakeTimers();
     fakeResizeObserver();
-    const { container, heights } = makeContainer(1000);
+    const { container, sizes } = makeContainer(1000);
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
     setHidden(true);
-    heights.scrollHeight = 2000; // 隐藏期增长，ResizeObserver 回调被节流吞掉
+    sizes.scrollHeight = 2000; // 隐藏期增长，ResizeObserver 回调被节流吞掉
     setHidden(false);
     document.dispatchEvent(new Event("visibilitychange"));
 
@@ -203,11 +231,11 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
-    const { container, content, heights } = makeContainer(1000);
+    const { container, content, sizes } = makeContainer(1000);
     // MutationObserver 回调是微任务：flush 后登记才发生
     await Promise.resolve();
     await Promise.resolve();
-    heights.scrollHeight = 1600; // 挂载即内容增长（消息流首屏渲染）
+    sizes.scrollHeight = 1600; // 挂载即内容增长（消息流首屏渲染）
     observer.fire(content);
 
     expect(container.classList.contains("scrollbar-live")).toBe(true);
@@ -216,14 +244,14 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
   it("豁免容器（data-scrollbar-content-signal=off）内容增长不显色，滚动信号照常", () => {
     vi.useFakeTimers();
     const observer = fakeResizeObserver();
-    const { container, content, heights } = makeContainer(1000);
+    const { container, content, sizes } = makeContainer(1000);
     container.setAttribute("data-scrollbar-content-signal", "off");
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
     // 豁免容器不登记内容根：流式自动刷新改高度不触发显色（防闪烁）
     expect(observer.observed.has(content)).toBe(false);
-    heights.scrollHeight = 1500;
+    sizes.scrollHeight = 1500;
     observer.fire(content);
 
     expect(container.classList.contains("scrollbar-live")).toBe(false);
@@ -241,13 +269,13 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
     const panel = document.createElement("div");
     panel.setAttribute("data-scrollbar-content-signal", "off");
     document.body.appendChild(panel);
-    const { container, content, heights } = makeContainer(1000);
+    const { container, content, sizes } = makeContainer(1000);
     panel.appendChild(container); // 滚动容器移入豁免祖先（子代理详情形态）
     const uninstall = installScrollbarVisibility();
     teardowns.push(uninstall);
 
     expect(observer.observed.has(content)).toBe(false);
-    heights.scrollHeight = 1800;
+    sizes.scrollHeight = 1800;
     observer.fire(content);
     expect(container.classList.contains("scrollbar-live")).toBe(false);
   });
@@ -255,11 +283,11 @@ describe("installScrollbarVisibility（内容变化信号）", () => {
   it("卸载后内容信号停止（观察器断开、回调不再显色）", () => {
     vi.useFakeTimers();
     const observer = fakeResizeObserver();
-    const { container, content, heights } = makeContainer(1000);
+    const { container, content, sizes } = makeContainer(1000);
     const uninstall = installScrollbarVisibility();
     uninstall();
 
-    heights.scrollHeight = 1500;
+    sizes.scrollHeight = 1500;
     observer.fire(content);
     document.dispatchEvent(new Event("visibilitychange"));
 

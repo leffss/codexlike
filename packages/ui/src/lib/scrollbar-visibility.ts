@@ -13,6 +13,8 @@
  *   滚动容器的内容根，scrollHeight 变化且纵向可滚动时同样挂
  *   scrollbar-live；隐藏期间的 ResizeObserver 回调会被渲染节流吞掉，
  *   visibilitychange 恢复可见时对全部已登记容器补一次高度比对。
+ *   容器宽度同帧变化视为重排（右栏开合改变正文宽度、文本重排改
+ *   scrollHeight），只重置快照不显色，避免滚动条随面板开关闪烁。
  *   流式自动刷新的面板可标记 data-scrollbar-content-signal="off" 豁免
  *   本信号（见 CONTENT_SIGNAL_OFF_SELECTOR）。
  * main.tsx 先安装后渲染（初始扫描扑空），滚动容器由 MutationObserver
@@ -121,8 +123,16 @@ export function installScrollbarVisibility(): () => void {
   }
 
   // —— 内容变化信号 ——
-  /** 滚动容器 → 上次 scrollHeight 快照（visibilitychange 恢复比对的基准） */
-  const contentHeights = new Map<Element, number>();
+  /** 内容快照：scrollHeight 变化且 clientWidth 未变才显色——宽度变化
+   *  即重排（右栏开合改正文宽度、文本重排改 scrollHeight），高度变化
+   *  是重排副产品而非内容增长，只重置快照跳过显色 */
+  interface ContentSnapshot {
+    scrollHeight: number;
+    clientWidth: number;
+  }
+
+  /** 滚动容器 → 上次内容快照（visibilitychange 恢复比对的基准） */
+  const contentSnapshots = new Map<Element, ContentSnapshot>();
   /** 滚动容器 → 观察中的内容根（child 替换后重挂的依据） */
   const containerRoots = new Map<Element, Element>();
   /** 内容根 → 所属滚动容器（ResizeObserver 回调反查） */
@@ -135,12 +145,15 @@ export function installScrollbarVisibility(): () => void {
     }
   });
 
-  /** scrollHeight 较快照变化且纵向可滚动 → 显色信号 */
+  /** scrollHeight 较快照变化、宽度未变且纵向可滚动 → 显色信号 */
   function refreshContentSignal(container: Element) {
     const next = (container as HTMLElement).scrollHeight;
-    const previous = contentHeights.get(container);
-    contentHeights.set(container, next);
-    if (previous === undefined || next === previous) return;
+    const width = (container as HTMLElement).clientWidth;
+    const previous = contentSnapshots.get(container);
+    contentSnapshots.set(container, { scrollHeight: next, clientWidth: width });
+    if (previous === undefined) return;
+    if (next === previous.scrollHeight) return;
+    if (width !== previous.clientWidth) return;
     if (!isScrollable(container as HTMLElement, "y")) return;
     touchLive(container);
   }
@@ -159,7 +172,10 @@ export function installScrollbarVisibility(): () => void {
     }
     containerRoots.set(container, root);
     contentOwners.set(root, container);
-    contentHeights.set(container, (container as HTMLElement).scrollHeight);
+    contentSnapshots.set(container, {
+      scrollHeight: (container as HTMLElement).scrollHeight,
+      clientWidth: (container as HTMLElement).clientWidth,
+    });
     contentObserver.observe(root);
   }
 
@@ -262,7 +278,7 @@ export function installScrollbarVisibility(): () => void {
     domObserver.disconnect();
     containerRoots.clear();
     contentOwners.clear();
-    contentHeights.clear();
+    contentSnapshots.clear();
     for (const [element, timer] of scrollTimers) {
       clearTimeout(timer);
       removeLive(element);
