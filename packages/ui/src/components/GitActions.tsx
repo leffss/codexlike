@@ -117,7 +117,7 @@ export function GitActions(props: {
         onChange={(event) => setCommitDraft(event.target.value)}
         placeholder="提交消息（可由模型生成，可编辑）"
         rows={2}
-        className="w-full resize-none rounded-lg border border-transparent bg-surface-muted p-2 text-sm text-fg transition-colors placeholder:text-fg-subtle focus:border-accent focus:outline-none"
+        className="w-full resize-none rounded-lg bg-surface-muted p-2 text-sm text-fg transition-shadow duration-150 ease-out placeholder:text-fg-subtle focus:input-focus-ring focus:outline-none"
       />
       <div className="flex gap-2">
         <button

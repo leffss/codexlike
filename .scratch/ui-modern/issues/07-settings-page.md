@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 七分区卡片化/分区标题/行间距按 D 语言统一
 - [x] Provider Profile 表单（含 model-row 增删、默认模型徽章）层级清晰

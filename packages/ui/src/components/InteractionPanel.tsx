@@ -265,7 +265,7 @@ export function InteractionPanel(props: {
                         })
                       }
                       placeholder="输入你的回答（不会按 Enter 提交）"
-                      className="mt-1 block max-h-40 w-full resize-y rounded-lg bg-surface p-2 text-sm text-fg transition-shadow duration-150 ease-out focus:shadow-[0_0_0_1.5px_color-mix(in_oklab,var(--fg)_45%,transparent)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mt-1 block max-h-40 w-full resize-y rounded-lg bg-surface p-2 text-sm text-fg transition-shadow duration-150 ease-out focus:input-focus-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </label>
                   <div className="mt-3 flex shrink-0 flex-wrap gap-2">

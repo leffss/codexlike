@@ -1810,7 +1810,7 @@ export function WorkspacePage(props: {
                       <div
                         data-testid="task-auto-approve"
                         role="status"
-                        className="flex items-start gap-2 rounded-lg border border-warn-fg/40 bg-warn-bg px-3 py-2 text-xs text-warn-fg"
+                        className="flex items-start gap-2 rounded-lg bg-warn-bg px-3 py-2 text-xs text-warn-fg"
                       >
                         <span
                           className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-warn-fg"
@@ -1839,7 +1839,7 @@ export function WorkspacePage(props: {
                             const id = currentIdRef.current;
                             if (id !== null) void revokeAutoApprove(id);
                           }}
-                          className="shrink-0 rounded border border-line px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                          className="shrink-0 rounded-md px-2 py-1 hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
                         >
                           {autoApproveBusy ? "取消中…" : "取消自动批准"}
                         </button>

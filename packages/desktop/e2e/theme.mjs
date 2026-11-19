@@ -34,6 +34,7 @@ async function assertComposerSurface(window, label) {
         streamBackground: stream.backgroundColor,
         borderTop: region.borderTopWidth,
         cardBorder: getComputedStyle(card).borderTopWidth,
+        cardBackground: getComputedStyle(card).backgroundColor,
       };
     });
   assert(
@@ -41,9 +42,12 @@ async function assertComposerSurface(window, label) {
       surface.borderTop === "0px",
     `${label}：输入区外围应与消息区同色且没有分隔线，实际 ${JSON.stringify(surface)}`
   );
+  // 输入卡为无边框暖灰块（D 语言「留白呼吸」：三壳去边框、层次靠底色，
+  // ADR 0028 / 票 03 折回）。主题翻转时卡片底色应随 token 换向而非依赖边框。
   assert(
-    parseFloat(surface.cardBorder) > 0,
-    `${label}：输入卡片自身边框应保留`
+    parseFloat(surface.cardBorder) === 0 &&
+      surface.cardBackground !== surface.streamBackground,
+    `${label}：输入卡应为无边框暖灰块（底色与消息区不同以分层），实际 ${JSON.stringify(surface)}`
   );
 }
 

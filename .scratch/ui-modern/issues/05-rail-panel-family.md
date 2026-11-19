@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] rail-panel 白底去边界；拖拽分隔条平时隐形、hover/拖动暖灰现形（保留可拖宽度与键盘操作）
 - [x] tab 激活态暖灰底+字重（非描边胶囊）；三 tab 互斥与开关状态同步行为不变

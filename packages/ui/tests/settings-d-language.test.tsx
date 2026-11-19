@@ -176,7 +176,7 @@ describe("D 语言：SettingsPage 七分区", () => {
     ).toContain("accent-accent");
   });
 
-  it("数字/密码输入为白卡 + 聚焦深色细描边（ring，非 border）", async () => {
+  it("数字/密码输入为白卡 + 聚焦深色细描边（input-focus-ring 描边淡入，非 border/ring）", async () => {
     setup();
     render(<SettingsPage />);
     for (const id of [
@@ -189,7 +189,7 @@ describe("D 语言：SettingsPage 七分区", () => {
       expect(input.className).toContain("bg-surface");
       expect(input.className).not.toContain("border-line");
       expect(input.className).not.toContain("bg-code-bg");
-      expect(input.className).toContain("focus:ring");
+      expect(input.className).toContain("focus:input-focus-ring");
     }
   });
 
@@ -200,7 +200,7 @@ describe("D 语言：SettingsPage 七分区", () => {
       const select = await screen.findByTestId(id);
       expect(select.className).toContain("bg-surface");
       expect(select.className).not.toContain("border-line");
-      expect(select.className).toContain("focus:ring");
+      expect(select.className).toContain("focus:input-focus-ring");
     }
   });
 
@@ -245,10 +245,10 @@ describe("D 语言：ProviderProfileForm", () => {
     expect(nameInput.className).toContain("bg-surface");
     expect(nameInput.className).not.toContain("border-line");
     expect(nameInput.className).not.toContain("bg-code-bg");
-    expect(nameInput.className).toContain("focus:ring");
+    expect(nameInput.className).toContain("focus:input-focus-ring");
     const modelInput = screen.getByLabelText("模型 1");
     expect(modelInput.className).toContain("bg-surface");
-    expect(modelInput.className).toContain("focus:ring");
+    expect(modelInput.className).toContain("focus:input-focus-ring");
   });
 
   it("默认模型徽章换白卡中性色（不再借 accent 淡底）", () => {
@@ -404,7 +404,7 @@ describe("D 语言：MCP 分区", () => {
       const input = screen.getByTestId(id);
       expect(input.className).toContain("bg-surface");
       expect(input.className).not.toContain("border-line");
-      expect(input.className).toContain("focus:ring");
+      expect(input.className).toContain("focus:input-focus-ring");
     }
     const submit = screen.getByTestId("mcp-form-submit");
     expect(submit.className).toContain("bg-accent");
@@ -441,7 +441,7 @@ describe("D 语言：MCP 超时表体", () => {
       const input = screen.getByTestId(id);
       expect(input.className).toContain("bg-surface");
       expect(input.className).not.toContain("border-line");
-      expect(input.className).toContain("focus:ring");
+      expect(input.className).toContain("focus:input-focus-ring");
     }
     const save = screen.getByTestId("mcp-timeout-settings-save");
     expect(save.className).toContain("bg-accent");

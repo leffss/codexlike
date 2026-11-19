@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] composer-card / new-task-composer / interaction-panel 三壳同形：暖灰块 + 聚焦描边淡入（白底上光晕不可见，用描边——原型已验证）
 - [x] 审批三键语义色可辨；批量批准警示文案区样式统一
