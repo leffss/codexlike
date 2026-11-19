@@ -2,8 +2,11 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type { ProjectRecord } from "@codexlike/agent-core";
@@ -14,6 +17,21 @@ import { TaskSearch } from "./TaskSearch";
 
 import { groupTasksByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
+
+/** 拖拽分栏约束（px，与右栏 RailPanel 同款交互）：左栏最小宽、正文最小
+ *  宽（中列消息流+输入区）、默认宽（原 w-80 = 20rem） */
+const SIDEBAR_MIN_WIDTH = 240;
+const STREAM_MIN_WIDTH = 480;
+const SIDEBAR_DEFAULT_WIDTH = 320;
+
+/**
+ * 宽度夹取（拖拽与方向键共用）：左栏最小宽 SIDEBAR_MIN_WIDTH、上限 max
+ * （= 当前侧栏宽 + 正文列富余）；上限优先于最小宽（正文 STREAM_MIN_WIDTH
+ * 优先，窄窗口下跟随容器收窄保布局不溢出）。导出供单测。
+ */
+export function clampSidebarWidth(width: number, max: number): number {
+  return Math.min(max, Math.max(SIDEBAR_MIN_WIDTH, width));
+}
 
 function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   const next = new Set(set);
@@ -262,6 +280,70 @@ export function TaskSidebar(props: {
     return () => window.clearInterval(timer);
   }, []);
 
+  // ===== 拖拽分栏：宽度内存态（会话内保持；不持久化），与右栏 RailPanel 同款 =====
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef<{ x: number; width: number; max: number } | null>(
+    null
+  );
+
+  /** 宽度上限 = 当前侧栏宽 + 正文列（本栏右侧的 @container/task section）
+   *  富余（现宽 − 最小宽）。量正文列而非整行——右栏展开时正文已被压窄，
+   *  行宽口径会高估富余、把正文压穿最小宽。 */
+  function maxSidebarWidth(): number {
+    const section = layoutRef.current?.nextElementSibling;
+    const streamWidth = section?.getBoundingClientRect().width;
+    if (streamWidth === undefined) return SIDEBAR_DEFAULT_WIDTH;
+    return sidebarWidth + Math.max(0, streamWidth - STREAM_MIN_WIDTH);
+  }
+
+  function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (layoutRef.current === null) return;
+    // 阻止 pointerdown 默认行为（否则合成 mouse 事件会开启原生文本划选）
+    event.preventDefault();
+    // 正文富余在拖动起点测一次（拖动期间窗口尺寸变化不在考虑内）
+    dragStart.current = {
+      x: event.clientX,
+      width: sidebarWidth,
+      max: maxSidebarWidth(),
+    };
+    setDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    // 拖动期间禁选中（防正文文字被划选）并统一光标
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }
+
+  function onDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = dragStart.current;
+    if (start === null) return;
+    // 左栏在左侧：向右拖 = 变宽；双端夹取
+    const next = start.width + (event.clientX - start.x);
+    setSidebarWidth(clampSidebarWidth(next, start.max));
+  }
+
+  function endDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragStart.current === null) return;
+    dragStart.current = null;
+    setDragging(false);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function onSeparatorKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    // → 拉宽左栏，← 收窄（与拖动方向一致），步进 24px（右栏同款）
+    const delta = event.key === "ArrowRight" ? 24 : -24;
+    setSidebarWidth((width) =>
+      clampSidebarWidth(width + delta, maxSidebarWidth())
+    );
+  }
+
   const groups = groupTasksByProject(props.tasks, props.projects);
 
   function submitRename(id: string) {
@@ -349,6 +431,36 @@ export function TaskSidebar(props: {
           />
         ) : (
           <>
+            {/* 置顶图标常驻标题之前：列位固定预留（未置顶仅悬停显形，
+                标题起点不随图标显隐跳动）；已置顶实心常显（accent 色） */}
+            <button
+              type="button"
+              data-testid="pin-button"
+              aria-pressed={task.pinned ?? false}
+              aria-label={task.pinned ? "取消置顶" : "置顶任务"}
+              title={task.pinned ? "取消置顶" : "置顶任务"}
+              className={`ml-0.5 flex h-6 w-5 shrink-0 items-center justify-center rounded hover:text-accent ${
+                task.pinned
+                  ? "text-accent"
+                  : "pointer-events-none text-fg-muted opacity-0 group-hover/task:pointer-events-auto group-hover/task:opacity-100 group-focus-within/task:pointer-events-auto group-focus-within/task:opacity-100"
+              }`}
+              onClick={() => props.onPin(task.id, !task.pinned)}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill={task.pinned ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+              </svg>
+            </button>
             <button
               type="button"
               data-testid={archived ? "archived-task-item" : "task-item"}
@@ -357,7 +469,7 @@ export function TaskSidebar(props: {
               aria-current={task.id === props.currentId ? "page" : undefined}
               aria-haspopup="menu"
               aria-expanded={menu?.taskId === task.id}
-              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-[7px] pl-2 pr-1 text-left text-sm"
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-[7px] pl-0.5 pr-1 text-left text-sm"
               onClick={() => props.onSelect(task.id)}
             >
               <span
@@ -392,35 +504,6 @@ export function TaskSidebar(props: {
                 </span>
               )}
               <TaskActivityBadge task={task} compact />
-            </button>
-            <button
-              type="button"
-              data-testid="pin-button"
-              aria-pressed={task.pinned ?? false}
-              aria-label={task.pinned ? "取消置顶" : "置顶任务"}
-              title={task.pinned ? "取消置顶" : "置顶任务"}
-              className={`mr-1 flex h-6 w-5 shrink-0 items-center justify-center rounded hover:text-accent ${
-                task.pinned
-                  ? "text-accent"
-                  : "pointer-events-none text-fg-muted opacity-0 group-hover/task:pointer-events-auto group-hover/task:opacity-100 group-focus-within/task:pointer-events-auto group-focus-within/task:opacity-100"
-              }`}
-              onClick={() => props.onPin(task.id, !task.pinned)}
-            >
-              {/* 图钉两态：已置顶实心常显（accent 色），未置顶空心仅悬停出现 */}
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill={task.pinned ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
-              </svg>
             </button>
           </>
         )}
@@ -570,9 +653,11 @@ export function TaskSidebar(props: {
             )}
           </span>
         </div>
-        {/* 无竖线缩进导轨：任务标题起点对齐原竖线位置（ml-7 + 行内 pl-2），为标题让出宽度 */}
+        {/* 无竖线缩进导轨（ml-5 收敛自原 ml-7，组缩进 ≥20px 口径保留）：
+            行首置顶图标列落位在项目文件夹图标正下方，任务标题起点保持
+            与项目名文字对齐（sidebar-archive e2e assertProjectHierarchy） */}
         {expanded && (
-          <div data-testid="group-tasks" className="ml-7">
+          <div data-testid="group-tasks" className="ml-5">
             <ul>{group.active.map((task) => renderTaskItem(task))}</ul>
             {group.archived.length > 0 && (
               <div>
@@ -601,103 +686,129 @@ export function TaskSidebar(props: {
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col bg-canvas">
-      {menu && menuTask && (
-        <TaskContextMenu
-          taskId={menuTask.id}
-          anchor={menu.anchor}
-          onClose={closeMenu}
-          items={[
-            {
-              testId: "task-membership",
-              label: menuTask.projectId === null ? "移入项目" : "移出项目",
-              onSelect: () => props.onMembership(menuTask.id),
-            },
-            {
-              testId: "rename-button",
-              label: "重命名",
-              onSelect: () => {
-                setEditingTitle(menuTask.title);
-                setEditingId(menuTask.id);
+    <div ref={layoutRef} className="flex shrink-0">
+      <aside
+        aria-label="任务列表"
+        style={{ width: sidebarWidth }}
+        className="flex min-w-0 shrink-0 flex-col bg-canvas"
+      >
+        {menu && menuTask && (
+          <TaskContextMenu
+            taskId={menuTask.id}
+            anchor={menu.anchor}
+            onClose={closeMenu}
+            items={[
+              {
+                testId: "task-membership",
+                label: menuTask.projectId === null ? "移入项目" : "移出项目",
+                onSelect: () => props.onMembership(menuTask.id),
               },
-            },
-            {
-              testId:
-                menuTask.archivedAt === null
-                  ? "archive-button"
-                  : "unarchive-button",
-              label: menuTask.archivedAt === null ? "归档" : "恢复",
-              onSelect: () =>
-                props.onArchive(menuTask.id, menuTask.archivedAt === null),
-            },
-          ]}
-        />
-      )}
-      {projectMenu && (
-        <TaskContextMenu
-          menuLabel="项目操作"
-          anchor={projectMenu.anchor}
-          onClose={closeProjectMenu}
-          items={[
-            {
-              testId: "project-remove-menu",
-              label: "移除项目",
-              onSelect: () => props.onRemoveProject!(projectMenu.projectId),
-            },
-          ]}
-        />
-      )}
-      <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
-        <h2 className="text-sm font-medium text-fg">任务列表</h2>
-        <div className="flex items-center gap-1">
-          {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
-              弹层 fixed 贴视口，从侧栏头部下方展开 */}
-          <TaskSearch
-            recordsRevision={props.searchRecordsRevision}
-            onSelect={props.onSelect}
+              {
+                testId: "rename-button",
+                label: "重命名",
+                onSelect: () => {
+                  setEditingTitle(menuTask.title);
+                  setEditingId(menuTask.id);
+                },
+              },
+              {
+                testId:
+                  menuTask.archivedAt === null
+                    ? "archive-button"
+                    : "unarchive-button",
+                label: menuTask.archivedAt === null ? "归档" : "恢复",
+                onSelect: () =>
+                  props.onArchive(menuTask.id, menuTask.archivedAt === null),
+              },
+            ]}
           />
-          <button
-            type="button"
-            data-testid="add-project"
-            title="添加项目"
-            aria-label="添加项目"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
-            onClick={props.onAddProject}
-          >
-            <FolderPlusIcon />
-          </button>
-          {/* 单一「新建任务」按钮：直达新建任务页（独立入口语境，
+        )}
+        {projectMenu && (
+          <TaskContextMenu
+            menuLabel="项目操作"
+            anchor={projectMenu.anchor}
+            onClose={closeProjectMenu}
+            items={[
+              {
+                testId: "project-remove-menu",
+                label: "移除项目",
+                onSelect: () => props.onRemoveProject!(projectMenu.projectId),
+              },
+            ]}
+          />
+        )}
+        <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
+          <h2 className="text-sm font-medium text-fg">任务列表</h2>
+          <div className="flex items-center gap-1">
+            {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
+              弹层 fixed 贴视口，从侧栏头部下方展开 */}
+            <TaskSearch
+              recordsRevision={props.searchRecordsRevision}
+              onSelect={props.onSelect}
+            />
+            <button
+              type="button"
+              data-testid="add-project"
+              title="添加项目"
+              aria-label="添加项目"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
+              onClick={props.onAddProject}
+            >
+              <FolderPlusIcon />
+            </button>
+            {/* 单一「新建任务」按钮：直达新建任务页（独立入口语境，
               归属在页面内选——ADR 0026 顶栏菜单退役，单击不再弹菜单） */}
-          <button
-            type="button"
-            data-testid="new-task"
-            disabled={props.creating}
-            title="新建任务"
-            aria-label="新建任务"
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => props.onCreate()}
-          >
-            <PlusIcon />
-          </button>
+            <button
+              type="button"
+              data-testid="new-task"
+              disabled={props.creating}
+              title="新建任务"
+              aria-label="新建任务"
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => props.onCreate()}
+            >
+              <PlusIcon />
+            </button>
+          </div>
         </div>
-      </div>
 
-      {groups.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-4">
-          <p className="text-center text-xs text-fg-subtle">
-            暂无任务
-            <br />
-            点右上角 + 新建任务，首次发送才建立工作区
-          </p>
-        </div>
-      ) : (
-        <ul
-          className="flex-1 overflow-y-auto px-2 pb-2"
-          data-testid="task-list"
-        >
-          {groups.map((group) => renderGroup(group))}
-        </ul>
-      )}
-    </aside>
+        {groups.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-4">
+            <p className="text-center text-xs text-fg-subtle">
+              暂无任务
+              <br />
+              点右上角 + 新建任务，首次发送才建立工作区
+            </p>
+          </div>
+        ) : (
+          <ul
+            className="flex-1 overflow-y-auto px-2 pb-2"
+            data-testid="task-list"
+          >
+            {groups.map((group) => renderGroup(group))}
+          </ul>
+        )}
+      </aside>
+      {/* 拖拽分隔条（右栏 rail-separator 同款）：双端最小宽夹取；
+          双击复位；←/→ 微调。拖拽期间正文列（flex-1 min-w-0）被推窄。 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整任务列表宽度"
+        data-testid="sidebar-separator"
+        tabIndex={0}
+        title="拖动调整任务列表宽度（正文有最小宽度限制）；双击复位"
+        onPointerDown={startDrag}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+        onKeyDown={onSeparatorKeyDown}
+        className={`w-1.5 shrink-0 cursor-col-resize select-none transition-colors ${
+          // D 语言：平时隐形融入画布，hover/拖动现形为 fg 淡色条（同右栏）
+          dragging ? "bg-fg/15" : "hover:bg-fg/15"
+        }`}
+      />
+    </div>
   );
 }

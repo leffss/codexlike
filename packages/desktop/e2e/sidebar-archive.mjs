@@ -277,9 +277,15 @@ async function main() {
             width: rect.width,
             height: box.height,
             overflow: row.scrollWidth > row.clientWidth + 1,
-            overlap: [...neighbors].some(
-              (node) => rect.right > node.getBoundingClientRect().left + 1
-            ),
+            // 置顶图标列在标题左侧（2026-11-19 前置）：只对标题右侧的
+            // 邻接徽章做遮挡判定（node.left 在标题右缘之后才算后邻）
+            overlap: [...neighbors]
+              .filter(
+                (node) => node.getBoundingClientRect().left >= rect.right - 1
+              )
+              .some(
+                (node) => rect.right > node.getBoundingClientRect().left + 1
+              ),
             nowrap: getComputedStyle(label).whiteSpace === "nowrap",
           };
         })
