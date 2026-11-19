@@ -57,6 +57,7 @@ import {
 } from "./execution-settings";
 import { describeModelError, isAbortLike } from "./errors";
 import type { TaskPersistence } from "./persistence";
+import { settleTaskUsage } from "./usage";
 import type { TaskEvent } from "./types";
 
 /** spawn_subagent 工具名（子代理工具集按此名剔除，防递归） */
@@ -135,6 +136,7 @@ export type SubagentPersistence = Pick<
   | "updateSubagent"
   | "insertSubagentMessage"
   | "insertSubagentToolCall"
+  | "addTaskUsage"
 >;
 
 /**
@@ -570,6 +572,15 @@ export function createSubagentOrchestrator(
           }
         }
         if (roundPersistenceFailure) throw roundPersistenceFailure.error;
+
+        // 任务用量（GLOSSARY「任务用量」，ADR 0029）：子代理本轮 usage 入任务的
+        // 子代理列（并入任务总量口径，与主任务列分账）；尽力而为语义统一在
+        // settleTaskUsage（未结算记 0，入账失败不影响生成）
+        await settleTaskUsage(
+          result.usage,
+          (delta) => port.persistence.addTaskUsage(port.taskId, delta),
+          "subagent"
+        );
 
         if (aborted || toolCalls.length === 0) {
           settled = true;

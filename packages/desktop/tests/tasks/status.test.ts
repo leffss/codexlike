@@ -49,6 +49,42 @@ const messages: StoredMessage[] = [
 ];
 
 describe("buildTaskStatus（/status 数据组装）", () => {
+  it("任务用量（ADR 0029）：record 四列聚合为总量与子代理份额，缺省等价 0", () => {
+    const withUsage = buildTaskStatus({
+      record: record({
+        mainInputTokens: 200,
+        mainOutputTokens: 30,
+        subagentInputTokens: 500,
+        subagentOutputTokens: 90,
+      }),
+      messages: [],
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    });
+    expect(withUsage.usage).toEqual({
+      inputTokens: 700,
+      outputTokens: 120,
+      subagentInputTokens: 500,
+      subagentOutputTokens: 90,
+    });
+
+    // 旧库/新建任务：四列缺失读作 0（不回补估算），全 0 也照常返回
+    const fresh = buildTaskStatus({
+      record: record(),
+      messages: [],
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    });
+    expect(fresh.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      subagentInputTokens: 0,
+      subagentOutputTokens: 0,
+    });
+  });
+
   it("返回模型、token 估算、消息数、AGENTS.md 来源与预留审批模式字段", () => {
     const discovery: AgentsMdDiscovery = {
       sections: [

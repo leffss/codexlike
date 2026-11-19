@@ -116,6 +116,7 @@ export function formatTaskStatus(status: TaskStatusInfo): string {
     "任务状态（/status）",
     `模型：${model}`,
     `上下文用量（估算）：约 ${status.estimatedContextTokens} tokens（${status.messageCount} 条消息 + 系统提示）`,
+    `任务用量：输入 ${status.usage.inputTokens} / 输出 ${status.usage.outputTokens} tokens（其中子代理 输入 ${status.usage.subagentInputTokens} / 输出 ${status.usage.subagentOutputTokens}）`,
     `压缩状态：${compacted}`,
     `AGENTS.md：${agentsMd}`,
     `审批模式：${APPROVAL_MODE_LABELS[status.approvalMode]}`,

@@ -78,8 +78,30 @@ export interface TaskRecord {
   lastUsedAt?: string;
   /** 置顶优先于最近使用；未设置等价 false。 */
   pinned?: boolean;
+  /**
+   * 任务用量（GLOSSARY「任务用量」，ADR 0029）：主任务累计输入 token，
+   * 只增不减；未记录等价 0（旧库/新建从 0 起算，不回补估算）。
+   */
+  mainInputTokens?: number;
+  /** 任务用量：主任务累计输出 token；未记录等价 0。 */
+  mainOutputTokens?: number;
+  /** 任务用量：子代理累计输入 token（并入任务总量口径）；未记录等价 0。 */
+  subagentInputTokens?: number;
+  /** 任务用量：子代理累计输出 token；未记录等价 0。 */
+  subagentOutputTokens?: number;
   /** 记录更新时间；不作为侧栏排序依据。 */
   updatedAt: string;
+}
+
+/**
+ * 任务用量增量（ADR 0029）：一次（或一组）模型调用结束时的用量入账——
+ * 主任务/子代理 × 输入/输出四列各自可选，未报（中断/失败）的字段不入账记 0。
+ */
+export interface TaskUsageDelta {
+  mainInputTokens?: number;
+  mainOutputTokens?: number;
+  subagentInputTokens?: number;
+  subagentOutputTokens?: number;
 }
 
 /**

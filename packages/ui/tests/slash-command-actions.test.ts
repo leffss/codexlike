@@ -33,6 +33,14 @@ const profiles: ProviderProfile[] = [
   },
 ];
 
+/** /status 任务用量的零值（旧库/新建任务：四列缺失等价 0，ADR 0029） */
+const ZERO_USAGE: TaskStatusInfo["usage"] = {
+  inputTokens: 0,
+  outputTokens: 0,
+  subagentInputTokens: 0,
+  subagentOutputTokens: 0,
+};
+
 /** 斜杠命令 → UI 动作的纯函数分发（命令与等效 UI 操作走同一 IPC 通道，ui 只做编排） */
 describe("planSlashCommand", () => {
   it("/new：按管理归属打开新草稿，不依赖执行工作区", () => {
@@ -122,12 +130,51 @@ describe("matchModelsForModelSwitch（/model 关键词匹配，票 02 模型级�
 });
 
 describe("formatTaskStatus（/status 展示文案）", () => {
+  it("任务用量行（ADR 0029）：总量与子代理份额分列显示，全 0 也照常显示", () => {
+    const text = formatTaskStatus({
+      model: "glm-4.7",
+      providerProfileName: "GLM",
+      estimatedContextTokens: 500,
+      contextWindowTokens: null,
+      messageCount: 3,
+      usage: {
+        inputTokens: 700,
+        outputTokens: 120,
+        subagentInputTokens: 500,
+        subagentOutputTokens: 90,
+      },
+      agentsMd: null,
+      approvalMode: "assist",
+      compacted: null,
+    });
+    expect(text).toContain(
+      "任务用量：输入 700 / 输出 120 tokens（其中子代理 输入 500 / 输出 90）"
+    );
+
+    const fresh = formatTaskStatus({
+      model: null,
+      providerProfileName: null,
+      estimatedContextTokens: 0,
+      contextWindowTokens: null,
+      messageCount: 0,
+      usage: ZERO_USAGE,
+      agentsMd: null,
+      approvalMode: "assist",
+      compacted: null,
+    });
+    // 不回补、不隐藏：全 0 的任务照常显示（自统计起算）
+    expect(fresh).toContain(
+      "任务用量：输入 0 / 输出 0 tokens（其中子代理 输入 0 / 输出 0）"
+    );
+  });
+
   it("最近轮摘要独立显示采集时间与分执行者加载，明确不代表当前激活", () => {
     for (const resourcePhase of ["active", "preview"] as const) {
       const text = formatTaskStatus({
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 500,
+        usage: ZERO_USAGE,
         messageCount: 0,
         agentsMd: null,
         approvalMode: "assist",
@@ -193,6 +240,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
+      usage: ZERO_USAGE,
       messageCount: 0,
       agentsMd: null,
       approvalMode: "assist",
@@ -228,6 +276,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 500,
+        usage: ZERO_USAGE,
         messageCount: 0,
         agentsMd: null,
         approvalMode: "assist",
@@ -295,6 +344,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
       model: "glm-4.7",
       providerProfileName: "GLM",
       estimatedContextTokens: 1234,
+      usage: ZERO_USAGE,
       messageCount: 12,
       agentsMd: {
         sources: [
@@ -329,6 +379,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
         model: null,
         providerProfileName: null,
         estimatedContextTokens: 0,
+        usage: ZERO_USAGE,
         messageCount: 0,
         agentsMd: null,
         approvalMode: mode,
@@ -344,6 +395,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
+      usage: ZERO_USAGE,
       messageCount: 0,
       agentsMd: null,
       approvalMode: "assist",
@@ -371,6 +423,7 @@ describe("/compact（手动压缩）ui 分发", () => {
       model: "glm-4.7",
       providerProfileName: "GLM",
       estimatedContextTokens: 210,
+      usage: ZERO_USAGE,
       messageCount: 7,
       agentsMd: null,
       approvalMode: "assist",
@@ -387,6 +440,7 @@ describe("/compact（手动压缩）ui 分发", () => {
       model: null,
       providerProfileName: null,
       estimatedContextTokens: 0,
+      usage: ZERO_USAGE,
       messageCount: 0,
       agentsMd: null,
       approvalMode: "assist",

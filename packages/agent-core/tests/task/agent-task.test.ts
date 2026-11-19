@@ -301,6 +301,52 @@ describe("AgentTask.sendMessage（任务流式循环）", () => {
     }
   });
 
+  it("任务用量（ADR 0029）：中断轮尽力而为——未报 usage 的调用记 0，不阻塞已完成的入账", async () => {
+    const persistence = createSqliteTaskStore(":memory:");
+    const record = taskRecord();
+    persistence.insertTask(record);
+    let openGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        if (call++ === 0) {
+          return { stream: gatedFirstDeltaStream(gate) };
+        }
+        return { stream: textStream(["中断后的新回答"]) };
+      },
+    });
+
+    const task = createAgentTask({
+      record,
+      persistence,
+      languageModelFor: () => model,
+      now: fakeClock(),
+    });
+
+    const controller = new AbortController();
+    for await (const event of task.sendMessage({
+      text: "慢慢说",
+      profile,
+      signal: controller.signal,
+    })) {
+      if (event.type === "assistant-delta") {
+        controller.abort();
+      }
+    }
+    openGate();
+    // 中断的调用未报 usage：不入账（记 0）
+    expect(persistence.listTasks().at(0)?.mainInputTokens ?? 0).toBe(0);
+
+    await collect(task.sendMessage({ text: "再来一次", profile }));
+    // 只有第二轮完整调用入账 (1,2)
+    const stored = persistence.listTasks().at(0);
+    expect(stored?.mainInputTokens).toBe(1);
+    expect(stored?.mainOutputTokens).toBe(2);
+  });
+
   it("模型 API 出错：error 事件带中文提示并落库，error 不进上下文，任务可继续使用", async () => {
     const persistence = createSqliteTaskStore(":memory:");
     const record = taskRecord();

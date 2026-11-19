@@ -87,20 +87,30 @@ describe("generateCommitMessage（一次不发工具的 LLM 请求）", () => {
         },
       }
     );
-    expect(
-      await generateCommitMessage({
-        model,
-        messages: [{ role: "user", content: "修复登录" }],
-        changedFiles: ["auth.ts"],
-      })
-    ).toBe("修复登录");
+    const { message } = await generateCommitMessage({
+      model,
+      messages: [{ role: "user", content: "修复登录" }],
+      changedFiles: ["auth.ts"],
+    });
+    expect(message).toBe("修复登录");
     expect(body).not.toHaveProperty("thinking");
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body).not.toHaveProperty("tools");
   });
 
+  it("任务用量（ADR 0029）：返回值携带本次调用的真实 usage 供任务入账", async () => {
+    const { message, usage } = await generateCommitMessage({
+      model: mockModel("修复登录页空指针"),
+      messages: [{ role: "user", content: "修复登录 bug" }],
+      changedFiles: ["src/auth.ts"],
+    });
+    expect(message).toBe("修复登录页空指针");
+    expect(usage.inputTokens).toBe(3);
+    expect(usage.outputTokens).toBe(5);
+  });
+
   it("返回模型生成的消息（trim 后）", async () => {
-    const message = await generateCommitMessage({
+    const { message } = await generateCommitMessage({
       model: mockModel("  修复登录页空指针  "),
       messages: [{ role: "user", content: "修复登录 bug" }],
       changedFiles: ["src/auth.ts"],
@@ -123,13 +133,19 @@ describe("generateCommitMessage（一次不发工具的 LLM 请求）", () => {
     expect(call.tools ?? []).toHaveLength(0); // 不发工具：只生成文本
   });
 
-  it("模型返回空白：中文报错（可回退手写）", async () => {
+  it("模型返回空白：中文报错（可回退手写），onUsage 仍收到本次已花用量", async () => {
+    // 任务用量（ADR 0029）尽力而为：消息无效但 token 已花、API 已报——照记
+    const banked: { inputTokens?: number; outputTokens?: number }[] = [];
     await expect(
       generateCommitMessage({
         model: mockModel("   "),
         messages: [{ role: "user", content: "做了点事" }],
         changedFiles: [],
+        onUsage: (usage) => banked.push(usage),
       })
     ).rejects.toThrow("未返回有效的提交消息");
+    expect(banked).toHaveLength(1);
+    expect(banked[0]?.inputTokens).toBe(3);
+    expect(banked[0]?.outputTokens).toBe(5);
   });
 });

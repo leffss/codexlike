@@ -299,6 +299,60 @@ function makeSubagentTask(options: SubagentHarnessOptions) {
 }
 
 describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
+  it("任务用量（ADR 0029）：子代理逐轮 usage 入子代理列，与主任务列分账", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexlike-sub-usage-"));
+    const { task, persistence } = makeSubagentTask({
+      workspacePath: directory,
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "del-1",
+              toolName: "spawn_subagent",
+              input: { task: "跑两轮计划的调研" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["主任务收尾"] },
+      ],
+      // 子代理 3 次 streamText（两轮计划 + 报告）：usage 各记 (1,2)
+      sub: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-1",
+              toolName: "update_plan",
+              input: { steps: [{ content: "步骤", status: "in_progress" }] },
+            },
+          ],
+        },
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "sub-2",
+              toolName: "update_plan",
+              input: { steps: [{ content: "步骤", status: "completed" }] },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["子代理报告"] },
+      ],
+    });
+
+    await collect(task.sendMessage({ text: "委派一个子代理", profile }));
+
+    const stored = persistence.listTasks()[0];
+    // 主任务 2 次 streamText（委派轮 + 收尾轮）、子代理 3 次，各记 (1,2)：分账不混
+    expect(stored?.mainInputTokens).toBe(2);
+    expect(stored?.mainOutputTokens).toBe(4);
+    expect(stored?.subagentInputTokens).toBe(3);
+    expect(stored?.subagentOutputTokens).toBe(6);
+    persistence.close();
+  });
+
   it("C02：跨生成轮复用 provider 委派 ID 仍分别持久化新报告，协议保留原 ID", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexlike-call-ids-"));
     const dbPath = join(directory, "task.db");

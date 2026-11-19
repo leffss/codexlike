@@ -3,6 +3,7 @@ import {
   createGitService,
   createLanguageModelFromProfile,
   generateCommitMessage,
+  settleTaskUsage,
   type ProviderProfile,
   type TaskManager,
   type TaskRecord,
@@ -120,11 +121,20 @@ export function registerGitHandlers(options: {
       }
       try {
         // 按任务内容 + 变更文件列表生成（一次不发工具的请求）
-        return await generateCommitMessage({
+        const { message } = await generateCommitMessage({
           model,
           messages: manager.messages(record.id),
           changedFiles: status.files.map((file) => file.path),
+          // 任务用量（GLOSSARY「任务用量」，ADR 0029）：commit 消息生成是任务域
+          // 模型调用，真实 usage 入主任务列（空白失败也照报；入账失败不拖垮生成）
+          onUsage: (usage) =>
+            void settleTaskUsage(
+              usage,
+              (delta) => manager.addUsage(record.id, delta),
+              "main"
+            ),
         });
+        return message;
       } catch (error) {
         throw new Error(
           `生成提交消息失败：${error instanceof Error ? error.message : String(error)}`,

@@ -27,6 +27,17 @@ export interface TaskStatusInfo {
   contextWindowTokens: number | null;
   /** 进入上下文估算的消息条数（user + assistant + compact-summary） */
   messageCount: number;
+  /**
+   * 任务用量（GLOSSARY「任务用量」，ADR 0029）：任务诞生起累计的真实 usage
+   * （非估算）——input/output 为任务总量（子代理并入），subagent* 为其中子代理
+   * 份额；旧库/新建任务四列缺失等价 0（不回补估算）。
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    subagentInputTokens: number;
+    subagentOutputTokens: number;
+  };
   /** AGENTS.md 来源摘要；未发现任何文件为 null */
   agentsMd: { sources: string[]; truncated: boolean } | null;
   /** 当前运行快照或下轮预览；不包含技能正文。 */
@@ -80,12 +91,23 @@ export function buildTaskStatus(input: {
       0
     );
 
+  const mainInputTokens = record.mainInputTokens ?? 0;
+  const mainOutputTokens = record.mainOutputTokens ?? 0;
+  const subagentInputTokens = record.subagentInputTokens ?? 0;
+  const subagentOutputTokens = record.subagentOutputTokens ?? 0;
+
   return {
     model: record.model,
     providerProfileName: input.providerProfileName,
     estimatedContextTokens: estimated,
     contextWindowTokens: input.contextWindowTokens ?? null,
     messageCount: contextMessages.length,
+    usage: {
+      inputTokens: mainInputTokens + subagentInputTokens,
+      outputTokens: mainOutputTokens + subagentOutputTokens,
+      subagentInputTokens,
+      subagentOutputTokens,
+    },
     agentsMd:
       sources.length === 0
         ? null

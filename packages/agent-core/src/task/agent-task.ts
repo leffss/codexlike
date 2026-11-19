@@ -51,6 +51,7 @@ import {
 } from "./approval";
 import { describeModelError, isAbortLike } from "./errors";
 import type { TaskPersistence } from "./persistence";
+import { settleTaskUsage } from "./usage";
 import {
   createSubagentOrchestrator,
   SUBAGENT_DELEGATION_POLICY,
@@ -701,6 +702,15 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               }
             }
 
+            // 任务用量（GLOSSARY「任务用量」，ADR 0029）：本轮 streamText 的真实
+            // usage 逐次入账（每轮一条 UPDATE，中途崩溃不丢已完成调用）；
+            // 尽力而为语义统一在 settleTaskUsage（未结算记 0，入账失败不影响生成）
+            await settleTaskUsage(
+              result.usage,
+              (delta) => persistence.addTaskUsage(record.id, delta),
+              "main"
+            );
+
             if (aborted || toolCalls.length === 0) {
               break;
             }
@@ -1038,6 +1048,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               },
             ],
           });
+          // 任务用量（GLOSSARY「任务用量」，ADR 0029）：压缩是任务内模型调用，
+          // usage 入主任务列（生成已发生，已花的 token 照记；入账失败不得把
+          // 已成功的压缩误报成模型错误）
+          await settleTaskUsage(
+            result.usage,
+            (delta) => persistence.addTaskUsage(record.id, delta),
+            "main"
+          );
           signal?.throwIfAborted();
           summary = result.text.trim();
         } catch (error) {

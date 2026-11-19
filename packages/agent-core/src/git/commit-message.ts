@@ -1,4 +1,4 @@
-import { generateText, type LanguageModel } from "ai";
+import { generateText, type LanguageModel, type LanguageModelUsage } from "ai";
 
 import type { StoredMessage } from "../task/types";
 
@@ -50,19 +50,25 @@ export function buildCommitMessagePrompt(
 /**
  * 由模型生成 commit 消息（一次不发工具的请求）。
  * 模型返回空白时抛中文错误，调用方可回退为手写。
+ * 返回值附带本次调用的真实 usage（任务用量入账用，ADR 0029）；
+ * 可选 onUsage 在请求结算后立即回调——消息无效抛错时 usage 已花仍照报
+ * （尽力而为：报多少记多少）。
  */
 export async function generateCommitMessage(options: {
   model: LanguageModel;
   messages: Pick<StoredMessage, "role" | "content">[];
   changedFiles: string[];
-}): Promise<string> {
-  const { text } = await generateText({
+  /** 任务用量入账回调（ADR 0029）：成功与空白失败都回调，请求抛错不回调 */
+  onUsage?: (usage: LanguageModelUsage) => void;
+}): Promise<{ message: string; usage: LanguageModelUsage }> {
+  const { text, usage } = await generateText({
     model: options.model,
     prompt: buildCommitMessagePrompt(options.messages, options.changedFiles),
   });
+  options.onUsage?.(usage);
   const message = text.trim();
   if (message === "") {
     throw new Error("模型未返回有效的提交消息，请手动填写");
   }
-  return message;
+  return { message, usage };
 }

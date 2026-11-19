@@ -197,6 +197,30 @@ describe("AgentTask.compact（手动压缩）", () => {
     expect(body).not.toHaveProperty("tools");
   });
 
+  it("任务用量（ADR 0029）：压缩的 generateText usage 入主任务用量列", async () => {
+    const persistence = memoryStore();
+    const model = compactableModel("旧历史摘要");
+    const manager = createTaskManager({
+      persistence,
+      languageModelFor: () => model,
+      now: fakeClock(),
+    });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    for (const text of ["第一轮", "第二轮", "第三轮", "第四轮"]) {
+      for await (const _event of task.sendMessage({ text, profile })) {
+      }
+    }
+    // 4 轮对话 streamText ×(1,2)
+    expect(persistence.listTasks()[0]?.mainInputTokens).toBe(4);
+    expect(persistence.listTasks()[0]?.mainOutputTokens).toBe(8);
+    await task.compact({ profile });
+    // 压缩 generateText 再 +(1,2)；子代理列不动
+    const stored = persistence.listTasks()[0];
+    expect(stored?.mainInputTokens).toBe(5);
+    expect(stored?.mainOutputTokens).toBe(10);
+    expect(stored?.subagentInputTokens ?? 0).toBe(0);
+  });
+
   it("恢复及 compact 不解析历史技能引用，压缩输入与后续请求均无已加载正文", async () => {
     const persistence = memoryStore();
     const model = compactableModel("摘要保留文字引用 $alpha，但不激活技能");

@@ -17,6 +17,7 @@ import type {
   SubagentRecord,
   SubagentToolCallRecord,
   TaskRecord,
+  TaskUsageDelta,
   StoredMessage,
 } from "./types";
 
@@ -48,6 +49,11 @@ export interface TaskPersistence {
     id: string,
     patch: Partial<Omit<TaskRecord, "id" | "createdAt">>
   ): void;
+  /**
+   * 任务用量累计（GLOSSARY「任务用量」，ADR 0029）：四列各自原子加 delta
+   * （单条 UPDATE 即单事务）；目标不存在时静默忽略（与 updateTask 同语义）。
+   */
+  addTaskUsage(id: string, delta: TaskUsageDelta): void;
   insertMessage(message: StoredMessage): void;
   insertInteraction(interaction: InteractionRecord): void;
   listInteractions(taskId: string): InteractionRecord[];
@@ -150,7 +156,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   workspace_origin_path TEXT,
   archived_at TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  main_input_tokens INTEGER NOT NULL DEFAULT 0,
+  main_output_tokens INTEGER NOT NULL DEFAULT 0,
+  subagent_input_tokens INTEGER NOT NULL DEFAULT 0,
+  subagent_output_tokens INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -249,6 +259,10 @@ interface TaskRow {
   updated_at: string;
   pinned: number;
   last_used_at: string | null;
+  main_input_tokens: number;
+  main_output_tokens: number;
+  subagent_input_tokens: number;
+  subagent_output_tokens: number;
 }
 
 interface MessageRow {
@@ -406,8 +420,21 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     db.exec("ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   if (!taskColumns.some((column) => column.name === "last_used_at"))
     db.exec("ALTER TABLE tasks ADD COLUMN last_used_at TEXT");
+  // 旧库迁移（ADR 0029，任务用量）：无用量列——主/子代理 × 输入/输出聚合记账，
+  // 旧行默认 0（真实 usage 自上线起累计，不回补估算）
+  for (const column of [
+    "main_input_tokens",
+    "main_output_tokens",
+    "subagent_input_tokens",
+    "subagent_output_tokens",
+  ]) {
+    if (!taskColumns.some((existing) => existing.name === column))
+      db.exec(
+        `ALTER TABLE tasks ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`
+      );
+  }
   const insertTask = db.prepare(
-    "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve, main_input_tokens, main_output_tokens, subagent_input_tokens, subagent_output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const updateTaskStmt = db.prepare(
     "UPDATE tasks SET title = ?, workspace_path = ?, provider_profile_id = ?, model = ?, status = ?, approval_mode = ?, workspace_mode = ?, workspace_origin_path = ?, archived_at = ?, updated_at = ?, pinned = ?, last_used_at = ?, project_id = ?, auto_approve = ? WHERE id = ?"
@@ -496,6 +523,11 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       autoApprove: row.auto_approve === 1,
       pinned: row.pinned === 1,
       lastUsedAt: row.last_used_at ?? row.created_at,
+      // 任务用量四列（ADR 0029）：迁移后 NOT NULL DEFAULT 0，读回恒有值
+      mainInputTokens: row.main_input_tokens ?? 0,
+      mainOutputTokens: row.main_output_tokens ?? 0,
+      subagentInputTokens: row.subagent_input_tokens ?? 0,
+      subagentOutputTokens: row.subagent_output_tokens ?? 0,
     };
   }
 
@@ -648,7 +680,11 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         record.creationRequestId ?? null,
         record.pinned ? 1 : 0,
         record.lastUsedAt ?? record.createdAt,
-        record.autoApprove ? 1 : 0
+        record.autoApprove ? 1 : 0,
+        record.mainInputTokens ?? 0,
+        record.mainOutputTokens ?? 0,
+        record.subagentInputTokens ?? 0,
+        record.subagentOutputTokens ?? 0
       );
     },
     removeUnstartedTask(id) {
@@ -679,6 +715,32 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         next.lastUsedAt ?? next.createdAt,
         next.projectId ?? null,
         next.autoApprove ? 1 : 0,
+        id
+      );
+    },
+
+    addTaskUsage(id, delta) {
+      // 只增不减的原子累加（单条 UPDATE 即单事务）；未报的字段（中断/失败）跳过
+      const columns: string[] = [];
+      const values: number[] = [];
+      const fields: [keyof TaskUsageDelta, string][] = [
+        ["mainInputTokens", "main_input_tokens"],
+        ["mainOutputTokens", "main_output_tokens"],
+        ["subagentInputTokens", "subagent_input_tokens"],
+        ["subagentOutputTokens", "subagent_output_tokens"],
+      ];
+      for (const [field, column] of fields) {
+        const amount = delta[field];
+        if (amount !== undefined && amount > 0) {
+          columns.push(`${column} = ${column} + ?`);
+          values.push(amount);
+        }
+      }
+      if (columns.length === 0) {
+        return;
+      }
+      db.prepare(`UPDATE tasks SET ${columns.join(", ")} WHERE id = ?`).run(
+        ...values,
         id
       );
     },

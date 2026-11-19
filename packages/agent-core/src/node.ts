@@ -109,3 +109,5 @@ export type {
 } from "./worktree/worktree-service";
 // commit 消息生成（一次不发工具的 LLM 请求；mock 依赖注入，可脱离 Electron 测试）
 export { generateCommitMessage } from "./git/commit-message";
+// 任务用量尽力而为入账（ADR 0029）：宿主为任务域辅助调用补记真实 usage
+export { settleTaskUsage } from "./task/usage";

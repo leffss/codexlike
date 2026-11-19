@@ -40,21 +40,22 @@ function taskRecord(workspacePath: string): TaskRecord {
   };
 }
 
-function usage() {
+function usage(input = 1, output = 2) {
   return {
     inputTokens: {
-      total: 1,
+      total: input,
       noCache: undefined,
       cacheRead: undefined,
       cacheWrite: undefined,
     },
-    outputTokens: { total: 2, text: undefined, reasoning: undefined },
+    outputTokens: { total: output, text: undefined, reasoning: undefined },
   };
 }
 
 /** 工具调用轮流式（finishReason 为 tool-calls，工具由任务循环执行后回填） */
 function toolCallRound(
-  toolCalls: { toolCallId: string; toolName: string; input: unknown }[]
+  toolCalls: { toolCallId: string; toolName: string; input: unknown }[],
+  tokens = usage()
 ) {
   const stream = new ReadableStream<LanguageModelV4StreamPart>({
     start(controller) {
@@ -68,7 +69,7 @@ function toolCallRound(
       }
       controller.enqueue({
         type: "finish",
-        usage: usage(),
+        usage: tokens,
         finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
       });
       controller.close();
@@ -79,7 +80,8 @@ function toolCallRound(
 
 /** 文本轮流式（ai v7：text-start/delta/end 包裹） */
 function textRound(
-  deltas: string[]
+  deltas: string[],
+  tokens = usage()
 ): ReadableStream<LanguageModelV4StreamPart> {
   return new ReadableStream({
     start(controller) {
@@ -90,7 +92,7 @@ function textRound(
       controller.enqueue({ type: "text-end", id: "text-1" });
       controller.enqueue({
         type: "finish",
-        usage: usage(),
+        usage: tokens,
         finishReason: { unified: "stop" as const, raw: "stop" },
       });
       controller.close();
@@ -167,6 +169,50 @@ function capErrorsOf(events: TaskEvent[]) {
 }
 
 describe("AgentTask 工具轮次上限（执行设置 resolver 注入）", () => {
+  it("任务用量（ADR 0029）：一条消息内多轮 streamText 的真实 usage 逐次入账求和，落库主任务用量列", async () => {
+    // 2 工具轮 + 1 收尾轮 = 一次 sendMessage 内 3 次 streamText，usage 各异
+    const responses = [
+      toolCallRound(
+        [
+          {
+            toolCallId: "usage-1",
+            toolName: "update_plan",
+            input: { steps: [{ content: "步骤一", status: "completed" }] },
+          },
+        ],
+        usage(10, 20)
+      ),
+      toolCallRound(
+        [
+          {
+            toolCallId: "usage-2",
+            toolName: "update_plan",
+            input: { steps: [{ content: "步骤二", status: "completed" }] },
+          },
+        ],
+        usage(30, 40)
+      ),
+      { stream: textRound(["收尾"], usage(5, 7)) },
+    ];
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => responses[Math.min(call++, responses.length - 1)]!,
+    });
+    const { task, persistence } = makeTask(model);
+
+    const events = await collect(task.sendMessage({ text: "跑两轮", profile }));
+    expect(events.filter((event) => event.type === "tool-result")).toHaveLength(
+      2
+    );
+
+    const stored = persistence.listTasks()[0];
+    expect(stored?.mainInputTokens).toBe(45);
+    expect(stored?.mainOutputTokens).toBe(67);
+    // 子代理列不受主任务入账影响
+    expect(stored?.subagentInputTokens ?? 0).toBe(0);
+    persistence.close();
+  });
+
   it("注入低值上限：满注入值轮后停止剩余调用，error 提示携带注入值", async () => {
     const model = loopingModel({
       remainingToolRounds: Number.POSITIVE_INFINITY,

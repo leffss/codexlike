@@ -27,6 +27,7 @@ import type {
   ProjectRecord,
   SubagentSnapshot,
   TaskRecord,
+  TaskUsageDelta,
   StoredMessage,
   TranscriptItem,
 } from "./types";
@@ -131,6 +132,11 @@ export interface TaskManager {
   search(query: string, includeArchived?: boolean): TaskSearchResult[];
   /** 指定任务的消息历史（读持久层，不实例化任务对象） */
   messages(taskId: string): StoredMessage[];
+  /**
+   * 任务用量入账（GLOSSARY「任务用量」，ADR 0029）：宿主为任务域辅助调用
+   * （如 commit 消息生成）补记真实 usage；不存在任务静默忽略（与持久层同语义）。
+   */
+  addUsage(taskId: string, delta: TaskUsageDelta): void;
   /**
    * 补记一条已发送未回复的用户消息（任务并发上限 review 修复 / ADR 0022
    * 「中断排队出队回空闲，已发消息保留」）：排队首条被中断出队时由宿主
@@ -400,6 +406,10 @@ export function createTaskManager(
 
     messages(taskId) {
       return persistence.listMessages(taskId);
+    },
+
+    addUsage(taskId, delta) {
+      persistence.addTaskUsage(taskId, delta);
     },
 
     appendUserMessage(taskId, message) {

@@ -29,6 +29,10 @@ function taskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
     workspaceOriginPath: null,
     approvalMode: "assist",
     autoApprove: false,
+    mainInputTokens: 0,
+    mainOutputTokens: 0,
+    subagentInputTokens: 0,
+    subagentOutputTokens: 0,
     archivedAt: null,
     pinned: false,
     lastUsedAt: overrides.createdAt ?? "2026-11-10T08:00:00.000Z",
@@ -103,6 +107,44 @@ describe("createSqliteTaskStore（SQLite 任务持久化）", () => {
     expect(reopened.listTasks().find((s) => s.id === "new")?.autoApprove).toBe(
       false
     );
+    reopened.close();
+  });
+  it("任务用量四列默认 0，addTaskUsage 累加且主/子代理分列，跨重启保留（ADR 0029）", () => {
+    const path = tempDbPath();
+    // 旧库：tasks 表没有用量列，打开即迁移补列（默认 0）
+    const raw = new DatabaseSync(path);
+    raw.exec(
+      `CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`
+    );
+    raw.close();
+    const store = createSqliteTaskStore(path);
+    store.insertTask(taskRecord());
+    const initial = store.listTasks()[0];
+    expect(initial?.mainInputTokens).toBe(0);
+    expect(initial?.mainOutputTokens).toBe(0);
+    expect(initial?.subagentInputTokens).toBe(0);
+    expect(initial?.subagentOutputTokens).toBe(0);
+    store.addTaskUsage("task-1", {
+      mainInputTokens: 120,
+      mainOutputTokens: 30,
+    });
+    store.addTaskUsage("task-1", {
+      mainInputTokens: 80,
+      subagentInputTokens: 500,
+      subagentOutputTokens: 90,
+    });
+    const accumulated = store.listTasks()[0];
+    expect(accumulated?.mainInputTokens).toBe(200);
+    expect(accumulated?.mainOutputTokens).toBe(30);
+    expect(accumulated?.subagentInputTokens).toBe(500);
+    expect(accumulated?.subagentOutputTokens).toBe(90);
+    // updateTask 全行重写不碰用量列（只增不减）
+    store.updateTask("task-1", { title: "改名" });
+    expect(store.listTasks()[0]?.mainInputTokens).toBe(200);
+    store.close();
+    const reopened = createSqliteTaskStore(path);
+    expect(reopened.listTasks()[0]?.mainInputTokens).toBe(200);
+    expect(reopened.listTasks()[0]?.subagentOutputTokens).toBe(90);
     reopened.close();
   });
   it("插入的任务与消息可原样读回（内存库）", () => {
