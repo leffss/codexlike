@@ -77,7 +77,7 @@ export function TaskSearch(props: {
         aria-label={open ? "关闭搜索" : "搜索任务"}
         aria-expanded={open}
         title="搜索任务"
-        className="rounded px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
+        className="rounded-md px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
         onClick={() => setOpen((value) => !value)}
       >
         {/* 放大镜 */}

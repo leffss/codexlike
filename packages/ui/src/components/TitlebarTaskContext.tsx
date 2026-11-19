@@ -149,7 +149,7 @@ function WorkspaceBadge(props: {
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={onToggle}
-        className="flex shrink-0 items-center gap-1 rounded border border-line bg-surface px-2 py-0.5 text-xs text-fg-muted hover:border-accent hover:text-accent"
+        className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg"
       >
         <span className="max-w-40 truncate">
           {task.projectName ?? "独立任务"}
@@ -401,7 +401,7 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
         title={disabled ? "未选择工作区" : "用默认程序打开工作区"}
         aria-label="打开工作区"
         onClick={() => void openMain()}
-        className="rounded-l border border-r-0 border-line bg-surface px-2 py-0.5 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50 disabled:hover:border-line disabled:hover:text-fg-muted"
+        className="rounded-l-md border border-r-0 border-transparent px-2 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
       >
         {/* 主按钮图标跟随当前默认（用户定稿）；未拉到列表前回退资源管理器 */}
         {openerIcon(defaultId ?? "explorer")}
@@ -414,7 +414,7 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
         aria-haspopup="menu"
         title={disabled ? "未选择工作区" : "选择打开工作区的程序"}
         onClick={() => void toggleMenu()}
-        className="rounded-r border border-line bg-surface px-1 py-0.5 text-xs text-fg-muted hover:border-accent hover:text-accent disabled:opacity-50 disabled:hover:border-line disabled:hover:text-fg-muted"
+        className="rounded-r-md border border-transparent px-1 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
       >
         <svg
           width="10"
@@ -535,9 +535,10 @@ export function TitlebarResourceToggle(props: { panels: TitlebarPanels }) {
       aria-label={showBadge ? `右栏开关，${badgeText} 个文件改动` : "右栏开关"}
       title={panels.open ? "收起右栏" : "展开右栏"}
       onClick={panels.onToggle}
-      className={`relative shrink-0 rounded border px-2 py-1.5 disabled:opacity-50 ${
+      className={`relative shrink-0 rounded-md border px-2 py-1.5 disabled:opacity-50 ${
         panels.open
-          ? "border-accent text-accent"
+          ? /* 展开态持久高亮 = 暖灰底 + 字重（D 语言激活语汇，非彩色描边） */
+            "border-transparent bg-surface-muted font-semibold text-fg"
           : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
       }`}
     >

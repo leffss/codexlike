@@ -30,7 +30,8 @@ export function TaskActivityBadge({
               ? "完成未查看"
               : null;
   if (!label) return null;
-  // 运行中统一用 accent 蓝：与消息流 generating-spinner 同色（转圈图标全局一致）
+  // 运行中统一用 accent 主张色（D 语言 accent=黑/白主张）：与消息流
+  // generating-spinner 同源 var(--accent)（转圈图标全局一致）
   const tone = waiting
     ? "bg-warn-bg text-warn-fg"
     : activity?.outcome === "failed"
