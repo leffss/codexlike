@@ -24,6 +24,10 @@ const SIDEBAR_MIN_WIDTH = 240;
 const STREAM_MIN_WIDTH = 480;
 const SIDEBAR_DEFAULT_WIDTH = 320;
 
+/** 组内活跃任务默认直显条数：超过折叠为「更多（N）」再点击展开
+ *  （与队列条 QueueBar PREVIEW_LIMIT=5 同口径，独立常量不耦合） */
+const ACTIVE_PREVIEW_LIMIT = 5;
+
 /**
  * 宽度夹取（拖拽与方向键共用）：左栏最小宽 SIDEBAR_MIN_WIDTH、上限 max
  * （= 当前侧栏宽 + 正文列富余）；上限优先于最小宽（正文 STREAM_MIN_WIDTH
@@ -160,6 +164,10 @@ export function TaskSidebar(props: {
 }) {
   const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  // 「更多」展开的组（按 group.key 记忆，会话内 state，同 expandedArchived）
+  const [expandedActive, setExpandedActive] = useState<ReadonlySet<string>>(
     () => new Set()
   );
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -527,6 +535,18 @@ export function TaskSidebar(props: {
       expandedArchived.has(group.key) ||
       (containsCurrent &&
         group.archived.some((task) => task.id === props.currentId));
+    // 组内活跃任务超过预览限额时默认截断，「更多」展开；当前任务被
+    // 截断时自动展开（与归档子折叠同口径：折叠不隐藏当前查看）。
+    const currentActiveIndex =
+      props.currentId === null
+        ? -1
+        : group.active.findIndex((task) => task.id === props.currentId);
+    const activeOpen =
+      expandedActive.has(group.key) ||
+      currentActiveIndex >= ACTIVE_PREVIEW_LIMIT;
+    const visibleActive = activeOpen
+      ? group.active
+      : group.active.slice(0, ACTIVE_PREVIEW_LIMIT);
 
     return (
       <li key={group.key} className="mt-4 first:mt-2">
@@ -658,7 +678,21 @@ export function TaskSidebar(props: {
             与项目名文字对齐（sidebar-archive e2e assertProjectHierarchy） */}
         {expanded && (
           <div data-testid="group-tasks" className="ml-5">
-            <ul>{group.active.map((task) => renderTaskItem(task))}</ul>
+            <ul>{visibleActive.map((task) => renderTaskItem(task))}</ul>
+            {group.active.length > ACTIVE_PREVIEW_LIMIT && (
+              <button
+                type="button"
+                data-testid="toggle-more-tasks"
+                className="w-full rounded px-2 py-1 text-left text-[11px] text-fg-subtle hover:text-fg-muted"
+                onClick={() =>
+                  setExpandedActive((prev) => toggleKey(prev, group.key))
+                }
+              >
+                {activeOpen
+                  ? "收起"
+                  : `更多（${group.active.length - ACTIVE_PREVIEW_LIMIT}）`}
+              </button>
+            )}
             {group.archived.length > 0 && (
               <div>
                 <button

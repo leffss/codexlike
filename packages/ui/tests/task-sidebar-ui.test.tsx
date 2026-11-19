@@ -722,3 +722,102 @@ it("置顶图标列在任务标题之前（2026-11-19 前置）：pin-button 先
   expect(pinIndex).toBeGreaterThan(-1);
   expect(pinIndex).toBeLessThan(selectIndex);
 });
+
+/** 组内活跃任务预览限额测试数据：n 越小越新（lastUsedAt 递减，顺序稳定） */
+function stackedTasks(count: number, projectId: string | null = null) {
+  return Array.from({ length: count }, (_, index) => {
+    const n = index + 1;
+    return task({
+      id: `t${n}`,
+      projectId,
+      title: `堆叠任务${n}`,
+      lastUsedAt: `2026-11-13T10:0${count - n}:00Z`,
+    });
+  });
+}
+
+describe("组内活跃任务默认 5 条，「更多」展开（预览限额与队列条同口径）", () => {
+  it("默认仅渲染前 5 条并带「更多（N）」；恰好 5 条时无按钮", () => {
+    const html = renderToStaticMarkup(
+      createElement(TaskSidebar, sidebarProps({ tasks: stackedTasks(7) }))
+    );
+    const rows = html.match(/data-testid="task-row" data-task-id="t\d"/g) ?? [];
+    expect(rows).toHaveLength(5);
+    expect(html).not.toContain('data-task-id="t6"');
+    expect(html).not.toContain('data-task-id="t7"');
+    const more = elementByTestId(html, "toggle-more-tasks");
+    expect(textContent(more.content)).toBe("更多（2）");
+    // 恰好 5 条：全量渲染、无展开入口
+    const fiveHtml = renderToStaticMarkup(
+      createElement(TaskSidebar, sidebarProps({ tasks: stackedTasks(5) }))
+    );
+    expect(
+      (fiveHtml.match(/data-testid="task-row" data-task-id="t\d"/g) ?? [])
+        .length
+    ).toBe(5);
+    expect(fiveHtml).not.toContain('data-testid="toggle-more-tasks"');
+  });
+
+  it("点击「更多」展开全部并变「收起」，再点回到前 5 条", () => {
+    render(
+      createElement(TaskSidebar, sidebarProps({ tasks: stackedTasks(7) }))
+    );
+    const rows = () => screen.getAllByTestId("task-row");
+    expect(rows()).toHaveLength(5);
+    fireEvent.click(screen.getByTestId("toggle-more-tasks"));
+    expect(rows()).toHaveLength(7);
+    expect(screen.getByTestId("toggle-more-tasks").textContent).toBe("收起");
+    fireEvent.click(screen.getByTestId("toggle-more-tasks"));
+    expect(rows()).toHaveLength(5);
+    expect(screen.getByTestId("toggle-more-tasks").textContent).toBe(
+      "更多（2）"
+    );
+  });
+
+  it("当前任务被截断时自动展开全量（与归档子折叠同口径：折叠不隐藏当前查看）", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        TaskSidebar,
+        sidebarProps({ tasks: stackedTasks(7), currentId: "t7" })
+      )
+    );
+    expect(
+      (html.match(/data-testid="task-row" data-task-id="t\d"/g) ?? []).length
+    ).toBe(7);
+    expect(html).toContain('data-task-id="t7"');
+  });
+
+  it("项目组与独立组各自计限额：各渲染前 5 条、各带独立「更多」", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        TaskSidebar,
+        sidebarProps({
+          projects: [
+            {
+              id: "p1",
+              name: "堆叠项目",
+              workspacePath: "/work",
+              createdAt: "2026-11-12",
+            },
+          ],
+          tasks: [
+            ...stackedTasks(6, "p1"),
+            ...stackedTasks(6).map((item, index) => ({
+              ...item,
+              id: `s${index + 1}`,
+            })),
+          ],
+        })
+      )
+    );
+    expect(
+      (html.match(/data-testid="task-row" data-task-id="t\d"/g) ?? []).length
+    ).toBe(5);
+    expect(
+      (html.match(/data-testid="task-row" data-task-id="s\d"/g) ?? []).length
+    ).toBe(5);
+    expect((html.match(/data-testid="toggle-more-tasks"/g) ?? []).length).toBe(
+      2
+    );
+  });
+});
