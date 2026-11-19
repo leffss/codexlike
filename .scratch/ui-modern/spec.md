@@ -118,3 +118,5 @@ ADR: 0028（设计语言定案）· 原型分支 `prototype/ui-modern`（primary
 - 已知工具链怪癖：@tailwindcss/vite dev 扫描器不提取 `1.5px+color-mix` 组合的 arbitrary shadow 候选（build 正常）——已用 @utility 语义类绕开并沉淀教训（票 08 Comments 1）；后续新工具类若含同类组合，直接走 @utility。
 
 **验证基线（最终态）**：三包单测 587/507+1skip/591 全绿；`test:e2e:all` 40 场景全量绿；theme.mjs 一处旧语汇断言镜像同步（票 03 去边框的连带，意图不变）；双主题 11 面走查截图存 `.scratch/ui-modern/screenshots/08/`（各票分目录另有 01-07 走查留证）。票 01-08 全部关单；`prototype/ui-modern` 原型分支保留存档。
+
+**2026-11-19 code-review 补记（className 镜像断言偏差落档）**：Spec 审查指出新增 `popover-family-ui.test.tsx` 与 `settings-d-language.test.tsx` 共 136 处 className 镜像断言，与「好测试标准：不断言 className」存在张力；裁定：保留——它们是设计语言语汇的回归锁（防止旧语汇悄悄回流），沿用仓库既有 `*-ui.test.tsx` prior art（02/04 票同型），记为已知偏差而非规范。

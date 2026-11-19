@@ -296,7 +296,7 @@ function StartComposer(props: NewTaskStartProps) {
     // 与更大内距（原型定案 14px 16px 16px）。
     <form
       data-testid="new-task-composer"
-      className="rounded-xl bg-surface-muted px-4 pt-3.5 pb-4 transition-shadow duration-150 ease-out focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--fg)_32%,transparent),0_0_0_5px_color-mix(in_oklab,var(--fg)_5%,transparent)]"
+      className="rounded-xl bg-surface-muted px-4 pt-3.5 pb-4 transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
       onSubmit={(event) => {
         event.preventDefault();
         submit();

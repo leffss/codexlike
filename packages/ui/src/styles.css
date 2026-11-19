@@ -15,6 +15,20 @@
   box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--fg) 45%, transparent);
 }
 
+/* 三壳聚焦描边+外晕（与 input-focus-ring 对仗，ADR 0028）：「壳聚焦 =
+ * --fg 32% 1px 描边 + 5% 5px 外晕」双层 color-mix，供任务态 composer
+ * 输入卡（MessageComposer composer-card）、交互面板（InteractionPanel）
+ * 与起点输入卡（NewTaskStart new-task-composer）三壳统一以
+ * focus-within:composer-focus-ring 消费。注册为 utility 而非任意值类：
+ * 与 input-focus-ring 同机制——@tailwindcss/vite dev 扫描器不提取
+ * color-mix 形态的任意值候选（build 正常、dev 漏），语义类双通道稳定，
+ * 亦免三处 96 字符任意值串逐字重复。 */
+@utility composer-focus-ring {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--fg) 32%, transparent),
+    0 0 0 5px color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
 /* 主题块用纯属性选择器（与 dark 块对称）：Tailwind v4 构建会吞掉 :root 前缀的自定义属性块 */
 /*
  * 语义 token 值系 D「留白呼吸」设计语言定案（ADR 0028，原型
