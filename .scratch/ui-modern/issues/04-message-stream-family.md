@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-human
+**Status:** ready-for-agent
 
 - [x] 消息段间距/行距按定案值放宽；用户消息右对齐暖灰块
 - [x] 工具卡（含连发分组、状态/耗时/参数输出）暖灰块化，展开/折叠行为与折叠记忆不变
