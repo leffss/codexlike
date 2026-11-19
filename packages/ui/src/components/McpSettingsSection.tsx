@@ -371,7 +371,7 @@ export function McpSettingsSection() {
               名称（决定工具前缀 mcp_名称_工具）
               <input
                 data-testid="mcp-form-name"
-                className="rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+                className="rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
                 placeholder="如 filesystem"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -381,7 +381,7 @@ export function McpSettingsSection() {
               启动命令（可执行文件）
               <input
                 data-testid="mcp-form-command"
-                className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+                className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
                 placeholder="如 node 或 npx"
                 value={form.command}
                 onChange={(e) => setForm({ ...form, command: e.target.value })}
@@ -393,7 +393,7 @@ export function McpSettingsSection() {
             <textarea
               data-testid="mcp-form-args"
               rows={2}
-              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               placeholder={"server.js\n--stdio"}
               value={form.argsText}
               onChange={(e) => setForm({ ...form, argsText: e.target.value })}
@@ -404,7 +404,7 @@ export function McpSettingsSection() {
             <textarea
               data-testid="mcp-form-env"
               rows={2}
-              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               placeholder={"API_TOKEN=xxx\nDEBUG=1"}
               value={form.envText}
               onChange={(e) => setForm({ ...form, envText: e.target.value })}
@@ -471,7 +471,7 @@ export function McpTimeoutSettingsBody(props: {
           max={300}
           step={1}
           data-testid="mcp-call-timeout-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.callTimeout}
           onChange={(e) => props.onCallInput(e.target.value)}
         />
@@ -489,7 +489,7 @@ export function McpTimeoutSettingsBody(props: {
           max={120}
           step={1}
           data-testid="mcp-connect-timeout-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.connectTimeout}
           onChange={(e) => props.onConnectInput(e.target.value)}
         />

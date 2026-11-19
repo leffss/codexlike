@@ -120,7 +120,7 @@ export function TaskSearch(props: {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="输入标题或消息正文"
-                className="mt-2 block w-full rounded-md border border-transparent bg-surface-muted px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+                className="mt-2 block w-full rounded-md bg-surface-muted px-2 py-1.5 text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               />
             </label>
             <div className="mt-2 flex items-center justify-between text-xs text-fg-muted">

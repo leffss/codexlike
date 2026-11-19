@@ -390,7 +390,7 @@ export function ExecutionSettingsBody(props: {
           max={1000}
           step={1}
           data-testid="execution-tool-rounds-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.maxToolRounds}
           onChange={(e) => props.onInput(e.target.value)}
         />
@@ -408,7 +408,7 @@ export function ExecutionSettingsBody(props: {
           max={1000}
           step={1}
           data-testid="execution-subagent-tool-rounds-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.maxSubagentToolRounds}
           onChange={(e) => props.onSubagentInput(e.target.value)}
         />
@@ -426,7 +426,7 @@ export function ExecutionSettingsBody(props: {
           max={10}
           step={1}
           data-testid="execution-compact-keep-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.compactKeepRounds}
           onChange={(e) => props.onCompactKeepInput(e.target.value)}
         />
@@ -444,7 +444,7 @@ export function ExecutionSettingsBody(props: {
           max={95}
           step={1}
           data-testid="execution-context-warning-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.contextWarningThresholdPercent}
           onChange={(e) => props.onContextWarningInput(e.target.value)}
         />
@@ -462,7 +462,7 @@ export function ExecutionSettingsBody(props: {
           max={8}
           step={1}
           data-testid="execution-task-concurrency-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.taskConcurrencyLimit}
           onChange={(e) => props.onTaskConcurrencyInput(e.target.value)}
         />
@@ -480,7 +480,7 @@ export function ExecutionSettingsBody(props: {
           max={10}
           step={1}
           data-testid="execution-model-retries-input"
-          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.modelMaxRetries}
           onChange={(e) => props.onModelRetriesInput(e.target.value)}
         />
@@ -771,7 +771,7 @@ function TerminalSettingsSection() {
             Shell
             <select
               data-testid="terminal-shell-select"
-              className="w-48 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="w-48 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               value={shell}
               onChange={(e) => setShell(e.target.value as typeof shell)}
             >
@@ -789,7 +789,7 @@ function TerminalSettingsSection() {
               max={600}
               step={1}
               data-testid="terminal-command-timeout-input"
-              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               value={commandTimeout}
               onChange={(e) => setCommandTimeout(e.target.value)}
             />
@@ -803,7 +803,7 @@ function TerminalSettingsSection() {
               max={1800}
               step={1}
               data-testid="terminal-max-command-timeout-input"
-              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               value={maxCommandTimeout}
               onChange={(e) => setMaxCommandTimeout(e.target.value)}
             />
@@ -962,7 +962,7 @@ function SubagentSettingsSection() {
             子代理模型
             <select
               data-testid="subagent-profile-select"
-              className="w-80 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="w-80 rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               value={modelValue}
               onChange={(e) => setModelValue(e.target.value)}
             >
@@ -993,7 +993,7 @@ function SubagentSettingsSection() {
               max={8}
               step={1}
               data-testid="subagent-concurrency-input"
-              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
             />
@@ -1120,7 +1120,7 @@ function SearchSettingsSection() {
             <input
               type="password"
               data-testid="search-api-key-input"
-              className="min-w-0 flex-1 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none focus:ring-[1.5px] focus:ring-fg/50"
+              className="min-w-0 flex-1 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               placeholder="Tavily API key（tvly-…）"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}

@@ -4,7 +4,7 @@
 
 **Blocked by:** None（can start immediately）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] styles.css 浅色块全部 token 换为原型 variant-d 值（暖白/暖灰/黑主张 accent/暖色状态系，见 notes.md「设计语言定案值」；原型源 `prototype/ui-modern` 分支 `variant-d.css`，剥作用域翻译）
 - [x] 深色块按 D 暖灰逻辑全新设计（深暖灰底、同纪律层次），Monaco `--hl-*`/`vs-dark` 与 highlight.js 色可读性过关

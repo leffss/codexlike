@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] model-thinking-popover 白卡化；portal 弹层从 html 继承 token（基座票已保证），几何锁定（use-stable-popover）行为不变
 - [x] 右键菜单/composer 菜单/任务搜索浮层白卡统一；选中/hover 态暖灰

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01（token 基座）
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 标题栏（window-titlebar）融入画布：去底边框，任务上下文行/主题切换/设置/窗口控制统一浅淡样式
 - [x] 侧栏透明底：任务行 hover 暖灰圆角底、选中态暖灰底+字重，重命名输入白底深描边

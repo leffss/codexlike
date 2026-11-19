@@ -5,6 +5,16 @@
  * shadow-popover / shadow-modal / shadow-toast / shadow-floating。 */
 @source inline("shadow-popover shadow-modal shadow-toast shadow-floating");
 
+/* 单输入聚焦描边（票 08 统一聚焦语汇）：「聚焦 = --fg 45% 1.5px 描边淡入」，
+ * 与三壳 focus-within 描边（--fg 32% 1px + 5% 外晕）同机制同一 color-mix
+ * 家族（ADR 0028）。注册为 utility 而非 arbitrary 类：@tailwindcss/vite dev
+ * 扫描器不提取 1.5px+color-mix 的任意值候选（build 正常、dev 漏），语义类
+ * 双通道稳定；组件（GitActions/TaskSearch/设置页表单/InteractionPanel
+ * 自定义输入）统一以 focus:input-focus-ring 消费，禁再用 border/ring 聚焦。 */
+@utility input-focus-ring {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--fg) 45%, transparent);
+}
+
 /* 主题块用纯属性选择器（与 dark 块对称）：Tailwind v4 构建会吞掉 :root 前缀的自定义属性块 */
 /*
  * 语义 token 值系 D「留白呼吸」设计语言定案（ADR 0028，原型

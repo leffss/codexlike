@@ -198,7 +198,7 @@ export function ProviderProfileForm(props: {
               className={`rounded-md bg-surface px-3 py-2 text-fg placeholder:text-fg-subtle ${
                 errors.models !== undefined
                   ? "ring-1 ring-danger-fg"
-                  : "focus:ring-[1.5px] focus:ring-fg/50"
+                  : "transition-shadow duration-150 ease-out focus:input-focus-ring"
               } outline-none`}
             />
           </div>
@@ -258,7 +258,7 @@ function Field(props: {
         className={`rounded-md bg-surface px-3 py-2 text-fg placeholder:text-fg-subtle ${
           props.error !== undefined
             ? "ring-1 ring-danger-fg"
-            : "focus:ring-[1.5px] focus:ring-fg/50"
+            : "transition-shadow duration-150 ease-out focus:input-focus-ring"
         } outline-none`}
       />
       {props.error !== undefined && (
