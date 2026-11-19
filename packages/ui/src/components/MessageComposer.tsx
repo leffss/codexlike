@@ -211,10 +211,12 @@ export function MessageComposer(props: {
         onReorder={props.onQueueReorder}
         onCancelEdit={props.onQueueCancelEdit}
       />
-      {/* 卡片式 composer：上行输入、下行工具栏（参考稿同构） */}
+      {/* 输入卡（ADR 0028 D 语言）：无边框暖灰块（surface-muted）+ 10px 圆角，
+          聚焦时深色细描边与极淡外晕经 box-shadow 淡入（描边色取 --fg 低透明，
+          浅色黑主张 / 深色亮主张随 token 自适应） */}
       <form
         data-testid="composer-card"
-        className="rounded-2xl border border-line bg-surface shadow-lg transition-colors focus-within:border-fg-muted"
+        className="rounded-[10px] bg-surface-muted transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -248,14 +250,14 @@ export function MessageComposer(props: {
             onKeyDown={onKeyDown}
             placeholder={props.hint}
             rows={2}
-            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+            className="max-h-64 min-h-11 w-full resize-none bg-transparent px-4 pt-3 pb-1.5 text-sm leading-[1.7] text-fg placeholder:text-fg-subtle focus:outline-none"
           />
         </div>
         {/* 底部工具栏：左审批模式，右模型 → 思考档位 → 技能 → 动作按钮。
               内容列 <560px（窗口收窄或右栏挤压）时降级为两行流式：审批整行
               左对齐、其余从左换行——两端分布在放不下时会把两行错开成斜的
               （审批独占一行、右组右对齐起点更靠右），流式才整齐。 */}
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-2.5 @min-[560px]:justify-between">
+        <div className="flex flex-wrap items-center gap-2 px-2.5 pb-2.5 @min-[560px]:justify-between">
           <div className="flex w-full min-w-0 items-center gap-2 @min-[560px]:w-auto">
             <ComposerSelect
               testId="approval-mode-select"

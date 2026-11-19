@@ -196,7 +196,8 @@ export function WorkPlanCard(props: {
   return (
     <div
       data-testid="plan-card"
-      className="overflow-hidden rounded-xl border border-line bg-surface shadow-sm"
+      // D 设计语言：暖灰圆角块（10px、无边框无阴影），与输入卡同族形态
+      className="overflow-hidden rounded-[10px] bg-surface-muted"
     >
       <button
         type="button"

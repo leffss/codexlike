@@ -187,7 +187,7 @@ export function McpSettingsSection() {
             type="button"
             data-testid="mcp-add-server"
             disabled={servers === null}
-            className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+            className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
             onClick={() => {
               setShowForm(true);
               setForm(EMPTY_FORM);
@@ -211,7 +211,7 @@ export function McpSettingsSection() {
                 type="button"
                 data-testid="mcp-timeout-settings-retry"
                 onClick={() => void refreshTimeouts()}
-                className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+                className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               >
                 重试
               </button>
@@ -250,7 +250,7 @@ export function McpSettingsSection() {
             type="button"
             data-testid="mcp-settings-retry"
             onClick={() => void refresh()}
-            className="mt-2 rounded border border-line px-3 py-1 hover:bg-hover"
+            className="mt-2 rounded-md px-3 py-1 text-sm text-fg-muted hover:bg-hover hover:text-fg"
           >
             重试
           </button>
@@ -269,7 +269,7 @@ export function McpSettingsSection() {
               key={view.config.id}
               data-testid="mcp-server-item"
               data-server-name={view.config.name}
-              className="flex flex-col gap-2 rounded-lg border border-line bg-surface px-4 py-3"
+              className="flex flex-col gap-2 rounded-lg bg-surface-muted px-4 py-3"
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -291,7 +291,7 @@ export function McpSettingsSection() {
                     type="button"
                     data-testid="mcp-reconnect"
                     disabled={busy}
-                    className="rounded px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+                    className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
                     onClick={() => void reconnect(view)}
                   >
                     重连
@@ -299,7 +299,7 @@ export function McpSettingsSection() {
                   <button
                     type="button"
                     data-testid="mcp-remove"
-                    className="rounded px-2 py-1 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
+                    className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-danger-bg hover:text-danger-fg"
                     onClick={() => void removeServer(view)}
                   >
                     删除
@@ -308,7 +308,7 @@ export function McpSettingsSection() {
               </div>
 
               {view.error !== null && view.status !== "connected" && (
-                <p className="rounded border border-danger-fg/30 bg-danger-bg px-2 py-1.5 text-xs text-danger-fg">
+                <p className="rounded-md bg-danger-bg px-2 py-1.5 text-xs text-danger-fg">
                   {view.error}
                 </p>
               )}
@@ -318,10 +318,10 @@ export function McpSettingsSection() {
                   {view.tools.map((tool) => (
                     <li
                       key={tool.name}
-                      className="flex items-center justify-between gap-2 rounded bg-code-bg px-2 py-1.5"
+                      className="flex items-center justify-between gap-2 rounded-md bg-surface px-2.5 py-1.5"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-mono text-xs text-accent">
+                        <p className="truncate font-mono text-xs text-fg">
                           {tool.name}
                         </p>
                         <p className="truncate text-xs text-fg-muted">
@@ -331,6 +331,7 @@ export function McpSettingsSection() {
                       <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-fg-muted">
                         <input
                           type="checkbox"
+                          className="accent-accent"
                           data-testid={`mcp-tool-toggle-${tool.name}`}
                           checked={tool.enabled}
                           onChange={(e) =>
@@ -355,7 +356,7 @@ export function McpSettingsSection() {
       </ul>
 
       {servers !== null && servers.length === 0 && !showForm && (
-        <p className="rounded border border-dashed border-line px-4 py-6 text-center text-sm text-fg-subtle">
+        <p className="rounded-lg bg-surface-muted px-4 py-6 text-center text-sm text-fg-muted">
           还没有配置 MCP server，点击「添加 server」接入第三方工具生态
         </p>
       )}
@@ -363,14 +364,14 @@ export function McpSettingsSection() {
       {showForm && (
         <div
           data-testid="mcp-server-form"
-          className="flex flex-col gap-2 rounded-lg border border-line bg-surface px-4 py-3"
+          className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3"
         >
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-xs text-fg-muted">
               名称（决定工具前缀 mcp_名称_工具）
               <input
                 data-testid="mcp-form-name"
-                className="rounded border border-line bg-code-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
+                className="rounded-md bg-surface px-2.5 py-1.5 text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
                 placeholder="如 filesystem"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -380,7 +381,7 @@ export function McpSettingsSection() {
               启动命令（可执行文件）
               <input
                 data-testid="mcp-form-command"
-                className="rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+                className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
                 placeholder="如 node 或 npx"
                 value={form.command}
                 onChange={(e) => setForm({ ...form, command: e.target.value })}
@@ -392,7 +393,7 @@ export function McpSettingsSection() {
             <textarea
               data-testid="mcp-form-args"
               rows={2}
-              className="rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               placeholder={"server.js\n--stdio"}
               value={form.argsText}
               onChange={(e) => setForm({ ...form, argsText: e.target.value })}
@@ -403,7 +404,7 @@ export function McpSettingsSection() {
             <textarea
               data-testid="mcp-form-env"
               rows={2}
-              className="rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+              className="rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
               placeholder={"API_TOKEN=xxx\nDEBUG=1"}
               value={form.envText}
               onChange={(e) => setForm({ ...form, envText: e.target.value })}
@@ -415,7 +416,7 @@ export function McpSettingsSection() {
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover"
+              className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
               onClick={() => {
                 setShowForm(false);
                 setFormError("");
@@ -428,7 +429,7 @@ export function McpSettingsSection() {
               formNoValidate
               data-testid="mcp-form-submit"
               disabled={busy}
-              className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
               onClick={() => void addServer()}
             >
               {busy ? "连接中…" : "保存并连接"}
@@ -460,7 +461,7 @@ export function McpTimeoutSettingsBody(props: {
   return (
     <div
       data-testid="mcp-timeout-settings"
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+      className="flex flex-col gap-4 rounded-lg bg-surface-muted px-4 py-3"
     >
       <label className="flex flex-col gap-1 text-sm text-fg-muted">
         工具调用超时（5-300 秒）
@@ -470,7 +471,7 @@ export function McpTimeoutSettingsBody(props: {
           max={300}
           step={1}
           data-testid="mcp-call-timeout-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.callTimeout}
           onChange={(e) => props.onCallInput(e.target.value)}
         />
@@ -488,7 +489,7 @@ export function McpTimeoutSettingsBody(props: {
           max={120}
           step={1}
           data-testid="mcp-connect-timeout-input"
-          className="w-32 rounded border border-line bg-code-bg px-2 py-1.5 font-mono text-sm text-fg outline-none focus:border-accent"
+          className="w-32 rounded-md bg-surface px-2.5 py-1.5 font-mono text-sm text-fg outline-none transition-shadow duration-150 ease-out focus:input-focus-ring"
           value={props.connectTimeout}
           onChange={(e) => props.onConnectInput(e.target.value)}
         />
@@ -503,7 +504,7 @@ export function McpTimeoutSettingsBody(props: {
           type="button"
           data-testid="mcp-timeout-settings-save"
           disabled={props.saving}
-          className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm text-on-accent hover:bg-accent-hover disabled:opacity-50"
           onClick={props.onSave}
         >
           {props.saving ? "保存中…" : "保存"}

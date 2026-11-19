@@ -7,11 +7,12 @@ import type { ToastEntry } from "../lib/toast-state";
  * 外观只用现有语义 token（ADR 0006），light/dark 由变量整体翻转。
  */
 
-/** kind → 条目外观（边框/底色/文字），均来自语义 token */
+/** kind → 条目外观（底色/文字类别语义保留），均来自语义 token；
+ *  边框统一中性 hairline（D 语汇：类别色不再走描边，经底色与圆点保留可辨） */
 const KIND_CLASS: Record<ToastEntry["kind"], string> = {
-  warn: "border-warn-fg/40 bg-warn-bg text-warn-fg",
-  error: "border-danger-fg/40 bg-danger-bg text-danger-fg",
-  info: "border-line bg-surface text-fg-muted",
+  warn: "bg-warn-bg text-warn-fg",
+  error: "bg-danger-bg text-danger-fg",
+  info: "bg-surface text-fg-muted",
 };
 
 /** kind → 状态圆点（原型：实心小圆点标识类别） */
@@ -39,7 +40,7 @@ export function ToastHost(props: {
           key={toast.id}
           data-testid={toast.id}
           role={toast.kind === "error" ? "alert" : "status"}
-          className={`pointer-events-auto flex max-w-sm flex-col gap-1 rounded-lg border px-3 py-2 text-xs shadow-lg ${KIND_CLASS[toast.kind]}`}
+          className={`pointer-events-auto flex max-w-sm flex-col gap-1 rounded-[10px] border border-line px-3 py-2 text-xs shadow-toast ${KIND_CLASS[toast.kind]}`}
         >
           <div className="flex items-center gap-2">
             <span

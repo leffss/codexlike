@@ -35,7 +35,8 @@ const MonacoDiff = lazy(() => import("./MonacoDiff"));
  * 打开时把消息流推窄（并列而非覆盖），中缝可拖拽调宽。
  *
  * 结构（自上而下）：
- * - tab 行：三个独立描边按钮（对标标题栏开关样式），单屏互斥切换；
+ * - tab 行：三个去描边按钮，激活 = 暖灰底 + 字重 600（D 语言），
+ *   单屏互斥切换；
  * - 改动 tab：当前分支行（行尾「刷新」）→ 变更文件清单 → 选中文件
  *   diff（Monaco 懒加载）→ 提交动作组（GitActions）；
  * - 规范与技能 tab：三档快照 chips（本轮/上轮/下轮预览）+ 密排摘要；
@@ -68,11 +69,12 @@ const CHANGE_KIND_LABELS: Record<GitChangeKind, string> = {
   renamed: "重命名",
 };
 
+/** D 语言：状态徽章去描边，语义靠淡底 + 前景色（增绿/改蓝/删红/重命名紫） */
 const CHANGE_KIND_CLASSES: Record<GitChangeKind, string> = {
-  added: "bg-ok-bg text-ok-fg border-ok-fg/40",
-  modified: "bg-info-bg text-info-fg border-info-fg/40",
-  deleted: "bg-danger-bg text-danger-fg border-danger-fg/40",
-  renamed: "bg-worktree-bg text-worktree-fg border-worktree-fg/40",
+  added: "bg-ok-bg text-ok-fg",
+  modified: "bg-info-bg text-info-fg",
+  deleted: "bg-danger-bg text-danger-fg",
+  renamed: "bg-worktree-bg text-worktree-fg",
 };
 
 const EMPTY_SNAPSHOT_TEXT: Record<SnapshotKey, string> = {
@@ -242,19 +244,21 @@ export function RailPanel(props: {
         onDoubleClick={() => setRailWidth(RAIL_DEFAULT_WIDTH)}
         onKeyDown={onSeparatorKeyDown}
         className={`w-1.5 shrink-0 cursor-col-resize select-none transition-colors ${
-          dragging ? "bg-accent/60" : "bg-transparent hover:bg-accent/40"
+          // D 语言：平时隐形融入画布，hover/拖动现形为 fg 淡色条
+          //（= 原型 rgba(55,53,47,0.14)，随主题 fg 自动换向）
+          dragging ? "bg-fg/15" : "hover:bg-fg/15"
         }`}
       />
       <aside
         aria-label="检视右栏"
         data-testid="rail-panel"
         style={{ width: railWidth }}
-        className="flex shrink-0 flex-col border-l border-line bg-surface text-sm"
+        className="flex shrink-0 flex-col bg-canvas text-sm"
       >
-        {/* tab 行：独立描边按钮（对标标题栏开关样式），选中态 accent。
-            flex-wrap 兜底：窄窗口下右栏会被夹到低于 RAIL_MIN_WIDTH
-            （正文 STREAM_MIN_WIDTH 优先，max 先于 min 生效），200px 宽
-            放不下三个 tab 时换行而不是溢出右栏。 */}
+        {/* tab 行：去描边按钮，激活 = 暖灰底 + 字重 600（D 语言，非描边
+            胶囊）。flex-wrap 兜底：窄窗口下右栏会被夹到低于
+            RAIL_MIN_WIDTH（正文 STREAM_MIN_WIDTH 优先，max 先于 min 生效），
+            200px 宽放不下三个 tab 时换行而不是溢出右栏。 */}
         <div
           role="tablist"
           aria-label="右栏面板切换"
@@ -266,10 +270,10 @@ export function RailPanel(props: {
             aria-selected={tab === "changes"}
             data-testid="rail-tab-changes"
             onClick={() => setTab("changes")}
-            className={`shrink-0 rounded border px-2 py-1.5 text-xs ${
+            className={`shrink-0 rounded-md px-2.5 py-[5px] text-xs ${
               tab === "changes"
-                ? "border-accent text-accent"
-                : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
+                ? "bg-surface-muted font-semibold text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
           >
             改动
@@ -292,10 +296,10 @@ export function RailPanel(props: {
             aria-selected={tab === "resources"}
             data-testid="rail-tab-resources"
             onClick={() => setTab("resources")}
-            className={`shrink-0 rounded border px-2 py-1.5 text-xs ${
+            className={`shrink-0 rounded-md px-2.5 py-[5px] text-xs ${
               tab === "resources"
-                ? "border-accent text-accent"
-                : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
+                ? "bg-surface-muted font-semibold text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
           >
             规范与技能
@@ -306,10 +310,10 @@ export function RailPanel(props: {
             aria-selected={tab === "subagents"}
             data-testid="rail-tab-subagents"
             onClick={() => setTab("subagents")}
-            className={`shrink-0 rounded border px-2 py-1.5 text-xs ${
+            className={`shrink-0 rounded-md px-2.5 py-[5px] text-xs ${
               tab === "subagents"
-                ? "border-accent text-accent"
-                : "border-transparent text-fg-muted hover:bg-hover hover:text-fg"
+                ? "bg-surface-muted font-semibold text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
             }`}
           >
             子代理
@@ -362,7 +366,7 @@ export function RailPanel(props: {
             ) : !loading && status?.isGitRepo === false ? (
               <div
                 data-testid="changes-not-git"
-                className="m-3 rounded border border-line bg-surface-muted p-3 text-sm text-fg-muted"
+                className="m-3 rounded-lg bg-surface-muted p-3 text-sm text-fg-muted"
               >
                 非 git 工作区：当前任务绑定的目录不受 git
                 管理，无法查看改动或提交。
@@ -387,7 +391,7 @@ export function RailPanel(props: {
                       }`}
                     >
                       <span
-                        className={`shrink-0 rounded border px-1.5 py-0.5 text-xs ${CHANGE_KIND_CLASSES[file.kind]}`}
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${CHANGE_KIND_CLASSES[file.kind]}`}
                       >
                         {CHANGE_KIND_LABELS[file.kind]}
                       </span>

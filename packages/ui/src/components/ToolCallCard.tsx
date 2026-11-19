@@ -103,12 +103,13 @@ export function ToolCallCard(props: { call: ToolCallSegment }) {
     <li
       data-testid="tool-call-card"
       data-tool-name={call.toolName}
-      className="max-w-full rounded-lg border border-line bg-surface text-sm"
+      // D 设计语言：极轻暖灰底块（无边框），折叠摘要行内距放宽（9px 14px）
+      className="max-w-full rounded-lg bg-surface-muted text-sm"
     >
       <button
         type="button"
         data-testid="tool-call-toggle"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-hover"
+        className="flex w-full items-center gap-2 px-3.5 py-[9px] text-left hover:bg-hover"
         onClick={toggle}
         aria-expanded={expanded}
       >

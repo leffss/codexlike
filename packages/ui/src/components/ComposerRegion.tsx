@@ -6,8 +6,11 @@ import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
  * 中栏底部输入区外壳（2026-11-19 交互面板整合轮）：消息输入框与交互面板
  * （权限批准 / 交互式提问）共用的同一插槽外壳——两者在 WorkspacePage 互斥
  * 渲染，此前交互面板直接全宽撑满中栏；收拢此前壳层后，宽度（背景画布、
- * px-4 py-3 内边距、滚动槽右缘补偿、contentWidthClass 居中收窄）与输入框
+ * px-4 水平内边距、滚动槽右缘补偿、contentWidthClass 居中收窄）与输入框
  * 完全一致，视觉上就是输入框区域变成了问题区域。
+ *
+ * 上下内边距 pt-2.5 / pb-4（原型 D 定案 10px / 16px）：输入区外壳放宽
+ * 上下呼吸（ADR 0028），底部留出比顶部更大的下距。
  *
  * 内层沿用 @container：composer 工具栏窄宽降级以内容列实际宽度为基准
  * （右栏开合不改变 @container/task 宽度，ADR 0011），交互面板暂无断点
@@ -25,7 +28,7 @@ export function ComposerRegion(props: {
     // 补偿消息流原生滚动条占宽，基准列对齐后输入卡片左右各外扩 8px。
     <div
       data-testid={props.testId}
-      className="bg-canvas px-4 py-3"
+      className="bg-canvas px-4 pt-2.5 pb-4"
       style={{
         paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
       }}

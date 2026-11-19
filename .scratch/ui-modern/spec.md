@@ -93,3 +93,30 @@ ADR: 0028（设计语言定案）· 原型分支 `prototype/ui-modern`（primary
 
 - 设计语言理由与败者谱系记录见 `docs/adr/0028-ui-design-language-breathing-minimal.md`；败者变体（A/B/C/E）留在 `prototype/ui-modern` 分支作微调素材池。
 - 原型 dev 预览三态（任务进行/审批/问答/新建起点）在分支上可随时复跑对照（`pnpm --filter @codexlike/ui run dev` + `?variant=d`）。
+
+## Comments
+
+**2026-11-19 实施完成（票 08 收档总结）**
+
+**实施序列总述**：01 token 基座（双主题全套语义值 + 四档阴影 token + markdown 排版）→ 02 外壳（标题栏/侧栏/窗口控制/徽章）→ 03 输入面（三壳同形暖灰块 + 聚焦描边 + 问答白卡选项）→ 04 消息流（轮距 24/14px + 暖灰块家族 + QueueBar 缺陷修复）→ 05 右栏（白底无边界 + tab 暖灰激活 + GitActions 输入卡化）→ 06 弹层（白卡+发丝线+四档阴影消费，含票 02 转办的徽章弹层/opener 菜单）→ 07 设置页（七分区暖灰块 + 表单层级）→ 08 收尾（聚焦语汇统一 + auto-approve 卡补齐 + 全量验证 + 关单）。全程纯样式层：零行为/testid/信息架构改动，38 组件全覆盖。
+
+**收尾轮裁决（五议题）**：
+
+1. 聚焦语汇统一为「描边淡入」单一机制：三壳 focus-within color-mix（原型正源）+ 单输入 `focus:input-focus-ring`（@utility 语义类，--fg 45% 1.5px + transition-shadow）；替换 border-accent / ring-fg/50 两个分叉共 24 处。
+2. task-auto-approve 提示卡补 D 语言（去 warn 描边留淡底块）。
+3. 深色时间戳 fg-subtle **保留**：深 3.10:1 优于浅定案同级 2.9:1（原型正源），「最弱信息定位」层级深浅对称是定案观感。
+4. 关闭钮 hover 暖灰**保留**：实机复核与全排标题栏按钮一致（暖灰 6%），「关闭=危险」由 ✕ 图标承担。
+5. 设置页行操作小钮**保留**：深色理论约 5.6:1 + 目视清晰可读，不构成「弱」。
+
+**残留清单及允许理由**：
+
+- 深色主底与次级面明度差含蓄（#1f1e1c vs #2a2827）——「次级面亮一档」纪律固有对比；激活/层次表达均有底色+字重+前景三通道，可辨（票 05 走查结论维持）。
+- 起点页标题层级偏弱、工作计划卡信息密度偏高——信息架构冻结（ADR 0018-0026），非样式层可动。
+- 深色 Monaco 走内置 vs-dark（与 --hl-* 六 token 独立体系），票 05 走查可读性过关。
+- toast 类别色留在底色 token（边框中性化）——票 06 定案。
+- 原生托盘菜单/系统对话框不变（Out of Scope）。
+- 已知工具链怪癖：@tailwindcss/vite dev 扫描器不提取 `1.5px+color-mix` 组合的 arbitrary shadow 候选（build 正常）——已用 @utility 语义类绕开并沉淀教训（票 08 Comments 1）；后续新工具类若含同类组合，直接走 @utility。
+
+**验证基线（最终态）**：三包单测 587/507+1skip/591 全绿；`test:e2e:all` 40 场景全量绿；theme.mjs 一处旧语汇断言镜像同步（票 03 去边框的连带，意图不变）；双主题 11 面走查截图存 `.scratch/ui-modern/screenshots/08/`（各票分目录另有 01-07 走查留证）。票 01-08 全部关单；`prototype/ui-modern` 原型分支保留存档。
+
+**2026-11-19 code-review 补记（className 镜像断言偏差落档）**：Spec 审查指出新增 `popover-family-ui.test.tsx` 与 `settings-d-language.test.tsx` 共 136 处 className 镜像断言，与「好测试标准：不断言 className」存在张力；裁定：保留——它们是设计语言语汇的回归锁（防止旧语汇悄悄回流），沿用仓库既有 `*-ui.test.tsx` prior art（02/04 票同型），记为已知偏差而非规范。

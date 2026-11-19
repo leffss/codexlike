@@ -95,7 +95,9 @@ export function QueueBar(props: {
             </span>
             <span
               data-testid="queue-item-sending-badge"
-              className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent-fg"
+              // 徽章缺陷修复：bg-accent-soft/text-accent-fg 是不存在的 Tailwind 类
+              //（基线即无样式），按 D 语言换 --selected 暖灰底 + 主文字色
+              className="shrink-0 rounded-full bg-selected px-1.5 py-0.5 text-[11px] font-medium text-fg"
             >
               发送中
             </span>
@@ -133,7 +135,7 @@ export function QueueBar(props: {
           onClick={() => props.onEditItem?.(item)}
           title={`${item.text}（点击取回输入框编辑，保存原地更新）`}
           className={`min-w-0 flex-1 truncate text-left hover:text-fg ${
-            editing ? "font-medium text-accent-fg" : ""
+            editing ? "font-medium text-fg" : ""
           }`}
         >
           {previewText(item.text)}
@@ -142,7 +144,7 @@ export function QueueBar(props: {
           <>
             <span
               data-testid="queue-item-editing"
-              className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent-fg"
+              className="shrink-0 rounded-full bg-selected px-1.5 py-0.5 text-[11px] font-medium text-fg"
             >
               编辑中
             </span>
@@ -150,7 +152,7 @@ export function QueueBar(props: {
               type="button"
               data-testid="queue-item-cancel-edit"
               onClick={() => props.onCancelEdit?.()}
-              className="shrink-0 rounded-md border border-line px-1.5 py-0.5 hover:bg-hover"
+              className="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-hover"
               title="取消编辑：条目原样保留，输入框还原先前草稿"
             >
               取消
@@ -174,9 +176,9 @@ export function QueueBar(props: {
   return (
     <div
       data-testid="queue-bar"
-      // 票04 视觉统一（原型变体 D 队列条准绳）：rounded-lg + surface-muted 次级面，
-      // 与 composer 卡（surface 主面）形成层次对比
-      className="mb-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+      // 票04 视觉统一（原型变体 D 队列条准绳）：rounded-lg + surface-muted
+      // 暖灰块，去边框；块内按钮统一去描边（hover 底承载反馈）
+      className="mb-2 rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
       aria-label={
         paused
           ? `输入队列 待发 ${waitingCount} 条，已暂停`
@@ -207,7 +209,7 @@ export function QueueBar(props: {
               type="button"
               data-testid="queue-resume"
               onClick={() => props.onResume?.()}
-              className="rounded-md border border-line px-2 py-0.5 font-medium text-fg hover:bg-hover"
+              className="rounded-md px-2 py-0.5 font-medium text-fg hover:bg-hover"
               title="恢复：从队首继续逐条自动发送"
             >
               恢复
@@ -216,7 +218,7 @@ export function QueueBar(props: {
               type="button"
               data-testid="queue-clear"
               onClick={() => props.onClear?.()}
-              className="rounded-md border border-line px-2 py-0.5 text-fg-muted hover:bg-hover hover:text-danger-fg"
+              className="rounded-md px-2 py-0.5 text-fg-muted hover:bg-hover hover:text-danger-fg"
               title="清空：作废全部排队消息"
             >
               清空

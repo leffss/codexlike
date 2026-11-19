@@ -1,116 +1,175 @@
 @import "tailwindcss";
 
+/* 阴影白名单四档的 utility 候选显式注册（ADR 0028）：值定义在下方双主题
+ * --shadow-* token，类名预注册使下游组件（含动态拼类场景）直接可用
+ * shadow-popover / shadow-modal / shadow-toast / shadow-floating。 */
+@source inline("shadow-popover shadow-modal shadow-toast shadow-floating");
+
+/* 单输入聚焦描边（票 08 统一聚焦语汇）：「聚焦 = --fg 45% 1.5px 描边淡入」，
+ * 与三壳 focus-within 描边（--fg 32% 1px + 5% 外晕）同机制同一 color-mix
+ * 家族（ADR 0028）。注册为 utility 而非 arbitrary 类：@tailwindcss/vite dev
+ * 扫描器不提取 1.5px+color-mix 的任意值候选（build 正常、dev 漏），语义类
+ * 双通道稳定；组件（GitActions/TaskSearch/设置页表单/InteractionPanel
+ * 自定义输入）统一以 focus:input-focus-ring 消费，禁再用 border/ring 聚焦。 */
+@utility input-focus-ring {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--fg) 45%, transparent);
+}
+
+/* 三壳聚焦描边+外晕（与 input-focus-ring 对仗，ADR 0028）：「壳聚焦 =
+ * --fg 32% 1px 描边 + 5% 5px 外晕」双层 color-mix，供任务态 composer
+ * 输入卡（MessageComposer composer-card）、交互面板（InteractionPanel）
+ * 与起点输入卡（NewTaskStart new-task-composer）三壳统一以
+ * focus-within:composer-focus-ring 消费。注册为 utility 而非任意值类：
+ * 与 input-focus-ring 同机制——@tailwindcss/vite dev 扫描器不提取
+ * color-mix 形态的任意值候选（build 正常、dev 漏），语义类双通道稳定，
+ * 亦免三处 96 字符任意值串逐字重复。 */
+@utility composer-focus-ring {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--fg) 32%, transparent),
+    0 0 0 5px color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
 /* 主题块用纯属性选择器（与 dark 块对称）：Tailwind v4 构建会吞掉 :root 前缀的自定义属性块 */
+/*
+ * 语义 token 值系 D「留白呼吸」设计语言定案（ADR 0028，原型
+ * prototype/ui-modern 分支 variant-d.css 剥作用域折回）：
+ * 暖白底、无边框、层次靠底色深浅与间距、accent 黑主张、阴影只给悬浮物。
+ * 深色套无原型，按同一暖灰逻辑新设计（非浅色反转）。
+ */
 [data-theme="light"] {
   color-scheme: light;
 
-  /* 表面 */
+  /* 表面：canvas 与 surface 同色，层次全靠间距与暖灰次级面 */
   --canvas: #ffffff; /* 页面主底 */
   --surface: #ffffff; /* 卡片 / 面板 */
-  --surface-muted: #f2f3f5; /* 侧栏 / 输入条等次级面 */
-  --hover: rgba(15, 23, 42, 0.06);
-  --selected: rgba(9, 105, 218, 0.14);
+  --surface-muted: #f7f6f3; /* Notion 暖灰：侧栏 / 输入卡等次级面 */
+  --hover: rgba(55, 53, 47, 0.06);
+  --selected: rgba(55, 53, 47, 0.09);
 
-  /* 内容 */
-  --fg: #1f2328;
-  --fg-muted: #59636e;
-  --fg-subtle: #898f98; /* 时间戳等最弱信息 */
-  --line: #e1e4e8;
+  /* 内容：暖黑 + 暖灰 */
+  --fg: #37352f;
+  --fg-muted: #787774;
+  --fg-subtle: #9f9e9b; /* 时间戳等最弱信息 */
+  --line: #ebeae8; /* 极淡发丝线，仅必要处 */
 
-  /* 操作 */
-  --accent: #0969da;
-  --accent-hover: #0860c9;
+  /* 操作：accent = 黑色主张（按钮即黑）；链接蓝降调只在 .markdown a 使用 */
+  --accent: #2f3437;
+  --accent-hover: #1e2224;
   --on-accent: #ffffff;
 
   /* 特殊 */
-  --overlay: rgba(23, 26, 31, 0.45);
-  --code-bg: #f6f8fa;
-  --code-fg: #1f2328;
-  --code-inline-bg: #f2f3f5;
-  --code-inline-fg: #24292f;
+  --overlay: rgba(15, 15, 15, 0.4);
+  --code-bg: #f7f6f3;
+  --code-fg: #37352f;
+  --code-inline-bg: rgba(135, 131, 125, 0.17);
+  --code-inline-fg: #c4554d; /* Notion 内联码红棕 */
 
-  /* 状态（前景 + 淡底） */
-  --ok-fg: #1a7f37;
-  --ok-bg: #dafbe1;
+  /* 状态：Notion 柔和色调（前景 + 淡底） */
+  --ok-fg: #448361;
+  --ok-bg: #e9f1e9;
   /* 实心确认按钮（批准）：白字可读的绿 */
-  --ok-solid: #1f883d;
-  --ok-solid-hover: #1a7f37;
-  --warn-fg: #9a6700;
-  --warn-bg: #fff3c4;
-  --danger-fg: #cf222e;
-  --danger-bg: #ffebe9;
-  /* 实心危险按钮（停止）：白字可读的深红 */
-  --danger-solid: #cf222e;
-  --danger-solid-hover: #a40e26;
-  --info-fg: #0969da;
-  --info-bg: #ddf4ff;
+  --ok-solid: #448361;
+  --ok-solid-hover: #38684e;
+  --warn-fg: #a3770f;
+  --warn-bg: #f9efcf;
+  --danger-fg: #c4554d;
+  --danger-bg: #fbe5e1;
+  /* 实心危险按钮（停止）：白字可读的红 */
+  --danger-solid: #d44c47;
+  --danger-solid-hover: #b83e39;
+  --info-fg: #2383e2;
+  --info-bg: #e8f2fb;
 
-  /* worktree 徽标（需与普通任务区分的辅助色，GLOSSARY「Worktree」） */
-  --worktree-fg: #8250df;
-  --worktree-bg: #ebe8ff;
+  /* worktree 徽标（需与普通任务区分的辅助色，GLOSSARY「Worktree」）：Notion 紫 */
+  --worktree-fg: #9065b0;
+  --worktree-bg: #ece4f3;
 
-  /* 子代理卡片（GLOSSARY「子代理」）：消息流中与工具卡片区分 */
-  --subagent-fg: #8250df;
-  --subagent-bg: #f1edfd;
+  /* 子代理卡片（GLOSSARY「子代理」）：暖青，与 worktree 紫、info 蓝区分 */
+  --subagent-fg: #2e8580;
+  --subagent-bg: #e2f0ee;
 
-  /* highlight.js token（github 浅色） */
-  --hl-keyword: #cf222e;
-  --hl-string: #0a3069;
-  --hl-title: #8250df;
-  --hl-comment: #6e7781;
-  --hl-number: #0550ae;
-  --hl-tag: #116329;
+  /* highlight.js token（暖色浅色代码主题） */
+  --hl-keyword: #c4554d;
+  --hl-string: #448361;
+  --hl-title: #9065b0;
+  --hl-comment: #9f9e9b;
+  --hl-number: #2383e2;
+  --hl-tag: #448361;
+
+  /* 阴影纪律（ADR 0028）：只给悬浮物——弹层 / 模态 / toast / 浮钮四档，别处禁用 */
+  --shadow-popover:
+    0 2px 6px rgba(15, 15, 15, 0.05), 0 10px 28px rgba(15, 15, 15, 0.1);
+  --shadow-modal: 0 8px 32px rgba(15, 15, 15, 0.18);
+  --shadow-toast: 0 4px 14px rgba(15, 15, 15, 0.08);
+  --shadow-floating: 0 2px 8px rgba(15, 15, 15, 0.08);
 }
 
+/*
+ * 深色套：无原型，按 D 的暖灰逻辑新设计（非浅色反转，ADR 0028）——
+ * 冷蓝黑换成暖深灰系；「层次靠底色深浅」翻译为次级面比主底亮一档
+ * （浅色是暗一档）；「accent 黑主张」在深色语境翻为亮白主张（按钮即白）；
+ * 状态 / 徽标 / hl 色保持浅色 Notion 色相，整体提亮到深底可读，淡底改同色相透明叠加。
+ */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --canvas: #0f172a;
-  --surface: #16203a;
-  --surface-muted: #0d1526;
-  --hover: rgba(148, 163, 184, 0.14);
-  --selected: rgba(2, 132, 199, 0.22);
+  /* 表面：暖深灰主底，次级面亮一档（与浅色恒定明度差同一纪律） */
+  --canvas: #1f1e1c;
+  --surface: #242322;
+  --surface-muted: #2a2827;
+  --hover: rgba(237, 233, 223, 0.06);
+  --selected: rgba(237, 233, 223, 0.1);
 
-  --fg: #e2e8f0;
-  --fg-muted: #94a3b8;
-  --fg-subtle: #6b7a93;
-  --line: #2c3b57;
+  /* 内容：暖白 + 暖灰 */
+  --fg: #e6e4df;
+  --fg-muted: #a09e99;
+  --fg-subtle: #75736e;
+  --line: #383634;
 
-  --accent: #0369a1;
-  --accent-hover: #0284c7;
-  --on-accent: #ffffff;
+  /* 操作：亮白主张（按钮即白），on-accent 回到主底暖深灰 */
+  --accent: #e8e6e1;
+  --accent-hover: #ffffff;
+  --on-accent: #1f1e1c;
 
-  --overlay: rgba(0, 0, 0, 0.55);
-  --code-bg: #0d1117;
-  --code-fg: #e2e8f0;
-  --code-inline-bg: #1e293b;
-  --code-inline-fg: #fda4af;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --code-bg: #2a2827;
+  --code-fg: #e6e4df;
+  --code-inline-bg: rgba(135, 131, 125, 0.22);
+  --code-inline-fg: #e8a29c;
 
-  --ok-fg: #34d399;
-  --ok-bg: rgba(6, 95, 70, 0.45);
-  --ok-solid: #238636;
-  --ok-solid-hover: #2ea043;
-  --warn-fg: #fbbf24;
-  --warn-bg: rgba(120, 53, 15, 0.45);
-  --danger-fg: #f87171;
-  --danger-bg: rgba(127, 29, 29, 0.5);
-  --danger-solid: #e5484d;
-  --danger-solid-hover: #f2555a;
-  --info-fg: #7dd3fc;
-  --info-bg: rgba(12, 74, 110, 0.5);
+  --ok-fg: #6fb38c;
+  --ok-bg: rgba(68, 131, 97, 0.22);
+  --ok-solid: #448361;
+  --ok-solid-hover: #559a73;
+  --warn-fg: #d1a245;
+  --warn-bg: rgba(163, 119, 15, 0.22);
+  --danger-fg: #e58e85;
+  --danger-bg: rgba(196, 85, 77, 0.22);
+  --danger-solid: #d44c47;
+  --danger-solid-hover: #e0655f;
+  --info-fg: #62aeea;
+  --info-bg: rgba(35, 131, 226, 0.22);
 
-  --worktree-fg: #c4b5fd;
-  --worktree-bg: rgba(76, 29, 149, 0.5);
+  --worktree-fg: #b395cd;
+  --worktree-bg: rgba(144, 101, 176, 0.24);
 
-  --subagent-fg: #c4b5fd;
-  --subagent-bg: rgba(46, 16, 101, 0.35);
+  --subagent-fg: #6fb8b2;
+  --subagent-bg: rgba(46, 133, 128, 0.24);
 
-  --hl-keyword: #ff7b72;
-  --hl-string: #a5d6ff;
-  --hl-title: #d2a8ff;
-  --hl-comment: #8b949e;
-  --hl-number: #79c0ff;
-  --hl-tag: #7ee787;
+  /* highlight.js token：浅色暖色代码主题同色相提亮 */
+  --hl-keyword: #e58f86;
+  --hl-string: #75b98d;
+  --hl-title: #b395cd;
+  --hl-comment: #8a8884;
+  --hl-number: #6cb2f0;
+  --hl-tag: #75b98d;
+
+  /* 阴影加深：暖深灰底上轻阴影不可见，悬浮物投影须重才成立 */
+  --shadow-popover:
+    0 2px 6px rgba(0, 0, 0, 0.3), 0 10px 28px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.55);
+  --shadow-toast: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-floating: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 /* 语义变量 → Tailwind 工具类（bg-canvas / text-fg-muted / border-line …） */
@@ -146,6 +205,13 @@
   --color-worktree-bg: var(--worktree-bg);
   --color-subagent-fg: var(--subagent-fg);
   --color-subagent-bg: var(--subagent-bg);
+
+  /* 悬浮物阴影（shadow-popover / shadow-modal / shadow-toast / shadow-floating …）：
+   * 阴影白名单的全部四档，值随 data-theme 双主题切换（ADR 0028） */
+  --shadow-popover: var(--shadow-popover);
+  --shadow-modal: var(--shadow-modal);
+  --shadow-toast: var(--shadow-toast);
+  --shadow-floating: var(--shadow-floating);
 }
 
 html,
@@ -179,8 +245,8 @@ body {
 }
 
 /* 助手消息的 markdown 排版（tailwind preflight 下无默认样式，这里给出最小排版）。
- * 密度取「舒适留白」档（prototype/reading-density 分支四档原型评审选定 A）：
- * 段距 0.85em + 行高 1.65，标题/列表/代码块/表格同步放宽，避免只有段落放宽显得孤立。 */
+ * 密度按 D「留白呼吸」定案放宽（ADR 0028）：段距 0.95em + 行高 1.75
+ * （列表 1.7），标题/列表/代码块/表格同步放宽，避免只有段落放宽显得孤立。 */
 .markdown > :first-child {
   margin-top: 0;
 }
@@ -190,8 +256,8 @@ body {
 }
 
 .markdown p {
-  margin: 0.85em 0;
-  line-height: 1.65;
+  margin: 0.95em 0;
+  line-height: 1.75;
   white-space: pre-wrap;
 }
 
@@ -206,7 +272,7 @@ body {
 
 .markdown ul,
 .markdown ol {
-  margin: 0.85em 0;
+  margin: 0.95em 0;
   padding-left: 1.5em;
 }
 
@@ -219,12 +285,14 @@ body {
 }
 
 .markdown li {
-  margin: 0.3em 0;
-  line-height: 1.6;
+  margin: 0.35em 0;
+  line-height: 1.7;
 }
 
+/* 链接蓝降调使用：accent 已让位给黑主张，正文链接取 info 蓝同源 token
+ * （浅色 = #2383e2 原型定案值，深色随 token 提亮保可读） */
 .markdown a {
-  color: var(--accent);
+  color: var(--info-fg);
   text-decoration: underline;
 }
 
@@ -249,7 +317,7 @@ body {
 
 .markdown pre {
   margin: 1em 0;
-  padding: 1em 1.25em;
+  padding: 14px 18px;
   line-height: 1.6;
   border-radius: 8px;
   background-color: var(--code-bg);

@@ -12,7 +12,7 @@ export function WorkspaceModeSelector(props: {
       <select
         data-testid="draft-workspace-mode"
         aria-label="工作区模式"
-        className="rounded border border-line bg-surface px-2 py-1"
+        className="rounded-md bg-surface-muted px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={props.busy}
         value={props.mode}
         onChange={(event) =>

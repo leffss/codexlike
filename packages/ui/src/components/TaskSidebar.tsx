@@ -296,7 +296,8 @@ export function TaskSidebar(props: {
         data-task-id={task.id}
         className={`group/task relative mt-0.5 flex items-center rounded-md ${
           task.id === props.currentId
-            ? "bg-selected text-fg"
+            ? /* 当前任务 = 暖灰底 + 字重（非彩色胶囊，D 语言选中语汇） */
+              "bg-selected font-medium text-fg"
             : "text-fg-muted hover:bg-hover hover:text-fg"
         }`}
         onContextMenu={(event) => {
@@ -344,7 +345,7 @@ export function TaskSidebar(props: {
             onChange={(event) => setEditingTitle(event.target.value)}
             onKeyDown={(event) => onRenameKeyDown(event, task.id)}
             onBlur={() => submitRename(task.id)}
-            className="w-full rounded border border-accent bg-code-bg px-2 py-1.5 text-sm text-fg outline-none"
+            className="w-full rounded-md border-[1.5px] border-accent/55 bg-canvas px-2 py-1.5 text-sm text-fg outline-none"
           />
         ) : (
           <>
@@ -356,7 +357,7 @@ export function TaskSidebar(props: {
               aria-current={task.id === props.currentId ? "page" : undefined}
               aria-haspopup="menu"
               aria-expanded={menu?.taskId === task.id}
-              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 pr-1 text-left text-sm"
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-[7px] pl-2 pr-1 text-left text-sm"
               onClick={() => props.onSelect(task.id)}
             >
               <span
@@ -491,7 +492,7 @@ export function TaskSidebar(props: {
             }
             title={group.path}
             aria-expanded={expanded}
-            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-semibold"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-[7px] text-left text-sm font-semibold"
             onClick={() =>
               group.projectId === null
                 ? setStandaloneCollapsed((prev) => !prev)
@@ -600,7 +601,7 @@ export function TaskSidebar(props: {
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-r border-line bg-surface-muted">
+    <aside className="flex w-80 shrink-0 flex-col bg-canvas">
       {menu && menuTask && (
         <TaskContextMenu
           taskId={menuTask.id}

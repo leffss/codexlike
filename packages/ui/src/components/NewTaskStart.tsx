@@ -75,7 +75,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
         <div className="mx-auto flex min-h-full w-full max-w-md flex-1 items-center justify-center px-6 py-12">
           <div
             data-testid="draft-empty-start"
-            className="w-full rounded-lg border border-line bg-surface p-8 text-center shadow-sm"
+            className="w-full rounded-xl bg-surface p-8 text-center"
           >
             <div className="text-xl font-semibold tracking-wide text-fg">
               CodexLike
@@ -140,10 +140,10 @@ export function NewTaskStart(props: NewTaskStartProps) {
             </div>
           </div>
 
-          {/* 工作区卡（最重决策项，单独成卡） */}
+          {/* 工作区卡（最重决策项，单独成卡）：D 语言暖灰 callout 块（ADR 0028） */}
           <div
             data-testid="draft-workspace-info"
-            className="mb-3 rounded-lg border border-line bg-surface p-3"
+            className="mb-3 rounded-[10px] bg-surface-muted p-3.5"
           >
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
               <span aria-hidden="true">📁</span> 工作区
@@ -179,7 +179,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
                   data-testid="draft-select-workspace"
                   disabled={draft.busy}
                   onClick={props.onSelectWorkspace}
-                  className="shrink-0 rounded border border-line px-2 py-1 text-xs text-accent hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   选择已有目录
                 </button>
@@ -192,7 +192,7 @@ export function NewTaskStart(props: NewTaskStartProps) {
                   onClick={() =>
                     props.onEditDraft({ workspacePath: undefined })
                   }
-                  className="shrink-0 rounded border border-line px-2 py-1 text-xs text-accent hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   使用专用目录
                 </button>
@@ -291,9 +291,12 @@ function StartComposer(props: NewTaskStartProps) {
   }
 
   return (
+    // 专属输入卡（ADR 0028 D 语言）：与任务态 composer-card / interaction-panel
+    // 三壳同形——无边框暖灰块 + 聚焦深色细描边淡入；起点页专属为 12px 圆角
+    // 与更大内距（原型定案 14px 16px 16px）。
     <form
       data-testid="new-task-composer"
-      className="rounded-lg border border-line bg-surface p-3 shadow-sm"
+      className="rounded-xl bg-surface-muted px-4 pt-3.5 pb-4 transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -327,7 +330,7 @@ function StartComposer(props: NewTaskStartProps) {
           onKeyDown={onKeyDown}
           placeholder="描述这个任务要做什么…（/ 命令 · @ 文件 · $ 技能）"
           rows={5}
-          className="min-h-[110px] w-full resize-y bg-transparent px-1 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+          className="min-h-[110px] w-full resize-y bg-transparent px-1 text-sm leading-[1.7] text-fg placeholder:text-fg-subtle focus:outline-none"
         />
       </div>
       {draft.error && (

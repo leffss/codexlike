@@ -180,7 +180,7 @@ export function SubagentRailPanelBody(props: {
             <ul
               ref={listRef}
               data-testid="subagent-rail-list"
-              className="absolute inset-x-0 top-0 z-20 max-h-[85%] overflow-auto rounded-b-lg border border-line bg-surface py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+              className="absolute inset-x-0 top-0 z-20 max-h-[85%] overflow-auto rounded-lg border border-line bg-surface py-0.5 shadow-popover"
             >
               {subagents.map((item) => (
                 <li key={item.id} data-subagent-id={item.id}>
@@ -366,7 +366,7 @@ function RunningStatus(props: { subagent: SubagentSegment }) {
     .reverse()
     .find((tool) => tool.running === true);
   return (
-    <div className="rounded border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted">
+    <div className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted">
       {activeTool !== undefined ? (
         <p>
           当前工具：
@@ -426,7 +426,7 @@ function SubagentRoundsDisclosure(props: {
           setOpen(event.currentTarget.open);
         }
       }}
-      className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+      className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
     >
       <summary
         data-testid={`subagent-${variant}-toggle`}
@@ -544,7 +544,7 @@ function SubagentToolDetails(props: {
     false
   );
   return (
-    <li className="rounded bg-code-bg font-mono text-xs">
+    <li className="rounded-md bg-code-bg font-mono text-xs">
       <details
         data-testid="subagent-tool-details"
         data-tool-id={tool.id}
@@ -723,7 +723,7 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
         disabled={copyState === "copying"}
         aria-label={copyLabel}
         title={copyLabel}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted hover:bg-hover hover:text-fg disabled:opacity-50"
       >
         <svg
           viewBox="0 0 24 24"
@@ -764,7 +764,7 @@ function SubagentReportActions(props: { subagent: SubagentSegment }) {
         disabled={exportState === "exporting"}
         aria-label={exportLabel}
         title={exportLabel}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-line bg-surface-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted hover:bg-hover hover:text-fg disabled:opacity-50"
       >
         {/* 下载（向下箭头 + 托盘，lucide download 官方 path）。旧版托盘弧
             命令多写一位参数，Chromium 解析到 h 处断链只渲染出左下小碎片。 */}

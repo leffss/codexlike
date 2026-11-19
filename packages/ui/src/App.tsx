@@ -59,7 +59,7 @@ function Header(props: {
   return (
     <header
       data-testid="window-titlebar"
-      className={`${api ? "window-titlebar-drag" : ""} flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2`}
+      className={`${api ? "window-titlebar-drag" : ""} flex shrink-0 items-center justify-between gap-2 bg-canvas px-4 py-2`}
     >
       {props.view === "workspace" && props.titlebar ? (
         /* 左区交给父级 drag 作用域：任务名/品牌/空白可拖，
@@ -87,7 +87,7 @@ function Header(props: {
           type="button"
           data-testid="theme-toggle"
           title={theme === "dark" ? "切换为浅色主题" : "切换为深色主题"}
-          className="rounded px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
+          className="rounded-md px-2 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? (
@@ -122,7 +122,7 @@ function Header(props: {
         {props.view === "settings" ? (
           <button
             type="button"
-            className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
+            className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
             data-testid="settings-back"
             onClick={() => props.onSwitch("workspace")}
           >
@@ -131,7 +131,7 @@ function Header(props: {
         ) : (
           <button
             type="button"
-            className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
+            className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-hover hover:text-fg"
             data-testid="settings-open"
             onClick={() => props.onSwitch("settings")}
           >

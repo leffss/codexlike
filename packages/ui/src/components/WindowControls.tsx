@@ -24,7 +24,7 @@ export function WindowControls(props: {
         aria-label="最小化"
         title="最小化"
         onClick={() => request(() => api.minimize())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
       >
         <svg
           width="12"
@@ -44,7 +44,7 @@ export function WindowControls(props: {
         aria-label={props.state.maximized ? "还原" : "最大化"}
         title={props.state.maximized ? "还原" : "最大化"}
         onClick={() => request(() => api.toggleMaximize())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
       >
         <svg
           width="12"
@@ -68,7 +68,7 @@ export function WindowControls(props: {
         aria-label="关闭"
         title="关闭"
         onClick={() => request(() => api.close())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-danger-solid hover:text-on-accent focus-visible:outline-2 focus-visible:outline-accent"
+        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
       >
         <svg
           width="12"

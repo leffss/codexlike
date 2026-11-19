@@ -167,7 +167,7 @@ it("「右栏开关」保留定位器并同步 aria 状态，无任务且草稿�
   expect(disabled).toMatch(/data-testid="resources-toggle"[^>]*disabled/);
 });
 
-it("「右栏开关」：展开态高亮（accent），panel 图标承载语义", () => {
+it("「右栏开关」：展开态高亮（暖灰底+字重），panel 图标承载语义", () => {
   const open = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
@@ -181,8 +181,8 @@ it("「右栏开关」：展开态高亮（accent），panel 图标承载语义"
   const button = open.match(
     /<button[^>]*data-testid="resources-toggle"[^>]*>[\s\S]*?<\/button>/
   )?.[0];
-  // 持久高亮 = 非前缀的 `border-accent text-accent`（与 hover 类区分）
-  expect(button).toContain("border-accent text-accent");
+  // 持久高亮 = 暖灰底 + 字重（D 语言激活语汇，非 hover 类）
+  expect(button).toContain("bg-surface-muted font-semibold");
   expect(button).toContain('aria-label="右栏开关"');
   expect(button).toContain('title="收起右栏"');
   expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);
@@ -197,7 +197,7 @@ it("「右栏开关」：展开态高亮（accent），panel 图标承载语义"
       },
     })
   );
-  expect(closed).not.toContain("border-accent text-accent");
+  expect(closed).not.toContain("bg-surface-muted");
   expect(closed).toContain('title="展开右栏"');
 });
 

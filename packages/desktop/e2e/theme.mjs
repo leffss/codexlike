@@ -34,6 +34,7 @@ async function assertComposerSurface(window, label) {
         streamBackground: stream.backgroundColor,
         borderTop: region.borderTopWidth,
         cardBorder: getComputedStyle(card).borderTopWidth,
+        cardBackground: getComputedStyle(card).backgroundColor,
       };
     });
   assert(
@@ -41,9 +42,12 @@ async function assertComposerSurface(window, label) {
       surface.borderTop === "0px",
     `${label}：输入区外围应与消息区同色且没有分隔线，实际 ${JSON.stringify(surface)}`
   );
+  // 输入卡为无边框暖灰块（D 语言「留白呼吸」：三壳去边框、层次靠底色，
+  // ADR 0028 / 票 03 折回）。主题翻转时卡片底色应随 token 换向而非依赖边框。
   assert(
-    parseFloat(surface.cardBorder) > 0,
-    `${label}：输入卡片自身边框应保留`
+    parseFloat(surface.cardBorder) === 0 &&
+      surface.cardBackground !== surface.streamBackground,
+    `${label}：输入卡应为无边框暖灰块（底色与消息区不同以分层），实际 ${JSON.stringify(surface)}`
   );
 }
 
@@ -73,8 +77,8 @@ async function main() {
     await window.getByTestId("theme-toggle").click();
     assert((await themeOf(window)) === "dark", "点击切换后应为深色");
     assert(
-      (await bodyBackground(window)) === "rgb(15, 23, 42)",
-      `深色下 body 背景应为 canvas 色，实际 ${await bodyBackground(window)}`
+      (await bodyBackground(window)) === "rgb(31, 30, 28)",
+      `深色下 body 背景应为 canvas 色（暖深灰 #1f1e1c，ADR 0028），实际 ${await bodyBackground(window)}`
     );
     await assertComposerSurface(window, "深色");
     await closeApp(first.app);
