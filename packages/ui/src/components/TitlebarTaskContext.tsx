@@ -73,7 +73,8 @@ export function WorkspaceBadgePopover(props: { task: TitlebarTask }) {
       role="dialog"
       aria-label="工作区信息"
       data-testid="workspace-popover"
-      className="absolute left-0 top-full z-30 mt-2 w-96 max-w-[80vw] rounded-lg border border-line bg-surface p-3 shadow-xl"
+      // 弹层统一语汇（ADR 0028，票 02 转办）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+      className="absolute left-0 top-full z-30 mt-2 w-96 max-w-[80vw] rounded-[10px] border border-line bg-surface p-3 shadow-popover"
     >
       <div className="text-xs text-fg-subtle">工作区</div>
       <div
@@ -435,7 +436,8 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
           role="menu"
           aria-label="打开工作区的程序"
           data-testid="workspace-opener-menu"
-          className="absolute left-0 top-full z-30 mt-2 w-52 rounded-lg border border-line bg-surface p-1 shadow-xl"
+          // 弹层统一语汇（ADR 0028，票 02 转办）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+          className="absolute left-0 top-full z-30 mt-2 w-52 rounded-[10px] border border-line bg-surface p-1 shadow-popover"
         >
           {items.map((item) => (
             <button

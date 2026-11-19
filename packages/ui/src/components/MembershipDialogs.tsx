@@ -120,7 +120,8 @@ export function MembershipDialog(props: {
         aria-modal="true"
         aria-label="调整任务归属"
         data-testid="membership-dialog"
-        className="w-[440px] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl"
+        // 模态卡统一语汇（ADR 0028）：白卡 12px 圆角 + shadow-modal 档，无边框
+        className="w-[440px] rounded-xl bg-surface p-5 text-fg shadow-modal"
       >
         <h2 className="mb-3 font-medium">
           {movingOut ? "移出项目" : "移入项目"} · {props.task.title}
@@ -221,7 +222,8 @@ export function ProjectRemovalDialog(props: {
         aria-modal="true"
         aria-label="移除项目确认"
         data-testid="project-removal-dialog"
-        className="w-[460px] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl"
+        // 模态卡统一语汇（ADR 0028）：白卡 12px 圆角 + shadow-modal 档，无边框
+        className="w-[460px] rounded-xl bg-surface p-5 text-fg shadow-modal"
       >
         <h2 className="mb-3 font-medium">移除项目「{props.project.name}」？</h2>
         <p className="mb-2 text-sm">

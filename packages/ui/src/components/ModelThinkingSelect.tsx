@@ -230,7 +230,8 @@ export function ModelThinkingSelect(props: ModelThinkingSelectProps) {
             aria-label="模型与思考"
             data-testid="model-thinking-popover"
             style={popoverStyle}
-            className="z-50 flex w-[220px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs text-fg shadow-lg"
+            // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+            className="z-50 flex w-[220px] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-xs text-fg shadow-popover"
           >
             <label className="flex items-center gap-2 px-2.5 py-1.5">
               <span className="shrink-0 text-fg-subtle">提供商</span>

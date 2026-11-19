@@ -125,7 +125,8 @@ export function TaskContextMenu(props: {
       aria-label={props.menuLabel ?? "任务操作"}
       data-testid="task-context-menu"
       data-task-id={props.taskId}
-      className="fixed z-50 w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-surface p-1 text-sm text-fg shadow-lg"
+      // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+      className="fixed z-50 w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-[10px] border border-line bg-surface p-1 text-sm text-fg shadow-popover"
       style={{ ...position, maxHeight: "calc(100vh - 16px)" }}
       onKeyDown={onKeyDown}
       onContextMenu={(event) => event.preventDefault()}

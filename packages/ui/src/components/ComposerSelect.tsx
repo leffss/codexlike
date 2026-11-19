@@ -211,7 +211,8 @@ export function ComposerSelect<Value extends string>(props: {
             role="listbox"
             aria-label={props.label}
             data-testid={`${props.testId}-listbox`}
-            className="fixed z-50 min-w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-lg border border-line bg-surface p-1 text-xs text-fg-muted shadow-lg"
+            // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover 档 + 10px 圆角
+            className="fixed z-50 min-w-40 max-w-[calc(100vw-16px)] overflow-y-auto rounded-[10px] border border-line bg-surface p-1 text-xs text-fg-muted shadow-popover"
             style={position}
             onPointerDown={(event) => event.preventDefault()}
           >

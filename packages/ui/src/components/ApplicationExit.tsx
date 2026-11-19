@@ -52,7 +52,8 @@ export function ApplicationExit(props: {
             role="dialog"
             aria-modal="true"
             aria-label="退出应用"
-            className="max-w-md rounded-lg border border-line bg-surface p-6 text-fg shadow-xl"
+            // 模态卡统一语汇（ADR 0028）：白卡 12px 圆角 + shadow-modal 档，无边框
+            className="max-w-md rounded-xl bg-surface p-6 text-fg shadow-modal"
           >
             {exit.phase === "confirming" ? (
               <>
@@ -102,7 +103,8 @@ export function ApplicationExit(props: {
         <div
           role="alert"
           data-testid="exit-error"
-          className="fixed bottom-4 left-4 z-50 rounded border border-line bg-surface p-4 text-fg"
+          // 浮出提示同走模态档（原型 variant-d 将 exit-error 归入模态卡规则）
+          className="fixed bottom-4 left-4 z-50 rounded-xl bg-surface p-4 text-fg shadow-modal"
         >
           {exit.error}
         </div>
