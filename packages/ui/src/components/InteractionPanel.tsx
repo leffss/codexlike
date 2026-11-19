@@ -78,7 +78,7 @@ export function InteractionPanel(props: {
         data-interaction-kind={request.kind}
         aria-label="等待用户交互"
         aria-busy={props.busy}
-        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col rounded-xl bg-surface-muted px-4 py-4 text-fg transition-shadow duration-150 ease-out focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--fg)_32%,transparent),0_0_0_5px_color-mix(in_oklab,var(--fg)_5%,transparent)]"
+        className="flex max-h-[65vh] min-h-0 min-w-0 flex-col rounded-xl bg-surface-muted px-4 py-4 text-fg transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
       >
         <header className="mb-2 flex flex-wrap items-center gap-2 text-xs">
           <span

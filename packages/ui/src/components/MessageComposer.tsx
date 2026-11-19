@@ -216,7 +216,7 @@ export function MessageComposer(props: {
           浅色黑主张 / 深色亮主张随 token 自适应） */}
       <form
         data-testid="composer-card"
-        className="rounded-[10px] bg-surface-muted transition-shadow duration-150 ease-out focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--fg)_32%,transparent),0_0_0_5px_color-mix(in_oklab,var(--fg)_5%,transparent)]"
+        className="rounded-[10px] bg-surface-muted transition-shadow duration-150 ease-out focus-within:composer-focus-ring"
         onSubmit={(event) => {
           event.preventDefault();
           submit();

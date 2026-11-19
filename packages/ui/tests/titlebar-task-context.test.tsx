@@ -167,7 +167,7 @@ it("「右栏开关」保留定位器并同步 aria 状态，无任务且草稿�
   expect(disabled).toMatch(/data-testid="resources-toggle"[^>]*disabled/);
 });
 
-it("「右栏开关」：展开态高亮（accent），panel 图标承载语义", () => {
+it("「右栏开关」：展开态高亮（暖灰底+字重），panel 图标承载语义", () => {
   const open = renderToStaticMarkup(
     createElement(TitlebarResourceToggle, {
       panels: {
