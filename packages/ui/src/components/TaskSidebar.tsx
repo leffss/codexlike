@@ -281,7 +281,7 @@ export function TaskSidebar(props: {
   }, []);
 
   // ===== 拖拽分栏：宽度内存态（会话内保持；不持久化），与右栏 RailPanel 同款 =====
-  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLElement | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ x: number; width: number; max: number } | null>(
@@ -686,111 +686,114 @@ export function TaskSidebar(props: {
   }
 
   return (
-    <div ref={layoutRef} className="flex shrink-0">
-      <aside
-        aria-label="任务列表"
-        style={{ width: sidebarWidth }}
-        className="flex min-w-0 shrink-0 flex-col bg-canvas"
-      >
-        {menu && menuTask && (
-          <TaskContextMenu
-            taskId={menuTask.id}
-            anchor={menu.anchor}
-            onClose={closeMenu}
-            items={[
-              {
-                testId: "task-membership",
-                label: menuTask.projectId === null ? "移入项目" : "移出项目",
-                onSelect: () => props.onMembership(menuTask.id),
+    // ref 挂在 aside 上：maxSidebarWidth 经 nextElementSibling 取右侧正文
+    // 列实测宽（拖拽上限数据源）
+    <aside
+      ref={layoutRef}
+      aria-label="任务列表"
+      style={{ width: sidebarWidth }}
+      className="relative flex shrink-0 flex-col bg-canvas"
+    >
+      {menu && menuTask && (
+        <TaskContextMenu
+          taskId={menuTask.id}
+          anchor={menu.anchor}
+          onClose={closeMenu}
+          items={[
+            {
+              testId: "task-membership",
+              label: menuTask.projectId === null ? "移入项目" : "移出项目",
+              onSelect: () => props.onMembership(menuTask.id),
+            },
+            {
+              testId: "rename-button",
+              label: "重命名",
+              onSelect: () => {
+                setEditingTitle(menuTask.title);
+                setEditingId(menuTask.id);
               },
-              {
-                testId: "rename-button",
-                label: "重命名",
-                onSelect: () => {
-                  setEditingTitle(menuTask.title);
-                  setEditingId(menuTask.id);
-                },
-              },
-              {
-                testId:
-                  menuTask.archivedAt === null
-                    ? "archive-button"
-                    : "unarchive-button",
-                label: menuTask.archivedAt === null ? "归档" : "恢复",
-                onSelect: () =>
-                  props.onArchive(menuTask.id, menuTask.archivedAt === null),
-              },
-            ]}
-          />
-        )}
-        {projectMenu && (
-          <TaskContextMenu
-            menuLabel="项目操作"
-            anchor={projectMenu.anchor}
-            onClose={closeProjectMenu}
-            items={[
-              {
-                testId: "project-remove-menu",
-                label: "移除项目",
-                onSelect: () => props.onRemoveProject!(projectMenu.projectId),
-              },
-            ]}
-          />
-        )}
-        <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
-          <h2 className="text-sm font-medium text-fg">任务列表</h2>
-          <div className="flex items-center gap-1">
-            {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
+            },
+            {
+              testId:
+                menuTask.archivedAt === null
+                  ? "archive-button"
+                  : "unarchive-button",
+              label: menuTask.archivedAt === null ? "归档" : "恢复",
+              onSelect: () =>
+                props.onArchive(menuTask.id, menuTask.archivedAt === null),
+            },
+          ]}
+        />
+      )}
+      {projectMenu && (
+        <TaskContextMenu
+          menuLabel="项目操作"
+          anchor={projectMenu.anchor}
+          onClose={closeProjectMenu}
+          items={[
+            {
+              testId: "project-remove-menu",
+              label: "移除项目",
+              onSelect: () => props.onRemoveProject!(projectMenu.projectId),
+            },
+          ]}
+        />
+      )}
+      <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
+        <h2 className="text-sm font-medium text-fg">任务列表</h2>
+        <div className="flex items-center gap-1">
+          {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
               弹层 fixed 贴视口，从侧栏头部下方展开 */}
-            <TaskSearch
-              recordsRevision={props.searchRecordsRevision}
-              onSelect={props.onSelect}
-            />
-            <button
-              type="button"
-              data-testid="add-project"
-              title="添加项目"
-              aria-label="添加项目"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
-              onClick={props.onAddProject}
-            >
-              <FolderPlusIcon />
-            </button>
-            {/* 单一「新建任务」按钮：直达新建任务页（独立入口语境，
-              归属在页面内选——ADR 0026 顶栏菜单退役，单击不再弹菜单） */}
-            <button
-              type="button"
-              data-testid="new-task"
-              disabled={props.creating}
-              title="新建任务"
-              aria-label="新建任务"
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => props.onCreate()}
-            >
-              <PlusIcon />
-            </button>
-          </div>
-        </div>
-
-        {groups.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center px-4">
-            <p className="text-center text-xs text-fg-subtle">
-              暂无任务
-              <br />
-              点右上角 + 新建任务，首次发送才建立工作区
-            </p>
-          </div>
-        ) : (
-          <ul
-            className="flex-1 overflow-y-auto px-2 pb-2"
-            data-testid="task-list"
+          <TaskSearch
+            recordsRevision={props.searchRecordsRevision}
+            onSelect={props.onSelect}
+          />
+          <button
+            type="button"
+            data-testid="add-project"
+            title="添加项目"
+            aria-label="添加项目"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
+            onClick={props.onAddProject}
           >
-            {groups.map((group) => renderGroup(group))}
-          </ul>
-        )}
-      </aside>
-      {/* 拖拽分隔条（右栏 rail-separator 同款）：双端最小宽夹取；
-          双击复位；←/→ 微调。拖拽期间正文列（flex-1 min-w-0）被推窄。 */}
+            <FolderPlusIcon />
+          </button>
+          {/* 单一「新建任务」按钮：直达新建任务页（独立入口语境，
+              归属在页面内选——ADR 0026 顶栏菜单退役，单击不再弹菜单） */}
+          <button
+            type="button"
+            data-testid="new-task"
+            disabled={props.creating}
+            title="新建任务"
+            aria-label="新建任务"
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => props.onCreate()}
+          >
+            <PlusIcon />
+          </button>
+        </div>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-4">
+          <p className="text-center text-xs text-fg-subtle">
+            暂无任务
+            <br />
+            点右上角 + 新建任务，首次发送才建立工作区
+          </p>
+        </div>
+      ) : (
+        <ul
+          className="flex-1 overflow-y-auto px-2 pb-2"
+          data-testid="task-list"
+        >
+          {groups.map((group) => renderGroup(group))}
+        </ul>
+      )}
+      {/* 拖拽分隔条（右栏 rail-separator 同款交互：拖拽/双击复位/←→微调）。
+          骑缝 absolute 定位（-right-1.5 压在正文列上）：不占 flex 布局——
+          占位会恒压窄正文容器 6px，width-tiers 的 @min-[1280px]/task 断点
+          在临界窗口宽下掉档（6xl→4xl，2026-11-19 实测回归）。 */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -804,11 +807,11 @@ export function TaskSidebar(props: {
         onPointerCancel={endDrag}
         onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
         onKeyDown={onSeparatorKeyDown}
-        className={`w-1.5 shrink-0 cursor-col-resize select-none transition-colors ${
+        className={`absolute inset-y-0 -right-1.5 z-10 w-1.5 cursor-col-resize select-none transition-colors ${
           // D 语言：平时隐形融入画布，hover/拖动现形为 fg 淡色条（同右栏）
           dragging ? "bg-fg/15" : "hover:bg-fg/15"
         }`}
       />
-    </div>
+    </aside>
   );
 }
