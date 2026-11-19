@@ -312,7 +312,7 @@ export function MessageStream(props: {
         // overflow-x-hidden：宽内容（表格 / 代码块）由各自容器内聚横向滚动，
         // 滚动容器自身不出现横向溢出（spec 用户故事 34）。
         // 稳定预留纵向滚动槽；同列头部和输入区消费实测槽宽保持左右缘一致。
-        className="h-full overflow-x-hidden overflow-y-auto bg-canvas px-4 py-4"
+        className="h-full overflow-x-hidden overflow-y-auto bg-canvas px-4 py-5"
         // 禁用原生 scroll anchoring：跟随/恢复由状态机自管，
         // 原生锚点会覆盖恢复值（票 03）
         style={{ overflowAnchor: "none", scrollbarGutter: "stable" }}
@@ -334,7 +334,7 @@ export function MessageStream(props: {
           ) : (
             <ol
               data-testid="message-list"
-              className={`${contentWidthClass} flex flex-col gap-4`}
+              className={`${contentWidthClass} flex flex-col gap-6`}
             >
               <ContentCommitContext.Provider
                 key={props.taskId}
@@ -355,7 +355,7 @@ export function MessageStream(props: {
               {props.compacting === true && (
                 <li
                   data-testid="compacting-indicator"
-                  className="flex items-center gap-2 rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
+                  className="flex items-center gap-2 rounded-lg bg-info-bg px-3 py-2 text-xs text-info-fg"
                 >
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-info-fg" />
                   正在压缩历史为摘要…（压缩期间输入已暂停）
@@ -395,7 +395,7 @@ export function MessageStream(props: {
             commitMode("following");
             snapToBottom(element);
           }}
-          className="absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-surface text-fg-muted shadow-sm hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="absolute bottom-4 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-surface text-fg-muted shadow-floating hover:border-fg/30 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <svg
             viewBox="0 0 24 24"
@@ -447,10 +447,10 @@ function TurnGroupItem(props: {
     <li
       data-testid="message-turn"
       data-turn-id={turn.turnId}
-      // 轮间距：首轮不加顶部留白，其后各轮 pt-4 与外层 gap-4 共同留出轮次空隙
-      className="[&:not(:first-child)]:pt-4"
+      // 轮间距（D 设计语言五变体最大档）：24px 全由外层 message-list 的
+      // gap-6 提供，轮内不再叠加顶部留白，段间距节奏单一可预期
     >
-      <ol className="flex flex-col gap-3">
+      <ol className="flex flex-col gap-[14px]">
         {turn.user !== null && (
           <SegmentView
             key={turn.user.id}
@@ -573,7 +573,7 @@ function ToolGroupView(props: {
         data-testid="tool-call-group-toggle"
         aria-expanded={open}
         onClick={toggle}
-        className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-2 text-left text-xs hover:bg-hover"
+        className="flex w-full items-center gap-2 rounded-lg bg-surface-muted px-3.5 py-[9px] text-left text-xs hover:bg-hover"
       >
         <DisclosureArrow open={open} />
         <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-accent">
@@ -692,7 +692,7 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+        className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
       >
         <summary
           data-testid="thinking-toggle"
@@ -757,7 +757,7 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-fg-muted"
+        className="rounded-lg bg-surface-muted px-3 py-2 text-xs text-fg-muted"
       >
         <summary
           data-testid="process-text-toggle"
@@ -806,7 +806,7 @@ function CompactSummaryBlock(props: {
           if (event.currentTarget.open !== open)
             setOpen(event.currentTarget.open);
         }}
-        className="rounded-lg border border-info-fg/30 bg-info-bg px-3 py-2 text-xs text-info-fg"
+        className="rounded-lg bg-info-bg px-3 py-2 text-xs text-info-fg"
       >
         <summary
           data-testid="compact-summary-toggle"
@@ -817,7 +817,7 @@ function CompactSummaryBlock(props: {
         {open && (
           <div
             data-testid="compact-summary-content"
-            className="markdown mt-2 rounded border border-line bg-surface px-3 py-2 text-sm text-fg"
+            className="markdown mt-2 rounded-lg bg-surface px-3 py-2 text-sm text-fg"
           >
             <MarkdownContent content={segment.content} />
           </div>
@@ -849,8 +849,9 @@ function MessageBubble(props: {
       <li
         data-testid="message-user"
         // 限宽右对齐气泡（spec 用户故事 33）：相对限宽 85% 保护窄容器，
-        // 绝对上限 36rem 防止内容列放宽后单段文本行长失控
-        className="ml-auto max-w-[min(85%,36rem)] rounded-lg bg-selected px-3 py-2 text-sm whitespace-pre-wrap text-fg"
+        // 绝对上限 36rem 防止内容列放宽后单段文本行长失控；
+        // D 设计语言：暖灰圆角块（10px、内距 10/14、行高 1.7）
+        className="ml-auto max-w-[min(85%,36rem)] rounded-[10px] bg-surface-muted px-3.5 py-2.5 text-sm leading-[1.7] whitespace-pre-wrap text-fg"
       >
         {segment.content}
       </li>
@@ -861,7 +862,7 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-error"
-        className="rounded-lg border border-danger-fg/30 bg-danger-bg px-3 py-2 text-sm text-danger-fg"
+        className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg"
       >
         {segment.content}
       </li>
@@ -873,7 +874,7 @@ function MessageBubble(props: {
     return (
       <li
         data-testid="message-status"
-        className="rounded-lg border border-line bg-surface px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
+        className="rounded-lg bg-surface-muted px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
       >
         {segment.content}
       </li>
@@ -887,8 +888,9 @@ function MessageBubble(props: {
   return (
     <li data-testid="message-assistant" className="max-w-full">
       {/* 正文无框纯文本流：与子代理报告（SubagentRailPanel）同构，
-          不再以边框气泡呈现；左右与工具卡对齐，段间距由流 gap-3 提供 */}
-      <div className="markdown text-sm leading-6">
+          不再以边框气泡呈现；左右与工具卡对齐，段间距由流 gap-[14px] 提供。
+          D 设计语言：正文 15px + 行高 1.75（组件级规则，原型 message-assistant 段） */}
+      <div className="markdown text-[0.9375rem] leading-[1.75]">
         <div data-testid="assistant-content">
           <StreamingMarkdownContent
             content={segment.content}

@@ -28,7 +28,7 @@ export function SubagentStreamMarker(props: {
         data-subagent-state={subagent.state}
         onClick={() => props.onOpen?.(subagent.id)}
         title="在右栏「子代理」tab 查看报告与进度"
-        className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface-muted px-3 py-1.5 text-left text-xs hover:bg-hover"
+        className="flex w-full items-center gap-2 rounded-lg bg-surface-muted px-3.5 py-[9px] text-left text-xs hover:bg-hover"
       >
         <span className="shrink-0 rounded bg-subagent-bg px-1.5 py-0.5 font-mono text-[11px] text-subagent-fg">
           子代理
