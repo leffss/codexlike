@@ -40,7 +40,7 @@ export function ToastHost(props: {
           key={toast.id}
           data-testid={toast.id}
           role={toast.kind === "error" ? "alert" : "status"}
-          className={`pointer-events-auto flex max-w-sm flex-col gap-1 rounded-[10px] border border-line px-3 py-2 text-xs shadow-toast ${KIND_CLASS[toast.kind]}`}
+          className={`pointer-events-auto flex max-h-64 max-w-sm flex-col gap-1 overflow-y-auto rounded-[10px] border border-line px-3 py-2 text-xs shadow-toast ${KIND_CLASS[toast.kind]}`}
         >
           <div className="flex items-center gap-2">
             <span
@@ -49,7 +49,7 @@ export function ToastHost(props: {
             />
             <p
               data-testid={toast.contentTestId}
-              className="min-w-0 flex-1 break-words"
+              className="min-w-0 flex-1 break-words whitespace-pre-wrap"
             >
               {toast.content}
             </p>
@@ -75,7 +75,9 @@ export function ToastHost(props: {
             </button>
           </div>
           {toast.detail && (
-            <p className="break-words opacity-80">{toast.detail}</p>
+            <p className="break-words whitespace-pre-wrap opacity-80">
+              {toast.detail}
+            </p>
           )}
           {toast.actionError && <p role="alert">{toast.actionError}</p>}
         </div>

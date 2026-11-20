@@ -16,6 +16,7 @@ import { ToastHost } from "../components/ToastHost";
 import {
   createToastManager,
   type ToastContent,
+  type ToastKind,
   type ToastManager,
 } from "../lib/toast-state";
 import type {
@@ -494,12 +495,15 @@ export function WorkspacePage(props: {
     prevStreamingRef.current = streaming;
   }, [streaming]);
 
-  /** 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文 */
-  const pushLocalStatus = useCallback((content: string) => {
-    setMessages((prev) =>
-      appendLocalSegment(prev, { kind: "status", content })
-    );
-  }, []);
+  /** 本地命令反馈（GLOSSARY）：不落库、不进模型上下文，右下角 toast 一次性
+   *  展示（ADR 0030）——同 id 顶替（右下角只保留最新一条），info 类约 6 秒
+   *  自动消失、error 类常驻直到手动关闭。 */
+  const pushCommandFeedback = useCallback(
+    (kind: ToastKind, content: string) => {
+      toastState.flash("command-feedback", { kind, content });
+    },
+    [toastState]
+  );
 
   /**
    * 上下文告警刷新（code review 修复 2，spec 验收场景 4；执行设置票 03）：
@@ -718,11 +722,8 @@ export function WorkspacePage(props: {
               workspaceState.version()
             );
           }
-          // 本地 /status 反馈不属于宿主历史，接续时保留。
-          setMessages((prev) => [
-            ...live.items,
-            ...prev.filter((item) => item.kind === "status"),
-          ]);
+          // 本地命令反馈已迁 toast（ADR 0030），消息流只余宿主历史。
+          setMessages(live.items);
           if (
             event.type === "queue-changed" &&
             envelope.sequence >= queueSequenceRef.current
@@ -831,7 +832,8 @@ export function WorkspacePage(props: {
     } catch (error) {
       if (taskRequestRef.current === request) {
         setLoading(false);
-        pushLocalStatus(
+        pushCommandFeedback(
+          "error",
           `进入新建任务失败：${error instanceof Error ? error.message : String(error)}`
         );
       }
@@ -880,7 +882,8 @@ export function WorkspacePage(props: {
       await window.codexlike.projects.add(path);
       setProjects(await window.codexlike.projects.list());
     } catch (error) {
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `添加项目失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -980,7 +983,8 @@ export function WorkspacePage(props: {
     try {
       await window.codexlike.tasks.interrupt(currentId);
     } catch (error) {
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `停止失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -1012,7 +1016,8 @@ export function WorkspacePage(props: {
       }
     } catch (error) {
       if (!isCurrent()) return;
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `${failure}：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -1114,7 +1119,8 @@ export function WorkspacePage(props: {
       setQueueEdit(null);
       workspaceState.setComposer(taskId, workspaceState.composer(taskId));
       if (currentIdRef.current === taskId)
-        pushLocalStatus(
+        pushCommandFeedback(
+          "error",
           `保存排队消息失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
         );
     }
@@ -1130,7 +1136,8 @@ export function WorkspacePage(props: {
     if (item === undefined) {
       setQueueEdit(null);
       workspaceState.setComposer(currentId, workspaceState.composer(currentId));
-      pushLocalStatus(
+      pushCommandFeedback(
+        "info",
         "编辑的排队消息已发出或被移除：编辑未保存，文本保留在输入框"
       );
       return;
@@ -1138,9 +1145,12 @@ export function WorkspacePage(props: {
     if (item.id === queueState.sendingId) {
       setQueueEdit(null);
       workspaceState.setComposer(currentId, workspaceState.composer(currentId));
-      pushLocalStatus("编辑的排队消息已开始发送：编辑未保存，文本保留在输入框");
+      pushCommandFeedback(
+        "info",
+        "编辑的排队消息已开始发送：编辑未保存，文本保留在输入框"
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pushLocalStatus 为稳定 useCallback
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pushCommandFeedback 为稳定 useCallback
   }, [queueState, queueEdit, currentId, loading]);
 
   /** 重命名按钮及命令共享记录刷新，已展开搜索不得保留旧标题。 */
@@ -1155,9 +1165,10 @@ export function WorkspacePage(props: {
         currentIdRef.current === id &&
         taskRequestRef.current === generation
       )
-        pushLocalStatus(`任务已重命名为「${title}」`);
+        pushCommandFeedback("info", `任务已重命名为「${title}」`);
     } catch (error) {
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `重命名失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -1178,7 +1189,8 @@ export function WorkspacePage(props: {
         else startCreateTask();
       }
     } catch (error) {
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `${archived ? "归档" : "恢复"}失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -1229,7 +1241,10 @@ export function WorkspacePage(props: {
       }
     } catch (error) {
       // 删除已提交，不能将后续列表读取失败误报成删除失败并让用户重复确认。
-      pushLocalStatus(`项目记录已移除，刷新列表失败：${String(error)}`);
+      pushCommandFeedback(
+        "error",
+        `项目记录已移除，刷新列表失败：${String(error)}`
+      );
     }
   }
 
@@ -1241,7 +1256,7 @@ export function WorkspacePage(props: {
     );
     switch (action.type) {
       case "needs-task":
-        pushLocalStatus("该命令需要先选择一个任务");
+        pushCommandFeedback("info", "该命令需要先选择一个任务");
         return;
       case "new-task": {
         // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
@@ -1251,11 +1266,11 @@ export function WorkspacePage(props: {
       case "compact": {
         // /compact：压缩进行中不可重复触发；模型在主进程解析（apiKey 不入渲染层）
         if (compacting) {
-          pushLocalStatus("正在压缩历史，请等待完成…");
+          pushCommandFeedback("info", "正在压缩历史，请等待完成…");
           return;
         }
         if (selectedProfileId === "") {
-          pushLocalStatus("压缩需要先选择模型（Provider Profile）");
+          pushCommandFeedback("info", "压缩需要先选择模型（Provider Profile）");
           return;
         }
         const compactTaskId = current!.id;
@@ -1272,12 +1287,14 @@ export function WorkspacePage(props: {
           );
           // 历史与运行状态由同序号终态事件更新；IPC回包只提供本地命令反馈。
           if (!compactIsCurrent()) return;
-          pushLocalStatus(
+          pushCommandFeedback(
+            "info",
             `已压缩：${result.compactedMessages} 条历史消息已替换为摘要（保留最近 3 轮原始对话）`
           );
         } catch (error) {
           if (!compactIsCurrent()) return;
-          pushLocalStatus(
+          pushCommandFeedback(
+            "error",
             `压缩失败：${error instanceof Error ? error.message : String(error)}（历史未受影响，可重试 /compact）`
           );
         } finally {
@@ -1290,7 +1307,7 @@ export function WorkspacePage(props: {
         return;
       }
       case "rename-missing-argument":
-        pushLocalStatus("用法：/rename 新名称");
+        pushCommandFeedback("info", "用法：/rename 新名称");
         return;
       case "archive": {
         await archiveTask(current!.id, true);
@@ -1301,11 +1318,13 @@ export function WorkspacePage(props: {
         const match = matchModelsForModelSwitch(action.query, profiles);
         if (match.kind === "unique") {
           setSelectedModel(match.profile.id, match.model);
-          pushLocalStatus(
+          pushCommandFeedback(
+            "info",
             `模型已切换：${match.profile.name} · ${match.model}（对下一条消息生效）`
           );
         } else {
-          pushLocalStatus(
+          pushCommandFeedback(
+            "info",
             [
               action.query === ""
                 ? "当前可选模型（用 /model 关键词 切换）："
@@ -1330,9 +1349,9 @@ export function WorkspacePage(props: {
           )
             return;
           if (status === null) {
-            pushLocalStatus("任务不存在或已损坏");
+            pushCommandFeedback("error", "任务不存在或已损坏");
           } else {
-            pushLocalStatus(formatTaskStatus(status));
+            pushCommandFeedback("info", formatTaskStatus(status));
           }
         } catch (error) {
           if (
@@ -1340,7 +1359,8 @@ export function WorkspacePage(props: {
             taskRequestRef.current !== request
           )
             return;
-          pushLocalStatus(
+          pushCommandFeedback(
+            "error",
             `查询状态失败：${error instanceof Error ? error.message : String(error)}`
           );
         }
@@ -1364,7 +1384,7 @@ export function WorkspacePage(props: {
     const editing = queueEditRef.current;
     if (editing !== null && editing.taskId === currentId) {
       if (submission.kind === "slash-command") {
-        pushLocalStatus("编辑中的排队消息不能是命令（输入已保留）");
+        pushCommandFeedback("info", "编辑中的排队消息不能是命令（输入已保留）");
         return;
       }
       void saveQueueEdit(submission.text, submission.mentionPaths);
@@ -1374,7 +1394,8 @@ export function WorkspacePage(props: {
       // 忙时命令不入队不执行（spec 用户故事 16，票 05）：命令在错误的时机被
       // 延迟执行没有意义；提示后保留输入，回复结束后原样重发即可执行。
       if (streaming) {
-        pushLocalStatus(
+        pushCommandFeedback(
+          "info",
           `命令 /${submission.name} 不入队：回复结束后可用（输入已保留）`
         );
         return;
@@ -1431,7 +1452,8 @@ export function WorkspacePage(props: {
         void revokeAutoApprove(currentId);
       }
     } catch (error) {
-      pushLocalStatus(
+      pushCommandFeedback(
+        "error",
         `切换审批模式失败：${error instanceof Error ? error.message : String(error)}`
       );
     }
@@ -1659,7 +1681,7 @@ export function WorkspacePage(props: {
             .setPinned(id, pinned)
             .then(refreshTasks)
             .catch((error: unknown) =>
-              pushLocalStatus(`置顶失败：${String(error)}`)
+              pushCommandFeedback("error", `置顶失败：${String(error)}`)
             );
         }}
         onPinProject={(id, pinned) => {
@@ -1668,7 +1690,7 @@ export function WorkspacePage(props: {
             .then(() => window.codexlike.projects.list())
             .then(setProjects)
             .catch((error: unknown) =>
-              pushLocalStatus(`项目置顶失败：${String(error)}`)
+              pushCommandFeedback("error", `项目置顶失败：${String(error)}`)
             );
         }}
         onCollapseProject={(id, collapsed) => {
@@ -1677,7 +1699,7 @@ export function WorkspacePage(props: {
             .then(() => window.codexlike.projects.list())
             .then(setProjects)
             .catch((error: unknown) =>
-              pushLocalStatus(`折叠失败：${String(error)}`)
+              pushCommandFeedback("error", `折叠失败：${String(error)}`)
             );
         }}
       />

@@ -806,18 +806,18 @@ describe("终态收敛与事件兜底", () => {
     ]);
   });
 
-  it("消息流外的本地反馈（status）经 appendLocalSegment 尾部追加并归当前轮", () => {
+  it("消息流外的本地错误段经 appendLocalSegment 尾部追加并归当前轮", () => {
     let items = applyTaskEvent([], {
       type: "user-message",
       message: stored({ id: "u1" }),
     });
     items = appendLocalSegment(items, {
-      kind: "status",
-      content: "任务已重命名",
+      kind: "error",
+      content: "读取失败",
     });
     expect(items.at(-1)).toMatchObject({
-      kind: "status",
-      content: "任务已重命名",
+      kind: "error",
+      content: "读取失败",
       turnId: "u1",
     });
     const empty = appendLocalSegment([], {

@@ -188,7 +188,7 @@ describe("消息流 Markdown 工作量", () => {
     expect(screen.getByTestId("back-to-latest")).toBeTruthy();
   });
 
-  it("活动正文 trailing throttle 持续吐出最新内容，状态事件与终稿立即显示", () => {
+  it("活动正文 trailing throttle 持续吐出最新内容，错误事件与终稿立即显示", () => {
     const active = text("throttle", "开始", true);
     const view = render(
       <MessageStream items={[active]} taskId="throttle-task" streaming />
@@ -200,7 +200,7 @@ describe("消息流 Markdown 工作量", () => {
           items={[
             { ...active, content: `开始 ${index}` },
             {
-              kind: "status",
+              kind: "error",
               id: "status",
               seq: 2,
               turnId: active.turnId,
@@ -212,7 +212,7 @@ describe("消息流 Markdown 工作量", () => {
           streaming
         />
       );
-      expect(screen.getByTestId("message-status").textContent).toBe(
+      expect(screen.getByTestId("message-error").textContent).toBe(
         `状态 ${index}`
       );
       act(() => vi.advanceTimersByTime(10));

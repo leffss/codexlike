@@ -36,9 +36,13 @@ export interface ToastEntry extends ToastContent {
   key: string;
 }
 
+/** 一次性反馈的自动消失延迟（ADR 0030：本地命令反馈 info 类约 6 秒） */
+const FEEDBACK_TTL_MS = 6000;
+
 export function createToastManager() {
   const entries = new Map<string, ToastEntry>();
   const dismissedKeys = new Set<string>();
+  const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<() => void>();
   let revision = 0;
   function notify() {
@@ -46,7 +50,31 @@ export function createToastManager() {
     for (const listener of listeners) listener();
   }
   const entryKey = (id: string, content: string) => `${id}\n${content}`;
+  function clearExpiry(id: string) {
+    const timer = expiryTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      expiryTimers.delete(id);
+    }
+  }
   return {
+    /** 一次性反馈（ADR 0030）：无条件 upsert——重复执行同命令是新事件，不受
+     *  dismissedKeys 约束；info 类约 6 秒自动消失（被顶替则计时从头算），
+     *  warn/error 常驻直到手动关闭。 */
+    flash(id: string, toast: ToastContent) {
+      clearExpiry(id);
+      entries.set(id, { id, key: entryKey(id, toast.content), ...toast });
+      if (toast.kind === "info") {
+        expiryTimers.set(
+          id,
+          setTimeout(() => {
+            expiryTimers.delete(id);
+            if (entries.delete(id)) notify();
+          }, FEEDBACK_TTL_MS)
+        );
+      }
+      notify();
+    },
     /** 幂等 upsert：同 testId 更新内容保持堆叠位置；已手动关闭的同内容不复活 */
     show(id: string, toast: ToastContent) {
       const key = entryKey(id, toast.content);
@@ -70,8 +98,10 @@ export function createToastManager() {
       entries.set(id, { id, key, ...toast });
       notify();
     },
-    /** 手动关闭：移除并记录内容指纹；状态持续期间同内容不再自动复活 */
+    /** 手动关闭：移除并记录内容指纹；状态持续期间同内容不再自动复活
+     *  （flash 条目不查该表，指纹残留无影响）；到期定时器一并清理 */
     dismiss(id: string) {
+      clearExpiry(id);
       const previous = entries.get(id);
       if (!previous) return;
       dismissedKeys.add(previous.key);
@@ -84,6 +114,7 @@ export function createToastManager() {
      * 前缀扫描清除该条目的全部内容变体，`\n` 分隔保证不同 id 的前缀不互混。
      */
     retract(id: string) {
+      clearExpiry(id);
       let removed = false;
       for (const key of [...dismissedKeys]) {
         if (key.startsWith(`${id}\n`)) {

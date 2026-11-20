@@ -758,7 +758,6 @@ function MessageBubble(props: {
     | { kind: "user" }
     | { kind: "assistant" }
     | { kind: "error" }
-    | { kind: "status" }
     | { kind: "compact-summary" }
   >;
 }) {
@@ -783,18 +782,6 @@ function MessageBubble(props: {
       <li
         data-testid="message-error"
         className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg"
-      >
-        {segment.content}
-      </li>
-    );
-  }
-
-  if (segment.kind === "status") {
-    // 本地命令反馈（/status、/rename 结果等）：不落库、不进模型上下文
-    return (
-      <li
-        data-testid="message-status"
-        className="rounded-lg bg-surface-muted px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
       >
         {segment.content}
       </li>

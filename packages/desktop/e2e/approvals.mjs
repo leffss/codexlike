@@ -175,7 +175,7 @@ async function main() {
 
     await send(window, "/status");
     await window
-      .getByTestId("message-status")
+      .getByTestId("command-feedback")
       .getByText("帮我批准（assist）：文件编辑与联网自动放行，仅危险命令询问")
       .waitFor();
 

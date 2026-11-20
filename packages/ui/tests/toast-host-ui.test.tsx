@@ -163,6 +163,35 @@ it("contentTestId 落在主文案段（共享提示 warning/error 子定位沿�
   );
 });
 
+it("多行报告全文进 toast：主文案保留换行，条目限高可滚动（ADR 0030 /status）", () => {
+  const report = [
+    "任务状态（/status）",
+    "模型：Mock · mock-model",
+    "上下文用量（估算）：约 1234 tokens（8 条消息 + 系统提示）",
+    "任务用量：输入 12000 / 输出 3400 tokens（其中子代理 输入 800 / 输出 200）",
+  ].join("\n");
+  const html = renderToStaticMarkup(
+    createElement(ToastHost, {
+      toasts: [
+        entry({
+          id: "command-feedback",
+          kind: "info",
+          content: report,
+        }),
+      ],
+      onDismiss: () => {},
+    })
+  );
+  // 条目容器限高 + 滚动
+  expect(html).toMatch(
+    /data-testid="command-feedback"[^>]*class="[^"]*max-h-64[^"]*overflow-y-auto/
+  );
+  // 主文案段 whitespace-pre-wrap，换行原样保留
+  expect(html).toMatch(
+    /class="[^"]*whitespace-pre-wrap[^"]*">任务状态（\/status）\n模型：Mock · mock-model/
+  );
+});
+
 it("操作与说明段渲染：自动批准条带撤销按钮、后果说明与失败提示", () => {
   const onAction = vi.fn();
   const props: { toasts: ToastEntry[]; onDismiss: () => void } = {

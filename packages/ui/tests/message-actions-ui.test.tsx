@@ -182,7 +182,7 @@ describe("最终正文操作栏（静态渲染 seam，点击与剪贴板由桌�
           content: "继续",
         },
         {
-          kind: "status",
+          kind: "error",
           id: "status",
           seq: 4,
           turnId: "next-turn",
