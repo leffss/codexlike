@@ -505,6 +505,11 @@ export function WorkspacePage(props: {
     [toastState]
   );
 
+  /** /status 报告块关闭（ADR 0031）：按段 id 从消息列表移除该报告 */
+  const dismissStatusSegment = useCallback((id: string) => {
+    setMessages((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   /**
    * 上下文告警刷新（code review 修复 2，spec 验收场景 4；执行设置票 03）：
    * 以 /status 的 token 估算对照模型上下文窗口（Profile 可配，默认 128k）
@@ -722,8 +727,11 @@ export function WorkspacePage(props: {
               workspaceState.version()
             );
           }
-          // 本地命令反馈已迁 toast（ADR 0030），消息流只余宿主历史。
-          setMessages(live.items);
+          // /status 报告段（ADR 0031）不属于宿主历史，事件接续时保留驻留。
+          setMessages((prev) => [
+            ...live.items,
+            ...prev.filter((item) => item.kind === "status"),
+          ]);
           if (
             event.type === "queue-changed" &&
             envelope.sequence >= queueSequenceRef.current
@@ -1351,7 +1359,14 @@ export function WorkspacePage(props: {
           if (status === null) {
             pushCommandFeedback("error", "任务不存在或已损坏");
           } else {
-            pushCommandFeedback("info", formatTaskStatus(status));
+            // /status 多行报告驻留消息流逐条可关闭（ADR 0031），
+            // 不走右下角 toast（限高滚动 + 短驻留不适合细看）。
+            setMessages((prev) =>
+              appendLocalSegment(prev, {
+                kind: "status",
+                content: formatTaskStatus(status),
+              })
+            );
           }
         } catch (error) {
           if (
@@ -1791,6 +1806,7 @@ export function WorkspacePage(props: {
                   followSignal={followSignal}
                   taskTitle={current?.title ?? null}
                   onOpenSubagent={openSubagentFromStream}
+                  onDismissStatus={dismissStatusSegment}
                   emptyHint={
                     profiles.length === 0 ? (
                       <button

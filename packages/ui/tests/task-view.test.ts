@@ -827,6 +827,22 @@ describe("终态收敛与事件兜底", () => {
     expect(empty.at(-1)).toMatchObject({ kind: "error", content: "读取失败" });
     expect(typeof seg(empty, 0).seq).toBe("number");
   });
+
+  it("/status 报告段（ADR 0031）经 appendLocalSegment 尾部追加并归当前轮", () => {
+    let items = applyTaskEvent([], {
+      type: "user-message",
+      message: stored({ id: "u1" }),
+    });
+    items = appendLocalSegment(items, {
+      kind: "status",
+      content: "任务状态（/status）\n模型：Mock · mock-model",
+    });
+    expect(items.at(-1)).toMatchObject({
+      kind: "status",
+      content: "任务状态（/status）\n模型：Mock · mock-model",
+      turnId: "u1",
+    });
+  });
 });
 
 describe("子代理段（主序列成员 + 卡内嵌套进度）", () => {

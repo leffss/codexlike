@@ -102,6 +102,8 @@ export function MessageStream(props: {
   taskTitle?: string | null;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位选中 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** /status 报告块关闭（ADR 0031）：按段 id 从消息列表移除该报告 */
+  onDismissStatus?: (id: string) => void;
 }) {
   const now = useLocalDay();
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
@@ -348,6 +350,7 @@ export function MessageStream(props: {
                     taskTitle={props.taskTitle}
                     planIndexById={planIndexById}
                     onOpenSubagent={props.onOpenSubagent}
+                    onDismissStatus={props.onDismissStatus}
                   />
                 ))}
               </ContentCommitContext.Provider>
@@ -422,6 +425,8 @@ function TurnGroupItem(props: {
   planIndexById?: Map<string, number>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** /status 报告块关闭（ADR 0031）：透传至 SegmentView → MessageBubble */
+  onDismissStatus?: (id: string) => void;
 }) {
   const { turn } = props;
   const failed = turn.segments.some((segment) => segment.kind === "error");
@@ -464,6 +469,7 @@ function TurnGroupItem(props: {
             taskTitle={props.taskTitle}
             planIndexById={props.planIndexById}
             onOpenSubagent={props.onOpenSubagent}
+            onDismissStatus={props.onDismissStatus}
           />
         ))}
       </ol>
@@ -489,6 +495,8 @@ function ToolSequenceView(props: {
   planIndexById?: Map<string, number>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** /status 报告块关闭（ADR 0031）：透传至 SegmentView → MessageBubble */
+  onDismissStatus?: (id: string) => void;
 }) {
   const { item } = props;
   if (item.kind === "passthrough") {
@@ -502,6 +510,7 @@ function ToolSequenceView(props: {
         questionDraft={props.questionDraft}
         taskTitle={props.taskTitle}
         onOpenSubagent={props.onOpenSubagent}
+        onDismissStatus={props.onDismissStatus}
       />
     );
   }
@@ -536,6 +545,8 @@ function SegmentView(props: {
   taskTitle?: string | null;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** /status 报告块关闭（ADR 0031）：透传至 MessageBubble */
+  onDismissStatus?: (id: string) => void;
 }) {
   const { segment } = props;
   if (segment.kind === "tool-call") {
@@ -568,6 +579,7 @@ function SegmentView(props: {
       now={props.now}
       failed={props.failed}
       taskTitle={props.taskTitle}
+      onDismissStatus={props.onDismissStatus}
     />
   );
 }
@@ -758,8 +770,11 @@ function MessageBubble(props: {
     | { kind: "user" }
     | { kind: "assistant" }
     | { kind: "error" }
+    | { kind: "status" }
     | { kind: "compact-summary" }
   >;
+  /** /status 报告块关闭（ADR 0031）：未提供时按钮不渲染 */
+  onDismissStatus?: (id: string) => void;
 }) {
   const { segment } = props;
 
@@ -784,6 +799,31 @@ function MessageBubble(props: {
         className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-fg"
       >
         {segment.content}
+      </li>
+    );
+  }
+
+  if (segment.kind === "status") {
+    // /status 报告（ADR 0031）：多行报告驻留消息流可细看，逐条可关闭
+    return (
+      <li
+        data-testid="message-status"
+        className="rounded-lg bg-surface-muted px-3 py-2 text-xs whitespace-pre-wrap text-fg-muted"
+      >
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 break-words">{segment.content}</p>
+          {props.onDismissStatus && (
+            <button
+              type="button"
+              data-testid="message-status-close"
+              aria-label="关闭状态报告"
+              onClick={() => props.onDismissStatus?.(segment.id)}
+              className="shrink-0 rounded px-1 opacity-70 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </li>
     );
   }

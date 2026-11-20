@@ -75,6 +75,12 @@ export interface ErrorSegment extends SegmentBase {
   content: string;
 }
 
+/** /status 报告段（ADR 0031）：多行状态报告驻留消息流、可逐条关闭 */
+export interface StatusSegment extends SegmentBase {
+  kind: "status";
+  content: string;
+}
+
 /** compact 摘要段（GLOSSARY「Compact」）：被压缩历史展开后的摘要卡片 */
 export interface CompactSummarySegment extends SegmentBase {
   kind: "compact-summary";
@@ -172,6 +178,7 @@ export type MessageSegment =
   | AssistantSegment
   | ThinkingSegment
   | ErrorSegment
+  | StatusSegment
   | CompactSummarySegment
   | ToolCallSegment
   | SubagentSegment
@@ -1051,11 +1058,11 @@ export function mergeSubagentsAfterCompact(
   return next;
 }
 
-/** 渲染层本地段（error）：不入事件流，尾部追加并归当前轮
- *  （本地命令反馈已迁右下角 toast，ADR 0030，不再进消息流） */
+/** 渲染层本地段（/status 报告 status / 错误 error）：不入事件流，
+ *  尾部追加并归当前轮（其余本地命令反馈走右下角 toast，ADR 0030/0031） */
 export function appendLocalSegment(
   items: MessageSegment[],
-  message: { kind: "error"; content: string }
+  message: { kind: "status" | "error"; content: string }
 ): MessageSegment[] {
   const at = nowEpoch();
   const id = `local-${at}-${Math.random().toString(36).slice(2, 8)}`;

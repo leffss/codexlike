@@ -193,9 +193,9 @@ async function main() {
     // 4) /status：已压缩标记 + 压缩后用量
     await composer.fill("/status");
     await composer.press("Enter");
-    const statusCard = window.getByTestId("command-feedback");
-    await statusCard.waitFor({ timeout: 10_000 });
-    const statusText = await statusCard.textContent();
+    const statusCards = window.getByTestId("message-status");
+    await statusCards.last().waitFor({ timeout: 10_000 });
+    const statusText = await statusCards.last().textContent();
     assert(
       statusText?.includes("已压缩") === true,
       `/status 未显示已压缩标记：${statusText}`

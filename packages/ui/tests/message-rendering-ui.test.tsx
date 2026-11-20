@@ -348,3 +348,30 @@ describe("消息流 Markdown 工作量", () => {
     20_000
   );
 });
+
+describe("/status 报告块（ADR 0031：回消息流带关闭按钮）", () => {
+  it("多行报告全文渲染，关闭按钮点击透传段 id", () => {
+    const onDismissStatus = vi.fn();
+    render(
+      <MessageStream
+        items={[
+          {
+            kind: "status",
+            id: "status-1",
+            seq: 1,
+            turnId: "status-1",
+            responseId: null,
+            content: "任务状态（/status）\n模型：Mock · mock-model",
+          },
+        ]}
+        taskId="status-task"
+        onDismissStatus={onDismissStatus}
+      />
+    );
+    const block = screen.getByTestId("message-status");
+    expect(block.textContent).toContain("任务状态（/status）");
+    expect(block.textContent).toContain("mock-model");
+    fireEvent.click(screen.getByTestId("message-status-close"));
+    expect(onDismissStatus).toHaveBeenCalledWith("status-1");
+  });
+});

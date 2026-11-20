@@ -78,7 +78,7 @@ async function main() {
     await composer.press("Enter"); // 选中 /status（无参命令）直接执行
     assert((await menu.count()) === 0, "执行后菜单应关闭");
 
-    const statusCard = window.getByTestId("command-feedback");
+    const statusCard = window.getByTestId("message-status").first();
     await statusCard.waitFor({ timeout: 10_000 });
     const statusText = await statusCard.textContent();
     // 正式任务只能由首次发送建立；模型、用量与 AGENTS.md 来源仍必须展示。
@@ -95,10 +95,10 @@ async function main() {
         statusText?.includes("AGENTS.md") === true,
       `/status 未显示 AGENTS.md 来源：${statusText}`
     );
-    // 本地命令反馈迁 toast（ADR 0030）：右下角可手动关闭，不再滞留消息流
-    await window.getByTestId("command-feedback-close").click();
+    // /status 报告块可手动关闭（ADR 0031），关闭后从消息流移除
+    await window.getByTestId("message-status-close").click();
     await statusCard.waitFor({ state: "detached" });
-    console.log("[e2e] /status：用量估算 + AGENTS.md 来源可见（toast 可关闭）");
+    console.log("[e2e] /status：用量估算 + AGENTS.md 来源可见（报告块可关闭）");
 
     // 4) @引用 菜单：输入 @REA 模糊匹配 README.md，Enter 写回，发送后断言真实请求体
     await composer.fill("请阅读 @REA");
@@ -147,7 +147,7 @@ async function main() {
     // 4.5) 消息往返后再查 /status：模型已记录
     await composer.fill("/status");
     await composer.press("Enter");
-    const statusAfter = window.getByTestId("command-feedback");
+    const statusAfter = window.getByTestId("message-status").first();
     await statusAfter.waitFor({ timeout: 10_000 });
     const statusAfterText = await statusAfter.textContent();
     assert(

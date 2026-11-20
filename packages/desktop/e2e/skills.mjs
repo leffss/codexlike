@@ -410,7 +410,7 @@ async function main() {
     await closeRailPanel(window);
     await window.getByTestId("composer-input").fill("/status");
     await window.getByTestId("composer-input").press("Enter");
-    const statusAfterLoad = window.getByTestId("command-feedback");
+    const statusAfterLoad = window.getByTestId("message-status").last();
     await statusAfterLoad.waitFor();
     assert(
       (await statusAfterLoad.textContent()).includes("reference") &&

@@ -145,8 +145,9 @@ async function main() {
     // 空闲命令行为不变：原样重发保留的 /status 正常执行
     await input.press("Enter");
     await window
-      .getByTestId("command-feedback")
+      .getByTestId("message-status")
       .filter({ hasText: "任务状态" })
+      .first()
       .waitFor({ timeout: 10_000 });
     console.log("[e2e] 空闲后：单发送按钮回归，保留的命令原样执行");
 
