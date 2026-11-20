@@ -18,7 +18,7 @@
     "icon": "node scripts/make-icon.mjs",
     "dist": "pnpm run predist && electron-builder --win --projectDir .dist-vendor",
     "predist": "node scripts/dist.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "pnpm --filter @codexlike/agent-core run build && tsc --noEmit -p tsconfig.json",
     "test": "pnpm --filter @codexlike/agent-core run build && vitest run",
     "test:e2e": "node e2e/smoke.mjs",
     "test:e2e:acceptance": "node e2e/acceptance.mjs",
