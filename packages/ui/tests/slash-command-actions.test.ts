@@ -129,96 +129,93 @@ describe("matchModelsForModelSwitch（/model 关键词匹配，票 02 模型级�
   });
 });
 
+/** /status 最小合法载荷（TaskStatusInfo 加字段只改这里，用例按需 override） */
+function statusInfo(overrides: Partial<TaskStatusInfo> = {}): TaskStatusInfo {
+  return {
+    model: null,
+    providerProfileName: null,
+    estimatedContextTokens: 0,
+    contextWindowTokens: null,
+    messageCount: 0,
+    usage: ZERO_USAGE,
+    agentsMd: null,
+    approvalMode: "assist",
+    compacted: null,
+    ...overrides,
+  };
+}
+
 describe("formatTaskStatus（/status 展示文案）", () => {
   it("任务用量行（ADR 0029）：总量与子代理份额分列显示，全 0 也照常显示", () => {
-    const text = formatTaskStatus({
-      model: "glm-4.7",
-      providerProfileName: "GLM",
-      estimatedContextTokens: 500,
-      contextWindowTokens: null,
-      messageCount: 3,
-      usage: {
-        inputTokens: 700,
-        outputTokens: 120,
-        subagentInputTokens: 500,
-        subagentOutputTokens: 90,
-      },
-      agentsMd: null,
-      approvalMode: "assist",
-      compacted: null,
-    });
+    const text = formatTaskStatus(
+      statusInfo({
+        model: "glm-4.7",
+        providerProfileName: "GLM",
+        estimatedContextTokens: 500,
+        messageCount: 3,
+        usage: {
+          inputTokens: 700,
+          outputTokens: 120,
+          subagentInputTokens: 500,
+          subagentOutputTokens: 90,
+        },
+      })
+    );
     expect(text).toContain(
       "任务用量：输入 700 / 输出 120 tokens（其中子代理 输入 500 / 输出 90）"
     );
 
-    const fresh = formatTaskStatus({
-      model: null,
-      providerProfileName: null,
-      estimatedContextTokens: 0,
-      contextWindowTokens: null,
-      messageCount: 0,
-      usage: ZERO_USAGE,
-      agentsMd: null,
-      approvalMode: "assist",
-      compacted: null,
-    });
     // 不回补、不隐藏：全 0 的任务照常显示（自统计起算）
-    expect(fresh).toContain(
+    expect(formatTaskStatus(statusInfo())).toContain(
       "任务用量：输入 0 / 输出 0 tokens（其中子代理 输入 0 / 输出 0）"
     );
   });
 
   it("最近轮摘要独立显示采集时间与分执行者加载，明确不代表当前激活", () => {
     for (const resourcePhase of ["active", "preview"] as const) {
-      const text = formatTaskStatus({
-        model: null,
-        providerProfileName: null,
-        estimatedContextTokens: 500,
-        usage: ZERO_USAGE,
-        messageCount: 0,
-        agentsMd: null,
-        approvalMode: "assist",
-        contextWindowTokens: null,
-        compacted: null,
-        resourcePhase,
-        resources: {
-          estimatedTokens: 10,
-          loaded: [],
-          catalog: {
-            capturedAt: "2026-11-11T02:00:00Z",
-            indexBytes: 0,
-            agents: { sources: [], truncated: false },
-            skills: [],
-            diagnostics: [],
-          },
-        },
-        lastResources: {
-          estimatedTokens: 100,
-          catalog: {
-            capturedAt: "2026-11-11T01:00:00Z",
-            indexBytes: 0,
-            agents: { sources: [], truncated: false },
-            skills: [],
-            diagnostics: [],
-          },
-          loaded: [
-            {
-              executorId: "main",
-              name: "previous-review",
-              path: "/previous/SKILL.md",
-              kind: "skill",
-              bytes: 50,
+      const text = formatTaskStatus(
+        statusInfo({
+          estimatedContextTokens: 500,
+          resourcePhase,
+          resources: {
+            estimatedTokens: 10,
+            loaded: [],
+            catalog: {
+              capturedAt: "2026-11-11T02:00:00Z",
+              indexBytes: 0,
+              agents: { sources: [], truncated: false },
+              skills: [],
+              diagnostics: [],
             },
-            {
-              executorId: "child-previous",
-              name: "previous-review",
-              path: "/previous/example.txt",
-              kind: "resource",
-              bytes: 20,
+          },
+          lastResources: {
+            estimatedTokens: 100,
+            catalog: {
+              capturedAt: "2026-11-11T01:00:00Z",
+              indexBytes: 0,
+              agents: { sources: [], truncated: false },
+              skills: [],
+              diagnostics: [],
             },
-          ],
-        },
-      });
+            loaded: [
+              {
+                executorId: "main",
+                name: "previous-review",
+                path: "/previous/SKILL.md",
+                kind: "skill",
+                bytes: 50,
+              },
+              {
+                executorId: "child-previous",
+                name: "previous-review",
+                path: "/previous/example.txt",
+                kind: "resource",
+                bytes: 20,
+              },
+            ],
+          },
+        })
+      );
       expect(text).toContain(
         resourcePhase === "active"
           ? "当前运行快照（active）"
@@ -236,17 +233,7 @@ describe("formatTaskStatus（/status 展示文案）", () => {
     }
   });
   it("没有最近轮摘要不显示历史加载，空加载摘要仍展示采集时间", () => {
-    const status: TaskStatusInfo = {
-      model: null,
-      providerProfileName: null,
-      estimatedContextTokens: 0,
-      usage: ZERO_USAGE,
-      messageCount: 0,
-      agentsMd: null,
-      approvalMode: "assist",
-      contextWindowTokens: null,
-      compacted: null,
-    };
+    const status = statusInfo();
     expect(formatTaskStatus(status)).not.toContain("最近一轮摘要");
     expect(formatTaskStatus({ ...status, lastResources: null })).not.toContain(
       "最近一轮摘要"
@@ -272,58 +259,52 @@ describe("formatTaskStatus（/status 展示文案）", () => {
 
   it("资源状态区分当前快照和下轮预览，展示来源/状态/诊断与执行者而非正文", () => {
     for (const resourcePhase of ["active", "preview"] as const) {
-      const text = formatTaskStatus({
-        model: null,
-        providerProfileName: null,
-        estimatedContextTokens: 500,
-        usage: ZERO_USAGE,
-        messageCount: 0,
-        agentsMd: null,
-        approvalMode: "assist",
-        contextWindowTokens: null,
-        compacted: null,
-        resourcePhase,
-        resources: {
-          estimatedTokens: 200,
-          loaded: [
-            {
-              executorId: "child-2",
-              name: "review",
-              path: "/review/SKILL.md",
-              kind: "skill",
-              bytes: 50,
-            },
-          ],
-          catalog: {
-            capturedAt: "2026-11-11T01:00:00Z",
-            indexBytes: 80,
-            agents: {
-              sources: [
-                {
-                  path: "/project/AGENTS.md",
-                  scope: "project",
-                  bytes: 40000,
-                  includedBytes: 32768,
-                },
-              ],
-              truncated: true,
-            },
-            skills: [
+      const text = formatTaskStatus(
+        statusInfo({
+          estimatedContextTokens: 500,
+          resourcePhase,
+          resources: {
+            estimatedTokens: 200,
+            loaded: [
               {
+                executorId: "child-2",
                 name: "review",
-                description: "审查",
                 path: "/review/SKILL.md",
-                directory: "/review",
-                scope: "project",
-                source: "agents",
-                status: "shadowed",
-                reason: "已覆盖来源",
+                kind: "skill",
+                bytes: 50,
               },
             ],
-            diagnostics: [{ path: "/review/SKILL.md", message: "诊断信息" }],
+            catalog: {
+              capturedAt: "2026-11-11T01:00:00Z",
+              indexBytes: 80,
+              agents: {
+                sources: [
+                  {
+                    path: "/project/AGENTS.md",
+                    scope: "project",
+                    bytes: 40000,
+                    includedBytes: 32768,
+                  },
+                ],
+                truncated: true,
+              },
+              skills: [
+                {
+                  name: "review",
+                  description: "审查",
+                  path: "/review/SKILL.md",
+                  directory: "/review",
+                  scope: "project",
+                  source: "agents",
+                  status: "shadowed",
+                  reason: "已覆盖来源",
+                },
+              ],
+              diagnostics: [{ path: "/review/SKILL.md", message: "诊断信息" }],
+            },
           },
-        },
-      });
+        })
+      );
       for (const expected of [
         resourcePhase === "active" ? "当前运行快照" : "下轮磁盘预览",
         "/project/AGENTS.md",
@@ -340,23 +321,21 @@ describe("formatTaskStatus（/status 展示文案）", () => {
     }
   });
   it("包含模型、用量估算、消息数、AGENTS.md 来源与审批模式（中文档位说明）", () => {
-    const text = formatTaskStatus({
-      model: "glm-4.7",
-      providerProfileName: "GLM",
-      estimatedContextTokens: 1234,
-      usage: ZERO_USAGE,
-      messageCount: 12,
-      agentsMd: {
-        sources: [
-          "C:\\Users\\u\\.codexlike\\AGENTS.md",
-          "C:\\work\\demo\\AGENTS.md",
-        ],
-        truncated: false,
-      },
-      approvalMode: "assist",
-      contextWindowTokens: null,
-      compacted: null,
-    } satisfies TaskStatusInfo);
+    const text = formatTaskStatus(
+      statusInfo({
+        model: "glm-4.7",
+        providerProfileName: "GLM",
+        estimatedContextTokens: 1234,
+        messageCount: 12,
+        agentsMd: {
+          sources: [
+            "C:\\Users\\u\\.codexlike\\AGENTS.md",
+            "C:\\work\\demo\\AGENTS.md",
+          ],
+          truncated: false,
+        },
+      })
+    );
     expect(text).toContain("模型：GLM · glm-4.7");
     expect(text).toContain("1234");
     expect(text).toContain("12");
@@ -375,33 +354,14 @@ describe("formatTaskStatus（/status 展示文案）", () => {
         "完全访问（full-access）：全自动执行，且不受限读写本地任意文件",
       ],
     ] as const) {
-      const text = formatTaskStatus({
-        model: null,
-        providerProfileName: null,
-        estimatedContextTokens: 0,
-        usage: ZERO_USAGE,
-        messageCount: 0,
-        agentsMd: null,
-        approvalMode: mode,
-        contextWindowTokens: null,
-        compacted: null,
-      } satisfies TaskStatusInfo);
-      expect(text).toContain(expected);
+      expect(formatTaskStatus(statusInfo({ approvalMode: mode }))).toContain(
+        expected
+      );
     }
   });
 
   it("未发现 AGENTS.md、未选模型时的降级文案", () => {
-    const text = formatTaskStatus({
-      model: null,
-      providerProfileName: null,
-      estimatedContextTokens: 0,
-      usage: ZERO_USAGE,
-      messageCount: 0,
-      agentsMd: null,
-      approvalMode: "assist",
-      contextWindowTokens: null,
-      compacted: null,
-    } satisfies TaskStatusInfo);
+    const text = formatTaskStatus(statusInfo());
     expect(text).toContain("未选择");
     expect(text).toContain("未发现");
   });
@@ -419,34 +379,21 @@ describe("/compact（手动压缩）ui 分发", () => {
   });
 
   it("formatTaskStatus：已压缩时显示「已压缩」标记与压缩后用量", () => {
-    const text = formatTaskStatus({
-      model: "glm-4.7",
-      providerProfileName: "GLM",
-      estimatedContextTokens: 210,
-      usage: ZERO_USAGE,
-      messageCount: 7,
-      agentsMd: null,
-      approvalMode: "assist",
-      contextWindowTokens: null,
-      compacted: { at: "2026-11-11T09:00:00.000Z", messagesCompacted: 8 },
-    } satisfies TaskStatusInfo);
+    const text = formatTaskStatus(
+      statusInfo({
+        model: "glm-4.7",
+        providerProfileName: "GLM",
+        estimatedContextTokens: 210,
+        messageCount: 7,
+        compacted: { at: "2026-11-11T09:00:00.000Z", messagesCompacted: 8 },
+      })
+    );
     expect(text).toContain("已压缩");
     expect(text).toContain("8");
     expect(text).toContain("210");
   });
 
   it("formatTaskStatus：未压缩时不显示压缩标记", () => {
-    const text = formatTaskStatus({
-      model: null,
-      providerProfileName: null,
-      estimatedContextTokens: 0,
-      usage: ZERO_USAGE,
-      messageCount: 0,
-      agentsMd: null,
-      approvalMode: "assist",
-      contextWindowTokens: null,
-      compacted: null,
-    } satisfies TaskStatusInfo);
-    expect(text).not.toContain("已压缩");
+    expect(formatTaskStatus(statusInfo())).not.toContain("已压缩");
   });
 });
