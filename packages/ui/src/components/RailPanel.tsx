@@ -27,7 +27,7 @@ import {
   type SnapshotKey,
 } from "./ResourceSnapshotSummary";
 import { SubagentRailPanelBody, type SubagentFocus } from "./SubagentRailPanel";
-import { TerminalRailPanelBody } from "./TerminalRailPanel";
+import { TerminalRailPanelBody, type TerminalFocus } from "./TerminalRailPanel";
 import type { SubagentSegment } from "../lib/task-view";
 
 const MonacoDiff = lazy(() => import("./MonacoDiff"));
@@ -106,6 +106,8 @@ export function RailPanel(props: {
   subagents: SubagentSegment[];
   /** 定位信号（消息流标记行点击）：切到子代理 tab 并选中对应子代理 */
   subagentFocus: SubagentFocus | null;
+  /** 定位信号（消息流终端标记行点击，ADR 0033 票 06）：切到终端 tab 并直跳详情页 */
+  terminalFocus: TerminalFocus | null;
   /**
    * 终端会话恢复快照（ADR 0033 票 08）：view 并行字段的已退出记录（含
    * 快照文本）——useTerminalSessions 初始拉取的恢复数据源（重启后内存
@@ -212,6 +214,13 @@ export function RailPanel(props: {
   useEffect(() => {
     if (subagentFocus !== null) setTab("subagents");
   }, [subagentFocus]);
+
+  // 消息流终端标记行点击定位（ADR 0033 票 06）：切到终端 tab（开右栏由
+  // WorkspacePage 侧完成；直跳详情页与幂等守卫在 TerminalRailPanelBody 内）
+  const terminalFocus = props.terminalFocus;
+  useEffect(() => {
+    if (terminalFocus !== null) setTab("terminals");
+  }, [terminalFocus]);
 
   // tab 徽章：运行中/排队中的子代理数（已完成不计数，title 说明语义）
   const runningSubagents = props.subagents.filter(
@@ -512,6 +521,7 @@ export function RailPanel(props: {
               creating={terminalSessions.creating}
               onKill={terminalSessions.killSession}
               killingSessionId={terminalSessions.killingSessionId}
+              focus={props.terminalFocus}
             />
           </div>
         ) : (

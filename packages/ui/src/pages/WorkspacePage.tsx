@@ -49,6 +49,7 @@ import { contextWarningMessage } from "../lib/context-warning";
 
 import { RailPanel } from "../components/RailPanel";
 import type { SubagentFocus } from "../components/SubagentRailPanel";
+import type { TerminalFocus } from "../components/TerminalRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
@@ -339,6 +340,17 @@ export function WorkspacePage(props: {
   const openSubagentFromStream = useCallback((subagentId: string) => {
     setRailOpen(true);
     setSubagentFocus({ id: subagentId, seq: ++subagentFocusSeqRef.current });
+  }, []);
+  // 终端标记行点击定位信号（ADR 0033 票 06，先例 SubagentFocus：seq 单调
+  // 递增——同 sessionId 重复点击也重新定位；RailPanel 切 tab、详情页选中
+  // 与幂等守卫在 TerminalRailPanelBody 内）
+  const terminalFocusSeqRef = useRef(0);
+  const [terminalFocus, setTerminalFocus] = useState<TerminalFocus | null>(
+    null
+  );
+  const openTerminalFromStream = useCallback((sessionId: string) => {
+    setRailOpen(true);
+    setTerminalFocus({ sessionId, seq: ++terminalFocusSeqRef.current });
   }, []);
   // 终端会话恢复快照（ADR 0033 票 08）：当前任务 view 并行字段的已退出
   // 记录（含快照文本），右栏终端 tab 初始拉取的恢复数据源——重启后内存
@@ -1863,6 +1875,7 @@ export function WorkspacePage(props: {
                   followSignal={followSignal}
                   taskTitle={current?.title ?? null}
                   onOpenSubagent={openSubagentFromStream}
+                  onOpenTerminal={openTerminalFromStream}
                   onDismissStatus={dismissStatusSegment}
                   emptyHint={
                     profiles.length === 0 ? (
@@ -2062,6 +2075,7 @@ export function WorkspacePage(props: {
               onChangesCount={setChangesCount}
               subagents={subagentSegments}
               subagentFocus={subagentFocus}
+              terminalFocus={terminalFocus}
               restoredTerminals={restoredTerminals}
             />
           </div>

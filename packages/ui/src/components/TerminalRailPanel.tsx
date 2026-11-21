@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   isExitedTerminalStatus,
@@ -45,6 +45,14 @@ function groupTerminals(sessions: TerminalSegment[]): Array<{
   ].filter((group) => group.items.length > 0);
 }
 
+/** 消息流标记行点击的定位信号（seq 递增触发 effect，sessionId 为目标；
+ *  先例 SubagentFocus——同 id 重复点击也能重新定位） */
+export interface TerminalFocus {
+  sessionId: string;
+  /** 单调递增序号：同 sessionId 重复点击也能重新定位 */
+  seq: number;
+}
+
 export function TerminalRailPanelBody(props: {
   /** 会话段列表（rail 数据源，切任务时重建） */
   sessions: TerminalSegment[];
@@ -60,11 +68,30 @@ export function TerminalRailPanelBody(props: {
   onKill: (sessionId: string) => void;
   /** 终止请求进行中的 sessionId（按钮禁用防重复点击） */
   killingSessionId: string | null;
+  /** 消息流标记行点击直跳（票 06，ADR 0032 语义：直落详情页不落列表页） */
+  focus: TerminalFocus | null;
 }) {
   const [page, setPage] = useState<"list" | "detail">("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected =
     props.sessions.find((item) => item.sessionId === selectedId) ?? null;
+
+  // 标记行点击直跳详情（票 06）：focus 信号变化时选中对应会话并进详情页。
+  // 每个 focus.seq 只消费一次（ref 幂等，照 SubagentRailPanelBody）：依赖里
+  // 保留 sessions 是为「段晚于点击到达列表」的重试，但运行中会话事件会持续
+  // 产生新数组引用，无幂等守卫时每次流式事件都重放 setSelectedId(focus.
+  // sessionId)，把用户手动点选的会话强行拉回 focus 目标。
+  const focus = props.focus;
+  const consumedFocusSeqRef = useRef(-1);
+  useEffect(() => {
+    if (focus === null) return;
+    if (focus.seq === consumedFocusSeqRef.current) return;
+    if (!props.sessions.some((item) => item.sessionId === focus.sessionId))
+      return;
+    consumedFocusSeqRef.current = focus.seq;
+    setSelectedId(focus.sessionId);
+    setPage("detail");
+  }, [focus, props.sessions]);
 
   // 详情页：顶栏（返回 + 状态 + 会话名 + 已用时 + kill）+ xterm 终端区。
   // 会话被 kill/退出后 selected 由事件推进为终态，页面原位转只读回看。

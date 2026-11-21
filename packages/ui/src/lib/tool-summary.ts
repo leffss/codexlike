@@ -64,6 +64,34 @@ function summarizeByTool(
     }
     case "run_terminal_command":
       return `$ ${asString(args["command"]) ?? "?"}`;
+    // 终端会话四工具（ADR 0033 票 06）：摘要取 command 参数原文或
+    // sessionId 动作——spawn 参数只有可选初始命令（sessionId 在结果里），
+    // write 摘要含 sessionId 关联（05 票 Comments：command 原文 +
+    // sessionId 串起后续调用）；命令单行化（write 以 \n 结尾执行是真实
+    // 场景，摘要行不吃换行）；长输出不展开全文（完成态收起 + 详情页看）
+    case "spawn_terminal": {
+      const command = asString(args["command"]);
+      return command !== undefined
+        ? `$ ${singleLine(command)}`
+        : "启动终端会话";
+    }
+    case "terminal_write": {
+      const sessionId = asString(args["sessionId"]) ?? "?";
+      const command = asString(args["command"]);
+      return command !== undefined
+        ? `写入 ${sessionId}：$ ${singleLine(command)}`
+        : `写入 ${sessionId}`;
+    }
+    case "terminal_read": {
+      const sessionId = asString(args["sessionId"]) ?? "?";
+      return args["wait"] === true
+        ? `读取 ${sessionId}（等待新输出）`
+        : `读取 ${sessionId} 的新输出`;
+    }
+    case "terminal_kill": {
+      const sessionId = asString(args["sessionId"]) ?? "?";
+      return `终止 ${sessionId}`;
+    }
     case "browser_navigate":
       return asString(args["url"]) ?? "?";
     case "browser_click": {
@@ -113,6 +141,11 @@ function summarizeByTool(
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+/** 单行化：空白序列（含换行）压成单空格并去首尾（摘要行不吃换行） */
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function asNumber(value: unknown): number | undefined {
