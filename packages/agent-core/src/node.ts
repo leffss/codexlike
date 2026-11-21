@@ -43,6 +43,10 @@ export type {
   TerminalToolOptions,
   TimeoutOption,
 } from "./tools/terminal";
+// 终端会话四工具（ADR 0033 票05）：createBuiltinTools 注入 terminalSessions
+// 时追加；desktop 装配管理器单例后经此注入
+export { createTerminalSessionTools } from "./tools/terminal-sessions";
+export type { TerminalSessionToolsOptions } from "./tools/terminal-sessions";
 // 终端命令超时默认值（执行设置票04）：常量本体移至 execution-settings.ts 后
 // 经上方 export * from "./index" 随根出口导出（code review 修复 3：单一出口
 // 路径，不再从 ./tools/terminal 二次转发）
