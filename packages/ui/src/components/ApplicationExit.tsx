@@ -58,9 +58,23 @@ export function ApplicationExit(props: {
             {exit.phase === "confirming" ? (
               <>
                 <h2 className="mb-3 font-semibold">仍有未完成执行或等待回应</h2>
-                <p className="mb-5 text-sm">
+                <p
+                  className={
+                    exit.terminalSessions ? "mb-2 text-sm" : "mb-5 text-sm"
+                  }
+                >
                   退出将中断所有任务及子代理。已保存的历史和草稿会保留，重启不会自动继续执行。
                 </p>
+                {/* 终端会话硬边（ADR 0033 票07）：数据面来自 ExitState.terminalSessions
+                    （主进程 request 时刻快照），>0 才渲染提示行 */}
+                {exit.terminalSessions ? (
+                  <p
+                    data-testid="exit-terminal-note"
+                    className="mb-5 text-sm text-fg-muted"
+                  >
+                    {exit.terminalSessions} 个终端会话将关闭。
+                  </p>
+                ) : null}
                 <div className="flex justify-end gap-3">
                   <button
                     data-testid="exit-cancel"

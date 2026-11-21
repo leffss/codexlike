@@ -47,6 +47,10 @@ import {
 import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
 import { createNodePtyPort } from "./terminal/node-pty-port";
 import { registerTerminalSessionHandlers } from "./terminal/terminal-session-ipc";
+import {
+  aliveSessionCount,
+  settleTerminalSessionsOnStartup,
+} from "./terminal/terminal-lifecycle";
 import { createOpenerSettingsStore } from "./openers/opener-settings-store";
 import { createOpenerLauncher } from "./openers/opener-launcher";
 import { registerOpenerHandlers } from "./openers/opener-ipc";
@@ -645,6 +649,17 @@ void app.whenReady().then(async () => {
     if (record.status !== "idle") manager.get(record.id);
   }
 
+  // 重启收尾（ADR 0033 票07，spec「重启后不恢复」）：清空终端注册表——内存
+  // 注册表在新进程启动时本应为空（此调用是防御性收尾），UI 的 list-for 初始
+  // 拉取从此无幽灵会话（04 票事件驱动下无需额外通知）。
+  // 【08 票衔接挂点】落库后此处要补：terminal_sessions 表中残留 running 的
+  // 行按已退出置终态（exitedAt/exitCode 用收尾时刻，快照缺省）——与本调用
+  // 同一时点、在 UI 恢复「已退出」列表（从库读）之前完成。
+  await settleTerminalSessionsOnStartup(
+    terminalSessions,
+    manager.list().map((record) => record.id)
+  );
+
   // 新库不认识旧任务，不以此将旧 Worktree 当孤儿回收；磁盘文件独立保留。
 
   registerProviderProfileHandlers(store);
@@ -729,6 +744,10 @@ void app.whenReady().then(async () => {
     //（onSaved 里的 pumpTaskQueue）。
     concurrencyLimit: () => agentSettings.taskConcurrencyLimit,
     taskQueueStore,
+    // 终端会话注册表（ADR 0033 票07）：任务归档「先杀后归档」挂点——归档
+    // 确认已由渲染端完成（存活会话提示后关闭），handler 在写入归档前终止
+    // 该任务全部存活会话并等待 exit。
+    terminalSessions,
   });
   pumpTaskQueue = taskRuntime.pumpTaskQueue;
   // 终端会话 IPC（ADR 0033 票03）：创建/输入/resize/kill + 字节流专用通道
@@ -808,7 +827,25 @@ void app.whenReady().then(async () => {
 
   registerApplicationExit({
     window: mainWindow,
-    runtime: taskRuntime,
+    // 终端存活并入退出屏障（ADR 0033 票07）：hasWork 计入存活终端会话——
+    // 只有存活会话而无运行任务时同样弹确认（「N 个终端会话将关闭」）；
+    // freeze/thaw/stopAndDrain 语义不变（会话清理由 releaseResources 的
+    // killAll 承担，03 票已并）。
+    runtime: {
+      ...taskRuntime,
+      hasWork: () =>
+        taskRuntime.hasWork() ||
+        aliveSessionCount(
+          terminalSessions,
+          manager.list().map((record) => record.id)
+        ) > 0,
+    },
+    // 确认状态携带存活终端数（渲染端「N 个终端会话将关闭」提示行数据面）
+    terminalSessionCount: () =>
+      aliveSessionCount(
+        terminalSessions,
+        manager.list().map((record) => record.id)
+      ),
     flushPendingWrites: () => launchStateTracking.flush(),
     minimizeToTray: () => {
       void trayResidency?.minimizeToTray();
@@ -825,7 +862,11 @@ void app.whenReady().then(async () => {
         browserManager.close(),
         // 终端会话退出 flush（ADR 0033「应用退出前 flush」路径）：kill 全部
         // 存活会话并等各自 exit 定格终态快照（内存内）；快照落库是 08 票，
-        // 退出前的「N 个终端会话将关闭」确认屏障是 07 票
+        // 退出前的「N 个终端会话将关闭」确认屏障是 07 票（已挂——确认状态
+        // 经 ExitState.terminalSessions 下发，见上方 runtime/terminalSessionCount）
+        // 【08 票衔接挂点】屏障 flush 快照写入位置：killAll 返回后（exit 齐
+        // 全语义保证各会话快照已定格）逐条取 exited 会话记录（含 64KB 快照
+        // 文本）落 terminal_sessions 表——写入发生在 app.quit 之前的本处。
         terminalSessions.killAll(),
       ]);
     },
