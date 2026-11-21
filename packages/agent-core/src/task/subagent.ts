@@ -44,6 +44,10 @@ import {
   TOOL_STYLE_POLICY,
 } from "../tools/update-plan";
 import { runTool, toModelTools } from "../tools/registry";
+import {
+  SPAWN_TERMINAL,
+  TERMINAL_USAGE_POLICY,
+} from "../tools/terminal-sessions";
 import type {
   ToolCallRecord,
   ToolDefinition,
@@ -429,14 +433,22 @@ export function createSubagentOrchestrator(
     try {
       const snapshot = port.resources?.();
       const execution = snapshot?.createExecution(entry.subagentId);
+      // 子代理工具表先于提示组装解析：终端会话策略按「终端四工具在表」条件
+      // 注入（下方 questionsTool 强制并入沿用同一份解析结果）
+      const subagentTools = resolveSubagentTools();
+      const hasTerminalSessionTools = subagentTools.some(
+        (tool) => tool.name === SPAWN_TERMINAL
+      );
       const systemPrompt = [
         SUBAGENT_SYSTEM_PROMPT,
         snapshot?.systemPrompt ?? "",
         // 工作计划策略与通用风格条款静态注入子代理（ADR 0023 修订 ADR 0016
         // 仅主任务边界）：子代理无每轮 turnSystemPrompt 机制，复用主任务同一
-        // 常量随 SUBAGENT_SYSTEM_PROMPT 一次性组装，不随轮次重复；风格条款
+        // 常量随 SUBAGENT_SYSTEM_PROMPT 一次性组装，不随轮次重复；终端会话
+        // 策略（ADR 0033）同层条件注入，仅当工具表含终端四工具；风格条款
         // 殿后统摄表达方式（与主任务注入顺序同构）
         PLAN_USAGE_POLICY,
+        hasTerminalSessionTools ? TERMINAL_USAGE_POLICY : "",
         TOOL_STYLE_POLICY,
       ]
         .filter(Boolean)
@@ -470,7 +482,6 @@ export function createSubagentOrchestrator(
           },
         })
       );
-      const subagentTools = resolveSubagentTools();
       if (subagentTools.some((tool) => tool.name === questionsTool.name))
         throw new Error(`工具名称冲突：${questionsTool.name}`);
       subagentTools.push(questionsTool);

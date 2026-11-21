@@ -547,6 +547,11 @@ describe("AgentTask 工具循环（六件工具默认放行）", () => {
       expect(
         JSON.stringify(request.prompt).match(/## 工具使用风格/g)
       ).toHaveLength(1);
+      // 终端会话策略（ADR 0033）条件注入：本 harness 工具表无终端四工具，
+      // 策略不得出现（不向模型描述不存在的工具）
+      expect(
+        JSON.stringify(request.prompt).match(/## 终端会话策略/g)
+      ).toBeNull();
     }
     // 策略是逐轮组装的提示层，不随 transcript 落库
     expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(

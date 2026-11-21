@@ -7,6 +7,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderProfile } from "../../src/provider/provider-profile";
+import { createTerminalSessionManager } from "../../src/terminal/manager";
+import type { PtyPort } from "../../src/terminal/pty-port";
 import { createSqliteTaskStore } from "../../src/task/persistence";
 import { createAgentTask } from "../../src/task/agent-task";
 import { createTaskManager } from "../../src/task/manager";
@@ -258,6 +260,15 @@ interface SubagentHarnessOptions {
   subTools?: ToolDefinition[];
   /** 文件库路径（缺省 :memory:；文件库支持关-重开等价重启场景） */
   dbPath?: string;
+}
+
+/** 终端会话策略注入测试用的最小端口：子代理脚本不触终端工具，进程能力不生效 */
+function stubPtyPort(): PtyPort {
+  return {
+    spawn: () => {
+      throw new Error("策略注入测试不应触发 spawn");
+    },
+  };
 }
 
 /**
@@ -898,6 +909,8 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     // 子代理无每轮注入机制，随 SUBAGENT_SYSTEM_PROMPT 一次性组装）
     expect(JSON.stringify(child.prompt)).toContain("## 工作计划策略");
     expect(JSON.stringify(child.prompt)).toContain("## 工具使用风格");
+    // 终端会话策略（ADR 0033）条件注入：本 harness 子代理工具表无终端四工具
+    expect(JSON.stringify(child.prompt)).not.toContain("## 终端会话策略");
     expect(JSON.stringify(child.prompt)).not.toContain("原宿主系统提示");
     expect(JSON.stringify(child.prompt)).not.toContain("ALPHA_PRIVATE_BODY");
     expect(child.tools?.map((tool) => tool.name)).not.toContain(
@@ -907,6 +920,46 @@ describe("子代理（spawn_subagent，GLOSSARY「子代理」）", () => {
     expect(child.tools?.map((tool) => tool.name)).toContain("update_plan");
     expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
       "## 子代理委派策略"
+    );
+    persistence.close();
+  });
+
+  it("终端会话策略（ADR 0033）：子代理工具表含终端四工具时静态注入，主任务无终端工具则不注入", async () => {
+    const { task, mainModel, subModel, persistence } = makeSubagentTask({
+      workspacePath: "C:/work/demo",
+      main: [
+        {
+          kind: "tool",
+          calls: [
+            {
+              toolCallId: "policy-terminal",
+              toolName: "spawn_subagent",
+              input: { task: "用终端会话盯构建" },
+            },
+          ],
+        },
+        { kind: "text", deltas: ["收到报告"] },
+      ],
+      sub: [{ kind: "text", deltas: ["子代理报告"] }],
+      subTools: createBuiltinTools({
+        // 策略注入测试只需工具表形状：子代理脚本不触终端工具，端口永不 spawn
+        terminalSessions: {
+          manager: createTerminalSessionManager({
+            port: stubPtyPort(),
+          }),
+        },
+      }),
+    });
+    await collect(task.sendMessage({ text: "委派盯构建", profile }));
+
+    expect(subModel.doStreamCalls).toHaveLength(1);
+    const child = JSON.stringify(subModel.doStreamCalls[0]!.prompt);
+    // 终端四工具在子代理工具表 → 策略随 SUBAGENT_SYSTEM_PROMPT 静态注入恰一次
+    expect(child).toContain("## 终端会话策略");
+    expect(child.match(/## 终端会话策略/g)).toHaveLength(1);
+    // 主任务工具表（createBuiltinTools() 缺省无终端四工具）→ 条件注入不出现
+    expect(JSON.stringify(mainModel.doStreamCalls[0]!.prompt)).not.toContain(
+      "## 终端会话策略"
     );
     persistence.close();
   });

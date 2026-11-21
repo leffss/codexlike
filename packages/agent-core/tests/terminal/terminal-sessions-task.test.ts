@@ -584,6 +584,40 @@ describe("终端会话四工具 × 真实任务循环（mock model）", () => {
     expect(events.at(-1)?.type).toBe("assistant-done");
   });
 
+  it("终端会话策略随主任务每轮系统提示注入一次，不入库（ADR 0033）", async () => {
+    const model = scriptedModel([
+      // 首轮带一次工具调用强制出现第二轮：两轮各自恰好注入一次
+      {
+        kind: "tool",
+        calls: [
+          {
+            toolCallId: "policy-read",
+            toolName: "terminal_read",
+            input: { sessionId: "missing" },
+          },
+        ],
+      },
+      { kind: "text", deltas: ["完成"] },
+    ]);
+    const { manager } = makeManager();
+    const { task, persistence } = makeTask(model, manager);
+
+    await collect(task.sendMessage({ text: "看下终端", profile }));
+
+    expect(model.doStreamCalls).toHaveLength(2);
+    for (const request of model.doStreamCalls) {
+      const prompt = JSON.stringify(request.prompt);
+      // 宿主注入 manager（终端四工具在表）→ 策略逐轮注入且每轮恰一次
+      expect(prompt).toContain("## 终端会话策略");
+      expect(prompt.match(/## 终端会话策略/g)).toHaveLength(1);
+    }
+    // 策略是逐轮组装的提示层，不随 transcript 落库（与工作计划策略同口径）
+    expect(JSON.stringify(persistence.listMessages("task-1"))).not.toContain(
+      "## 终端会话策略"
+    );
+    persistence.close();
+  });
+
   it("中断不杀会话：terminal_read 等待中被 abort，工具即断、会话仍 running", async () => {
     const { manager, port } = makeManager();
     const model = scriptedModel([

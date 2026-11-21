@@ -32,6 +32,10 @@ import {
 import type { ProviderProfile } from "../provider/provider-profile";
 import { resolveModelOf } from "../provider/provider-profile";
 import { runTool, toModelTools } from "../tools/registry";
+import {
+  SPAWN_TERMINAL,
+  TERMINAL_USAGE_POLICY,
+} from "../tools/terminal-sessions";
 import type {
   ToolCallRecord,
   ToolDefinition,
@@ -590,6 +594,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           // 工作计划策略（ADR 0016）：update_plan 无条件并入工具表，
           // 策略随之常驻主任务每轮提示；子代理侧由 subagent.ts 静态注入（ADR 0023）
           PLAN_USAGE_POLICY,
+          // 终端会话策略（ADR 0033）：条件注入——宿主注入 manager（终端四工具
+          // 在表）才有；子代理侧由 subagent.ts 按其工具表同口径静态注入
+          toolsByName.has(SPAWN_TERMINAL) ? TERMINAL_USAGE_POLICY : "",
           orchestrator !== null &&
           toolsByName.get(SUBAGENT_TOOL_NAME) === orchestrator.tool
             ? SUBAGENT_DELEGATION_POLICY

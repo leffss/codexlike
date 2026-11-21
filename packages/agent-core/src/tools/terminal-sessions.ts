@@ -26,6 +26,9 @@ import { filterEnv, type TerminalShell } from "./terminal";
 import { defineTool } from "./define-tool";
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "./types";
 
+/** spawn_terminal 工具名（策略注入按此名判定工具表是否含终端四工具） */
+export const SPAWN_TERMINAL = "spawn_terminal";
+
 export interface TerminalSessionToolsOptions {
   /** 终端会话管理器（宿主级单例，createTerminalSessionManager 产物） */
   manager: TerminalSessionManager;
@@ -50,6 +53,23 @@ const MAX_READ_WAIT_MS = 60_000;
  * 最多再推进 250ms 水位），单次 60s 等待不可中断地吞掉整个窗口。
  */
 const READ_WAIT_SLICE_MS = 250;
+
+/**
+ * 仅供拥有终端会话四工具的模型使用：工具描述只讲单工具契约，「何时选用会话
+ * 而非一次性命令」的横切边界由本策略段承担（与 PLAN_USAGE_POLICY /
+ * SUBAGENT_DELEGATION_POLICY 同构）。条件注入——宿主未注入 manager（工具表
+ * 无终端四工具）时不注入，不向模型描述不存在的工具。注入路径：主任务由
+ * agent-task 随每轮系统提示注入；子代理由 task/subagent 随
+ * SUBAGENT_SYSTEM_PROMPT 静态注入（子代理工具集 = 主任务全量工具剔除
+ * spawn_subagent，桌面装配下同样持有终端四工具）。
+ */
+export const TERMINAL_USAGE_POLICY = [
+  "## 终端会话策略",
+  "- 长时间运行的命令（构建、测试、watch、数据迁移）、交互式程序、需要后台存活的命令用 spawn_terminal 启动会话执行；一次性短命令（ls、cat 等拿输出即走）直接 run_terminal_command，不背上会话生命周期；",
+  "- 会话输出用 terminal_read 增量读取（已读内容不重复返回），长命令追进展带 wait=true 一次等待而非反复轮询；交互应答与追加命令用 terminal_write，输入以换行结尾才会被执行；",
+  "- 任务中断不终止会话：中断后命令继续在后台跑，回来用 terminal_read 接着读；会话使命完成用 terminal_kill 收尾（连带结束子进程树），退出后的会话仍可 terminal_read 回看最后输出；",
+  "- terminal_write 与 terminal_kill 仅限本任务中由你启动的会话；用户手开的会话只读，可 terminal_read 协助诊断终端问题。",
+].join("\n");
 
 function fail(message: string): ToolResult {
   return { output: message, isError: true };
@@ -180,7 +200,7 @@ export function createTerminalSessionTools(
   const { manager } = options;
 
   const spawnTerminal = defineTool({
-    name: "spawn_terminal",
+    name: SPAWN_TERMINAL,
     description:
       `启动一个持久终端会话（真 TTY：颜色、光标、交互式程序全保真），可选立即执行一条初始命令。` +
       `立即返回会话标识，不等待命令完成——适合长时间运行的命令（构建、测试、watch、数据迁移）或需要中途交互应答的场景。` +
