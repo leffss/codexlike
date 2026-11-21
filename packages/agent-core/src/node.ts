@@ -111,3 +111,22 @@ export type {
 export { generateCommitMessage } from "./git/commit-message";
 // 任务用量尽力而为入账（ADR 0029）：宿主为任务域辅助调用补记真实 usage
 export { settleTaskUsage } from "./task/usage";
+// 终端会话（ADR 0033）：管理器核心 + PtyPort 端口接口——node-pty 适配器
+// （02 票）在 desktop 实现该端口后注入；agent-core 不引入任何原生依赖
+export { createTerminalSessionManager } from "./terminal/manager";
+export type {
+  TerminalSessionManager,
+  TerminalSessionManagerOptions,
+} from "./terminal/manager";
+export type {
+  PtyExitEvent,
+  PtyPort,
+  PtyProcess,
+  PtySize,
+  PtySpawnRequest,
+} from "./terminal/pty-port";
+export {
+  DEFAULT_TERMINAL_BUFFER_MAX_BYTES,
+  DEFAULT_TERMINAL_MAX_ALIVE_PER_TASK,
+  TERMINAL_SNAPSHOT_BYTES,
+} from "./terminal/types";
