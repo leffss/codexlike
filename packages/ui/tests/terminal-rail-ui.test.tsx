@@ -65,7 +65,7 @@ describe("TerminalRailPanelBody 列表页（SSR 静态结构，ADR 0032 拆页�
     expect(button).toContain("disabled");
   });
 
-  it("分组渲染：运行中 → 已退出顺序，空组不渲染；富行两行式（会话名 + 状态/来源/已用时）", () => {
+  it("分组渲染：运行中 → 已退出顺序，空组不渲染；富行两行式（会话名 + 状态/来源/shell/已用时）", () => {
     const html = renderToStaticMarkup(
       createElement(
         TerminalRailPanelBody,
@@ -85,6 +85,7 @@ describe("TerminalRailPanelBody 列表页（SSR 静态结构，ADR 0032 拆页�
               sessionId: "ts-3",
               id: "ts-3",
               name: "powershell · 3",
+              shell: "powershell",
               origin: "agent",
               status: "exited",
               exitCode: 1,
@@ -105,13 +106,17 @@ describe("TerminalRailPanelBody 列表页（SSR 静态结构，ADR 0032 拆页�
     expect(html).toMatch(
       /data-testid="terminal-rail-item"[^>]*data-terminal-state="exited"/
     );
-    // 富行元信息：状态文案 + 来源标注 + 会话名
+    // 富行元信息：状态文案 + 来源标注 + shell 类型 + 会话名
     expect(html).toContain("运行中");
     expect(html).toContain("已退出");
     expect(html).toContain("用户");
     expect(html).toContain("agent");
     expect(html).toContain("git-bash · 1");
     expect(html).toContain("powershell · 3");
+    // shell 类型标注（spec 用户故事 4，code review 修复轮）：每行一枚，
+    // 值取 record.shell——powershell 会话的标注是 powershell（与会话名区分）
+    expect(html.match(/data-testid="terminal-shell-type"/g)).toHaveLength(3);
+    expect(html).toMatch(/data-testid="terminal-shell-type">powershell</);
     // 异常退出在富行即标退出码（扫读一眼定位失败的会话）
     expect(html).toContain("退出码 1");
     // 详情不在列表页

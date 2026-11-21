@@ -30,6 +30,10 @@ import type {
   PtySpawnRequest,
 } from "@codexlike/agent-core/node";
 import type { TerminalShell } from "@codexlike/agent-core/node";
+// Git Bash 安装位候选单一来源（code review 修复轮）：与 agent-core
+// run_terminal_command 共用同一名单（本文件的 resolveBashPath 与 agent-core
+// 的 findGitBash 解析函数不整合——两侧 spawn 语义不同：一次性执行 vs 交互 pty）
+import { GIT_BASH_CANDIDATES } from "@codexlike/agent-core/node";
 
 /** node-pty 模块的最小形状（适配器只用到的部分）；单测注入 fake 用 */
 export interface NodePtySpawnOptions {
@@ -61,16 +65,6 @@ export interface NodePtyModule {
     options: NodePtySpawnOptions
   ): NodePtyProcess;
 }
-
-/** bash 固定安装位候选，刻意不扫 PATH：PATH 首段 System32 的 bash.exe 是
- * WSL 启动器，命中会落 Linux shell 且 cwd 翻成 /mnt/c/...（CODING_STANDARDS
- * 「Windows spawn 坑」）；与 agent-core run_terminal_command 同款约束 */
-const GIT_BASH_CANDIDATES = [
-  "C:\\Program Files\\Git\\bin\\bash.exe",
-  "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-  "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-  "C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
-];
 
 /** kill 后等待真实 exit 事件的兜底窗（毫秒）：conpty 正常拆除远快于此值 */
 const KILL_EXIT_FALLBACK_MS = 2_000;

@@ -1,4 +1,7 @@
-import type { TerminalSessionEvent } from "@codexlike/agent-core";
+import type {
+  TerminalSessionEvent,
+  TerminalSessionRecord,
+} from "@codexlike/agent-core";
 import type {
   TaskPersistence,
   TerminalSessionManager,
@@ -104,6 +107,28 @@ export async function settleTerminalSessionsOnStartup(
 }
 
 /**
+ * 终端会话退出推进的 update patch（code review 修复轮收敛：原先事件桥与
+ * 退出屏障各写一份同款字段清单）：status/exitedAt/exitCode/signal/snapshot
+ * 五列，即 persistence.updateTerminalSession 契约注释声明的可更新全集。
+ * exitCode/signal/快照缺省容忍（兜底置终态的 record 无 exitCode）。
+ */
+function terminalExitPatch(record: TerminalSessionRecord): {
+  status: TerminalSessionRecord["status"];
+  exitedAt?: string;
+  exitCode?: number;
+  signal?: number;
+  snapshot?: string;
+} {
+  return {
+    status: record.status,
+    exitedAt: record.exitedAt,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    snapshot: record.snapshot,
+  };
+}
+
+/**
  * 终端会话落库桥（ADR 0033 票 08）：manager.onEvent → `terminal_sessions`
  * 表行。spawn 即写骨架行（status=running）——进程中途被杀也有「曾开过」
  * 的留痕（先例 subagents 注册行 queued 即写，ADR 0021）；exit 事件定格
@@ -120,13 +145,10 @@ export function recordTerminalSessionEvent(
     return;
   }
   const { record } = event;
-  persistence.updateTerminalSession(record.sessionId, {
-    status: record.status,
-    exitedAt: record.exitedAt,
-    exitCode: record.exitCode,
-    signal: record.signal,
-    snapshot: record.snapshot,
-  });
+  persistence.updateTerminalSession(
+    record.sessionId,
+    terminalExitPatch(record)
+  );
 }
 
 /**
@@ -144,13 +166,10 @@ export function persistExitedSessionSnapshots(
   for (const taskId of taskIds) {
     for (const record of sessions.sessionsFor(taskId)) {
       if (record.status !== "exited") continue;
-      persistence.updateTerminalSession(record.sessionId, {
-        status: record.status,
-        exitedAt: record.exitedAt,
-        exitCode: record.exitCode,
-        signal: record.signal,
-        snapshot: record.snapshot,
-      });
+      persistence.updateTerminalSession(
+        record.sessionId,
+        terminalExitPatch(record)
+      );
     }
   }
 }

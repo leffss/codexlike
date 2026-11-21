@@ -326,6 +326,16 @@ describe("run_terminal_command 工具（默认 Git Bash）", () => {
     expect(tool.description).toContain("应用设置");
   });
 
+  it("工具描述写清与终端会话工具的适用边界（spec 用户故事 20：长/交互/后台命令引导去会话工具）", () => {
+    // spawn_terminal 侧描述有正向边界（短命令请用 run_terminal_command），
+    // 本工具侧补反向边界（code review 修复轮）：与 05 票描述措辞呼应
+    const tool = createTerminalTool({ env: baseEnv });
+    expect(tool.description).toContain("spawn_terminal");
+    expect(tool.description).toContain("终端会话工具");
+    expect(tool.description).toContain("交互式程序");
+    expect(tool.description).toContain("后台存活");
+  });
+
   it("AbortSignal 中断：长命令执行中终止子进程，输出标记为用户中断（区别于超时）", async () => {
     const workspace = makeWorkspace();
     const controller = new AbortController();

@@ -43,6 +43,13 @@ export type {
   TerminalToolOptions,
   TimeoutOption,
 } from "./tools/terminal";
+// 终端环境白名单与 Git Bash 安装位候选（code review 修复轮：单一来源）——
+// desktop 终端会话侧（session-env / node-pty-port）经此复用，不再各自维护副本
+export {
+  ENV_ALLOWLIST,
+  GIT_BASH_CANDIDATES,
+  filterEnv,
+} from "./tools/terminal";
 // 终端会话四工具（ADR 0033 票05）：createBuiltinTools 注入 terminalSessions
 // 时追加；desktop 装配管理器单例后经此注入
 export { createTerminalSessionTools } from "./tools/terminal-sessions";

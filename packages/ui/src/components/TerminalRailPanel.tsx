@@ -22,7 +22,7 @@ import TerminalSessionView from "./TerminalSessionView";
  * 结构（拆页导航）：列表页 ↔ 详情页两页互斥。列表页为默认入口——头行
  * 计数摘要 +「+ 新建会话」（超上限的中文 reason 直接展示，不另造错误态）
  * + 按状态分组（运行中 → 已退出，空组不渲染；富行两行式：会话名 +
- * 状态/来源/已用时元信息，来源标注 用户 / agent）；点行进详情页——顶栏
+ * 状态/来源/shell 类型/已用时元信息，来源标注 用户 / agent）；点行进详情页——顶栏
  * 返回 + 状态点 + 状态文案 + 会话名 + 已用时 + kill（running 才有，用户
  * kill 不弹确认，ADR 0033 非破坏性）+ 主体 xterm.js 终端区。
  *
@@ -199,6 +199,11 @@ export function TerminalRailPanelBody(props: {
                         {statusText(item)}
                       </span>
                       <span>{originLabel(item.origin)}</span>
+                      {/* shell 类型（spec 用户故事 4）：直接展示 shell 标识
+                          （git-bash / powershell / cmd），与会话名前缀同源 */}
+                      <span data-testid="terminal-shell-type">
+                        {item.shell}
+                      </span>
                       <Elapsed session={item} />
                     </span>
                   </button>

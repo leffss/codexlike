@@ -483,6 +483,20 @@ void app.whenReady().then(async () => {
   const terminalSettingsStore = createTerminalSettingsStore({ dir: dataDir() });
   let terminalSettings: TerminalSettings = await terminalSettingsStore.get();
 
+  /**
+   * 生效 shell 偏好的统一 resolver（code review 修复轮收敛：原先四处装配
+   * 各写一份同款 lambda）：设置项优先、CODEXLIKE_SHELL 环境变量兜底（E2E/
+   * 自动化兼容），最终默认 Git Bash。逐次解析读 terminalSettings 内存缓存
+   * ——设置页保存后无需重启即对下一次命令/会话生效。消费方：终端工具与
+   * 会话四工具（createBuiltinTools）、工作区打开器（registerOpenerHandlers）、
+   * 终端 IPC（registerTerminalSessionHandlers）。
+   */
+  const resolveShellPreference = () =>
+    resolveTerminalShell(
+      terminalSettings.shell,
+      process.env["CODEXLIKE_SHELL"]
+    );
+
   // 外观主题偏好（ADR 0006）：启动时先读偏好再建窗口——窗口底色与页面主题一致，
   // 避免深色用户重启先闪浅色底；未配置默认浅色。渲染端另有 localStorage 镜像防页内闪烁。
   const themeSettingsStore = createThemeSettingsStore({ dir: dataDir() });
@@ -518,12 +532,8 @@ void app.whenReady().then(async () => {
 
   const builtinTools = createBuiltinTools({
     env: process.env,
-    // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 terminalSettings 缓存）
-    shell: () =>
-      resolveTerminalShell(
-        terminalSettings.shell,
-        process.env["CODEXLIKE_SHELL"]
-      ),
+    // shell 逐次解析：统一 resolver（见上方 resolveShellPreference）
+    shell: resolveShellPreference,
     // 命令超时逐次解析（执行设置票04，与 shell 注入同构）：秒 → 毫秒换算后注入
     defaultTimeoutMs: () => terminalSettings.commandTimeoutSeconds * 1000,
     maxTimeoutMs: () => terminalSettings.maxCommandTimeoutSeconds * 1000,
@@ -531,11 +541,7 @@ void app.whenReady().then(async () => {
     // agent spawn 的会话与用户手开的会话共用同一注册表；env 白名单过滤在工具层
     terminalSessions: {
       manager: terminalSessions,
-      shell: () =>
-        resolveTerminalShell(
-          terminalSettings.shell,
-          process.env["CODEXLIKE_SHELL"]
-        ),
+      shell: resolveShellPreference,
       // 宿主完整环境（白名单过滤在工具层 filterEnv）：05 票装配遗漏——缺省
       // 时 agent spawn 拿到空环境块，node-pty 对空 env 的 CreateProcess
       // 间歇性报「Cannot create process, error code: 87」（09 票 e2e 揭示）
@@ -709,11 +715,7 @@ void app.whenReady().then(async () => {
     store: createOpenerSettingsStore({ dir: dataDir() }),
     // 无 wt 时终端退化链起点用生效 shell 偏好（与 run_terminal_command 同源，
     // 设置页保存后对下一次展开/打开即时生效——见上方 terminalSettings 缓存）
-    terminalShell: () =>
-      resolveTerminalShell(
-        terminalSettings.shell,
-        process.env["CODEXLIKE_SHELL"]
-      ),
+    terminalShell: resolveShellPreference,
     launch: createOpenerLauncher({
       openPath: (path) => shell.openPath(path),
       spawnProcess: (command, args, options) =>
@@ -772,11 +774,7 @@ void app.whenReady().then(async () => {
   registerTerminalSessionHandlers({
     sessions: terminalSessions,
     workspaceFor: (taskId) => manager.get(taskId)?.record.workspacePath ?? null,
-    shell: () =>
-      resolveTerminalShell(
-        terminalSettings.shell,
-        process.env["CODEXLIKE_SHELL"]
-      ),
+    shell: resolveShellPreference,
     // 恢复回看兜底（ADR 0033 票08）：注册表未命中时查库行，已退出会话的
     // 快照作为 buffered 回放（重启后只读回看的现路径接通）
     restoredSession: (sessionId) => persistence.terminalSession(sessionId),
