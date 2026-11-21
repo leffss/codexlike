@@ -193,3 +193,16 @@ export type {
 // 任务名 → 类型/<slug> 分支名与提交消息 prompt 组装（纯函数，浏览器安全）
 export { taskBranchName } from "./git/branch-name";
 export { buildCommitMessagePrompt } from "./git/commit-message";
+
+// 终端会话域类型（GLOSSARY「终端会话」，ADR 0033）：type-only，管理器实现与
+// PtyPort（Node 宿主专属，desktop 装配注入）在 ./node 出口；rail 数据模型与
+// task-view 归并（后续票）从这里 import type
+export type {
+  TerminalActionFailure,
+  TerminalReadResult,
+  TerminalSessionEvent,
+  TerminalSessionOrigin,
+  TerminalSessionRecord,
+  TerminalSessionStatus,
+  TerminalSpawnRequest,
+} from "./terminal/types";
