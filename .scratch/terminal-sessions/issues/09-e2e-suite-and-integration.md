@@ -19,3 +19,4 @@
 - 【既有基线】02 落地后 desktop 532 用例 / 1 skipped；ui 623；agent-core 625——回归对照用。已知既有损坏：subagent-interrupted e2e 在 main HEAD 即失败（与终端无关，勿在本票链顺手修，单独诊断）。
 - 【03 票衔接】desktop build 已实跑、dist/main.cjs 可加载 node-pty（external 路径不变）；e2e 断言可用的通道清单与 preload API 见 03 票 Comments（`window.codexlike.terminals` + `onTaskEvent` 信封的 terminal-started/exited）；事件三任务态（idle/终态/stopped）下发行为已被单测覆盖，e2e 聚焦 GUI 链路。
 - 【05 票衔接】agent 侧 e2e 时序手法：复用 `tests/terminal/terminal-sessions-task.test.ts` 的 fake pty 时序锚点（doStream 调用序号注入输出/exit）——**setInterval 竞速会静默输给任务循环，不要用**（05 票踩坑）。read 边界口径：任意会话=本任务内任意来源/状态（跨任务拒绝，ADR 0033 已澄清），e2e 断言按此口径。四工具参数/返回形状见 05 票 Comments。
+- 【04 票衔接】e2e 断言入口 testid 清单：`rail-tab-terminals` / `terminals-panel` / `terminals-panel-body` / `terminal-rail-detail-header`（含 back/title/kill）/ `terminal-xterm-host`（xterm 可访问性/文本层断言挂这里）；rail 系 e2e（changes/subagents/subagent-recovery-review/width-tiers）已回归通过可作对照基线；subagent-interrupted 为既有损坏（main HEAD 即失败），本票链不修不背。

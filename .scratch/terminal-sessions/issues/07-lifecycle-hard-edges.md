@@ -18,3 +18,5 @@
 - 【03 票衔接】应用退出 flush 路径已通：releaseResources 已并入 `terminalSessions.killAll()`（等 exit 齐全 + 2s 兜底强制置终态；测试注入小 `killAllTimeoutMs` 防吃满兜底）。本票补三件事：退出屏障确认提示「N 个终端会话将关闭」（挂进现有退出屏障确认流程）、任务归档提示后关闭（先杀后归档——**顺手闭合 03 票未决口**：任务移除后存活会话的 terminal-exited 事件无现场可挂而静默丢弃）、重启收尾清注册表。
 - 【03 票衔接】`terminal-exited` 事件已走 TaskEvent 通道且 live-tasks 白名单三任务态验证过——屏障/归档杀会话后 UI 会自然收到 exited 推进，无需额外通知机制。
 - 【任务中断不杀】验证口径：中断路径（InterruptRegistry abort）不触达 manager——desktop 单测断言 abort 后会话仍 running 且输出继续产生（fake pty），与子代理 abort 共存亡行为对照。
+- 【04 票衔接】UI 已事件驱动：terminal-exited 推进呈现、已退出详情只读（disableStdin + subscribe buffered 回看）、重启收尾清注册表后 UI 自然无幽灵会话——desktop 侧实现上述生命周期动作即可，无需为 UI 加通知机制。主题如需新语义色只动 `lib/terminal-theme.ts`（语义 token→palette 已收口）。
+- 【e2e 现状】rail 系 e2e 已回归通过（changes/subagents/subagent-recovery-review/width-tiers）；subagent-interrupted 为既有损坏（main HEAD 即失败，已两轮基线对照确认）——本票动中断收尾链路时**不要顺手修它**，保持既有失败边界，单独诊断。

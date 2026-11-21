@@ -4,15 +4,15 @@
 
 **Blocked by:** 03。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 第四 tab 就位，徽章计数正确；拖拽分栏行为与现有 tab 一致
-- [ ] 拆页导航：列表页分组渲染（运行中/已退出、空组不渲染、富行元信息）↔ 详情页；SSR 单测覆盖列表页与详情壳（先例 subagent-rail-ui / subagent-rail-switch）
-- [ ] xterm.js 交互区：真 TTY 保真（颜色/光标/交互程序）、字节流直写、跟随语义 token 主题
-- [ ] 新建会话入口（含上限提示）、用户 kill 无确认；已退出会话只读回看
-- [ ] terminal-status 状态口径单一来源
-- [ ] `terminal-*` 事件在 task-view 的归并有单测（先例 task-view.test.ts）
-- [ ] ui test / typecheck 绿；改动 e2e 交互面后实跑相关场景或手测（AGENTS.md 纪律）
+- [x] 第四 tab 就位，徽章计数正确；拖拽分栏行为与现有 tab 一致
+- [x] 拆页导航：列表页分组渲染（运行中/已退出、空组不渲染、富行元信息）↔ 详情页；SSR 单测覆盖列表页与详情壳（先例 subagent-rail-ui / subagent-rail-switch）
+- [x] xterm.js 交互区：真 TTY 保真（颜色/光标/交互程序）、字节流直写、跟随语义 token 主题
+- [x] 新建会话入口（含上限提示）、用户 kill 无确认；已退出会话只读回看
+- [x] terminal-status 状态口径单一来源
+- [x] `terminal-*` 事件在 task-view 的归并有单测（先例 task-view.test.ts）
+- [x] ui test / typecheck 绿；改动 e2e 交互面后实跑相关场景或手测（AGENTS.md 纪律）——rail 系四场景实跑回归通过，subagent-interrupted 失败经基线对照确认为既有损坏非本票回归
 
 ## Comments
 
@@ -21,3 +21,8 @@
 - 【03 票衔接】已退出会话详情 = subscribe 取 buffered 只读回看；record.name 形如 `git-bash · 1`；来源 origin（user|agent）直接映射列表富行标注；activity 字段随事件信封下发（idle 任务 running=false/queued=false），tab 徽章计数以 record.status 为准。
 - 【03 票衔接】新建会话 `create({taskId, initialCommand?})` 超上限返回 `{ok:false, reason 中文}`，直接展示不另造错误态；kill 走 `terminals:kill` 不弹确认（票面既定）。
 - 【设计注解】列表页「已退出」组数据源 = `list-for`（含已退出记录）；xterm 主题对接语义 token 时注意 xterm 自有 palette 结构与 CSS token 的换算放 terminal-status/主题适配一处收口。
+- 落地：票分支 ts-04-terminal-rail-tab commit `5045976`，集成合入 `b7797ba`。18 文件 +2192/−11；ui 670 绿（+46）、desktop 540 绿、typecheck 0 错、pre-commit 全链过；e2e 实跑回归：changes/subagents/subagent-recovery-review/width-tiers ✅，subagent-interrupted ❌ 经 stash 基线对照确认为既有损坏（与 notes §9 口径一致，非本票回归）。
+- **渲染端结构与数据流**（06 票接线用）：tab 体入口 RailPanel `tab==="terminals"` → `data-testid="terminals-panel"`（tabpanel）→ TerminalRailPanelBody（列表页↔详情页 page state）；第四 tab 按钮 `rail-tab-terminals`、徽章 `terminal-rail-badge`；详情页根 `terminal-rail-detail-header`（返回 `terminal-rail-back`、标题 `terminal-rail-title`、kill `terminal-rail-kill`）、xterm 容器 `terminal-xterm-host`、面板体 `terminals-panel-body`。数据自 RailPanel 内 `useTerminalSessions(taskId)`（list-for 初始 + terminal-* 信封增量 + 切任务重建）。**当前无外部 focus 信号入口——06 票给 body 加 focus prop（照 SubagentFocus seq 幂等模式）并从 WorkspacePage 传 onOpenTerminal 类回调**。
+- **TerminalSegment 模型**（task-view.ts MessageSegment 成员）：`{ kind:"terminal", sessionId, name, shell, origin, status, createdAt, exitedAt?, exitCode?, signal? }` + 公共底座（id=sessionId、seq/turnId/responseId/at）；record.snapshot 与 taskId **有意不进段**（快照大文本不进 React 状态，回看走 subscribe 的 buffered）。applyTaskEvent 按 sessionId 幂等 upsert（整段替换保 seq、终态不可回退守卫、迟到 exited 兜底建段）；rail 同构 `terminalSegmentsFromRecords` / `upsertTerminalSession`。消息流 terminal 段当前渲染 null——06 票换标记行 + 直跳。
+- xterm 适配：@xterm/xterm 6.0.0 + @xterm/addon-fit 0.11.0；**6.0 是 UMD 包，node 下 named import 不可靠——组件动态 import、顶层零 xterm 运行时依赖**（SSR/jsdom/浏览器三态安全；jsdom 测试 vi.mock 拦动态 import）。主题换算收口 `lib/terminal-theme.ts`（`terminalXtermTheme()` 读 computed style，ANSI 16 色映射语义 token，MutationObserver 随 `data-theme` 翻转重读）。
+- 踩坑：term.onData 返回 IDisposable（对象非函数）——直接 push 退订数组 cleanup 抛错并连锁 React 重挂载（表现为 subscribe 双调用），已包装 dispose；kill 已退出会话的拒绝是正常竞态（按钮已被事件推进隐藏），未造错误态。
