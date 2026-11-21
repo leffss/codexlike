@@ -13,6 +13,7 @@ import type {
   InteractionRecord,
   QuestionAnswerSnapshot,
 } from "../interaction/types";
+import type { TerminalSessionRecord } from "../terminal/types";
 
 /**
  * 任务运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
@@ -374,4 +375,15 @@ export type TaskEvent =
       task: string;
       report: string;
       ok: boolean;
-    };
+    }
+  /**
+   * 终端会话启动（ADR 0033，03 票并入 TaskEvent 通道）：record 为启动时刻的
+   * 完整副本，消费方不必回查管理器。PTY 字节流不走本通道（spec：专用 IPC
+   * 通道直写 xterm.js，不进 React 状态）。
+   */
+  | { type: "terminal-started"; record: TerminalSessionRecord }
+  /**
+   * 终端会话退出：record 含终态（exitedAt / exitCode / 终态 64KB 快照）。
+   * 迟到的残留输出不进入快照（快照定格于退出时刻）。
+   */
+  | { type: "terminal-exited"; record: TerminalSessionRecord };

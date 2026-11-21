@@ -23,6 +23,7 @@ import {
   createTaskManager,
   createSqliteTaskStore,
   createTavilySearchSource,
+  createTerminalSessionManager,
   createWorktreeService,
   resolveModelOf,
   validateProviderProfile,
@@ -44,6 +45,8 @@ import {
   type TerminalSettings,
 } from "./terminal/terminal-settings-store";
 import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
+import { createNodePtyPort } from "./terminal/node-pty-port";
+import { registerTerminalSessionHandlers } from "./terminal/terminal-session-ipc";
 import { createOpenerSettingsStore } from "./openers/opener-settings-store";
 import { createOpenerLauncher } from "./openers/opener-launcher";
 import { registerOpenerHandlers } from "./openers/opener-ipc";
@@ -489,6 +492,16 @@ void app.whenReady().then(async () => {
     screenshotDirFor: (taskId) => taskScreenshotDir(dataDir(), taskId),
   });
 
+  // 终端会话服务（ADR 0033 票03）：宿主级常驻单例（browser-manager/mcpService
+  // 装配先例）。管理器本身即按 sessionId 的会话注册表（状态机与进程树 kill，
+  // 02 票适配器保证 kill 后死透）——不再建平行 kill Map（02 票 Comments 设计
+  // 依据，interrupt-registry 形态的类比已由管理器承载）。05 票 agent 四工具
+  // 经 host 注入复用同一单例；会话创建强制 cwd = 任务工作区（终端 IPC 面不
+  // 接受任意 cwd 参数——ADR 0004），shell 跟随执行设置（下方 shell resolver）。
+  const terminalSessions = createTerminalSessionManager({
+    port: createNodePtyPort(),
+  });
+
   const builtinTools = createBuiltinTools({
     env: process.env,
     // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 terminalSettings 缓存）
@@ -708,6 +721,21 @@ void app.whenReady().then(async () => {
     taskQueueStore,
   });
   pumpTaskQueue = taskRuntime.pumpTaskQueue;
+  // 终端会话 IPC（ADR 0033 票03）：创建/输入/resize/kill + 字节流专用通道
+  // + 生命周期事件桥（manager.onEvent → taskRuntime.pushTaskEvent → task:events，
+  // live-tasks 白名单放行 terminal 类）。cwd 经 workspaceFor 从任务记录取
+  // （任务工作区单一来源）；shell 逐次解析与 run_terminal_command 同源。
+  registerTerminalSessionHandlers({
+    sessions: terminalSessions,
+    workspaceFor: (taskId) => manager.get(taskId)?.record.workspacePath ?? null,
+    shell: () =>
+      resolveTerminalShell(
+        terminalSettings.shell,
+        process.env["CODEXLIKE_SHELL"]
+      ),
+    getWindow: () => mainWindow,
+    pushTaskEvent: taskRuntime.pushTaskEvent,
+  });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
   // 渲染层文件导出（复制旁的「导出 Markdown」）
@@ -782,7 +810,14 @@ void app.whenReady().then(async () => {
       taskQueueStore.close();
     },
     releaseResources: async () => {
-      await Promise.allSettled([mcpService.shutdown(), browserManager.close()]);
+      await Promise.allSettled([
+        mcpService.shutdown(),
+        browserManager.close(),
+        // 终端会话退出 flush（ADR 0033「应用退出前 flush」路径）：kill 全部
+        // 存活会话并等各自 exit 定格终态快照（内存内）；快照落库是 08 票，
+        // 退出前的「N 个终端会话将关闭」确认屏障是 07 票
+        terminalSessions.killAll(),
+      ]);
     },
   });
 });

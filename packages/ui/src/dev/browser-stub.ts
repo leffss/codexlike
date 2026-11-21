@@ -178,6 +178,32 @@ function installBrowserStub(): void {
       setToolEnabled: async () => {},
     },
     onTaskEvent: () => () => {},
+    terminals: {
+      // 形状对齐真实 IPC 契约（ADR 0033 票03）：dev 预览暂无终端面板
+      //（04 票接线），只补齐命名空间契约让纯浏览器预览挂载不缺 API；
+      // 操作 no-op（create 返回明确拒绝），字节流订阅恒空
+      create: async () => ({
+        ok: false as const,
+        reason: "dev 预览环境不支持终端会话",
+      }),
+      write: async () => ({
+        ok: false as const,
+        reason: "dev 预览环境不支持终端会话",
+      }),
+      resize: async () => {},
+      kill: async () => ({
+        ok: false as const,
+        reason: "dev 预览环境不支持终端会话",
+      }),
+      subscribe: async (sessionId: string) => ({
+        ok: false as const,
+        reason: `dev 预览环境不支持终端会话：${sessionId}`,
+      }),
+      unsubscribe: async () => {},
+      session: async () => null,
+      listFor: async () => [],
+      onSessionData: () => () => {},
+    },
     openers: {
       // 形状对齐真实 IPC 契约（工作区打开器）：资源管理器恒在，
       // 另给终端/VS Code 两个探测项样例呈现下拉密度；open 不真启动程序

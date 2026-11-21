@@ -793,6 +793,12 @@ export function applyTaskEvent(
     case "approval-resolved":
       return items;
 
+    // 终端会话生命周期（ADR 0033，03 票并入通道）：渲染端消费（消息流
+    // 工具卡与 rail 终端 tab 归并）是 04 票——本票事件先不产生消息段。
+    case "terminal-started":
+    case "terminal-exited":
+      return items;
+
     case "error":
       // 出错即本轮终止：全部流态段收敛（打 endedAt），尾部追加错误段
       return append(settleStreamingSegments(items, nowEpoch()), {

@@ -209,6 +209,33 @@ const api: CodexLikeApi = {
       ipcRenderer.removeListener(IPC.taskEvents, handler);
     };
   },
+  terminals: {
+    create: (input) => ipcRenderer.invoke(IPC.terminals.create, input),
+    write: (sessionId, data) =>
+      ipcRenderer.invoke(IPC.terminals.write, sessionId, data),
+    resize: (sessionId, size) =>
+      ipcRenderer.invoke(IPC.terminals.resize, sessionId, size),
+    kill: (sessionId) => ipcRenderer.invoke(IPC.terminals.kill, sessionId),
+    subscribe: (sessionId) =>
+      ipcRenderer.invoke(IPC.terminals.subscribe, sessionId),
+    unsubscribe: (sessionId) =>
+      ipcRenderer.invoke(IPC.terminals.unsubscribe, sessionId),
+    session: (sessionId) =>
+      ipcRenderer.invoke(IPC.terminals.session, sessionId),
+    listFor: (taskId) => ipcRenderer.invoke(IPC.terminals.listFor, taskId),
+    // PTY 字节流专用通道（不进 React 状态，直写 xterm.js）；生命周期
+    // 事件不走这里——terminal-* 经 onTaskEvent 的信封下发
+    onSessionData: (listener) => {
+      const handler: (
+        _event: Electron.IpcRendererEvent,
+        payload: import("./shared/ipc").TerminalSessionDataPayload
+      ) => void = (_event, payload) => listener(payload);
+      ipcRenderer.on(IPC.terminals.sessionData, handler);
+      return () => {
+        ipcRenderer.removeListener(IPC.terminals.sessionData, handler);
+      };
+    },
+  },
   git: {
     status: (taskId) => ipcRenderer.invoke(IPC.git.status, taskId),
     diff: (taskId, path, oldPath) =>
