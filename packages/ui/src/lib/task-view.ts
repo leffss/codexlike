@@ -3,9 +3,13 @@ import type {
   SubagentSnapshot,
   TaskEvent,
   StoredMessage,
+  TerminalSessionOrigin,
+  TerminalSessionRecord,
+  TerminalSessionStatus,
   ToolCallRecord,
   TranscriptItem,
 } from "@codexlike/agent-core";
+import type { TerminalShell } from "@codexlike/desktop/ipc";
 
 import { subagentSegmentState } from "./subagent-status";
 
@@ -172,6 +176,33 @@ export interface InteractionSegment extends SegmentBase {
   interaction: InteractionRecord;
 }
 
+/**
+ * 终端会话段（GLOSSARY「终端会话」，ADR 0033 票 04）：消息流时序成员，
+ * 同时是右栏「终端」tab 的列表数据源（与 SubagentSegment 同款「事件归并
+ * 实体段」两处消费）。record 的呈现投影：record 全量副本随 terminal-*
+ * 事件下发，快照（64KB 终态文本）与 taskId 不进段——快照回看走
+ * terminals:subscribe 的 buffered（字节流纪律：大文本绝不进 React 状态），
+ * 任务归属由信封路由承载。
+ */
+export interface TerminalSegment extends SegmentBase {
+  kind: "terminal";
+  /** 会话 id（terminal-* 事件匹配键；详情页字节流订阅键，= 段 id） */
+  sessionId: string;
+  /** 会话名（record.name，形如「git-bash · 1」；v1 不做重命名） */
+  name: string;
+  shell: TerminalShell;
+  /** 来源（列表富行标注 用户 / agent；ADR 0033 所有权边界） */
+  origin: TerminalSessionOrigin;
+  status: TerminalSessionStatus;
+  /** 创建时刻（ISO；已用时的计算基准） */
+  createdAt: string;
+  /** 退出时刻（ISO；running 时缺失，已用时定格基准） */
+  exitedAt?: string;
+  exitCode?: number;
+  /** 终止信号编号（正常退出缺失；kill/taskkill 场景呈现用） */
+  signal?: number;
+}
+
 /** 消息段：消息流时序序列的最小呈现单元 */
 export type MessageSegment =
   | UserSegment
@@ -182,6 +213,7 @@ export type MessageSegment =
   | CompactSummarySegment
   | ToolCallSegment
   | SubagentSegment
+  | TerminalSegment
   | InteractionSegment;
 
 /** 下一个稳定序号：基于现有最大序号递增 */
@@ -793,6 +825,13 @@ export function applyTaskEvent(
     case "approval-resolved":
       return items;
 
+    // 终端会话生命周期（ADR 0033 票 04）：record 为事件时刻完整副本，
+    // 按 sessionId 幂等 upsert（started 建段 / exited 推进终态 / 乱序
+    // 迟到事件不回退状态）。rail tab 列表同源归并见 upsertTerminalSession。
+    case "terminal-started":
+    case "terminal-exited":
+      return upsertTerminal(items, event.record);
+
     case "error":
       // 出错即本轮终止：全部流态段收敛（打 endedAt），尾部追加错误段
       return append(settleStreamingSegments(items, nowEpoch()), {
@@ -939,6 +978,133 @@ function subagentTurnBoundary(turns: SubagentTurn[]): SubagentTurn[] {
     return turns;
   }
   return [...turns, { content: "" }];
+}
+
+/* ------------------------------------------------------------------ */
+/* 终端会话段（ADR 0033 票 04）：record → 段映射与幂等 upsert            */
+
+/** record → 终端段（快照/taskId 不进段，见 TerminalSegment 注释） */
+function terminalSegmentOf(
+  record: TerminalSessionRecord,
+  seq: number,
+  turnId: string,
+  at?: number
+): TerminalSegment {
+  const base: TerminalSegment = {
+    kind: "terminal",
+    id: record.sessionId,
+    seq,
+    turnId,
+    responseId: null,
+    at,
+    sessionId: record.sessionId,
+    name: record.name,
+    shell: record.shell,
+    origin: record.origin,
+    status: record.status,
+    createdAt: record.createdAt,
+  };
+  return {
+    ...base,
+    ...(record.exitedAt !== undefined ? { exitedAt: record.exitedAt } : {}),
+    ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+    ...(record.signal !== undefined ? { signal: record.signal } : {}),
+  };
+}
+
+/**
+ * 终端段幂等 upsert（terminal-started / terminal-exited 共用同一映射）：
+ * 已存在同 sessionId → 整段替换但保 seq/turnId/at（封闭集操作二：状态
+ * 迁移保持段 id 与序号；record 全量覆盖，乱序迟到的 started 不会把终态
+ * 拉回 running）；不存在 → 尾部追加归当前轮（迟到 exited 错过 started
+ * 的兜底，先例 tool-result 补齐终态卡）。
+ */
+function upsertTerminal<T extends MessageSegment>(
+  items: T[],
+  record: TerminalSessionRecord
+): T[] {
+  const index = items.findIndex(
+    (item) => item.kind === "terminal" && item.sessionId === record.sessionId
+  );
+  if (index < 0) {
+    return [
+      ...items,
+      terminalSegmentOf(
+        record,
+        nextSeq(items),
+        deriveTurnId(items, record.sessionId),
+        nowEpoch()
+      ) as unknown as T,
+    ];
+  }
+  const existing = items[index]!;
+  // 终态不可回退（TerminalSessionStatus 状态机 running → exited 单向，
+  // 进程死亡不可逆）：乱序迟到的 started 事件忽略，不把已退出段拉回 running
+  if (
+    existing.kind === "terminal" &&
+    existing.status === "exited" &&
+    record.status === "running"
+  ) {
+    return items;
+  }
+  const next = items.slice();
+  next[index] = terminalSegmentOf(
+    record,
+    existing.seq,
+    existing.turnId,
+    existing.at
+  ) as unknown as T;
+  return next;
+}
+
+/**
+ * rail 列表重建（`terminals:list-for` 初始数据源）：任务内会话清单按创建
+ * 顺序映射为段列表。时序底座在列表上下文无轮次语义：seq 按清单序派发、
+ * turnId 以各自 sessionId 兜底、at 取 record.createdAt（与消息流归并同构
+ * 的映射，唯一差异是时序底座来源）。
+ */
+export function terminalSegmentsFromRecords(
+  records: TerminalSessionRecord[]
+): TerminalSegment[] {
+  const segments: TerminalSegment[] = [];
+  for (const record of records) {
+    segments.push(
+      terminalSegmentOf(
+        record,
+        segments.length + 1,
+        record.sessionId,
+        parseIso(record.createdAt)
+      )
+    );
+  }
+  return segments;
+}
+
+/** rail 列表事件增量归并（terminal-* record 幂等 upsert），与消息流同构 */
+export function upsertTerminalSession(
+  sessions: TerminalSegment[],
+  record: TerminalSessionRecord
+): TerminalSegment[] {
+  return upsertTerminal(sessions, record);
+}
+
+/**
+ * 恢复快照记录与 list-for 清单合并（ADR 0033 票 08，useTerminalSessions
+ * 初始数据源）：同 sessionId 去重——live 侧（内存管理器，同进程数据面更新）
+ * 优先于 restored 侧（库行）；合并后按创建时间正序（rail 列表顺序，名称
+ * 序号随 createdAt 递增）。record 层不剥离快照——大文本不进 React 状态的
+ * 口径在 terminalSegmentOf 投影落地（快照随 IPC 载荷到达、进段即丢弃）。
+ */
+export function mergeTerminalRecords(
+  restored: TerminalSessionRecord[],
+  live: TerminalSessionRecord[]
+): TerminalSessionRecord[] {
+  const byId = new Map<string, TerminalSessionRecord>();
+  for (const record of restored) byId.set(record.sessionId, record);
+  for (const record of live) byId.set(record.sessionId, record);
+  return [...byId.values()].sort((a, b) =>
+    a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0
+  );
 }
 
 /** 子代理卡内嵌套的工具进度归并（call → 运行中，result → 终态） */

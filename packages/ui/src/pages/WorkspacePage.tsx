@@ -40,6 +40,7 @@ import {
   type ProviderProfile,
   type ProjectRecord,
   type TaskResourcesView,
+  type TerminalSessionRecord,
   type ThinkingEffort,
   type WorkbenchTarget,
 } from "@codexlike/agent-core";
@@ -48,6 +49,7 @@ import { contextWarningMessage } from "../lib/context-warning";
 
 import { RailPanel } from "../components/RailPanel";
 import type { SubagentFocus } from "../components/SubagentRailPanel";
+import type { TerminalFocus } from "../components/TerminalRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
@@ -63,6 +65,7 @@ import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
+import { ArchiveTerminalDialog } from "../components/ArchiveTerminalDialog";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
 import { useWorkspaceSharing } from "../lib/workspace-sharing";
@@ -208,6 +211,13 @@ export function WorkspacePage(props: {
   const [removingProject, setRemovingProject] = useState<ProjectRecord | null>(
     null
   );
+  // 终端会话硬边（ADR 0033 票07）：归档带存活会话任务的待确认请求——
+  // null = 无挂起；非 null 时渲染 ArchiveTerminalDialog（确认/取消回调分流）
+  const [archiveTerminalConfirm, setArchiveTerminalConfirm] = useState<{
+    id: string;
+    title: string;
+    aliveCount: number;
+  } | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<
     string | null | undefined
   >(workspaceState.activeDraftProjectId);
@@ -331,6 +341,23 @@ export function WorkspacePage(props: {
     setRailOpen(true);
     setSubagentFocus({ id: subagentId, seq: ++subagentFocusSeqRef.current });
   }, []);
+  // 终端标记行点击定位信号（ADR 0033 票 06，先例 SubagentFocus：seq 单调
+  // 递增——同 sessionId 重复点击也重新定位；RailPanel 切 tab、详情页选中
+  // 与幂等守卫在 TerminalRailPanelBody 内）
+  const terminalFocusSeqRef = useRef(0);
+  const [terminalFocus, setTerminalFocus] = useState<TerminalFocus | null>(
+    null
+  );
+  const openTerminalFromStream = useCallback((sessionId: string) => {
+    setRailOpen(true);
+    setTerminalFocus({ sessionId, seq: ++terminalFocusSeqRef.current });
+  }, []);
+  // 终端会话恢复快照（ADR 0033 票 08）：当前任务 view 并行字段的已退出
+  // 记录（含快照文本），右栏终端 tab 初始拉取的恢复数据源——重启后内存
+  // 注册表为空，rail「已退出」组由此恢复（任务打开时随 view 一次刷新）
+  const [restoredTerminals, setRestoredTerminals] = useState<
+    TerminalSessionRecord[]
+  >([]);
   // 新建、加载与已有任务始终使用同一档位；滚动条宽度由消息流实际测量。
   const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
@@ -561,6 +588,8 @@ export function WorkspacePage(props: {
       setQueueState(EMPTY_QUEUE_STATE);
       // 排队首条（票 03）：随快照恢复，加载期间先清空防上个任务的值闪现
       setQueuedStart(null);
+      // 终端恢复快照（票 08）：加载期间先清空防上个任务的已退出组闪现
+      setRestoredTerminals([]);
       setWorkspaceFiles([]);
       setResources(null);
       toastState.retract("context-warning");
@@ -602,6 +631,8 @@ export function WorkspacePage(props: {
         queueSequenceRef.current = live.sequence;
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
+        // 终端恢复快照（票 08）：view 并行字段随任务打开一次刷新
+        setRestoredTerminals(view.terminals);
         setStreaming(live.activity.running);
         // 运行中恢复：从消息段重推运行起点（轮次起点），工时不因重开清零
         setRunStartedAt(
@@ -1184,6 +1215,30 @@ export function WorkspacePage(props: {
 
   /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的任务。 */
   async function archiveTask(id: string, archived: boolean) {
+    if (archived) {
+      // 终端会话硬边（ADR 0033 票07）：任务有存活终端会话时提示后关闭——
+      // 先确认再归档，确认后宿主「先杀后归档」；取消则不发起归档 IPC，
+      // 会话继续运行（拒绝路径）。查询失败不阻断既有归档行为。
+      try {
+        const sessions = await window.codexlike.terminals.listFor(id);
+        const aliveCount = sessions.filter(
+          (session) => session.status === "running"
+        ).length;
+        if (aliveCount > 0) {
+          const title =
+            tasks.find((item) => item.id === id)?.title ?? "未命名任务";
+          setArchiveTerminalConfirm({ id, title, aliveCount });
+          return;
+        }
+      } catch {
+        // 终端查询不可用（如旧版宿主）时按无存活会话处理
+      }
+    }
+    await performArchive(id, archived);
+  }
+
+  /** 归档/恢复的实际执行（archiveTask 确认分流后的共用路径）。 */
+  async function performArchive(id: string, archived: boolean) {
     const generation = taskRequestRef.current;
     try {
       await window.codexlike.tasks.archive(id, archived);
@@ -1673,6 +1728,20 @@ export function WorkspacePage(props: {
           onRemoved={projectRemoved}
         />
       )}
+      {archiveTerminalConfirm && (
+        <ArchiveTerminalDialog
+          taskTitle={archiveTerminalConfirm.title}
+          aliveCount={archiveTerminalConfirm.aliveCount}
+          onConfirm={() => {
+            const { id } = archiveTerminalConfirm;
+            setArchiveTerminalConfirm(null);
+            // 确认路径：宿主 tasks:archive 内「先杀后归档」（存活会话终止并
+            // 等 exit 后写入归档，terminal-exited 事件先于归档推进）
+            void performArchive(id, true);
+          }}
+          onCancel={() => setArchiveTerminalConfirm(null)}
+        />
+      )}
       <TaskSidebar
         projects={projects}
         searchRecordsRevision={recordsRevision}
@@ -1806,6 +1875,7 @@ export function WorkspacePage(props: {
                   followSignal={followSignal}
                   taskTitle={current?.title ?? null}
                   onOpenSubagent={openSubagentFromStream}
+                  onOpenTerminal={openTerminalFromStream}
                   onDismissStatus={dismissStatusSegment}
                   emptyHint={
                     profiles.length === 0 ? (
@@ -2005,6 +2075,8 @@ export function WorkspacePage(props: {
               onChangesCount={setChangesCount}
               subagents={subagentSegments}
               subagentFocus={subagentFocus}
+              terminalFocus={terminalFocus}
+              restoredTerminals={restoredTerminals}
             />
           </div>
         </div>

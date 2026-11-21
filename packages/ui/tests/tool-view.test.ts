@@ -236,4 +236,33 @@ describe("summarizeToolCall（工具卡片参数摘要）", () => {
     expect(summarizeToolCall("browser_screenshot", "{}")).toBe("整页截图");
     expect(summarizeToolCall("browser_read", "{}")).toBe("提取页面正文");
   });
+
+  it("终端四件工具：command 原文或 sessionId 动作（ADR 0033 票 06）", () => {
+    // spawn_terminal：参数只有可选初始命令（sessionId 在结果里）——
+    // 有命令取 command 原文（与 run_terminal_command 同款 $ 形态），
+    // 无命令（只启动空闲 shell）给动作摘要
+    expect(summarizeToolCall("spawn_terminal", '{"command":"pnpm test"}')).toBe(
+      "$ pnpm test"
+    );
+    expect(summarizeToolCall("spawn_terminal", "{}")).toBe("启动终端会话");
+    // write：命令原文 + sessionId 关联（05 票 Comments：command 原文 +
+    // sessionId 串起后续调用）
+    expect(
+      summarizeToolCall(
+        "terminal_write",
+        '{"sessionId":"ts-1","command":"y\\n"}'
+      )
+    ).toBe("写入 ts-1：$ y");
+    // read：sessionId 动作；wait=true 标注阻塞等待
+    expect(summarizeToolCall("terminal_read", '{"sessionId":"ts-1"}')).toBe(
+      "读取 ts-1 的新输出"
+    );
+    expect(
+      summarizeToolCall("terminal_read", '{"sessionId":"ts-1","wait":true}')
+    ).toBe("读取 ts-1（等待新输出）");
+    // kill：sessionId 动作
+    expect(summarizeToolCall("terminal_kill", '{"sessionId":"ts-1"}')).toBe(
+      "终止 ts-1"
+    );
+  });
 });

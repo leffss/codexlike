@@ -79,7 +79,15 @@ export function receiveLiveEvent(
     envelope.event.type === "queue-changed" ||
     // 任务排队（任务并发上限票 02）同为任务状态：排队中的任务无执行现场
     //（running=false），不按起点接续会被丢弃——queued 活动态随信封携带。
-    envelope.event.type === "task-queue-changed";
+    envelope.event.type === "task-queue-changed" ||
+    // 终端会话生命周期（ADR 0033 票09 e2e 揭示的渲染端缺口）：终端是宿主级
+    // 常驻实体、在执行现场之外启停（宿主桥 pushTaskEvent 经 ensureExecution
+    // 挂当前现场，信封是任务级状态快照而非执行增量）——rail 直连
+    // onTaskEvent 不经本闸门，消息流却会在空闲期丢事件：用户手开会话的
+    // 标记行不出现、空闲期 kill 后标记行停留 running 与 rail 状态分裂。
+    // 与 queue-changed 同口径按水位接续（09 票补 ui 单测锁定）。
+    envelope.event.type === "terminal-started" ||
+    envelope.event.type === "terminal-exited";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [

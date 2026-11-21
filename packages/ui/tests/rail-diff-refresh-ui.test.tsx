@@ -43,13 +43,36 @@ function props(
     onChangesCount() {},
     subagents: [],
     subagentFocus: null,
+    // 终端标记行 focus（票 06）：本文件聚焦 diff 刷新，恒空
+    terminalFocus: null,
+    // 终端恢复快照（票 08）：本文件聚焦 diff 刷新，恒空
+    restoredTerminals: [],
     ...overrides,
   };
 }
 function installGit(git: object) {
   Object.defineProperty(window, "codexlike", {
     configurable: true,
-    value: { git },
+    // terminals 最小 stub：RailPanel 的 useTerminalSessions 挂载即拉取
+    //（本文件聚焦 diff 刷新，终端数据路径由 terminal-rail-switch 覆盖）
+    value: {
+      git,
+      onTaskEvent: () => () => {},
+      terminals: {
+        listFor: async () => [],
+        onSessionData: () => () => {},
+        subscribe: async (sessionId: string) => ({
+          ok: false as const,
+          reason: sessionId,
+        }),
+        unsubscribe: async () => {},
+        write: async () => ({ ok: false as const, reason: "stub" }),
+        resize: async () => {},
+        kill: async () => ({ ok: false as const, reason: "stub" }),
+        create: async () => ({ ok: false as const, reason: "stub" }),
+        session: async () => null,
+      },
+    },
   });
 }
 function deferred<T>() {

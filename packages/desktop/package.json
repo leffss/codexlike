@@ -16,6 +16,8 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "icon": "node scripts/make-icon.mjs",
+    "rebuild:native": "electron-rebuild -f -w node-pty",
+    "smoke:pty": "node scripts/pty-smoke.mjs",
     "dist": "pnpm run predist && electron-builder --win --projectDir .dist-vendor",
     "predist": "node scripts/dist.mjs",
     "typecheck": "pnpm --filter @codexlike/agent-core run build && tsc --noEmit -p tsconfig.json",
@@ -69,10 +71,13 @@
     "test:e2e:scroll": "node e2e/scroll-following.mjs",
     "test:e2e:entries": "node e2e/entry-consistency.mjs",
     "test:e2e:reasoning-recovery": "node e2e/reasoning-recovery.mjs",
-    "test:e2e:all": "node e2e/credential-durability.mjs && node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/interactions.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/sidebar-archive.mjs && node e2e/sidebar-task-preview.mjs && node e2e/membership.mjs && node e2e/task-search.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs && node e2e/message-order.mjs && node e2e/process-segments.mjs && node e2e/work-plan.mjs && node e2e/live-tasks.mjs && node e2e/persistent-workbench.mjs && node e2e/exit-recovery.mjs && node e2e/launch-state.mjs && node e2e/launch-state-target.mjs && node e2e/entry-consistency.mjs && node e2e/width-tiers.mjs && node e2e/reasoning-recovery.mjs && node e2e/subagent-recovery-review.mjs && node e2e/subagent-interrupted.mjs && node e2e/subagent-legacy-record.mjs && node e2e/subagent-work-plan.mjs && node e2e/scroll-following.mjs && node e2e/window-controls.mjs && node e2e/external-links.mjs && node e2e/workspace-opener.mjs"
+    "test:e2e:terminal": "node e2e/terminal-sessions.mjs",
+    "test:e2e:terminal-restart": "node e2e/terminal-restart-recovery.mjs",
+    "test:e2e:all": "node e2e/credential-durability.mjs && node e2e/smoke.mjs && node e2e/acceptance.mjs && node e2e/commands.mjs && node e2e/browser.mjs && node e2e/approvals.mjs && node e2e/interactions.mjs && node e2e/changes.mjs && node e2e/interrupt.mjs && node e2e/compact.mjs && node e2e/worktree.mjs && node e2e/mcp.mjs && node e2e/subagents.mjs && node e2e/projects-sidebar.mjs && node e2e/sidebar-archive.mjs && node e2e/sidebar-task-preview.mjs && node e2e/membership.mjs && node e2e/task-search.mjs && node e2e/theme.mjs && node e2e/skills.mjs && node e2e/thinking.mjs && node e2e/subagent-thinking.mjs && node e2e/message-order.mjs && node e2e/process-segments.mjs && node e2e/work-plan.mjs && node e2e/live-tasks.mjs && node e2e/persistent-workbench.mjs && node e2e/exit-recovery.mjs && node e2e/launch-state.mjs && node e2e/launch-state-target.mjs && node e2e/entry-consistency.mjs && node e2e/width-tiers.mjs && node e2e/reasoning-recovery.mjs && node e2e/subagent-recovery-review.mjs && node e2e/subagent-interrupted.mjs && node e2e/subagent-legacy-record.mjs && node e2e/subagent-work-plan.mjs && node e2e/scroll-following.mjs && node e2e/window-controls.mjs && node e2e/external-links.mjs && node e2e/workspace-opener.mjs && node e2e/terminal-sessions.mjs && node e2e/terminal-restart-recovery.mjs"
   },
   "devDependencies": {
     "@codexlike/agent-core": "workspace:*",
+    "@electron/rebuild": "^4.2.1",
     "@types/node": "^24.0.0",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
@@ -81,5 +86,8 @@
     "typescript": "^5.9.0",
     "vitest": "^5.1.0",
     "wait-on": "^9.5.1"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
   }
 }

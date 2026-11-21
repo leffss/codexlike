@@ -22,14 +22,16 @@ files:
   - app-dist/**
   - build/icon.ico
 
-# asar 外资源：ui 静态产物（file:// 直读）与 playwright-core
-# （工单 11 external 化；放 resources/node_modules 使模块解析从 app.asar
-# 向上出 asar 后命中；chromium 安装器 spawn cli.js 需要真实文件路径）
+# asar 外资源：ui 静态产物（file:// 直读）与 external 化的运行时依赖
+# （playwright-core：工单 11；node-pty：票02 原生模块，主进程适配器动态
+# require；放 resources/node_modules 使模块解析从 app.asar 向上出 asar 后命中）
 extraResources:
   - from: ui-dist
     to: ui-dist
   - from: node_modules/playwright-core
     to: node_modules/playwright-core
+  - from: node_modules/node-pty
+    to: node_modules/node-pty
 
 # 二进制下载镜像（国内网络；eudi 不做代码签名，SmartScreen 首次运行提示属预期）
 electronDownload:

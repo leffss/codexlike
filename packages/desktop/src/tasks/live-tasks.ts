@@ -26,6 +26,14 @@ interface LiveExecution {
  * 子代理恢复快照（票 03）与 history 并行同点采样：本轮新委派经事件流重建
  * （不与落库行重复计数），compact 整体替换 history 时并行字段原样保留。
  */
+/**
+ * 终端会话生命周期事件类型（ADR 0033）：两处白名单共用的清单。
+ * 终端会话是宿主级常驻、任务中断不杀（ADR 0033）——事件可能在无执行现场
+ * （空闲）、已终态（terminalAt > 0）或用户停止（stopped）后到达，三个关口
+ * 都须放行：它们是任务级状态快照事件，不是执行现场的新正文/工具。
+ */
+const TERMINAL_EVENT_TYPES = ["terminal-started", "terminal-exited"];
+
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();
   // 恢复态中断任务的「本会话已查看」记账：无执行现场的任务没有 viewed
@@ -82,10 +90,15 @@ export function createLiveTasks(manager: TaskManager) {
       live.executionId !== executionId ||
       (live.terminalAt > 0 &&
         event.type !== "queue-changed" &&
-        event.type !== "task-queue-changed")
+        event.type !== "task-queue-changed" &&
+        // 终端生命周期（ADR 0033）：任务终态后终端仍会启停（宿主级常驻），
+        // 与 queue-changed 同口径延续任务水位
+        !TERMINAL_EVENT_TYPES.includes(event.type))
     )
       return null;
     // 停止后仅接收清理终态，不能再显示新的正文、工具开始或等待请求。
+    // 终端事件例外：任务中断不杀会话（ADR 0033），停止后的会话启停
+    // 照常下发——这正是终端躲开任务中断的功能起点。
     if (
       live.stopped &&
       ![
@@ -103,6 +116,8 @@ export function createLiveTasks(manager: TaskManager) {
         // 任务排队变更（任务并发上限票 02）同为任务状态快照，同口径放行
         "queue-changed",
         "task-queue-changed",
+        // 终端生命周期（ADR 0033）：停止后终端照常启停
+        ...TERMINAL_EVENT_TYPES,
       ].includes(event.type)
     )
       return null;
@@ -205,6 +220,13 @@ export function createLiveTasks(manager: TaskManager) {
       // 并行恢复字段（票 03）：有现场用执行起点快照，无现场（重启后首次查看）
       // 直接读库——含启动收尾补记的 interrupted 骨架
       subagents: live?.subagents ?? manager.subagents(id),
+      // 并行恢复字段（ADR 0033 票 08）：已退出会话随 view 一次性下发
+      // （含重启收尾置终态的行，快照缺省容忍）；运行中的会话不经本字段
+      // ——list-for 与 terminal-* 事件是其呈现通道。重启后内存注册表为空，
+      // 本字段是「已退出」组恢复的唯一数据源
+      terminals: manager
+        .terminalSessions(id)
+        .filter((record) => record.status === "exited"),
       events: live ? [...live.events] : [],
       pendingInteractions: manager.get(id)?.pendingInteractions ?? [],
       activity: activity(id),

@@ -29,6 +29,8 @@ const METHOD_ALIASES: Record<string, string> = {
   "application.exitChanged": "onExitState",
   "git.commitMessage": "generateCommitMessage",
   "traySettings.changed": "onLaunchAtLoginChanged",
+  // 终端字节流专用通道（ADR 0033 票03）：表用事件名、API 用 on* 前缀
+  "terminals.sessionData": "onSessionData",
 };
 
 test("browser-stub 覆盖 IPC 契约的全部 window API 命名空间", () => {

@@ -332,7 +332,9 @@ it("公开执行状态含稳定执行标识与等待状态，拒绝并发发送�
     waitingForUser: true,
   });
   expect(state.pendingInteractionIds).toHaveLength(1);
-  expect(() => invoke("tasks:archive", task.id, true)).toThrow("先停止");
+  await expect(invoke("tasks:archive", task.id, true)).rejects.toThrow(
+    "先停止"
+  );
   expect(
     (await invoke("tasks:list")).find((s: any) => s.id === task.id).archivedAt
   ).toBeNull();
@@ -874,6 +876,9 @@ it("实际模型请求使用发送快照，中途偏好只影响下一次；缺�
 it("执行已占位但Core尚未更新状态时，过时的idle列表也不能绕过归档保护", async () => {
   let taskId: string | undefined;
   let checked = false;
+  // archive handler 已是 async（07 票先杀后归档）：拒绝以 rejection 到达，
+  // 同步回调内捕获、用例尾部断言（语义同原同步 toThrow）
+  let archiveRejection: unknown;
   const app = setup(undefined, () => {
     if (!taskId) return;
     expect(invoke("tasks:list").find((s: any) => s.id === taskId).status).toBe(
@@ -883,7 +888,9 @@ it("执行已占位但Core尚未更新状态时，过时的idle列表也不能�
       running: true,
       executionId: expect.any(String),
     });
-    expect(() => invoke("tasks:archive", taskId, true)).toThrow("先停止");
+    void invoke("tasks:archive", taskId, true).catch((error: unknown) => {
+      archiveRejection = error;
+    });
     checked = true;
   });
   const model = await provider(app);
@@ -901,6 +908,8 @@ it("执行已占位但Core尚未更新状态时，过时的idle列表也不能�
     expect(invoke("tasks:execution", taskId).running).toBe(false)
   );
   expect(checked).toBe(true);
+  await waitFor(() => expect(archiveRejection).toBeDefined());
+  expect((archiveRejection as Error).message).toContain("先停止");
   expect(invoke("tasks:list")[0].archivedAt).toBeNull();
 });
 
@@ -934,13 +943,15 @@ it("归档抢先于异步发送准备完成时拒绝启动，恢复后历史仍�
     model.profile.id
   );
   const rejected = expect(sending).rejects.toThrow("归档");
-  expect(invoke("tasks:archive", task.id, true).archivedAt).not.toBeNull();
+  expect(
+    (await invoke("tasks:archive", task.id, true)).archivedAt
+  ).not.toBeNull();
   release();
   await rejected;
   lookup.mockRestore();
   expect(invoke("tasks:messages", task.id)).toEqual(history);
   expect(model.requests()).toBe(1);
-  expect(invoke("tasks:archive", task.id, false).archivedAt).toBeNull();
+  expect((await invoke("tasks:archive", task.id, false)).archivedAt).toBeNull();
   await invoke("tasks:send", task.id, "恢复后继续", model.profile.id);
   await waitFor(() =>
     expect(invoke("tasks:execution", task.id).running).toBe(false)
@@ -985,7 +996,7 @@ it("独立与项目任务按用户使用排序、置顶优先，重开保留整�
   const marker = join(app.workspace, "成果.txt");
   writeFileSync(marker, "不因归档删除");
   const history = invoke("tasks:messages", b.id);
-  invoke("tasks:archive", b.id, true);
+  await invoke("tasks:archive", b.id, true);
   app.reopen();
   expect(invoke("projects:list")[0]).toMatchObject({
     id: project.id,
@@ -1000,7 +1011,7 @@ it("独立与项目任务按用户使用排序、置顶优先，重开保留整�
     archivedAt: clock,
   });
   expect(invoke("tasks:messages", b.id)).toEqual(history);
-  expect(invoke("tasks:archive", b.id, false)).toMatchObject({
+  expect(await invoke("tasks:archive", b.id, false)).toMatchObject({
     projectId: null,
     workspacePath: app.workspace,
     archivedAt: null,
@@ -1040,7 +1051,7 @@ it("发送登记最近使用，后台增量与完成不抢走后来查看的任�
   try {
     expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([a.id, b.id]);
     await waitFor(() => expect(model.requests()).toBe(3));
-    expect(() => invoke("tasks:archive", a.id, true)).toThrow("先停止");
+    await expect(invoke("tasks:archive", a.id, true)).rejects.toThrow("先停止");
     clock = "2026-11-11T04:00:00.000Z";
     invoke("tasks:mark-used", b.id);
     expect(invoke("tasks:list").map((s: any) => s.id)).toEqual([b.id, a.id]);
@@ -1086,14 +1097,14 @@ it("归档及恢复真实 Worktree 仅整理记录，来源、分支与成果文
   writeFileSync(marker, "未提交成果");
   const before = git("worktree", "list", "--porcelain");
   const history = invoke("tasks:messages", task.id);
-  invoke("tasks:archive", task.id, true);
+  await invoke("tasks:archive", task.id, true);
   expect(readFileSync(marker, "utf8")).toBe("未提交成果");
   expect(readFileSync(join(app.workspace, "source.txt"), "utf8")).toBe(
     "来源成果"
   );
   app.reopen();
   expect(invoke("tasks:messages", task.id)).toEqual(history);
-  expect(invoke("tasks:archive", task.id, false)).toMatchObject({
+  expect(await invoke("tasks:archive", task.id, false)).toMatchObject({
     projectId: project.id,
     workspaceMode: "worktree",
     workspaceOriginPath: app.workspace,
@@ -1166,7 +1177,7 @@ it("确认移除仅删除显式所属含归档记录，清除现场与首次发�
     ).toBe(true)
   );
   invoke("tasks:set-project", member.id, project.id);
-  invoke("tasks:archive", archived.id, true);
+  await invoke("tasks:archive", archived.id, true);
   const before = invoke("tasks:list");
   const survivorView = invoke("tasks:view", standalone.id);
   expect(invoke("projects:remove", project.id, false)).toBeNull();

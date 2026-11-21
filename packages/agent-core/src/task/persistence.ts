@@ -7,6 +7,7 @@ import type {
   InteractionRecord,
   QuestionAnswerSnapshot,
 } from "../interaction/types";
+import type { TerminalSessionRecord } from "../terminal/types";
 import { LEGACY_APPROVAL_MODE_MAP } from "./approval";
 import { createTaskSearch, type TaskSearchResult } from "./search";
 import { workbenchKey } from "./workbench-state";
@@ -123,8 +124,41 @@ export interface TaskPersistence {
    * insertToolCall）；按任务列出见 listSubagentToolCalls。
    */
   insertSubagentToolCall(record: SubagentToolCallRecord): void;
-  /** 指定任务的子代理工具调用，按写入时间正序；未知任务返回空数组 */
+  /** 指定任务的子代理工具调用记录，按写入顺序；未知任务返回空数组 */
   listSubagentToolCalls(taskId: string): SubagentToolCallRecord[];
+  /**
+   * 终端会话骨架行（ADR 0033 票 08）：spawn 即写（status=running，终态列
+   * 缺省）——「曾开过会话」的事实从创建就成立（先例 subagents 注册行
+   * queued 即写）；状态推进见 updateTerminalSession，恢复读取见
+   * listTerminalSessions。快照列只供回看，模型上下文组装不读本表。
+   */
+  insertTerminalSession(record: TerminalSessionRecord): void;
+  /**
+   * 只更新状态机推进触碰的列（status / exitedAt / exitCode / signal /
+   * snapshot）：exit 事件定格快照后一次推进（killAll 等 exit 齐全语义保证
+   * 快照已定格再写）。归属与描述列（taskId / name / shell / origin /
+   * createdAt）建行后不变，不提供更新。目标不存在时静默忽略（与
+   * updateSubagent 同语义）。
+   */
+  updateTerminalSession(
+    id: string,
+    patch: Partial<
+      Pick<
+        TerminalSessionRecord,
+        "status" | "exitedAt" | "exitCode" | "signal" | "snapshot"
+      >
+    >
+  ): void;
+  /** 单会话行（subscribe 回看的恢复兜底：重启后内存注册表无此会话）；不存在返回 null */
+  terminalSession(sessionId: string): TerminalSessionRecord | null;
+  /** 指定任务的终端会话行，按创建时间正序（rail「已退出」组恢复数据源）；未知任务返回空数组 */
+  listTerminalSessions(taskId: string): TerminalSessionRecord[];
+  /**
+   * 重启收尾（ADR 0033 票 08）：库中残留 running 行按已退出置终态——
+   * exitedAt 用收尾时刻，exitCode/signal/快照缺省（兜底置终态的容忍口径，
+   * 与 01 票 killAll 兜底 record 同款）；已终态行不改写（重开幂等）。
+   */
+  settleRunningTerminalSessions(settledAt: string): void;
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -239,6 +273,21 @@ CREATE TABLE IF NOT EXISTS subagent_tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_subagent_tool_calls_subagent
   ON subagent_tool_calls(task_id, subagent_id, created_at);
+CREATE TABLE IF NOT EXISTS terminal_sessions (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  shell TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  exited_at TEXT,
+  exit_code INTEGER,
+  signal INTEGER,
+  snapshot TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task
+  ON terminal_sessions(task_id, created_at);
 `;
 
 interface TaskRow {
@@ -324,6 +373,20 @@ interface SubagentToolCallRow {
   output: string;
   is_error: number;
   created_at: string;
+}
+
+interface TerminalSessionRow {
+  id: string;
+  task_id: string;
+  name: string;
+  origin: string;
+  shell: string;
+  status: string;
+  created_at: string;
+  exited_at: string | null;
+  exit_code: number | null;
+  signal: number | null;
+  snapshot: string | null;
 }
 
 /**
@@ -490,6 +553,12 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   const listSubagentToolCallsStmt = db.prepare(
     "SELECT * FROM subagent_tool_calls WHERE task_id = ? ORDER BY created_at, rowid"
   );
+  const insertTerminalSessionStmt = db.prepare(
+    "INSERT INTO terminal_sessions (id, task_id, name, origin, shell, status, created_at, exited_at, exit_code, signal, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listTerminalSessionsStmt = db.prepare(
+    "SELECT * FROM terminal_sessions WHERE task_id = ? ORDER BY created_at, rowid"
+  );
 
   function toRecord(row: TaskRow): TaskRecord {
     return {
@@ -548,6 +617,23 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         : null,
       message.reasoning || null
     );
+  }
+
+  /** terminal_sessions 行 → record：NULL 列读回字段缺省（兜底置终态容忍口径） */
+  function terminalRecordOf(row: TerminalSessionRow): TerminalSessionRecord {
+    return {
+      sessionId: row.id,
+      taskId: row.task_id,
+      name: row.name,
+      shell: row.shell as TerminalSessionRecord["shell"],
+      origin: row.origin as TerminalSessionRecord["origin"],
+      status: row.status as TerminalSessionRecord["status"],
+      createdAt: row.created_at,
+      ...(row.exited_at !== null ? { exitedAt: row.exited_at } : {}),
+      ...(row.exit_code !== null ? { exitCode: row.exit_code } : {}),
+      ...(row.signal !== null ? { signal: row.signal } : {}),
+      ...(row.snapshot !== null ? { snapshot: row.snapshot } : {}),
+    };
   }
 
   return {
@@ -623,6 +709,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           "subagents",
           "subagent_messages",
           "subagent_tool_calls",
+          "terminal_sessions",
         ]) {
           db.prepare(
             `DELETE FROM ${table} WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`
@@ -1090,6 +1177,75 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         isError: row.is_error === 1,
         createdAt: row.created_at,
       }));
+    },
+
+    insertTerminalSession(record) {
+      insertTerminalSessionStmt.run(
+        record.sessionId,
+        record.taskId,
+        record.name,
+        record.origin,
+        record.shell,
+        record.status,
+        record.createdAt,
+        record.exitedAt ?? null,
+        record.exitCode ?? null,
+        record.signal ?? null,
+        record.snapshot ?? null
+      );
+    },
+
+    updateTerminalSession(id, patch) {
+      // 只更新状态机推进的列（status/exitedAt/exitCode/signal/snapshot），
+      // 目标不存在静默忽略（与 updateSubagent 同语义）
+      const columns: string[] = [];
+      const values: (string | number | null)[] = [];
+      if (patch.status !== undefined) {
+        columns.push("status = ?");
+        values.push(patch.status);
+      }
+      if (patch.exitedAt !== undefined) {
+        columns.push("exited_at = ?");
+        values.push(patch.exitedAt);
+      }
+      if (patch.exitCode !== undefined) {
+        columns.push("exit_code = ?");
+        values.push(patch.exitCode);
+      }
+      if (patch.signal !== undefined) {
+        columns.push("signal = ?");
+        values.push(patch.signal);
+      }
+      if (patch.snapshot !== undefined) {
+        columns.push("snapshot = ?");
+        values.push(patch.snapshot);
+      }
+      if (columns.length === 0) {
+        return;
+      }
+      db.prepare(
+        `UPDATE terminal_sessions SET ${columns.join(", ")} WHERE id = ?`
+      ).run(...values, id);
+    },
+
+    terminalSession(sessionId) {
+      const row = db
+        .prepare("SELECT * FROM terminal_sessions WHERE id = ?")
+        .get(sessionId) as TerminalSessionRow | undefined;
+      return row === undefined ? null : terminalRecordOf(row);
+    },
+
+    listTerminalSessions(taskId) {
+      return (
+        listTerminalSessionsStmt.all(taskId) as unknown as TerminalSessionRow[]
+      ).map(terminalRecordOf);
+    },
+
+    settleRunningTerminalSessions(settledAt) {
+      // 只碰残留 running 行；已终态行不改写（重开幂等）
+      db.prepare(
+        "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE status = 'running'"
+      ).run(settledAt);
     },
 
     close() {

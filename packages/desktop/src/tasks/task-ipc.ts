@@ -21,12 +21,16 @@ import {
   type ProviderProfile,
   type TaskManager,
   type TaskRecord,
+  type TerminalSessionManager,
   type WorktreeService,
 } from "@codexlike/agent-core/node";
+
+import type { TaskEvent } from "@codexlike/agent-core";
 
 import type { ProfileStore } from "../profiles/profile-store";
 import type { TaskExitRuntime } from "../lifecycle/application-exit";
 import { normalizeModelInput } from "../shared/model-value";
+import { closeTaskSessions } from "../terminal/terminal-lifecycle";
 import { createInterruptRegistry } from "./interrupt-registry";
 import {
   createMemoryInputQueueStore,
@@ -85,7 +89,19 @@ export function registerTaskHandlers(options: {
   concurrencyLimit?: () => number;
   /** 任务排队持久化（票 02 内存态；票 05 换真实实现）：缺省内存（单测装配）。 */
   taskQueueStore?: TaskQueueStore;
-}): TaskExitRuntime & { startInputQueues(): void; pumpTaskQueue(): void } {
+  /**
+   * 终端会话注册表（ADR 0033 票07）：任务归档的「先杀后归档」挂点注入——
+   * 归档确认已由渲染端完成（任务有存活会话时提示后关闭），handler 在写入
+   * 归档前终止该任务全部存活会话并等待 exit。缺省未注入时归档不触终端
+   * （单测装配既有行为不变）。
+   */
+  terminalSessions?: TerminalSessionManager;
+}): TaskExitRuntime & {
+  startInputQueues(): void;
+  pumpTaskQueue(): void;
+  /** 终端生命周期事件下发（ADR 0033 票03）：main.ts 装配桥接 manager.onEvent。 */
+  pushTaskEvent(taskId: string, event: TaskEvent): void;
+} {
   const {
     manager,
     profiles,
@@ -101,6 +117,7 @@ export function registerTaskHandlers(options: {
     queueStore = createMemoryInputQueueStore(),
     concurrencyLimit = () => DEFAULT_TASK_CONCURRENCY_LIMIT,
     taskQueueStore = createMemoryTaskQueueStore(),
+    terminalSessions,
   } = options;
   // 每条运行中的消息流登记一个 AbortController：停止按钮（tasks:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
@@ -1062,9 +1079,16 @@ export function registerTaskHandlers(options: {
 
   ipcMain.handle(
     IPC.tasks.archive,
-    (_e: IpcMainInvokeEvent, taskId: unknown, archived: unknown) => {
+    async (_e: IpcMainInvokeEvent, taskId: unknown, archived: unknown) => {
       if (typeof taskId !== "string" || typeof archived !== "boolean") {
         throw new Error("archive：参数不合法");
+      }
+      // 先杀后归档（ADR 0033 票07）：归档确认已由渲染端完成（任务有存活
+      // 会话时提示后关闭），这里终止该任务全部存活会话并等待 exit——
+      // terminal-exited 事件在归档写入前推进，执行现场完整（闭合 03 票
+      // 「任务移除后事件无现场静默丢弃」的未决口）。无存活会话时立即返回。
+      if (archived && terminalSessions !== undefined) {
+        await closeTaskSessions(terminalSessions, taskId);
       }
       // 先在同一同步操作点检查活动状态并写入；拒绝时不释放浏览器或中断任务。
       const result = management.archive(taskId, archived);
@@ -1394,6 +1418,26 @@ export function registerTaskHandlers(options: {
     }
   }
 
+  /**
+   * 执行现场之外的任务级事件下发（终端生命周期，ADR 0033 票03）：终端
+   * 会话宿主级常驻、在消息循环之外启停，经 ensureExecution 延续任务水位
+   * （与 acceptQueue 同构，空闲/终态任务的信封照常可挂），全部工作台
+   * 窗口收到同一权威信封。任务已移除（无现场可建）时静默丢弃——
+   * 视图已随任务撤下，无消费方。
+   */
+  function pushTaskEvent(taskId: string, event: TaskEvent): void {
+    const executionId = liveTasks.ensureExecution(taskId);
+    if (executionId === null) return;
+    const envelope = liveTasks.accept(taskId, executionId, event);
+    if (!envelope) return;
+    envelope.activity = activityOf(taskId);
+    for (const window of getWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC.taskEvents, envelope);
+      }
+    }
+  }
+
   return {
     /** 主进程服务装配完成后启用恢复；不依赖窗口、view 或渲染层加载。 */
     startInputQueues: continueInputQueues,
@@ -1402,6 +1446,8 @@ export function registerTaskHandlers(options: {
      * 调用——排队任务立即补位开跑；调小时 pump 自然无事可做（只拦新）。
      */
     pumpTaskQueue: runQueuePump,
+    /** 终端生命周期事件下发（ADR 0033 票03）：main.ts 装配桥接 manager.onEvent。 */
+    pushTaskEvent,
     hasWork: () =>
       starts.size > 0 ||
       tasks.size > 0 ||

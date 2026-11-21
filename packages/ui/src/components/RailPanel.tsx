@@ -15,9 +15,11 @@ import type {
   GitFileDiff,
   GitStatus,
   TaskResourcesView,
+  TerminalSessionRecord,
 } from "@codexlike/agent-core";
 
 import { languageForPath } from "../lib/diff-language";
+import { useTerminalSessions } from "../lib/use-terminal-sessions";
 import { GitActions } from "./GitActions";
 import {
   SnapshotSummary,
@@ -25,6 +27,7 @@ import {
   type SnapshotKey,
 } from "./ResourceSnapshotSummary";
 import { SubagentRailPanelBody, type SubagentFocus } from "./SubagentRailPanel";
+import { TerminalRailPanelBody, type TerminalFocus } from "./TerminalRailPanel";
 import type { SubagentSegment } from "../lib/task-view";
 
 const MonacoDiff = lazy(() => import("./MonacoDiff"));
@@ -103,14 +106,29 @@ export function RailPanel(props: {
   subagents: SubagentSegment[];
   /** 定位信号（消息流标记行点击）：切到子代理 tab 并选中对应子代理 */
   subagentFocus: SubagentFocus | null;
+  /** 定位信号（消息流终端标记行点击，ADR 0033 票 06）：切到终端 tab 并直跳详情页 */
+  terminalFocus: TerminalFocus | null;
+  /**
+   * 终端会话恢复快照（ADR 0033 票 08）：view 并行字段的已退出记录（含
+   * 快照文本）——useTerminalSessions 初始拉取的恢复数据源（重启后内存
+   * 注册表为空，record 进合并层数据源、进段投影丢弃快照）。
+   */
+  restoredTerminals: TerminalSessionRecord[];
 }) {
   const taskId = props.taskId;
   const hasTask = taskId !== null;
-  const [tab, setTab] = useState<"changes" | "resources" | "subagents">(
-    "changes"
-  );
+  const [tab, setTab] = useState<
+    "changes" | "resources" | "subagents" | "terminals"
+  >("changes");
   const [selected, setSelected] = useState<GitFileChange | null>(null);
   const [snapshot, setSnapshot] = useState<SnapshotKey>("preview");
+
+  // 终端会话列表（ADR 0033 票 04）：list-for 初始 + terminal-* 事件增量
+  // 归并，切任务时重建（hook 内 generation 守卫）；票 08 起并入恢复快照
+  // 记录（props.restoredTerminals，view 并行字段）初始化「已退出」组。
+  // 任务切换后清掉选中文件同款口径，详情页选中态由 TerminalRailPanelBody
+  // 会话存在性自然回退（会话随任务重建，切任务即回列表页语义）。
+  const terminalSessions = useTerminalSessions(taskId, props.restoredTerminals);
 
   const { status, loading, error, refresh, version } = useGitStatus(
     taskId,
@@ -197,9 +215,22 @@ export function RailPanel(props: {
     if (subagentFocus !== null) setTab("subagents");
   }, [subagentFocus]);
 
+  // 消息流终端标记行点击定位（ADR 0033 票 06）：切到终端 tab（开右栏由
+  // WorkspacePage 侧完成；直跳详情页与幂等守卫在 TerminalRailPanelBody 内）
+  const terminalFocus = props.terminalFocus;
+  useEffect(() => {
+    if (terminalFocus !== null) setTab("terminals");
+  }, [terminalFocus]);
+
   // tab 徽章：运行中/排队中的子代理数（已完成不计数，title 说明语义）
   const runningSubagents = props.subagents.filter(
     (item) => item.state === "running" || item.state === "queued"
+  ).length;
+
+  // 终端 tab 徽章：运行中会话计数（已退出不计数，ADR 0033 票 04；
+  // record.status 为准——activity 字段是任务执行态，不进终端口径）
+  const runningTerminals = terminalSessions.sessions.filter(
+    (item) => item.status === "running"
   ).length;
 
   // 打开瞬间把记忆宽度夹到当前容器上限（窄窗口下 400 默认宽会把正文
@@ -328,6 +359,29 @@ export function RailPanel(props: {
               </span>
             )}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "terminals"}
+            data-testid="rail-tab-terminals"
+            onClick={() => setTab("terminals")}
+            className={`shrink-0 rounded-md px-2.5 py-[5px] text-xs ${
+              tab === "terminals"
+                ? "bg-surface-muted font-semibold text-fg"
+                : "text-fg-muted hover:bg-hover hover:text-fg"
+            }`}
+          >
+            终端
+            {runningTerminals > 0 && (
+              <span
+                data-testid="terminal-rail-badge"
+                title={`${runningTerminals} 个终端会话运行中（不含已退出）`}
+                className="ml-1 rounded-full bg-warn-bg px-1.5 py-0.5 text-xs text-warn-fg"
+              >
+                {runningTerminals}
+              </span>
+            )}
+          </button>
         </div>
         {tab === "changes" ? (
           <div
@@ -450,6 +504,24 @@ export function RailPanel(props: {
             <SubagentRailPanelBody
               subagents={props.subagents}
               focus={props.subagentFocus}
+            />
+          </div>
+        ) : tab === "terminals" ? (
+          <div
+            data-testid="terminals-panel"
+            role="tabpanel"
+            aria-label="终端"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TerminalRailPanelBody
+              sessions={terminalSessions.sessions}
+              taskId={taskId}
+              onCreate={terminalSessions.createSession}
+              createError={terminalSessions.createError}
+              creating={terminalSessions.creating}
+              onKill={terminalSessions.killSession}
+              killingSessionId={terminalSessions.killingSessionId}
+              focus={props.terminalFocus}
             />
           </div>
         ) : (

@@ -30,6 +30,8 @@ const snapshot: TaskView = {
   history: [],
   // 子代理恢复快照（票 03/04）：hydrate 重建的并行数据面（见下方恢复用例）
   subagents: [],
+  // 终端会话恢复快照（ADR 0033 票 08）：rail 列表恢复面，消息流不消费
+  terminals: [],
   events: [delta(1, "第一段"), delta(2, "第二段")],
   pendingInteractions: [],
   activity,
@@ -393,6 +395,8 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
     events: [],
     // 子代理恢复快照（票 03/04）：本用例无子代理，空数组即旧路径
     subagents: [],
+    // 终端会话恢复快照（ADR 0033 票 08）：消息流恢复不消费，恒空
+    terminals: [],
     pendingInteractions: [],
     activity: { ...activity, running: false, outcome: "completed" },
   });
@@ -982,4 +986,70 @@ it("输入队列随事件与快照接续（票 01）：入队更新快照，出�
     "排队第一条",
   ]);
   expect(restored.queueState.paused).toBe(true);
+});
+
+it("终端生命周期随空闲任务水位接续（09 票 e2e 缺口回归）：手开会话标记行入流、kill 推进与 rail 不分裂", () => {
+  const view: TaskView = {
+    ...snapshot,
+    activity: { ...activity, running: false, outcome: "completed" },
+  };
+  const idle = view.activity;
+  const initial = hydrateLiveTask(view);
+  // 空闲期用户手开会话：terminal-started 此前被渲染端闸门丢弃（rail 直连
+  // onTaskEvent 可见、消息流标记行缺席）；与 queue-changed 同口径按水位接续
+  const started: TaskEventEnvelope = {
+    ...delta(3, ""),
+    activity: idle,
+    event: {
+      type: "terminal-started",
+      record: {
+        sessionId: "ts-1",
+        taskId: "a",
+        name: "git-bash · 1",
+        shell: "git-bash",
+        origin: "user",
+        status: "running",
+        createdAt: "2026-11-21T08:00:00.000Z",
+      },
+    },
+  };
+  const startedLive = receiveLiveEvent(initial, started);
+  expect(startedLive.sequence).toBe(3);
+  expect(startedLive.items.at(-1)).toMatchObject({
+    kind: "terminal",
+    sessionId: "ts-1",
+    origin: "user",
+    status: "running",
+  });
+  // 空闲期 kill：exited 推进消息流标记行（与 rail 同源，不状态分裂）
+  const exited: TaskEventEnvelope = {
+    ...delta(4, ""),
+    activity: idle,
+    event: {
+      type: "terminal-exited",
+      record: {
+        sessionId: "ts-1",
+        taskId: "a",
+        name: "git-bash · 1",
+        shell: "git-bash",
+        origin: "user",
+        status: "exited",
+        createdAt: "2026-11-21T08:00:00.000Z",
+        exitedAt: "2026-11-21T08:01:00.000Z",
+        exitCode: 0,
+      },
+    },
+  };
+  const exitedLive = receiveLiveEvent(startedLive, exited);
+  expect(exitedLive.sequence).toBe(4);
+  expect(exitedLive.items.at(-1)).toMatchObject({
+    kind: "terminal",
+    sessionId: "ts-1",
+    status: "exited",
+    exitCode: 0,
+  });
+  // 乱序迟到的 started 不把终态拉回 running（task-view 终态不可回退同源）
+  expect(
+    receiveLiveEvent(exitedLive, { ...started, sequence: 5 }).items.at(-1)
+  ).toMatchObject({ kind: "terminal", status: "exited" });
 });

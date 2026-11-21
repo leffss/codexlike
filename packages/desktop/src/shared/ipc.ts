@@ -35,6 +35,11 @@ import type { SearchSettings } from "../search/search-settings-store";
 import type { SubagentSettings } from "../subagents/subagent-settings-store";
 import type { AgentSettings } from "../execution/agent-settings-store";
 import type { TerminalShell } from "@codexlike/agent-core/node";
+import type { PtySize } from "@codexlike/agent-core/node";
+import type {
+  TerminalActionFailure,
+  TerminalSessionRecord,
+} from "@codexlike/agent-core";
 import type { TerminalSettings } from "../terminal/terminal-settings-store";
 import type {
   OpenerListResult,
@@ -186,6 +191,35 @@ export const IPC = {
     get: "terminal-settings:get",
     set: "terminal-settings:set",
   },
+  /**
+   * 终端会话（ADR 0033 票03）：宿主级会话服务的渲染端操作面（独立
+   * namespace，对齐 tasks 三段式：快照（session/listFor）→ 订阅
+   * （subscribe 携缓冲回放）→ 事件接续（sessionData 专用通道）。
+   * 生命周期 terminal-* 事件并入 taskEvents（live-tasks 白名单已放行）。
+   */
+  terminals: {
+    /** 创建会话：cwd 一律任务工作区（ADR 0004 不开 cwd 口子）、shell 跟随执行设置 */
+    create: "terminals:create",
+    /** 向会话写入用户键入（用户即授权者，不走审批） */
+    write: "terminals:write",
+    /** 调整 PTY 尺寸；会话不存在或已退出静默忽略（01 票口径，渲染端无需防御） */
+    resize: "terminals:resize",
+    /** 终止会话（用户 kill 不弹确认，非破坏性）；进程树终止由适配器保证 */
+    kill: "terminals:kill",
+    /**
+     * 订阅字节流并取初始回放：返回会话记录与当前缓冲全量（manager.bufferedOutput，
+     * 不推读取水位——05 票工具 read 的水位语义不受影响）。重复订阅幂等。
+     */
+    subscribe: "terminals:subscribe",
+    /** 退订字节流转发（详情页关闭时调用） */
+    unsubscribe: "terminals:unsubscribe",
+    /** 单会话记录；不存在返回 null */
+    session: "terminals:session",
+    /** 任务内会话清单（rail 列表页数据）：按创建顺序，含已退出会话 */
+    listFor: "terminals:list-for",
+    /** 主→渲染：PTY 字节流专用通道（高频，直写 xterm.js，绝不进 React 状态） */
+    sessionData: "terminals:session-data",
+  },
   /** 外观主题偏好（ADR 0006）：light / dark，默认浅色；主进程同步窗口底色与 nativeTheme */
   themeSettings: {
     get: "theme-settings:get",
@@ -310,6 +344,14 @@ export interface TaskView {
    * 仅为检视与导出，模型上下文组装不读它（transcript 仍是唯一来源）。
    */
   subagents: SubagentSnapshot[];
+  /**
+   * 终端会话恢复快照（ADR 0033 票 08）：已退出会话记录（含 64KB 终态快照
+   * 文本；重启收尾置终态的行快照缺省）随 view 同一次 IPC 发出、不走按需
+   * 拉取（恢复传输惯例对齐）。快照只供 rail「已退出」组恢复与只读回看，
+   * 模型上下文组装不读它；同进程运行中的会话不经本字段——list-for 与
+   * terminal-* 事件是其呈现通道。
+   */
+  terminals: TerminalSessionRecord[];
   events: TaskEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: TaskActivity;
@@ -386,6 +428,71 @@ export interface TaskExecutionState {
   running: boolean;
   waitingForUser: boolean;
   pendingInteractionIds: string[];
+}
+
+/** 终端会话创建结果：spawn 走判别 union，reason 是可直接展示的中文（01 票口径） */
+export type TerminalSpawnResult =
+  { ok: true; sessionId: string } | TerminalActionFailure;
+
+/**
+ * 字节流订阅结果：record 为订阅时刻的会话记录副本（running 或含终态快照的
+ * exited），buffered 为当前缓冲全量（详情页 xterm.js 初始回放数据源，
+ * manager.bufferedOutput 不推读取水位）。
+ */
+export type TerminalSubscribeResult =
+  | {
+      ok: true;
+      sessionId: string;
+      record: TerminalSessionRecord;
+      buffered: string;
+    }
+  | { ok: false; reason: string };
+
+/** sessionData 专用通道载荷（主→渲染）：按 sessionId 多路复用的实时字节流 */
+export interface TerminalSessionDataPayload {
+  sessionId: string;
+  data: string;
+}
+
+/** 终端会话域 API：`window.codexlike.terminals` 的形状（ADR 0033 票03）。 */
+export interface TerminalApi {
+  /**
+   * 创建用户侧终端会话：cwd 一律为 taskId 对应任务的工作区（ADR 0004，
+   * 不接受任意 cwd 参数）、shell 跟随执行设置、origin 固定 user。
+   * initialCommand 缺省为空（落在交互提示符）。任务不存在以中文异常抛回。
+   */
+  create(input: {
+    taskId: string;
+    initialCommand?: string;
+  }): Promise<TerminalSpawnResult>;
+  /** 向会话写入用户键入；会话不存在 / 已退出返回 ok:false（中文 reason） */
+  write(
+    sessionId: string,
+    data: string
+  ): Promise<{ ok: true } | TerminalActionFailure>;
+  /** 调整 PTY 尺寸；会话不存在或已退出静默忽略（渲染端无需防御） */
+  resize(sessionId: string, size: PtySize): Promise<void>;
+  /** 终止会话（进程树死透由适配器保证）；重复 kill 已退出会话返回明确拒绝 */
+  kill(sessionId: string): Promise<{ ok: true } | TerminalActionFailure>;
+  /**
+   * 订阅字节流并取初始回放（三段式的订阅段）：先订阅后读缓冲，订阅后的
+   * 实时输出经 onSessionData 推送，不丢不重。重复订阅幂等（不叠加转发）。
+   */
+  subscribe(sessionId: string): Promise<TerminalSubscribeResult>;
+  /** 退订字节流转发；未订阅时幂等无副作用 */
+  unsubscribe(sessionId: string): Promise<void>;
+  /** 单会话记录（详情页刷新）；不存在返回 null */
+  session(sessionId: string): Promise<TerminalSessionRecord | null>;
+  /** 任务内会话清单（rail 列表页数据）：按创建顺序，含已退出会话 */
+  listFor(taskId: string): Promise<TerminalSessionRecord[]>;
+  /**
+   * 订阅 PTY 字节流专用通道（terminals:session-data）：载荷按 sessionId
+   * 多路复用，直写 xterm.js——绝不进 React 状态（spec 双通道纪律）。
+   * 生命周期启停不走本通道（terminal-* 事件经 onTaskEvent）。
+   */
+  onSessionData(
+    listener: (payload: TerminalSessionDataPayload) => void
+  ): () => void;
 }
 
 /** `window.codexlike` 的完整 API 形状 */
@@ -684,6 +791,8 @@ export interface CodexLikeApi {
   };
   /** 订阅任务事件流（task:events channel）；返回取消订阅函数 */
   onTaskEvent(listener: (envelope: TaskEventEnvelope) => void): () => void;
+  /** 终端会话操作面（ADR 0033 票03）：字节流专用订阅 + 生命周期 + 操作 */
+  terminals: TerminalApi;
   /** 改动面板 + git 集成（工单 05） */
   git: {
     /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */

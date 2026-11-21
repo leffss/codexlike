@@ -8,7 +8,7 @@ status: accepted
 
 ## 关键边界
 
-- **agent 侧四工具 + 所有权边界**：`spawn_terminal` / `terminal_write` / `terminal_read` / `terminal_kill`；`terminal_write` 与 `terminal_kill` 仅限 agent 自己启动的会话，用户手开的会话对 agent 只读（用户正在 vim 里编辑时会话被模型插字是灾难，read 任意保留「帮我看下刚才那个命令为什么报错」场景）；`terminal_read` 按会话读取水位增量返回，可带 wait 参数阻塞等新输出（带超时），长命令不用反复轮询。
+- **agent 侧四工具 + 所有权边界**：`spawn_terminal` / `terminal_write` / `terminal_read` / `terminal_kill`；`terminal_write` 与 `terminal_kill` 仅限 agent 自己启动的会话，用户手开的会话对 agent 只读（用户正在 vim 里编辑时会话被模型插字是灾难，read 任意保留「帮我看下刚才那个命令为什么报错」场景）；`terminal_read` 按会话读取水位增量返回，可带 wait 参数阻塞等新输出（带超时），长命令不用反复轮询。read 的「任意会话」澄清为**本任务内**任意来源/状态的会话（会话归属任务，跨任务拒绝）——任务是终端会话的组织与可见性边界。
 - **审批逐次照搬现有三档**：`ask` 全问、`assist` 走 `isRiskyCommand`、`full-access` 放行；spawn 的初始命令与每次 write 都算一次命令执行。用户在面板里手敲天然无需审批（用户即授权者）。
 - **工作区边界不开口子**：会话起始目录一律为任务工作区，shell 类型跟随执行设置；`spawn_terminal` 不提供 cwd 参数——那是绕过 ADR 0004 权限线的通道。
 - **与 `run_terminal_command` 共存**：前台短命令继续用现有工具（跑完拿输出一次往返最省），长命令/交互式/需后台存活的走终端会话，工具描述写清适用边界。

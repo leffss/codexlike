@@ -869,6 +869,8 @@ export function taskView(taskId: string): TaskView | null {
     // 子代理恢复快照（票 04）：恢复新路径样例（完成重建 + interrupted 留痕），
     // 仅主任务携带；其余任务空数组即旧路径
     subagents: taskId === MAIN_TASK_ID ? SUBAGENTS : [],
+    // 终端会话恢复快照（ADR 0033 票 08）：dev 预览无落库，恒空数组
+    terminals: [],
     // 子代理运行态样例仅主任务回放
     events: taskId === MAIN_TASK_ID ? SUBAGENT_EVENTS : [],
     pendingInteractions: [],

@@ -24,6 +24,12 @@ export function registerApplicationExit(options: {
   minimizeToTray?(): void;
   /** 退出需要用户处理时恢复、显示并聚焦主窗口，复用托盘的静默启动恢复逻辑。 */
   showMainWindow?(): void;
+  /**
+   * 存活终端会话数 resolver（ADR 0033 票07）：透传给退出状态机——确认状态
+   * 携带「N 个终端会话将关闭」的数据面（main.ts 注入 aliveSessionCount，
+   * 终端存活同时并入 runtime.hasWork 判定）。未注入维持既有形状。
+   */
+  terminalSessionCount?: () => number;
 }) {
   const win = options.window;
   let storageClosed = false;
@@ -36,6 +42,7 @@ export function registerApplicationExit(options: {
   app.on("will-quit", closeStorage);
   const exit = createApplicationExit({
     runtime: options.runtime,
+    terminalSessionCount: options.terminalSessionCount,
     publish: (state) => {
       if (win.isDestroyed()) return;
       if (state.phase === "confirming" || state.phase === "error")

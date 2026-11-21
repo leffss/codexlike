@@ -43,6 +43,17 @@ export type {
   TerminalToolOptions,
   TimeoutOption,
 } from "./tools/terminal";
+// 终端环境白名单与 Git Bash 安装位候选（code review 修复轮：单一来源）——
+// desktop 终端会话侧（session-env / node-pty-port）经此复用，不再各自维护副本
+export {
+  ENV_ALLOWLIST,
+  GIT_BASH_CANDIDATES,
+  filterEnv,
+} from "./tools/terminal";
+// 终端会话四工具（ADR 0033 票05）：createBuiltinTools 注入 terminalSessions
+// 时追加；desktop 装配管理器单例后经此注入
+export { createTerminalSessionTools } from "./tools/terminal-sessions";
+export type { TerminalSessionToolsOptions } from "./tools/terminal-sessions";
 // 终端命令超时默认值（执行设置票04）：常量本体移至 execution-settings.ts 后
 // 经上方 export * from "./index" 随根出口导出（code review 修复 3：单一出口
 // 路径，不再从 ./tools/terminal 二次转发）
@@ -111,3 +122,22 @@ export type {
 export { generateCommitMessage } from "./git/commit-message";
 // 任务用量尽力而为入账（ADR 0029）：宿主为任务域辅助调用补记真实 usage
 export { settleTaskUsage } from "./task/usage";
+// 终端会话（ADR 0033）：管理器核心 + PtyPort 端口接口——node-pty 适配器
+// （02 票）在 desktop 实现该端口后注入；agent-core 不引入任何原生依赖
+export { createTerminalSessionManager } from "./terminal/manager";
+export type {
+  TerminalSessionManager,
+  TerminalSessionManagerOptions,
+} from "./terminal/manager";
+export type {
+  PtyExitEvent,
+  PtyPort,
+  PtyProcess,
+  PtySize,
+  PtySpawnRequest,
+} from "./terminal/pty-port";
+export {
+  DEFAULT_TERMINAL_BUFFER_MAX_BYTES,
+  DEFAULT_TERMINAL_MAX_ALIVE_PER_TASK,
+  TERMINAL_SNAPSHOT_BYTES,
+} from "./terminal/types";

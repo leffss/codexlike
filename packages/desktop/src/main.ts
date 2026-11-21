@@ -23,6 +23,7 @@ import {
   createTaskManager,
   createSqliteTaskStore,
   createTavilySearchSource,
+  createTerminalSessionManager,
   createWorktreeService,
   resolveModelOf,
   validateProviderProfile,
@@ -44,6 +45,15 @@ import {
   type TerminalSettings,
 } from "./terminal/terminal-settings-store";
 import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
+import { createNodePtyPort } from "./terminal/node-pty-port";
+import { registerTerminalSessionHandlers } from "./terminal/terminal-session-ipc";
+import {
+  aliveSessionCount,
+  persistExitedSessionSnapshots,
+  recordTerminalSessionEvent,
+  settleTerminalSessionRowsOnStartup,
+  settleTerminalSessionsOnStartup,
+} from "./terminal/terminal-lifecycle";
 import { createOpenerSettingsStore } from "./openers/opener-settings-store";
 import { createOpenerLauncher } from "./openers/opener-launcher";
 import { registerOpenerHandlers } from "./openers/opener-ipc";
@@ -473,6 +483,20 @@ void app.whenReady().then(async () => {
   const terminalSettingsStore = createTerminalSettingsStore({ dir: dataDir() });
   let terminalSettings: TerminalSettings = await terminalSettingsStore.get();
 
+  /**
+   * 生效 shell 偏好的统一 resolver（code review 修复轮收敛：原先四处装配
+   * 各写一份同款 lambda）：设置项优先、CODEXLIKE_SHELL 环境变量兜底（E2E/
+   * 自动化兼容），最终默认 Git Bash。逐次解析读 terminalSettings 内存缓存
+   * ——设置页保存后无需重启即对下一次命令/会话生效。消费方：终端工具与
+   * 会话四工具（createBuiltinTools）、工作区打开器（registerOpenerHandlers）、
+   * 终端 IPC（registerTerminalSessionHandlers）。
+   */
+  const resolveShellPreference = () =>
+    resolveTerminalShell(
+      terminalSettings.shell,
+      process.env["CODEXLIKE_SHELL"]
+    );
+
   // 外观主题偏好（ADR 0006）：启动时先读偏好再建窗口——窗口底色与页面主题一致，
   // 避免深色用户重启先闪浅色底；未配置默认浅色。渲染端另有 localStorage 镜像防页内闪烁。
   const themeSettingsStore = createThemeSettingsStore({ dir: dataDir() });
@@ -489,17 +513,40 @@ void app.whenReady().then(async () => {
     screenshotDirFor: (taskId) => taskScreenshotDir(dataDir(), taskId),
   });
 
+  // 终端会话服务（ADR 0033 票03）：宿主级常驻单例（browser-manager/mcpService
+  // 装配先例）。管理器本身即按 sessionId 的会话注册表（状态机与进程树 kill，
+  // 02 票适配器保证 kill 后死透）——不再建平行 kill Map（02 票 Comments 设计
+  // 依据，interrupt-registry 形态的类比已由管理器承载）。05 票 agent 四工具
+  // 经 host 注入复用同一单例；会话创建强制 cwd = 任务工作区（终端 IPC 面不
+  // 接受任意 cwd 参数——ADR 0004），shell 跟随执行设置（下方 shell resolver）。
+  const terminalSessions = createTerminalSessionManager({
+    port: createNodePtyPort(),
+  });
+  // 快照落库桥（ADR 0033 票08）：spawn 即写 terminal_sessions 骨架行（status=
+  // running，进程中途被杀也有「曾开过」留痕），exit 事件定格快照后推进终态。
+  // 须在任何会话可 spawn（建窗 / agent 工具）之前注册——whenReady 内首个
+  // 消费方都在本桥之后；退出屏障 flush 的兜底写入见 releaseResources。
+  terminalSessions.onEvent((event) => {
+    recordTerminalSessionEvent(persistence, event);
+  });
+
   const builtinTools = createBuiltinTools({
     env: process.env,
-    // shell 逐次解析：设置项优先、CODEXLIKE_SHELL 兜底（见上方 terminalSettings 缓存）
-    shell: () =>
-      resolveTerminalShell(
-        terminalSettings.shell,
-        process.env["CODEXLIKE_SHELL"]
-      ),
+    // shell 逐次解析：统一 resolver（见上方 resolveShellPreference）
+    shell: resolveShellPreference,
     // 命令超时逐次解析（执行设置票04，与 shell 注入同构）：秒 → 毫秒换算后注入
     defaultTimeoutMs: () => terminalSettings.commandTimeoutSeconds * 1000,
     maxTimeoutMs: () => terminalSettings.maxCommandTimeoutSeconds * 1000,
+    // 终端会话四工具（ADR 0033 票05）：复用上方宿主级单例与 shell resolver，
+    // agent spawn 的会话与用户手开的会话共用同一注册表；env 白名单过滤在工具层
+    terminalSessions: {
+      manager: terminalSessions,
+      shell: resolveShellPreference,
+      // 宿主完整环境（白名单过滤在工具层 filterEnv）：05 票装配遗漏——缺省
+      // 时 agent spawn 拿到空环境块，node-pty 对空 env 的 CreateProcess
+      // 间歇性报「Cannot create process, error code: 87」（09 票 e2e 揭示）
+      env: process.env,
+    },
     webSearch: {
       searchSource: () => {
         if (searchSettingsError) throw searchSettingsError;
@@ -622,6 +669,18 @@ void app.whenReady().then(async () => {
     if (record.status !== "idle") manager.get(record.id);
   }
 
+  // 重启收尾（ADR 0033 票07，spec「重启后不恢复」）：清空终端注册表——内存
+  // 注册表在新进程启动时本应为空（此调用是防御性收尾），UI 的 list-for 初始
+  // 拉取从此无幽灵会话（04 票事件驱动下无需额外通知）。
+  // 【08 票衔接挂点·已接通】库层收尾先行：terminal_sessions 表中残留 running
+  // 的行（崩溃进程的骨架行）按已退出置终态（exitedAt 用收尾时刻，exitCode/
+  // 快照缺省）——在 UI 恢复「已退出」列表（view 并行字段从库读）之前完成。
+  settleTerminalSessionRowsOnStartup(persistence, new Date().toISOString());
+  await settleTerminalSessionsOnStartup(
+    terminalSessions,
+    manager.list().map((record) => record.id)
+  );
+
   // 新库不认识旧任务，不以此将旧 Worktree 当孤儿回收；磁盘文件独立保留。
 
   registerProviderProfileHandlers(store);
@@ -656,11 +715,7 @@ void app.whenReady().then(async () => {
     store: createOpenerSettingsStore({ dir: dataDir() }),
     // 无 wt 时终端退化链起点用生效 shell 偏好（与 run_terminal_command 同源，
     // 设置页保存后对下一次展开/打开即时生效——见上方 terminalSettings 缓存）
-    terminalShell: () =>
-      resolveTerminalShell(
-        terminalSettings.shell,
-        process.env["CODEXLIKE_SHELL"]
-      ),
+    terminalShell: resolveShellPreference,
     launch: createOpenerLauncher({
       openPath: (path) => shell.openPath(path),
       spawnProcess: (command, args, options) =>
@@ -706,8 +761,26 @@ void app.whenReady().then(async () => {
     //（onSaved 里的 pumpTaskQueue）。
     concurrencyLimit: () => agentSettings.taskConcurrencyLimit,
     taskQueueStore,
+    // 终端会话注册表（ADR 0033 票07）：任务归档「先杀后归档」挂点——归档
+    // 确认已由渲染端完成（存活会话提示后关闭），handler 在写入归档前终止
+    // 该任务全部存活会话并等待 exit。
+    terminalSessions,
   });
   pumpTaskQueue = taskRuntime.pumpTaskQueue;
+  // 终端会话 IPC（ADR 0033 票03）：创建/输入/resize/kill + 字节流专用通道
+  // + 生命周期事件桥（manager.onEvent → taskRuntime.pushTaskEvent → task:events，
+  // live-tasks 白名单放行 terminal 类）。cwd 经 workspaceFor 从任务记录取
+  // （任务工作区单一来源）；shell 逐次解析与 run_terminal_command 同源。
+  registerTerminalSessionHandlers({
+    sessions: terminalSessions,
+    workspaceFor: (taskId) => manager.get(taskId)?.record.workspacePath ?? null,
+    shell: resolveShellPreference,
+    // 恢复回看兜底（ADR 0033 票08）：注册表未命中时查库行，已退出会话的
+    // 快照作为 buffered 回放（重启后只读回看的现路径接通）
+    restoredSession: (sessionId) => persistence.terminalSession(sessionId),
+    getWindow: () => mainWindow,
+    pushTaskEvent: taskRuntime.pushTaskEvent,
+  });
   // 改动面板 + git 集成（工单 05）
   registerGitHandlers({ manager, profiles: store });
   // 渲染层文件导出（复制旁的「导出 Markdown」）
@@ -770,7 +843,25 @@ void app.whenReady().then(async () => {
 
   registerApplicationExit({
     window: mainWindow,
-    runtime: taskRuntime,
+    // 终端存活并入退出屏障（ADR 0033 票07）：hasWork 计入存活终端会话——
+    // 只有存活会话而无运行任务时同样弹确认（「N 个终端会话将关闭」）；
+    // freeze/thaw/stopAndDrain 语义不变（会话清理由 releaseResources 的
+    // killAll 承担，03 票已并）。
+    runtime: {
+      ...taskRuntime,
+      hasWork: () =>
+        taskRuntime.hasWork() ||
+        aliveSessionCount(
+          terminalSessions,
+          manager.list().map((record) => record.id)
+        ) > 0,
+    },
+    // 确认状态携带存活终端数（渲染端「N 个终端会话将关闭」提示行数据面）
+    terminalSessionCount: () =>
+      aliveSessionCount(
+        terminalSessions,
+        manager.list().map((record) => record.id)
+      ),
     flushPendingWrites: () => launchStateTracking.flush(),
     minimizeToTray: () => {
       void trayResidency?.minimizeToTray();
@@ -782,7 +873,23 @@ void app.whenReady().then(async () => {
       taskQueueStore.close();
     },
     releaseResources: async () => {
-      await Promise.allSettled([mcpService.shutdown(), browserManager.close()]);
+      await Promise.allSettled([
+        mcpService.shutdown(),
+        browserManager.close(),
+        // 终端会话退出 flush（ADR 0033「应用退出前 flush」路径）：kill 全部
+        // 存活会话并等各自 exit 定格终态快照；exit 事件经落库桥推进终态
+        //（上方 terminalSessions.onEvent 装配）
+        terminalSessions.killAll(),
+      ]);
+      // 【08 票衔接挂点·已接通】屏障 flush 快照写入：killAll 返回即 exit
+      // 齐全（各会话快照已定格），逐条把现存任务的 exited 记录（含 64KB
+      // 快照文本）落 terminal_sessions 表——事件桥漏写的行由此兜底，须在
+      // app.quit（closeStorage 关库）之前完成。
+      persistExitedSessionSnapshots(
+        persistence,
+        terminalSessions,
+        manager.list().map((record) => record.id)
+      );
     },
   });
 });

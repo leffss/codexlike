@@ -39,8 +39,9 @@ export interface TerminalToolOptions {
   gitBashPath?: string;
 }
 
-/** 环境变量白名单（大小写不敏感）：基础项才透传给子进程 */
-const ENV_ALLOWLIST = new Set([
+/** 环境变量白名单（大小写不敏感）：基础项才透传给子进程。单一来源（code
+ * review 修复轮）：desktop 终端会话 PTY 侧经 /node 出口复用同一名单 */
+export const ENV_ALLOWLIST = new Set([
   "PATH",
   "HOME",
   "LANG",
@@ -68,8 +69,11 @@ const ENV_ALLOWLIST = new Set([
 
 // 固定安装位候选，刻意不扫 PATH：PATH 首段 System32 的 bash.exe 是 WSL
 // 启动器，命中会落 Linux shell 且 cwd 翻成 /mnt/c/...（见 CODING_STANDARDS
-// 「Windows spawn 坑」）；自定义安装位置走下方显式配置项
-const GIT_BASH_CANDIDATES = [
+// 「Windows spawn 坑」）；自定义安装位置走下方显式配置项。单一来源（code
+// review 修复轮）：desktop node-pty 适配器经 /node 出口复用同一候选清单
+//（两侧 spawn 语义不同——一次性执行 vs 交互 pty——解析函数各自维护，
+// 只共享常量）
+export const GIT_BASH_CANDIDATES = [
   "C:\\Program Files\\Git\\bin\\bash.exe",
   "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
   "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
@@ -98,8 +102,8 @@ function findGitBash(explicit?: string): string {
   );
 }
 
-/** 白名单过滤环境变量（大小写不敏感匹配键名） */
-function filterEnv(
+/** 白名单过滤环境变量（大小写不敏感匹配键名）；终端会话工具（05 票）复用同一名单 */
+export function filterEnv(
   env: Record<string, string | undefined>
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
@@ -221,7 +225,8 @@ export function createTerminalTool(options: TerminalToolOptions = {}) {
     description:
       `在工作区内执行终端命令（默认 Git Bash：ls、cat、grep、管道等 POSIX 命令可用）。` +
       `cwd 默认为工作区根。命令默认在应用设置的超时内完成，可用 timeoutMs 参数为单条命令指定更长时限，上限同样由应用设置决定。` +
-      `输出最长 ${maxOutputLength} 字符（超出截断）。环境变量仅透传白名单基础项。`,
+      `输出最长 ${maxOutputLength} 字符（超出截断）。环境变量仅透传白名单基础项。` +
+      `本工具适合一次性执行拿输出的短命令：长命令（构建、测试、watch）、交互式程序、需要后台存活的命令请改用终端会话工具（spawn_terminal 创建会话，terminal_read 增量读取输出，terminal_write 交互应答）。`,
     parameters: {
       type: "object",
       properties: {

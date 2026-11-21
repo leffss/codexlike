@@ -7,6 +7,10 @@ import {
   type TerminalShell,
   type TimeoutOption,
 } from "./terminal";
+import {
+  createTerminalSessionTools,
+  type TerminalSessionToolsOptions,
+} from "./terminal-sessions";
 import type { ToolDefinition } from "./types";
 import { createWebSearchTool, type WebSearchToolOptions } from "./web-search";
 import { createWriteFileTool } from "./write-file";
@@ -30,6 +34,13 @@ export interface BuiltinToolsOptions {
    * searchSource 每次调用时解析，设置页改 key 无需重启。
    */
   webSearch?: WebSearchToolOptions;
+  /**
+   * 终端会话管理器（ADR 0033 票05）：传入即在工具表中追加四件终端会话工具
+   * （spawn_terminal / terminal_write / terminal_read / terminal_kill，webSearch
+   * 同款可选注入）；缺省不注册——未装配会话服务的宿主（如部分测试环境）模型
+   * 看不到这些工具，无从误调。管理器实例由 desktop 装配（宿主级单例）。
+   */
+  terminalSessions?: TerminalSessionToolsOptions;
 }
 
 /**
@@ -56,6 +67,9 @@ export function createBuiltinTools(
   ];
   if (options.webSearch !== undefined) {
     tools.push(createWebSearchTool(options.webSearch));
+  }
+  if (options.terminalSessions !== undefined) {
+    tools.push(...createTerminalSessionTools(options.terminalSessions));
   }
   return tools;
 }
