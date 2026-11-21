@@ -513,6 +513,16 @@ void app.whenReady().then(async () => {
     // 命令超时逐次解析（执行设置票04，与 shell 注入同构）：秒 → 毫秒换算后注入
     defaultTimeoutMs: () => terminalSettings.commandTimeoutSeconds * 1000,
     maxTimeoutMs: () => terminalSettings.maxCommandTimeoutSeconds * 1000,
+    // 终端会话四工具（ADR 0033 票05）：复用上方宿主级单例与 shell resolver，
+    // agent spawn 的会话与用户手开的会话共用同一注册表；env 白名单过滤在工具层
+    terminalSessions: {
+      manager: terminalSessions,
+      shell: () =>
+        resolveTerminalShell(
+          terminalSettings.shell,
+          process.env["CODEXLIKE_SHELL"]
+        ),
+    },
     webSearch: {
       searchSource: () => {
         if (searchSettingsError) throw searchSettingsError;

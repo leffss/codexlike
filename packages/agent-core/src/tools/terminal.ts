@@ -98,8 +98,8 @@ function findGitBash(explicit?: string): string {
   );
 }
 
-/** 白名单过滤环境变量（大小写不敏感匹配键名） */
-function filterEnv(
+/** 白名单过滤环境变量（大小写不敏感匹配键名）；终端会话工具（05 票）复用同一名单 */
+export function filterEnv(
   env: Record<string, string | undefined>
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
