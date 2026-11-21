@@ -63,6 +63,7 @@ import {
   MembershipDialog,
   ProjectRemovalDialog,
 } from "../components/MembershipDialogs";
+import { ArchiveTerminalDialog } from "../components/ArchiveTerminalDialog";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
 import { useWorkspaceSharing } from "../lib/workspace-sharing";
@@ -208,6 +209,13 @@ export function WorkspacePage(props: {
   const [removingProject, setRemovingProject] = useState<ProjectRecord | null>(
     null
   );
+  // 终端会话硬边（ADR 0033 票07）：归档带存活会话任务的待确认请求——
+  // null = 无挂起；非 null 时渲染 ArchiveTerminalDialog（确认/取消回调分流）
+  const [archiveTerminalConfirm, setArchiveTerminalConfirm] = useState<{
+    id: string;
+    title: string;
+    aliveCount: number;
+  } | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<
     string | null | undefined
   >(workspaceState.activeDraftProjectId);
@@ -1184,6 +1192,30 @@ export function WorkspacePage(props: {
 
   /** 侧栏及 /archive 共用导航，异步返回不能抢走用户刚切换的任务。 */
   async function archiveTask(id: string, archived: boolean) {
+    if (archived) {
+      // 终端会话硬边（ADR 0033 票07）：任务有存活终端会话时提示后关闭——
+      // 先确认再归档，确认后宿主「先杀后归档」；取消则不发起归档 IPC，
+      // 会话继续运行（拒绝路径）。查询失败不阻断既有归档行为。
+      try {
+        const sessions = await window.codexlike.terminals.listFor(id);
+        const aliveCount = sessions.filter(
+          (session) => session.status === "running"
+        ).length;
+        if (aliveCount > 0) {
+          const title =
+            tasks.find((item) => item.id === id)?.title ?? "未命名任务";
+          setArchiveTerminalConfirm({ id, title, aliveCount });
+          return;
+        }
+      } catch {
+        // 终端查询不可用（如旧版宿主）时按无存活会话处理
+      }
+    }
+    await performArchive(id, archived);
+  }
+
+  /** 归档/恢复的实际执行（archiveTask 确认分流后的共用路径）。 */
+  async function performArchive(id: string, archived: boolean) {
     const generation = taskRequestRef.current;
     try {
       await window.codexlike.tasks.archive(id, archived);
@@ -1671,6 +1703,20 @@ export function WorkspacePage(props: {
           }
           onClose={() => setRemovingProject(null)}
           onRemoved={projectRemoved}
+        />
+      )}
+      {archiveTerminalConfirm && (
+        <ArchiveTerminalDialog
+          taskTitle={archiveTerminalConfirm.title}
+          aliveCount={archiveTerminalConfirm.aliveCount}
+          onConfirm={() => {
+            const { id } = archiveTerminalConfirm;
+            setArchiveTerminalConfirm(null);
+            // 确认路径：宿主 tasks:archive 内「先杀后归档」（存活会话终止并
+            // 等 exit 后写入归档，terminal-exited 事件先于归档推进）
+            void performArchive(id, true);
+          }}
+          onCancel={() => setArchiveTerminalConfirm(null)}
         />
       )}
       <TaskSidebar
