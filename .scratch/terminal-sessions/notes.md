@@ -60,9 +60,15 @@
 - e2e：`packages/desktop/e2e/*.mjs`，开发目录模式加载 desktop 自身 `dist/main.cjs`——主进程源码改动后不重建会让 e2e 验证旧代码（`launchTarget` 有 mtime 守卫）。改 e2e 交互面合入前实跑。终端 e2e 断言走 xterm 可访问性/文本层，不碰 canvas 像素。
 - 检查命令直接跑取退出码，不接 `| tail` 管道。
 - pnpm workspace：新 worktree 先 `pnpm install --frozen-lockfile`；node-pty 加入后 lockfile 变化，所有 worktree 需重装。
+- **worktree 首次 pre-commit 坑（01 票实测）**：`pnpm install` 不构建包产物，直接提交时 desktop build 报 `Could not resolve "@codexlike/agent-core/node"`——先跑一次 `pnpm --filter @codexlike/agent-core run build` 再提交。
+- pre-commit 钩子全量跑三包测试（约 2-3 分钟），属既有行为。
 
 ## 8. 决策文档
 
 - ADR 0033（本特性决策权威）：`docs/adr/0033-terminal-sessions.md`——取舍节列出全部被拒备选（纯用户终端 / 宿主级组织 / 共存亡 / 消息流内嵌 / 无 TTY / 会话级授权 / 替代前台工具 / 尾部读取 / 全量落库 / spawn cwd）。实现票不得顺手推翻。
 - GLOSSARY 词条：「终端会话」「内嵌终端」（与工作区打开器的「终端」严格区分——后者指打开系统终端窗口的外部程序）。
 - 相关既有 ADR：0020/0032（rail 收纳与拆页导航）、0021（记录落库纪律）、0004（工作区边界——spawn cwd 被拒的依据）、0018（RailPanel）。
+
+## 9. 本特性已落地符号（随票合入更新）
+
+- **票 01（集成 `fd6072e`）**：`agent-core/src/terminal/`——`pty-port.ts`（`PtyPort` / `PtyProcess` / `PtySpawnRequest` / `PtyExitEvent` / `PtySize`）、`types.ts`（`TerminalSessionRecord` / `TerminalSpawnRequest` / 域常量：上限 5、1MiB、快照 64KB、killAll 超时）、`manager.ts`（`createTerminalSessionManager`：spawn / write / resize / read(waitMs) / kill / killAll / session / sessionsFor / discard / onEvent(terminal-started|exited) / onSessionData / bufferedOutput）。单测 `tests/terminal/terminal-session-manager.test.ts`（32 用例）。导出：根出口 type-only（index.ts），实现与常量走 `/node`（node.ts）。

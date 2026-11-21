@@ -12,3 +12,10 @@
 - [ ] 快照随 view 载荷并行字段下发，不走按需拉取（对齐恢复传输惯例）
 - [ ] 快照不进恢复后的模型上下文（与子代理记录同口径）
 - [ ] 单测覆盖建表/写入/快照重建（先例：persistence 与 subagent 快照测试）+ 重启手测记录 Comments
+
+## Comments
+
+- 【01 票衔接】`record.snapshot` 在 **exit 时刻定格**（exit 后残留输出不进入），exit 时落库即可；**兜底置终态的 record 无 exitCode**——落库 schema 对 exitCode/signal 缺省要有容忍。
+- 【01 票衔接】`discard` 移除会话后缓冲与记录消失——落库时机在 exit 时或 discard 前，勿依赖 discard 后仍可取数。
+- 【01 票衔接】record 已含 name（「shell · 任务内序号」）/ origin（user|agent）/ shell / 起止时间——表列直接映射，无需再生成。
+- 【字节口径】快照为尾部原文（TextDecoder code point 边界截取，不切断多字节字符），落库按原样存文本。

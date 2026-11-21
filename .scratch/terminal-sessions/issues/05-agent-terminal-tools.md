@@ -13,3 +13,11 @@
 - [ ] 超上限 spawn 返回说明性拒绝
 - [ ] 工具描述含两类命令工具的适用边界
 - [ ] agent-core 单测绿；dev 实跑一条模型侧 spawn → read → kill 通路（结果记票面 Comments）
+
+## Comments
+
+- 【01 票衔接】管理器不做权限过滤——**所有权边界在工具层实现**：write/kill 前判 `record.origin`（且需是本任务 agent 自启的会话，不是任意 origin=agent）；read 任意会话。所有拒绝路径返回可直接回模型的中文 reason。
+- 【01 票衔接】`terminal_read` 对已退出会话仍可读（缓冲保留至 discard）——正好支撑「帮用户诊断刚跑完的命令」场景；不要把已退出当错误拒绝。
+- 【01 票衔接】工具 read 用增量水位；UI 的 `bufferedOutput` 回放不推水位——两条读取通道互不干扰，勿混用。
+- 【类型/接线】agent-core 侧 `createTerminalSessionManager` 经 `/node` 出口；host port 注入范式先例见 notes.md §2（SubagentHostPort）。
+- 【中断语义】任务中断不杀会话（ADR 0033）：工具注册/接线时不得把管理器生命周期挂到任务 AbortController 上；abort 中的工具调用自身取消即可，会话留存。

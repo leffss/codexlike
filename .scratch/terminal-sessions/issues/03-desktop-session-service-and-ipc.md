@@ -12,3 +12,11 @@
 - [ ] `terminal-*` 生命周期事件并入 TaskEvent 通道，live-tasks stopped 过滤白名单加入 terminal 类
 - [ ] desktop 单测（fake pty 注入驱动服务层）+ typecheck 绿
 - [ ] dev 模式手测：从主进程侧可创建会话、收字节流、kill（验证手段写进票面 Comments）
+
+## Comments
+
+- 【01 票衔接】IPC 双通道数据源已定（集成 `fd6072e`）：实时字节流 `manager.onSessionData`（只转发订阅后的输出）；详情页初始回放 `manager.bufferedOutput`（**不推水位**，不会破坏 05 票工具 read 的水位语义）。订阅时序：收到 `terminal-started` 后立即订阅字节流即不丢数据。
+- 【01 票衔接】生命周期事件源 `manager.onEvent`（terminal-started / terminal-exited，携带 record 副本）→ 转 `terminal-*` TaskEvent；**live-tasks 的 stopped 过滤白名单记得加 terminal 类**（notes.md §4）。
+- 【01 票衔接】resize 对已退出会话静默忽略，渲染端无需防御；spawn/kill 走判别 union（`{ok:true}` / `{ok:false, reason}`），reason 是可直接展示的中文。
+- 【未决】read 并发 wait 同会话共享水位（先唤醒者取走全部增量）——正常调用方不并发 wait；若 IPC 层出现并发场景需回 01 票再议。
+- 【类型】`@codexlike/agent-core` 根出口 type-only（TerminalSessionRecord 等），实现经 `/node` 出口（createTerminalSessionManager 等）。
