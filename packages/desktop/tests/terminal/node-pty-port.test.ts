@@ -104,6 +104,7 @@ interface Harness {
 function makeHarness(overrides?: {
   platform?: NodeJS.Platform;
   fileExists?: (path: string) => boolean;
+  gitBashInitFile?: string;
 }): Harness {
   const fakePty = new FakeNodePty();
   const taskkillCalls: SpawnCall[] = [];
@@ -111,6 +112,9 @@ function makeHarness(overrides?: {
     nodePty: fakePty,
     platform: overrides?.platform ?? "win32",
     fileExists: overrides?.fileExists ?? (() => true),
+    ...(overrides?.gitBashInitFile !== undefined
+      ? { gitBashInitFile: overrides.gitBashInitFile }
+      : {}),
     spawnImpl: (file, args, options) => {
       taskkillCalls.push({ file, args, options });
       // 返回值只被适配器 fire-and-forget，给个最小假对象即可
@@ -140,6 +144,25 @@ describe("node-pty-port spawn（shell 命令行映射与环境透传）", () => 
     );
     expect(fakePty.spawnCalls[0]?.args).toEqual(["--login", "-i"]);
     expect(seen[0]).toBe("C:\\Program Files\\Git\\bin\\bash.exe");
+  });
+
+  it("git-bash 注入托管 init 文件：非登录交互 + --init-file 在 -i 之前（窄面板 PS1 适配）", () => {
+    const { fakePty, port } = makeHarness({
+      gitBashInitFile:
+        "/c/Users/u/AppData/Roaming/CodexLike/terminal/git-bash-init.sh",
+    });
+    port.spawn({ ...BASE_REQUEST });
+    // 参数顺序实证：--init-file 后置会被 bash 拒之门外（usage），必须在前
+    expect(fakePty.spawnCalls[0]?.args).toEqual([
+      "--init-file",
+      "/c/Users/u/AppData/Roaming/CodexLike/terminal/git-bash-init.sh",
+      "-i",
+    ]);
+    // powershell / cmd 不受 init 文件影响
+    port.spawn({ ...BASE_REQUEST, shell: "powershell" });
+    port.spawn({ ...BASE_REQUEST, shell: "cmd" });
+    expect(fakePty.spawnCalls[1]?.args).toEqual(["-NoLogo"]);
+    expect(fakePty.spawnCalls[2]?.args).toEqual(["/k", "cls"]);
   });
 
   it("cwd/env/初始尺寸原样透传 node-pty，不设 encoding（node-pty 默认 utf8 文本）", () => {

@@ -238,6 +238,9 @@ const api: CodexLikeApi = {
       };
     },
   },
+  clipboard: {
+    read: () => ipcRenderer.invoke(IPC.clipboard.read),
+  },
   git: {
     status: (taskId) => ipcRenderer.invoke(IPC.git.status, taskId),
     diff: (taskId, path, oldPath) =>

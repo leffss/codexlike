@@ -178,6 +178,9 @@ function installBrowserStub(): void {
       setToolEnabled: async () => {},
     },
     onTaskEvent: () => () => {},
+    clipboard: {
+      read: async () => "",
+    },
     terminals: {
       // 形状对齐真实 IPC 契约（ADR 0033 票03）：dev 预览暂无终端面板
       //（04 票接线），只补齐命名空间契约让纯浏览器预览挂载不缺 API；

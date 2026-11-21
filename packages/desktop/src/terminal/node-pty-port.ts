@@ -89,6 +89,12 @@ export interface NodePtyPortOptions {
   fileExists?: (path: string) => boolean;
   /** 显式 Git Bash 路径（宿主高级配置）；缺省 CODEXLIKE_GIT_BASH_PATH env > 固定候选 */
   gitBashPath?: string;
+  /**
+   * git-bash 托管 init 文件（MSYS POSIX 形态，git-bash-init.ts 生成）：
+   * 非登录交互 + 单行紧凑提示符（rail 面板窄，默认两行 PS1 折成两三行英文
+   * 噪音）。未注入时回退 VS Code Git Bash 同款 --login -i。
+   */
+  gitBashInitFile?: string;
 }
 
 /** 真件动态加载：vitest（node ABI）不触达本函数——单测必注入 fake；
@@ -122,19 +128,28 @@ function resolveBashPath(
 }
 
 /** shell 类型 → 可执行文件与交互参数（持久会话要交互提示符，与前台工具的
- * -c 一次性执行不同）：git-bash 用 VS Code Git Bash profile 同款 --login -i，
- * powershell 去 banner，cmd 无 NoLogo 旗标、以 /k cls 清掉启动 banner
- * （conpty 实证：banner 输出后被 cls 转义序列清屏含 scrollback，首屏只剩
- * 提示符；/k 保持交互不退出） */
+ * -c 一次性执行不同）：powershell 去 banner，cmd 无 NoLogo 旗标、以 /k cls
+ * 清掉启动 banner（conpty 实证：banner 输出后被 cls 转义序列清屏含
+ * scrollback，首屏只剩提示符；/k 保持交互不退出）。git-bash 注入了托管
+ * init 文件时用非登录交互 + 单行提示符（--init-file 必须在 -i 之前，后置
+ * 会被 bash 拒之门外打 usage——2026-11-22 实证）；未注入回退 VS Code Git
+ * Bash profile 同款 --login -i（两行默认 PS1，窄面板会折行）。 */
 function buildShellCommand(
   shell: TerminalShell,
-  resolveBash: () => string
+  resolveBash: () => string,
+  gitBashInitFile?: string
 ): { file: string; args: string[] } {
   if (shell === "powershell") {
     return { file: "powershell.exe", args: ["-NoLogo"] };
   }
   if (shell === "cmd") {
     return { file: "cmd.exe", args: ["/k", "cls"] };
+  }
+  if (gitBashInitFile !== undefined && gitBashInitFile !== "") {
+    return {
+      file: resolveBash(),
+      args: ["--init-file", gitBashInitFile, "-i"],
+    };
   }
   return { file: resolveBash(), args: ["--login", "-i"] };
 }
@@ -147,7 +162,11 @@ export function createNodePtyPort(options: NodePtyPortOptions = {}): PtyPort {
 
   return {
     spawn(request: PtySpawnRequest): PtyProcess {
-      const { file, args } = buildShellCommand(request.shell, resolveBash);
+      const { file, args } = buildShellCommand(
+        request.shell,
+        resolveBash,
+        options.gitBashInitFile
+      );
       const env = request.env;
       const proc = nodePty.spawn(file, args, {
         cwd: request.cwd,

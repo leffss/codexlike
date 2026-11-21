@@ -275,6 +275,16 @@ export const IPC = {
     /** 打开工作区目录；携带 openerId 时以它打开并记为默认（点选即设置） */
     open: "openers:open",
   },
+  /**
+   * 剪贴板（终端粘贴用）：Chromium 的 navigator.clipboard.readText 在文档
+   * 无 OS 焦点时静默返回空串，主进程 clipboard.readText 无此约束——终端
+   * 粘贴走本桥保证任意焦点态可用（写侧 navigator.clipboard.writeText 无
+   * 焦点约束，AssistantActions 沿用）。
+   */
+  clipboard: {
+    /** 读 OS 剪贴板文本 */
+    read: "clipboard:read",
+  },
 } as const;
 
 /** 事件流信封：按任务 ID 多路复用 */
@@ -503,6 +513,12 @@ export interface TerminalApi {
   onSessionData(
     listener: (payload: TerminalSessionDataPayload) => void
   ): () => void;
+}
+
+/** 剪贴板 API：`window.codexlike.clipboard` 的形状（终端粘贴桥） */
+export interface ClipboardApi {
+  /** 读 OS 剪贴板文本（主进程 clipboard.readText，无焦点约束） */
+  read(): Promise<string>;
 }
 
 /** `window.codexlike` 的完整 API 形状 */
@@ -803,6 +819,8 @@ export interface CodexLikeApi {
   onTaskEvent(listener: (envelope: TaskEventEnvelope) => void): () => void;
   /** 终端会话操作面（ADR 0033 票03）：字节流专用订阅 + 生命周期 + 操作 */
   terminals: TerminalApi;
+  /** 剪贴板读桥（终端粘贴用，ClipboardApi 注释） */
+  clipboard: ClipboardApi;
   /** 改动面板 + git 集成（工单 05） */
   git: {
     /** 工作区 git 状态；非 git 工作区返回 isGitRepo=false（面板显示降级提示） */

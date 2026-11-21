@@ -14,7 +14,7 @@ status: accepted
 - **与 `run_terminal_command` 共存**：前台短命令继续用现有工具（跑完拿输出一次往返最省），长命令/交互式/需后台存活的走终端会话，工具描述写清适用边界。
 - **输出不全量落库**：每会话内存环形缓冲 1MB，会话终止时把最后 64KB 写入轻量快照记录供回看（正常退出、被 kill、应用退出前 flush 三条路径都尽力写）；重启后会话不恢复。子代理是逐轮批量写、终端是逐字节流，全量落库会打爆 SQLite。
 - **退出并入退出屏障**：有存活会话时退出确认提示「N 个终端会话将关闭」；托盘驻留下关闭主窗口照旧不触发、会话继续跑。任务归档时若有存活会话则提示后关闭。
-- **进程管理**：node-pty（Windows 走 conpty）出真 TTY，渲染端 xterm.js；引入 Electron 原生模块重编译链。kill 走按 sessionId 的注册表（形态仿 `interrupt-registry`）——现有中断设施没有任何 per-entity 粒度，这是必须新增的缺口。
+- **进程管理**：node-pty（Windows 走 conpty）出真 TTY，渲染端 xterm.js；引入 Electron 原生模块重编译链。kill 走按 sessionId 的注册表（形态仿 `interrupt-registry`）——现有中断设施没有任何 per-entity 粒度，这是必须新增的缺口。git-bash 的 spawn 形态（标题功能轮从 `--login -i` 调整为**非登录交互 + 托管 init 文件**）：rail 面板窄（约 60 列），登录态默认两行 PS1（`user@host MINGW64 全路径` + `$`，profile.d/git-prompt.sh 无条件设置）路径一长折成两三行英文噪音，正是「会话首屏莫名信息」的来源；托管 init（userData 下生成）自补 PATH、保用户链（.bash_profile/.bashrc）、挂 git 补全并设**单行提示符**（绿色 cwd 末段 + git 分支 + `$`），OSC 0 标题转义保留在 PS1 里喂动态标题。cmd 会话的启动 banner（`Microsoft Windows [版本…]` 两行）无 NoLogo 旗标，以 `/k cls` 清屏消除。
 - **事件与恢复**：`terminal-*` 事件走现有 TaskEvent 通道（`live-tasks.ts` 事件白名单需加入），快照恢复照搬子代理快照模式。
 - **默认值**：每任务同时存活会话上限 5（超限模型侧拒绝、用户侧提示）；会话默认名「shell 类型 · 序号」；列表页分「运行中 / 已退出（快照回看）」两组、富行标注来源（用户 / agent）；用户 kill 不弹确认（非破坏性）。
 - **展示标题（标题功能轮，放开 v1「不做重命名」）**：record 增 `title` / `titleSource`，呈现一律 `title ?? name`——默认名退为稳定标识（工具结果、消息流标记行仍用它）。标题两来源：shell 的 OSC 0/2 序列经增量扫描器动态写入（source=auto，conpty 的 exe 绝对路径回声过滤不产出）；用户在详情页顶栏改名（source=user），改名后 OSC 更新不再覆盖（手动命名优先）。标题变化走 `terminal-title-changed` 事件：rail 列表归并跟随；**消息流标记行保持启动时会话身份不重写历史**（ui live-task 闸门不放行该事件）。标题随终态落库（`terminal_sessions` 增 title / title_source 两列，旧库 ALTER 迁移），重启恢复的只读回看行保留标题。

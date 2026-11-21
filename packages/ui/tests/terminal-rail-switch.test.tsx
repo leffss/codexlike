@@ -181,12 +181,19 @@ function resetFakes() {
   ipc.state.taskListeners = [];
 }
 
+/** 粘贴桥的可控返回（Ctrl+V 用例按需覆写） */
+const clipboardState = { readTextResult: "粘贴内容" };
+
 function installStub() {
   window.codexlike = {
     ...window.codexlike,
     // onTaskEvent 挂顶层（hook 订阅信封通道）；terminals 子命名空间独立
     onTaskEvent: ipc.stub.onTaskEvent,
     terminals: ipc.stub,
+    // 粘贴桥（Ctrl+V 用例消费）
+    clipboard: {
+      read: async () => clipboardState.readTextResult,
+    },
     // RailPanel 的 useGitStatus 在挂载即拉取：非 git 仓库最小值放行
     git: {
       status: async () => ({ isGitRepo: false, files: [], branch: null }),
@@ -648,17 +655,16 @@ describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律�
 
 describe("TerminalSessionView 复制/粘贴接线（Ctrl+C/V + Shift 变体）", () => {
   /**
-   * jsdom 无 navigator.clipboard：注入可控 fake。Electron 渲染端
-   * navigator.clipboard 即 OS 剪贴板（AssistantActions 同款用法）。
+   * jsdom 无 navigator.clipboard：注入可控 fake（只覆盖复制侧写；粘贴侧走
+   * window.codexlike.clipboard.read 桥，返回值由 clipboardState 控制）。
+   * Electron 渲染端 navigator.clipboard 即 OS 剪贴板（AssistantActions 同款）。
    */
   function installClipboard() {
     const clipboard = {
       written: [] as string[],
-      readTextResult: "粘贴内容",
       writeText: async (text: string) => {
         clipboard.written.push(text);
       },
-      readText: async () => clipboard.readTextResult,
     };
     Object.defineProperty(window.navigator, "clipboard", {
       value: clipboard,

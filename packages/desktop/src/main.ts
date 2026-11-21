@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import {
   app,
   BrowserWindow,
+  clipboard,
   ipcMain,
   Menu,
   nativeTheme,
@@ -46,6 +47,7 @@ import {
 } from "./terminal/terminal-settings-store";
 import { registerTerminalSettingsHandlers } from "./terminal/terminal-settings-ipc";
 import { createNodePtyPort } from "./terminal/node-pty-port";
+import { ensureGitBashInitFile } from "./terminal/git-bash-init";
 import { registerTerminalSessionHandlers } from "./terminal/terminal-session-ipc";
 import {
   aliveSessionCount,
@@ -520,8 +522,15 @@ void app.whenReady().then(async () => {
   // 经 host 注入复用同一单例；会话创建强制 cwd = 任务工作区（终端 IPC 面不
   // 接受任意 cwd 参数——ADR 0004），shell 跟随执行设置（下方 shell resolver）。
   const terminalSessions = createTerminalSessionManager({
-    port: createNodePtyPort(),
+    port: createNodePtyPort({
+      // git-bash 托管 init（单行提示符适配窄面板，git-bash-init.ts）：每次
+      // 启动覆盖生成（内容随版本演进），spawn 参数用 MSYS POSIX 形态
+      gitBashInitFile: ensureGitBashInitFile(app.getPath("userData")).msysPath,
+    }),
   });
+  // 剪贴板读桥（终端粘贴用）：navigator.clipboard.readText 在文档无 OS 焦点
+  // 时静默返回空串，主进程 clipboard.readText 无此约束（shared/ipc ClipboardApi）
+  ipcMain.handle(IPC.clipboard.read, () => clipboard.readText());
   // 快照落库桥（ADR 0033 票08）：spawn 即写 terminal_sessions 骨架行（status=
   // running，进程中途被杀也有「曾开过」留痕），exit 事件定格快照后推进终态。
   // 须在任何会话可 spawn（建窗 / agent 工具）之前注册——whenReady 内首个
