@@ -19,3 +19,5 @@
 - 【01 票衔接】`discard` 移除会话后缓冲与记录消失——落库时机在 exit 时或 discard 前，勿依赖 discard 后仍可取数。
 - 【01 票衔接】record 已含 name（「shell · 任务内序号」）/ origin（user|agent）/ shell / 起止时间——表列直接映射，无需再生成。
 - 【字节口径】快照为尾部原文（TextDecoder code point 边界截取，不切断多字节字符），落库按原样存文本。
+- 【03 票衔接】生命周期事件已走 TaskEvent（terminal-started/exited，exited 含快照）——本票落库后，「已退出」组的重启恢复数据源从内存 manager 换为 `terminal_sessions` 表；view 快照并行字段下发的桥接点先例是 task-ipc.ts `pushTaskEvent` 与子代理快照的 view 并行字段（notes §2/§4）。
+- 【与 07 接续】07 票在退出屏障留 flush 快照挂点——本票接通：屏障 flush 时对存活会话 killAll（已并入 releaseResources）后逐条落库（killAll 等exit 齐全语义保证快照已定格再写库）。

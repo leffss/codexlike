@@ -12,3 +12,9 @@
 - [ ] 托盘驻留：关主窗口不触发屏障、会话继续；托盘「退出」走完整屏障
 - [ ] 重启收尾：注册表清空、UI 无幽灵会话
 - [ ] desktop 单测（先例 exit-flush / close-to-tray）+ dev 手测记录票面 Comments
+
+## Comments
+
+- 【03 票衔接】应用退出 flush 路径已通：releaseResources 已并入 `terminalSessions.killAll()`（等 exit 齐全 + 2s 兜底强制置终态；测试注入小 `killAllTimeoutMs` 防吃满兜底）。本票补三件事：退出屏障确认提示「N 个终端会话将关闭」（挂进现有退出屏障确认流程）、任务归档提示后关闭（先杀后归档——**顺手闭合 03 票未决口**：任务移除后存活会话的 terminal-exited 事件无现场可挂而静默丢弃）、重启收尾清注册表。
+- 【03 票衔接】`terminal-exited` 事件已走 TaskEvent 通道且 live-tasks 白名单三任务态验证过——屏障/归档杀会话后 UI 会自然收到 exited 推进，无需额外通知机制。
+- 【任务中断不杀】验证口径：中断路径（InterruptRegistry abort）不触达 manager——desktop 单测断言 abort 后会话仍 running 且输出继续产生（fake pty），与子代理 abort 共存亡行为对照。
