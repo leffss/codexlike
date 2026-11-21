@@ -87,6 +87,8 @@ describe("消息流 Markdown 工作量", () => {
     const view = render(
       <SubagentRailPanelBody subagents={[subagent]} focus={null} />
     );
+    // 拆页导航（ADR 0032）：列表页点行进详情，过程折叠块默认收起
+    fireEvent.click(screen.getByTestId("subagent-rail-item"));
     expect(screen.queryByTestId("subagent-body-content")).toBeNull();
     expect(screen.queryByTestId("subagent-thinking-content")).toBeNull();
     parsed.length = 0;

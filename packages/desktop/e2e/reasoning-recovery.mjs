@@ -19,7 +19,6 @@ import {
   assert,
   closeApp,
   createMockProfile,
-  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -230,9 +229,8 @@ async function main() {
     // 子代理详情思考折叠块不空白（ADR 0020 右栏详情；先打开定位）。
     // 票 04 起恢复走并行快照新路径：spawn 行已瘦身（reasoning 不再拼接），
     // 思考与逐轮正文都由 subagent_messages 行重建——正文折叠块即新路径证据。
-    // focus 定位展开的浮层盖住详情区拦截点击，收起后再展开折叠块
+    // 拆页导航（ADR 0032）：focus 直跳详情页，折叠块直接展开
     const subagentPanel = await openSubagentDetail(window);
-    await collapseSubagentList(window);
     const subThinking = subagentPanel.getByTestId("subagent-thinking-block");
     await subThinking.waitFor({ timeout: 10_000 });
     await subThinking.getByTestId("subagent-thinking-toggle").click();

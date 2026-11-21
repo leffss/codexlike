@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import { MessageStream } from "../src/components/MessageStream";
 import {
+  SubagentDetail,
   SubagentRailPanelBody,
   formatElapsed,
 } from "../src/components/SubagentRailPanel";
@@ -65,32 +66,92 @@ function planTool(
   };
 }
 
-describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
-  it("空列表：占位提示，不渲染列表", () => {
+describe("SubagentRailPanelBody 列表页（SSR 静态结构，ADR 0032 拆页导航）", () => {
+  it("空列表：占位提示，不渲染列表行与分组标题", () => {
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, { subagents: [], focus: null })
     );
     expect(html).toContain("本任务尚无子代理委派");
     expect(html).not.toMatch(/data-testid="subagent-rail-item"/);
+    expect(html).not.toMatch(/data-testid="subagent-rail-group-header"/);
   });
 
-  it("默认选中最后一个（最新）：摘要行计数 + 当前行锚点 + 详情报告直接可读", () => {
+  it("列表页为默认入口：计数摘要行 + 分组标题（accent 竖条 + 加粗标签 + 计数章）+ 富行，不渲染详情", () => {
     const html = renderToStaticMarkup(
       createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-1"), subSeg("sa-2", { report: "最新报告" })],
+        subagents: [
+          subSeg("sa-run", {
+            state: "running",
+            endedAt: null,
+            report: null,
+            ok: null,
+            tools: [TOOL],
+          }),
+          subSeg("sa-queue", {
+            state: "queued",
+            startedAt: null,
+            endedAt: null,
+            report: null,
+            ok: null,
+          }),
+          subSeg("sa-done-1"),
+          subSeg("sa-done-2"),
+          subSeg("sa-fail", { ok: false, report: "失败报告" }),
+        ],
         focus: null,
       })
     );
-    // 摘要行常驻：总数一目了然（浮层收起，列表行不渲染）
-    expect(html).toMatch(/data-testid="subagent-rail-summary"/);
-    expect(html).toContain("子代理 2 个");
-    expect(html).not.toMatch(/data-testid="subagent-rail-item"/);
-    // 当前行：默认最后一个（最新）作为详情锚点
+    // 摘要计数行：总数 + 非零计数
+    expect(html).toContain("子代理 5 个");
+    expect(html).toContain("进行中 1");
+    expect(html).toContain("排队 1");
+    expect(html).toContain("失败/中断 1");
+    // 分组顺序：进行中 → 排队 → 已完成 → 失败与中断；四组齐全
+    expect(
+      html.match(/data-testid="subagent-rail-group-header"/g)
+    ).toHaveLength(4);
+    expect(html.indexOf("进行中")).toBeLessThan(html.indexOf("排队"));
+    expect(html.indexOf("排队")).toBeLessThan(html.indexOf("已完成"));
+    expect(html.indexOf("已完成")).toBeLessThan(html.indexOf("失败与中断"));
+    // 富行：状态点 + 任务（title 承载完整委派说明）+ 元信息（状态/用时/工具数/报告字数）
+    expect(html.match(/data-testid="subagent-rail-item"/g)).toHaveLength(5);
     expect(html).toMatch(
-      /data-testid="subagent-rail-current"[^>]*data-subagent-state="done"/
+      /data-testid="subagent-rail-item"[^>]*data-subagent-state="running"/
     );
-    expect(html).toContain("任务 sa-2");
-    // 详情：报告直接渲染（无展开记忆门槛）
+    expect(html).toMatch(
+      /data-testid="subagent-rail-item"[^>]*data-subagent-state="queued"/
+    );
+    expect(html).toMatch(/title="任务 sa-done-1"/);
+    expect(html).toContain("工具 1");
+    expect(html).toContain("报告 4 字");
+    // 详情不在列表页：无报告块、无详情页顶栏
+    expect(html).not.toMatch(/data-testid="subagent-report"/);
+    expect(html).not.toMatch(/data-testid="subagent-rail-back"/);
+    expect(html).not.toMatch(/data-testid="subagent-rail-pager-label"/);
+  });
+
+  it("分组标题强化（2026-11-21 评审反馈）：accent 竖条 + font-semibold 标签 + accent 计数章", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentRailPanelBody, {
+        subagents: [subSeg("sa-1"), subSeg("sa-2")],
+        focus: null,
+      })
+    );
+    expect(html).toContain("h-3 w-0.5 shrink-0 rounded-full bg-accent");
+    expect(html).toContain("text-xs font-semibold text-fg");
+    expect(html).toContain(
+      "rounded-full bg-accent/15 px-1.5 text-xs text-accent"
+    );
+  });
+});
+
+describe("SubagentDetail 详情内容（SSR；经列表页点行或标记行 focus 进入详情页）", () => {
+  it("完成态：报告与操作行直接可读（复制 / 导出 / 完成时间）", () => {
+    const html = renderToStaticMarkup(
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-2", { report: "最新报告" }),
+      })
+    );
     expect(html).toContain("最新报告");
     expect(html).toMatch(/data-testid="subagent-report"/);
     expect(html).toMatch(/data-testid="subagent-report-copy"/);
@@ -110,21 +171,20 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       endedAt: null,
     });
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [restored, failed],
-        focus: null,
-      })
+      createElement(SubagentDetail, { subagent: restored })
     );
     expect(html).not.toMatch(/data-testid="subagent-report-completed-at"/);
-    expect(html).toContain("失败");
-    expect(html).toContain("API 429");
+    const failedHtml = renderToStaticMarkup(
+      createElement(SubagentDetail, { subagent: failed })
+    );
+    expect(failedHtml).toContain("失败");
+    expect(failedHtml).toContain("API 429");
   });
 
   it("事件态完成（含 endedAt）：工具卡在正文流中、报告与操作行之前（主代理同款）", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-e", { tools: [TOOL] })],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-e", { tools: [TOOL] }),
       })
     );
     expect(html).toMatch(/完成于/);
@@ -147,19 +207,16 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
 
   it("update_plan 不出工具卡：计划由底部工作计划卡承担（主消息流同源口径）", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-p", {
-            tools: [
-              TOOL,
-              planTool("sub-p1", [
-                { content: "调研现有布局", status: "completed" },
-                { content: "布局变体原型", status: "pending" },
-              ]),
-            ],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-p", {
+          tools: [
+            TOOL,
+            planTool("sub-p1", [
+              { content: "调研现有布局", status: "completed" },
+              { content: "布局变体原型", status: "pending" },
+            ]),
+          ],
+        }),
       })
     );
     // 只有 read_file 出卡；update_plan 不以通用卡呈现
@@ -181,13 +238,7 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
       tools: [{ ...TOOL, running: true }],
     });
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [running],
-        focus: null,
-      })
-    );
-    expect(html).toMatch(
-      /data-testid="subagent-rail-current"[^>]*data-subagent-state="running"/
+      createElement(SubagentDetail, { subagent: running })
     );
     expect(html).toContain("read_file");
     // 工具卡运行中默认展开：参数与输出实时可见（与主代理卡同款行为）
@@ -203,10 +254,7 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
 
   it("委派说明块：主代理委派正文特殊标明，默认 line-clamp-3 部分显示", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-d")],
-        focus: null,
-      })
+      createElement(SubagentDetail, { subagent: subSeg("sa-d") })
     );
     expect(html).toMatch(/data-testid="subagent-delegation"/);
     expect(html).toContain("主代理的委派说明");
@@ -228,10 +276,7 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
   it("委派说明块：预置展开记忆时正文无截断类；空任务给占位", () => {
     setRememberedOpen("subagent-delegation-sa-open", true);
     const opened = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-open")],
-        focus: null,
-      })
+      createElement(SubagentDetail, { subagent: subSeg("sa-open") })
     );
     const openedText = opened.match(
       /data-testid="subagent-delegation-text"[^>]*>任务 sa-open/
@@ -240,9 +285,8 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(openedText).not.toContain("line-clamp-3");
 
     const empty = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-empty", { task: "" })],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-empty", { task: "" }),
       })
     );
     expect(empty).toContain("（任务描述缺失）");
@@ -252,18 +296,15 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     setRememberedOpen("subagent-body-sa-body", true);
     setRememberedOpen("subagent-thinking-sa-body", true);
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-body", {
-            startedAt: "2026-11-14T08:00:02.000Z",
-            endedAt: "2026-11-14T08:00:30.000Z",
-            turns: [
-              { reasoning: "第一轮思考", content: "第一轮正文" },
-              { content: "最终报告：已梳理" },
-            ],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-body", {
+          startedAt: "2026-11-14T08:00:02.000Z",
+          endedAt: "2026-11-14T08:00:30.000Z",
+          turns: [
+            { reasoning: "第一轮思考", content: "第一轮正文" },
+            { content: "最终报告：已梳理" },
+          ],
+        }),
       })
     );
     // 已有展开记忆：完成态保持用户选择，逐轮内容可读。
@@ -289,17 +330,14 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     setRememberedOpen("subagent-body-sa-run2", false);
     setRememberedOpen("subagent-thinking-sa-run2", true);
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-run2", {
-            state: "running",
-            endedAt: null,
-            report: null,
-            ok: null,
-            turns: [{ reasoning: "进行中的思考", content: "流式正文增量" }],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-run2", {
+          state: "running",
+          endedAt: null,
+          report: null,
+          ok: null,
+          turns: [{ reasoning: "进行中的思考", content: "流式正文增量" }],
+        }),
       })
     );
     // 思考块预置展开记忆生效；正文块独立键：记忆为收起（用户手动收过）
@@ -318,9 +356,8 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
 
   it("旧记录（无 turns、仅拼接种 reasoning）：思考折叠单段呈现，不渲染正文折叠块", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-legacy", { reasoning: "旧记录拼接的思考" })],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-legacy", { reasoning: "旧记录拼接的思考" }),
       })
     );
     expect(html).toContain("旧记录拼接的思考");
@@ -329,29 +366,22 @@ describe("SubagentRailPanelBody（SSR 静态结构，ADR 0020）", () => {
     expect(html).not.toContain("第 1 轮");
   });
 
-  it("interrupted 委派（票 04）：列表状态点/详情徽章/中断说明；无报告操作行，已发生内容可回看", () => {
+  it("interrupted 委派（票 04）：详情徽章/中断说明；无报告操作行，已发生内容可回看", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-int", {
-            state: "interrupted",
-            endedAt: "2026-11-14T08:00:09.000Z",
-            report: null,
-            ok: false,
-            startedAt: "2026-11-14T08:00:03.000Z",
-            turns: [{ content: "中断前已写出的部分正文" }],
-            tools: [TOOL],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-int", {
+          state: "interrupted",
+          endedAt: "2026-11-14T08:00:09.000Z",
+          report: null,
+          ok: false,
+          startedAt: "2026-11-14T08:00:03.000Z",
+          turns: [{ content: "中断前已写出的部分正文" }],
+          tools: [TOOL],
+        }),
       })
     );
-    // 当前行状态点 + 详情徽章（委派说明块头）同文案
-    expect(html).toMatch(
-      /data-testid="subagent-rail-current"[^>]*data-subagent-state="interrupted"/
-    );
-    expect(html.match(/运行中被中断/g)?.length).toBeGreaterThanOrEqual(2);
-    // 中断说明 + 已发生过程内容可回看（正文折叠 + 工具卡）
+    // 详情徽章（委派说明块头）+ 中断说明 + 已发生过程内容可回看
+    expect(html.match(/运行中被中断/g)?.length).toBeGreaterThanOrEqual(1);
     expect(html).toMatch(/data-testid="subagent-interrupted-note"/);
     expect(html).toMatch(/data-testid="subagent-body-block"/);
     expect(html).toContain("中断前已写出的部分正文");
@@ -377,13 +407,10 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
 
   it("完成态有计划：详情滚动容器末尾渲染计划卡（工具清单之后），百分比 + N/M + 当前/下一步预览，默认收起", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-plan", {
-            tools: [TOOL, planTool("sub-p1", STEPS_2_OF_3)],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-plan", {
+          tools: [TOOL, planTool("sub-p1", STEPS_2_OF_3)],
+        }),
       })
     );
     expect(html).toContain('data-testid="plan-card"');
@@ -403,25 +430,21 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
 
   it("无计划：不渲染计划卡不占布局行（其他工具调用不触发）", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subSeg("sa-noplan", { tools: [TOOL] })],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-noplan", { tools: [TOOL] }),
       })
     );
     expect(html).not.toContain('data-testid="plan-card"');
     // 零工具的运行中子代理同样无卡
     const empty = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-empty", {
-            state: "running",
-            endedAt: null,
-            report: null,
-            ok: null,
-            tools: [],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-empty", {
+          state: "running",
+          endedAt: null,
+          report: null,
+          ok: null,
+          tools: [],
+        }),
       })
     );
     expect(empty).not.toContain('data-testid="plan-card"');
@@ -429,27 +452,24 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
 
   it("运行中实时刷新：卡随最后一次 update_plan 快照更新（含尚未返回的运行中调用）", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-run-plan", {
-            state: "running",
-            endedAt: null,
-            report: null,
-            ok: null,
-            tools: [
-              planTool(
-                "sub-p1",
-                [
-                  { content: "梳理需求", status: "completed" },
-                  { content: "写实现", status: "in_progress" },
-                  { content: "补测试", status: "pending" },
-                ],
-                true
-              ),
-            ],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-run-plan", {
+          state: "running",
+          endedAt: null,
+          report: null,
+          ok: null,
+          tools: [
+            planTool(
+              "sub-p1",
+              [
+                { content: "梳理需求", status: "completed" },
+                { content: "写实现", status: "in_progress" },
+                { content: "补测试", status: "pending" },
+              ],
+              true
+            ),
+          ],
+        }),
       })
     );
     // call 已到即渲染（arguments 齐备），显示最新快照 1/3
@@ -461,26 +481,23 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
 
   it("已中断回看最后快照：卡常驻显示最后一次 update_plan，位于中断说明与工具清单之后", () => {
     const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-int-plan", {
-            state: "interrupted",
-            endedAt: "2026-11-14T08:00:09.000Z",
-            report: null,
-            ok: false,
-            tools: [
-              planTool("sub-p1", [
-                { content: "梳理需求", status: "completed" },
-                { content: "写实现", status: "in_progress" },
-              ]),
-              planTool("sub-p2", [
-                { content: "梳理需求", status: "completed" },
-                { content: "写实现", status: "completed" },
-              ]),
-            ],
-          }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-int-plan", {
+          state: "interrupted",
+          endedAt: "2026-11-14T08:00:09.000Z",
+          report: null,
+          ok: false,
+          tools: [
+            planTool("sub-p1", [
+              { content: "梳理需求", status: "completed" },
+              { content: "写实现", status: "in_progress" },
+            ]),
+            planTool("sub-p2", [
+              { content: "梳理需求", status: "completed" },
+              { content: "写实现", status: "completed" },
+            ]),
+          ],
+        }),
       })
     );
     expect(html).toContain('data-testid="plan-card"');
@@ -497,11 +514,10 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
     setRememberedOpen("plan-card-task-1", true);
     setRememberedOpen("subagent-plan-card-sa-other", true);
     const collapsed = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-mine", { tools: [planTool("sub-p1", STEPS_2_OF_3)] }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-mine", {
+          tools: [planTool("sub-p1", STEPS_2_OF_3)],
+        }),
       })
     );
     expect(collapsed).toContain('data-testid="plan-card"');
@@ -509,39 +525,14 @@ describe("子代理计划卡（ADR 0023：详情正文最下方常驻，复用 A
     // 本子代理键预置展开后：完整清单渲染
     setRememberedOpen("subagent-plan-card-sa-mine", true);
     const opened = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-mine", { tools: [planTool("sub-p1", STEPS_2_OF_3)] }),
-        ],
-        focus: null,
+      createElement(SubagentDetail, {
+        subagent: subSeg("sa-mine", {
+          tools: [planTool("sub-p1", STEPS_2_OF_3)],
+        }),
       })
     );
     expect(opened).toContain('data-testid="plan-card-panel"');
     expect(opened).toContain("梳理需求");
-  });
-
-  it("切换子代理互不串：各子代理计划卡按各自记忆独立开合（各自独立计划）", () => {
-    setRememberedOpen("subagent-plan-card-sa-a", true);
-    const html = renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [
-          subSeg("sa-a", { tools: [planTool("sub-a-p1", STEPS_2_OF_3)] }),
-          subSeg("sa-b", {
-            tools: [
-              planTool("sub-b-p1", [
-                { content: "乙方案调研", status: "in_progress" },
-              ]),
-            ],
-          }),
-        ],
-        focus: null,
-      })
-    );
-    // 默认选中最后一个（sa-b）：其卡收起且显示自己的计划，不串 sa-a 的展开记忆
-    expect(html).toContain('data-testid="plan-card"');
-    expect(html).not.toContain('data-testid="plan-card-panel"');
-    expect(html).toContain("乙方案调研");
-    expect(html).toContain("0/1");
   });
 });
 

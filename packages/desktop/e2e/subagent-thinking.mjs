@@ -217,7 +217,7 @@ async function main() {
       !(await thinkingContent.isVisible()),
       "子代理思考块应默认收起（内容不可见）"
     );
-    // focus 定位直接显示详情（不展开列表浮层），思考块可直接交互
+    // focus 直跳详情页（拆页导航 ADR 0032），思考块可直接交互
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
     await thinkingContent.waitFor({ timeout: 10_000 });
     const thinkingText = await thinkingContent.textContent();

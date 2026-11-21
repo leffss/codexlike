@@ -154,7 +154,7 @@ async function main() {
 
     // ---- 运行期：右栏详情底部计划卡终态 ----
     const panel = await openSubagentDetail(window);
-    // focus 定位直接显示详情（不展开列表浮层），详情可直接交互
+    // focus 直跳详情页（拆页导航 ADR 0032），详情可直接交互
     // 与主任务卡同款 testid，容器限定子代理详情（本轮主任务未建计划）
     await panel.getByTestId("plan-card").waitFor({ timeout: 10_000 });
     assert(

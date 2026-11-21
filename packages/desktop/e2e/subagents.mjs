@@ -290,7 +290,7 @@ async function main() {
       restoredReport?.includes(REPORT_MARKER) === true,
       `重启后嵌套卡片报告缺失：${restoredReport}`
     );
-    // 新路径证据：起止时间恢复（列表行已用时定格渲染）+ 逐轮正文折叠块
+    // 新路径证据：起止时间恢复（详情顶栏已用时定格渲染）+ 逐轮正文折叠块
     // （最终轮即报告轮，正文内含报告标记）
     await restoredPanel
       .locator('[data-testid="subagent-elapsed"]')
@@ -298,7 +298,7 @@ async function main() {
       .waitFor({ timeout: 10_000 });
     const restoredBody = restoredPanel.getByTestId("subagent-body-block");
     await restoredBody.waitFor({ timeout: 10_000 });
-    // focus 定位直接显示详情（不展开列表浮层），正文折叠块可直接交互
+    // focus 直跳详情页（拆页导航 ADR 0032），正文折叠块可直接交互
     await restoredBody.getByTestId("subagent-body-toggle").click();
     const restoredBodyText = await restoredBody
       .getByTestId("subagent-body-content")

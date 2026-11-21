@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
-import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
+import { SubagentDetail } from "../src/components/SubagentRailPanel";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
 import type {
   MessageSegment,
@@ -114,11 +114,10 @@ describe("子代理详情内思考块：与主任务思考块同构（ADR 0020 �
   }
 
   function railMarkup(state: "running" | "done", id: string): string {
+    // 拆页导航（ADR 0032）：思考块在详情页内容区（SubagentDetail），
+    // 经列表页点行或标记行 focus 进入后呈现；本用例直接渲染详情内容
     return renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subagent(state, id)],
-        focus: null,
-      })
+      createElement(SubagentDetail, { subagent: subagent(state, id) })
     );
   }
 

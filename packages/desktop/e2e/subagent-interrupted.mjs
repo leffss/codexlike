@@ -17,7 +17,6 @@ import process from "node:process";
 import {
   assert,
   closeApp,
-  collapseSubagentList,
   launchApp,
   prepareDraft,
   startMockProvider,
@@ -191,12 +190,12 @@ async function main() {
         .count()) === 4,
       "重启后四条委派标记行应全部为 interrupted"
     );
-    // 点击甲的标记行打开右栏定位详情（focus 直接显示详情，不展开列表）
+    // 点击甲的标记行直跳详情页（拆页导航 ADR 0032：focus 直跳不落列表页）
     await markerOf(restored, TASKS[0]).click();
     const panel = restored.getByTestId("subagents-panel-body");
     await panel.waitFor({ timeout: 10_000 });
-    // 列表行只在浮层展开时渲染——手动展开摘要行做列表级断言
-    await panel.getByTestId("subagent-rail-summary").click();
+    // 列表级断言先返回列表页（列表页行直接渲染，无浮层概念）
+    await panel.getByTestId("subagent-rail-back").click();
     await until(
       async () =>
         (await panel
@@ -208,7 +207,11 @@ async function main() {
     );
     console.log("[e2e] 重启后：主任务已中断，四条委派留痕（interrupted）");
 
-    // 3) 运行中被杀（甲）：已发生部分完整回看
+    // 3) 运行中被杀（甲）：列表页点甲的行进详情，已发生部分完整回看
+    await panel
+      .locator('[data-testid="subagent-rail-item"]')
+      .filter({ hasText: TASKS[0] })
+      .click();
     await panel.getByTestId("subagent-interrupted-note").waitFor({
       timeout: 10_000,
     });
@@ -219,17 +222,15 @@ async function main() {
       delegationText !== null && delegationText.includes(TASKS[0]),
       `甲的委派说明缺失：${delegationText ?? "(空)"}`
     );
-    // 起止时间对齐全（启动收尾补记 completedAt）：列表行已用时定格。
-    // 列表浮层仍展开（列表行可断言），断言完收浮层再做详情内点击
-    // （浮层遮罩盖住详情区拦截点击）
+    // 起止时间对齐全（启动收尾补记 completedAt）：详情顶栏已用时定格
     const elapsedJia = panel
-      .getByTestId("subagent-rail-item")
+      .getByTestId("subagent-rail-detail-header")
       .getByTestId("subagent-elapsed");
     assert(
       (await elapsedJia.count()) >= 1,
       "运行中被杀的委派应有起止时间（已用时定格）"
     );
-    await collapseSubagentList(restored);
+    // 详情内点击无浮层遮挡（拆页导航），折叠块直接展开
     const thinkingBlock = panel.getByTestId("subagent-thinking-block");
     await thinkingBlock.waitFor({ timeout: 10_000 });
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
@@ -278,8 +279,8 @@ async function main() {
       "排队中被杀的委派未启动，不应有正文/思考/工具卡"
     );
     // 排队未启动 → 无 startedAt → 该列表行无已用时（与运行中被杀判别）。
-    // 列表浮层已收起（focus 不再自动展开）——重新展开做列表行断言
-    await panel.getByTestId("subagent-rail-summary").click();
+    // 返回列表页做列表行断言（拆页导航：列表页行直接渲染）
+    await panel.getByTestId("subagent-rail-back").click();
     await panel.getByTestId("subagent-rail-item").first().waitFor();
     assert(
       (await panel.getByTestId("subagent-rail-item").count()) === 4,

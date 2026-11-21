@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { MessageStream } from "../src/components/MessageStream";
 import { setRememberedOpen } from "../src/lib/collapse-memory";
-import { SubagentRailPanelBody } from "../src/components/SubagentRailPanel";
+import { SubagentDetail } from "../src/components/SubagentRailPanel";
 import type { MessageSegment, SubagentSegment } from "../src/lib/task-view";
 
 /** 静态渲染接缝：验证三个真实入口的链接语义，不替代桌面 E2E 点击验证。 */
@@ -28,12 +28,7 @@ function render(entry: (typeof entries)[number], content: string): string {
       ok: true,
       tools: [],
     };
-    return renderToStaticMarkup(
-      createElement(SubagentRailPanelBody, {
-        subagents: [subagent],
-        focus: null,
-      })
-    );
+    return renderToStaticMarkup(createElement(SubagentDetail, { subagent }));
   }
   if (entry === "compact-summary")
     setRememberedOpen("compact-markdown-links-message", true);

@@ -226,30 +226,16 @@ export async function openRailPanel(window, tab = "changes") {
 }
 
 /**
- * 打开右栏「子代理」tab 并定位（ADR 0020）：点击消息流标记行一步到位
- * （开右栏 + 切 tab + 选中对应子代理并直接显示其详情——2026-11-19 起
- * focus 定位不再自动展开列表浮层；子代理 id 运行时生成，标记行与列表
- * 项一一对应，点哪行定位哪个）。返回面板体 locator（报告与操作行断言
- * 的容器）。
+ * 打开右栏「子代理」tab 并定位（ADR 0020；拆页导航 ADR 0032）：点击
+ * 消息流标记行一步到位（开右栏 + 切 tab + 直跳对应子代理的详情页——
+ * 标记行 focus 直跳不落列表页；子代理 id 运行时生成，标记行与列表项
+ * 一一对应，点哪行定位哪个）。返回面板体 locator（报告与操作行断言
+ * 的容器）。列表级行断言需先点 subagent-rail-back 返回列表页。
  */
 export async function openSubagentDetail(window) {
   await window.getByTestId("subagent-stream-marker-toggle").first().click();
   await window.getByTestId("subagents-panel-body").waitFor();
   return window.getByTestId("subagents-panel-body");
-}
-
-/**
- * 收起右栏子代理完整列表浮层（Escape，面板标准键盘出口，选中态保持）：
- * 浮层由摘要行手动展开后，其遮罩与列表盖住详情区拦截点击——详情内
- * 点击类断言先收浮层；列表行（subagent-rail-item）只在浮层展开时渲染，
- * 依赖它的断言先做完再收起。幂等：浮层未展开时不操作。
- */
-export async function collapseSubagentList(window) {
-  const list = window.getByTestId("subagent-rail-list");
-  if ((await list.count()) > 0) {
-    await window.keyboard.press("Escape");
-    await list.waitFor({ state: "hidden" });
-  }
 }
 
 /** 关闭检视右栏（幂等——已关闭不再点）。 */

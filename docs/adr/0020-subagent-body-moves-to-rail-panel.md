@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: partially superseded by ADR-0032（tab 体拆页导航；正文收纳右栏与消息流标记行的大结构维持本文决定）
 ---
 
 # 子代理：正文迁右栏「子代理」tab，消息流留单行标记

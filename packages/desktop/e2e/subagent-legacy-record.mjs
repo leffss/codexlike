@@ -18,7 +18,6 @@ import {
   assert,
   closeApp,
   createMockProfile,
-  collapseSubagentList,
   launchApp,
   openSubagentDetail,
   prepareDraft,
@@ -139,8 +138,7 @@ async function main() {
     );
     const thinkingBlock = panel.getByTestId("subagent-thinking-block");
     await thinkingBlock.waitFor({ timeout: 10_000 });
-    // focus 定位展开的浮层盖住详情区拦截点击——收起后再展开思考块
-    await collapseSubagentList(window);
+    // 拆页导航（ADR 0032）：详情内点击无浮层遮挡，折叠块直接展开
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
     const thinkingText = await thinkingBlock
       .getByTestId("subagent-thinking-content")

@@ -145,9 +145,9 @@ async function main() {
       .waitFor({ timeout: 15_000 });
     const panel = await openSubagentDetail(window);
 
-    // 1) 起止时间：当前行已用时定格（mm:ss）+ 详情完成时刻（起止对齐产物）
+    // 1) 起止时间：详情顶栏已用时定格（mm:ss）+ 详情完成时刻（起止对齐产物）
     const elapsed = panel
-      .getByTestId("subagent-rail-current")
+      .getByTestId("subagent-rail-detail-header")
       .getByTestId("subagent-elapsed");
     await elapsed.waitFor({ timeout: 10_000 });
     assert(
@@ -163,7 +163,7 @@ async function main() {
     console.log("[e2e] 起止时间恢复：已用时定格 + 完成时刻可读");
 
     // 2) 逐轮正文：两轮轮边界保留（第一轮过程正文 + 第二轮报告）。
-    //    focus 定位直接显示详情（不展开列表浮层），详情可直接交互
+    //    focus 直跳详情页（拆页导航 ADR 0032），详情可直接交互
     const bodyBlock = panel.getByTestId("subagent-body-block");
     await bodyBlock.waitFor({ timeout: 10_000 });
     await bodyBlock.getByTestId("subagent-body-toggle").click();
