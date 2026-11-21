@@ -20,3 +20,6 @@
 - 【01 票衔接】resize 对已退出会话静默忽略，渲染端无需防御；spawn/kill 走判别 union（`{ok:true}` / `{ok:false, reason}`），reason 是可直接展示的中文。
 - 【未决】read 并发 wait 同会话共享水位（先唤醒者取走全部增量）——正常调用方不并发 wait；若 IPC 层出现并发场景需回 01 票再议。
 - 【类型】`@codexlike/agent-core` 根出口 type-only（TerminalSessionRecord 等），实现经 `/node` 出口（createTerminalSessionManager 等）。
+- 【02 票衔接】装配极简：`createTerminalSessionManager({ port: createNodePtyPort() })`——适配器工厂**无参**（真件动态加载）；需自定义 Git Bash 路径才传 `gitBashPath`。kill 注册表设计注解：**管理器本身就是按 sessionId 的会话注册表**（含状态机与 kill），勿再建平行 Map 造成双登记漂移——票面「kill 注册表」验收按「经 manager.kill 的会话级终止可用且进程树死透」满足，并在票面 Comments 记录该设计依据（interrupt-registry 形态的类比已由管理器承载）。
+- 【02 票衔接】manager 装配后 `dist/main.cjs` 引用 node-pty → dev 目录模式与 dev e2e 依赖 node-pty 已安装（prebuild 兼容本机 Electron，`pnpm install --frozen-lockfile` 即可，allowBuilds 已放行）；打包模式 vendor 拷贝已就位。真件行为可随时 `pnpm --filter @codexlike/desktop run smoke:pty` 复验。
+- 【验证途径】票面「dev 模式手测」验收：实现者用 desktop IPC 层集成测试（tests/tasks/task-ipc.test.ts 同款「真实 Electron 构建产物、无应用启动」基建）驱动创建/字节流/kill 全链路作为证据；GUI 手测延至 04/09。

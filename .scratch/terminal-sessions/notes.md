@@ -56,7 +56,8 @@
 ## 7. 构建与测试纪律（AGENTS.md 既有 + 本特性新增）
 
 - desktop/ui 的 `test` / `typecheck` script 已前置 agent-core build——agent-core 改源码后直接跑会假红（旧 dist）。
-- **新增：node-pty 原生模块需 electron-rebuild**——desktop 构建链要补该步骤；agent-core 不得依赖 node-pty（PtyPort 端口隔离，fake 驱动单测）。
+- **node-pty ABI 策略（02 票定案）**：官方 node-pty 1.1.0 自带 prebuilds，实测兼容本机 Electron——**默认免 electron-rebuild**；`rebuild:native`（@electron/rebuild devDep）仅当 prebuild 不覆盖平台/版本时兜底（需 VS Build Tools，本机未装未实跑）。真件加载边界：**只在 Electron 运行时加载**——适配器 `node-pty-port.ts` 是 desktop 唯一 node-pty 触点、无静态 import（源码形状单测守住），运行时 createRequire 动态解析；esbuild external + dist vendor 拷贝 + extraResources 下发三重保险；vitest 单测一律注入 fake，真件行为验证入口 `pnpm --filter @codexlike/desktop run smoke:pty`（可随时复跑）与 e2e。agent-core 保持零原生依赖（PtyPort 端口隔离）。
+- pnpm 12 的构建脚本白名单在 pnpm-workspace.yaml `allowBuilds`（node-pty 已放行）；新引入带安装脚本的依赖走这里。
 - e2e：`packages/desktop/e2e/*.mjs`，开发目录模式加载 desktop 自身 `dist/main.cjs`——主进程源码改动后不重建会让 e2e 验证旧代码（`launchTarget` 有 mtime 守卫）。改 e2e 交互面合入前实跑。终端 e2e 断言走 xterm 可访问性/文本层，不碰 canvas 像素。
 - 检查命令直接跑取退出码，不接 `| tail` 管道。
 - pnpm workspace：新 worktree 先 `pnpm install --frozen-lockfile`；node-pty 加入后 lockfile 变化，所有 worktree 需重装。
@@ -72,3 +73,4 @@
 ## 9. 本特性已落地符号（随票合入更新）
 
 - **票 01（集成 `fd6072e`）**：`agent-core/src/terminal/`——`pty-port.ts`（`PtyPort` / `PtyProcess` / `PtySpawnRequest` / `PtyExitEvent` / `PtySize`）、`types.ts`（`TerminalSessionRecord` / `TerminalSpawnRequest` / 域常量：上限 5、1MiB、快照 64KB、killAll 超时）、`manager.ts`（`createTerminalSessionManager`：spawn / write / resize / read(waitMs) / kill / killAll / session / sessionsFor / discard / onEvent(terminal-started|exited) / onSessionData / bufferedOutput）。单测 `tests/terminal/terminal-session-manager.test.ts`（32 用例）。导出：根出口 type-only（index.ts），实现与常量走 `/node`（node.ts）。
+- **票 02（集成 `2c1fed8`）**：desktop `src/terminal/node-pty-port.ts`（`createNodePtyPort` 无参工厂；可选注入面 nodePty / platform / spawnImpl / fileExists / gitBashPath）；单测 `tests/terminal/node-pty-port.test.ts`（23 用例，含「源码无静态 import」形状守卫）；冒烟 `scripts/pty-smoke.mjs`（`smoke:pty` script）；构建链接入：`scripts/build-options.mjs`（external += node-pty）、`scripts/dist.mjs`（vendor 拷贝）、`electron-builder.template.yml`（extraResources）、`pnpm-workspace.yaml`（allowBuilds）。

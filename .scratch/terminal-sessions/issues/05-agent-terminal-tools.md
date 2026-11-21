@@ -21,3 +21,5 @@
 - 【01 票衔接】工具 read 用增量水位；UI 的 `bufferedOutput` 回放不推水位——两条读取通道互不干扰，勿混用。
 - 【类型/接线】agent-core 侧 `createTerminalSessionManager` 经 `/node` 出口；host port 注入范式先例见 notes.md §2（SubagentHostPort）。
 - 【中断语义】任务中断不杀会话（ADR 0033）：工具注册/接线时不得把管理器生命周期挂到任务 AbortController 上；abort 中的工具调用自身取消即可，会话留存。
+- 【02 票衔接】desktop 适配器 `createNodePtyPort()` 无参工厂、真件动态加载——agent-core 工具侧无需关心 node-pty；管理器实例由 desktop 装配注入（03 票落 main.ts，本票不动 main.ts 避免合并冲突，`createBuiltinTools` 加可选注入面即可）。
+- 【实跑验收口径】票面「dev 实跑一条 spawn → read → kill 通路」：本票（03 未合入时无 desktop 装配）以 **mock model 走真实任务循环**验证四工具接线+审批门+所有权+增量读取（tests/provider/mock-model 与 tests/task/agent-task.test.ts 先例），证据记报告；真凭据真 pty 全链路由 03 装配、09 e2e 与最终用户验收覆盖。按此口径勾验收。
