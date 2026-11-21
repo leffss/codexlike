@@ -49,6 +49,9 @@ import { createNodePtyPort } from "./terminal/node-pty-port";
 import { registerTerminalSessionHandlers } from "./terminal/terminal-session-ipc";
 import {
   aliveSessionCount,
+  persistExitedSessionSnapshots,
+  recordTerminalSessionEvent,
+  settleTerminalSessionRowsOnStartup,
   settleTerminalSessionsOnStartup,
 } from "./terminal/terminal-lifecycle";
 import { createOpenerSettingsStore } from "./openers/opener-settings-store";
@@ -505,6 +508,13 @@ void app.whenReady().then(async () => {
   const terminalSessions = createTerminalSessionManager({
     port: createNodePtyPort(),
   });
+  // 快照落库桥（ADR 0033 票08）：spawn 即写 terminal_sessions 骨架行（status=
+  // running，进程中途被杀也有「曾开过」留痕），exit 事件定格快照后推进终态。
+  // 须在任何会话可 spawn（建窗 / agent 工具）之前注册——whenReady 内首个
+  // 消费方都在本桥之后；退出屏障 flush 的兜底写入见 releaseResources。
+  terminalSessions.onEvent((event) => {
+    recordTerminalSessionEvent(persistence, event);
+  });
 
   const builtinTools = createBuiltinTools({
     env: process.env,
@@ -652,9 +662,10 @@ void app.whenReady().then(async () => {
   // 重启收尾（ADR 0033 票07，spec「重启后不恢复」）：清空终端注册表——内存
   // 注册表在新进程启动时本应为空（此调用是防御性收尾），UI 的 list-for 初始
   // 拉取从此无幽灵会话（04 票事件驱动下无需额外通知）。
-  // 【08 票衔接挂点】落库后此处要补：terminal_sessions 表中残留 running 的
-  // 行按已退出置终态（exitedAt/exitCode 用收尾时刻，快照缺省）——与本调用
-  // 同一时点、在 UI 恢复「已退出」列表（从库读）之前完成。
+  // 【08 票衔接挂点·已接通】库层收尾先行：terminal_sessions 表中残留 running
+  // 的行（崩溃进程的骨架行）按已退出置终态（exitedAt 用收尾时刻，exitCode/
+  // 快照缺省）——在 UI 恢复「已退出」列表（view 并行字段从库读）之前完成。
+  settleTerminalSessionRowsOnStartup(persistence, new Date().toISOString());
   await settleTerminalSessionsOnStartup(
     terminalSessions,
     manager.list().map((record) => record.id)
@@ -762,6 +773,9 @@ void app.whenReady().then(async () => {
         terminalSettings.shell,
         process.env["CODEXLIKE_SHELL"]
       ),
+    // 恢复回看兜底（ADR 0033 票08）：注册表未命中时查库行，已退出会话的
+    // 快照作为 buffered 回放（重启后只读回看的现路径接通）
+    restoredSession: (sessionId) => persistence.terminalSession(sessionId),
     getWindow: () => mainWindow,
     pushTaskEvent: taskRuntime.pushTaskEvent,
   });
@@ -861,14 +875,19 @@ void app.whenReady().then(async () => {
         mcpService.shutdown(),
         browserManager.close(),
         // 终端会话退出 flush（ADR 0033「应用退出前 flush」路径）：kill 全部
-        // 存活会话并等各自 exit 定格终态快照（内存内）；快照落库是 08 票，
-        // 退出前的「N 个终端会话将关闭」确认屏障是 07 票（已挂——确认状态
-        // 经 ExitState.terminalSessions 下发，见上方 runtime/terminalSessionCount）
-        // 【08 票衔接挂点】屏障 flush 快照写入位置：killAll 返回后（exit 齐
-        // 全语义保证各会话快照已定格）逐条取 exited 会话记录（含 64KB 快照
-        // 文本）落 terminal_sessions 表——写入发生在 app.quit 之前的本处。
+        // 存活会话并等各自 exit 定格终态快照；exit 事件经落库桥推进终态
+        //（上方 terminalSessions.onEvent 装配）
         terminalSessions.killAll(),
       ]);
+      // 【08 票衔接挂点·已接通】屏障 flush 快照写入：killAll 返回即 exit
+      // 齐全（各会话快照已定格），逐条把现存任务的 exited 记录（含 64KB
+      // 快照文本）落 terminal_sessions 表——事件桥漏写的行由此兜底，须在
+      // app.quit（closeStorage 关库）之前完成。
+      persistExitedSessionSnapshots(
+        persistence,
+        terminalSessions,
+        manager.list().map((record) => record.id)
+      );
     },
   });
 });

@@ -1088,6 +1088,25 @@ export function upsertTerminalSession(
   return upsertTerminal(sessions, record);
 }
 
+/**
+ * 恢复快照记录与 list-for 清单合并（ADR 0033 票 08，useTerminalSessions
+ * 初始数据源）：同 sessionId 去重——live 侧（内存管理器，同进程数据面更新）
+ * 优先于 restored 侧（库行）；合并后按创建时间正序（rail 列表顺序，名称
+ * 序号随 createdAt 递增）。record 层不剥离快照——大文本不进 React 状态的
+ * 口径在 terminalSegmentOf 投影落地（快照随 IPC 载荷到达、进段即丢弃）。
+ */
+export function mergeTerminalRecords(
+  restored: TerminalSessionRecord[],
+  live: TerminalSessionRecord[]
+): TerminalSessionRecord[] {
+  const byId = new Map<string, TerminalSessionRecord>();
+  for (const record of restored) byId.set(record.sessionId, record);
+  for (const record of live) byId.set(record.sessionId, record);
+  return [...byId.values()].sort((a, b) =>
+    a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0
+  );
+}
+
 /** 子代理卡内嵌套的工具进度归并（call → 运行中，result → 终态） */
 function applySubagentTool(
   tools: SubagentToolCall[],

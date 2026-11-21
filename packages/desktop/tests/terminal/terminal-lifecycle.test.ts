@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { type TaskRecord } from "@codexlike/agent-core";
 import {
+  createSqliteTaskStore,
   createTerminalSessionManager,
   type PtyExitEvent,
   type PtyPort,
@@ -11,6 +13,9 @@ import {
 import {
   aliveSessionCount,
   closeTaskSessions,
+  persistExitedSessionSnapshots,
+  recordTerminalSessionEvent,
+  settleTerminalSessionRowsOnStartup,
   settleTerminalSessionsOnStartup,
 } from "../../src/terminal/terminal-lifecycle";
 
@@ -114,6 +119,33 @@ function exitSession(record: {
   record.exit({ exitCode: 0 });
 }
 
+/** 最小合法任务记录（terminal_sessions 有 tasks 外键，terminal 行先行落父行） */
+function taskRow(id = "task-1"): TaskRecord {
+  return {
+    id,
+    creationRequestId: null,
+    title: "demo",
+    workspacePath: "C:\\work\\demo",
+    providerProfileId: null,
+    model: null,
+    status: "idle",
+    workspaceMode: "local",
+    projectId: null,
+    workspaceOriginPath: null,
+    approvalMode: "assist",
+    autoApprove: false,
+    mainInputTokens: 0,
+    mainOutputTokens: 0,
+    subagentInputTokens: 0,
+    subagentOutputTokens: 0,
+    archivedAt: null,
+    pinned: false,
+    lastUsedAt: "2026-11-21T08:00:00.000Z",
+    createdAt: "2026-11-21T08:00:00.000Z",
+    updatedAt: "2026-11-21T08:00:00.000Z",
+  };
+}
+
 describe("aliveSessionCount：存活会话计数（退出屏障与归档确认共用口径）", () => {
   it("只计 running：已退出会话不计入", () => {
     const { manager, records } = makeManager();
@@ -197,5 +229,141 @@ describe("settleTerminalSessionsOnStartup：重启收尾", () => {
     const { manager } = makeManager();
     await settleTerminalSessionsOnStartup(manager, ["task-1"]);
     expect(manager.sessionsFor("task-1")).toEqual([]);
+  });
+});
+
+/**
+ * 快照落库三组合件（ADR 0033 票 08，main.ts 三处挂点的实现本体）：
+ * recordTerminalSessionEvent（manager.onEvent → 表行的落库桥：spawn 即写
+ * 骨架、exit 推进终态+快照）、persistExitedSessionSnapshots（退出屏障
+ * flush：killAll 返回后逐条推进，app.quit 关库前兜底）、
+ * settleTerminalSessionRowsOnStartup（重启收尾库层衔接：残留 running 行
+ * 置终态，UI 从库读之前完成）。
+ */
+describe("recordTerminalSessionEvent：落库桥（spawn 即写骨架 / exit 推进终态快照）", () => {
+  it("terminal-started 即写 running 骨架行（进程中途被杀也有「曾开过」留痕）", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRow());
+    const { manager } = makeManager();
+    const sessionId = spawn(manager, "task-1");
+    // 与生产装配同序：桥在会话可 spawn 之前注册（started 事件即发），
+    // 这里直接驱动一条 started 事件
+    const started = manager.session(sessionId);
+    recordTerminalSessionEvent(store, {
+      kind: "terminal-started",
+      record: started!,
+    });
+    const row = store.terminalSession(sessionId);
+    expect(row).toMatchObject({
+      sessionId,
+      taskId: "task-1",
+      status: "running",
+      createdAt: started!.createdAt,
+    });
+    expect(row?.exitedAt).toBeUndefined();
+    expect(row?.snapshot).toBeUndefined();
+    store.close();
+  });
+
+  it("terminal-exited 推进终态并写入定格快照（exitCode/signal 缺省容忍）", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRow());
+    const { manager, records } = makeManager();
+    // 桥先于 spawn 注册（生产装配同序）：started 即写骨架行，exit 推进终态
+    manager.onEvent((event) => recordTerminalSessionEvent(store, event));
+    const sessionId = spawn(manager, "task-1");
+    records[0]!.emitData("构建日志第一行\n");
+    records[0]!.emitData("构建日志最后一行\n");
+    manager.kill(sessionId); // fake port kill 后自动 exit（exit 齐全语义）
+
+    const row = store.terminalSession(sessionId);
+    expect(row?.status).toBe("exited");
+    expect(row?.exitedAt).not.toBeUndefined();
+    expect(row?.exitCode).toBe(0);
+    expect(row?.snapshot).toContain("构建日志最后一行");
+    store.close();
+  });
+});
+
+describe("persistExitedSessionSnapshots：退出屏障 flush 快照落库", () => {
+  it("killAll 返回后逐条把 exited 记录推进落库（桥漏写的行由 flush 兜底，幂等）", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRow());
+    const { manager, records } = makeManager();
+    // 骨架行由 spawn 即写（生产装配桥保证）；本测试手动落骨架行，
+    // 会话 exit 不经桥——模拟「事件桥漏写」的行，由 flush 兜底推进
+    const done = spawn(manager, "task-1"); // records[0]
+    const missed = spawn(manager, "task-1"); // records[1]
+    for (const sessionId of [done, missed]) {
+      recordTerminalSessionEvent(store, {
+        kind: "terminal-started",
+        record: manager.session(sessionId)!,
+      });
+    }
+    manager.kill(done);
+    exitSession(records[0]!);
+    manager.kill(missed);
+    exitSession(records[1]!);
+
+    persistExitedSessionSnapshots(store, manager, ["task-1"]);
+
+    const snapshotOf = (sessionId: string) =>
+      store.terminalSession(sessionId)?.snapshot;
+    expect(store.terminalSession(done)).toMatchObject({ status: "exited" });
+    expect(store.terminalSession(missed)).toMatchObject({
+      status: "exited",
+      exitedAt: manager.session(missed)?.exitedAt,
+      exitCode: 0,
+    });
+    expect(snapshotOf(missed)).toBe(manager.session(missed)?.snapshot);
+    // 幂等：重复 flush 不产生副作用（同值重写）
+    persistExitedSessionSnapshots(store, manager, ["task-1"]);
+    expect(snapshotOf(missed)).toBe(manager.session(missed)?.snapshot);
+    store.close();
+  });
+
+  it("只推进现存任务的 exited 记录：running 会话与未知任务的清单不落快照", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRow());
+    const { manager, records } = makeManager();
+    const alive = spawn(manager, "task-1"); // records[0]
+    persistExitedSessionSnapshots(store, manager, ["task-1"]);
+    expect(store.terminalSession(alive)).toBeNull();
+    // 已退出会话但任务清单不含其归属（孤儿）：不推进（行已随任务删除）
+    const orphan = spawn(manager, "task-gone"); // records[1]
+    manager.kill(orphan);
+    exitSession(records[1]!);
+    persistExitedSessionSnapshots(store, manager, ["task-1"]);
+    expect(store.terminalSession(orphan)).toBeNull();
+    store.close();
+  });
+});
+
+describe("settleTerminalSessionRowsOnStartup：重启收尾库层衔接", () => {
+  it("残留 running 行按收尾时刻置终态（exitCode/快照缺省），在 UI 从库读之前完成", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRow());
+    recordTerminalSessionEvent(store, {
+      kind: "terminal-started",
+      record: {
+        sessionId: "term-crash",
+        taskId: "task-1",
+        name: "git-bash · 1",
+        shell: "git-bash",
+        origin: "agent",
+        status: "running",
+        createdAt: "2026-11-21T08:00:00.000Z",
+      },
+    });
+    settleTerminalSessionRowsOnStartup(store, "2026-11-21T09:00:00.000Z");
+    const row = store.terminalSession("term-crash");
+    expect(row).toMatchObject({
+      status: "exited",
+      exitedAt: "2026-11-21T09:00:00.000Z",
+    });
+    expect(row?.exitCode).toBeUndefined();
+    expect(row?.signal).toBeUndefined();
+    expect(row?.snapshot).toBeUndefined();
+    store.close();
   });
 });

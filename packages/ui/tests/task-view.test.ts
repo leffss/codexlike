@@ -14,6 +14,7 @@ import {
   applyTaskEvent,
   initialTranscript,
   mergeInteractions,
+  mergeTerminalRecords,
   terminalSegmentsFromRecords,
   upsertTerminalSession,
   type AssistantSegment,
@@ -1406,5 +1407,46 @@ describe("终端会话段（ADR 0033 票 04：消息流成员 + rail tab 列表�
     );
     expect(sessions).not.toBe(before);
     expect(sessions.map((item) => item.sessionId)).toEqual(["ts-1", "ts-2"]);
+  });
+
+  it("mergeTerminalRecords：恢复快照记录与 list-for 合并去重（同会话 live 优先），按创建序排列", () => {
+    // 恢复记录（view 并行字段，重启后 list-for 为空时的「已退出」组数据源）
+    const restored = [
+      termRecord({
+        sessionId: "ts-old",
+        name: "git-bash · 1",
+        status: "exited",
+        exitCode: 0,
+        exitedAt: "2026-11-21T08:01:00.000Z",
+        createdAt: "2026-11-21T08:00:00.000Z",
+        snapshot: "重启前输出的尾部",
+      }),
+    ];
+    // 同进程清单：一个新会话 + 一个与恢复记录同 id 的会话（live 数据面更新）
+    const live = [
+      termRecord({
+        sessionId: "ts-old",
+        name: "git-bash · 1",
+        status: "exited",
+        exitCode: 0,
+        exitedAt: "2026-11-21T08:01:30.000Z",
+        createdAt: "2026-11-21T08:00:00.000Z",
+        snapshot: "同进程定格的快照（更新）",
+      }),
+      termRecord({
+        sessionId: "ts-live",
+        name: "git-bash · 2",
+        createdAt: "2026-11-21T08:02:00.000Z",
+      }),
+    ];
+    const merged = mergeTerminalRecords(restored, live);
+    // 去重（同 id 只留 live 侧）+ 创建序排列
+    expect(merged.map((row) => row.sessionId)).toEqual(["ts-old", "ts-live"]);
+    expect(merged[0]).toMatchObject({ exitedAt: "2026-11-21T08:01:30.000Z" });
+    // record 层携带快照（进段投影才丢弃——大文本不进 React 状态的口径
+    // 在 terminalSegmentOf 落地，合并层不私自剥离）
+    expect(merged[0]?.snapshot).toBe("同进程定格的快照（更新）");
+    // 重启形态：list-for 为空，恢复记录原样成为数据源
+    expect(mergeTerminalRecords(restored, [])).toEqual(restored);
   });
 });

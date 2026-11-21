@@ -220,6 +220,13 @@ export function createLiveTasks(manager: TaskManager) {
       // 并行恢复字段（票 03）：有现场用执行起点快照，无现场（重启后首次查看）
       // 直接读库——含启动收尾补记的 interrupted 骨架
       subagents: live?.subagents ?? manager.subagents(id),
+      // 并行恢复字段（ADR 0033 票 08）：已退出会话随 view 一次性下发
+      // （含重启收尾置终态的行，快照缺省容忍）；运行中的会话不经本字段
+      // ——list-for 与 terminal-* 事件是其呈现通道。重启后内存注册表为空，
+      // 本字段是「已退出」组恢复的唯一数据源
+      terminals: manager
+        .terminalSessions(id)
+        .filter((record) => record.status === "exited"),
       events: live ? [...live.events] : [],
       pendingInteractions: manager.get(id)?.pendingInteractions ?? [],
       activity: activity(id),

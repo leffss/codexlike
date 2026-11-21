@@ -344,6 +344,14 @@ export interface TaskView {
    * 仅为检视与导出，模型上下文组装不读它（transcript 仍是唯一来源）。
    */
   subagents: SubagentSnapshot[];
+  /**
+   * 终端会话恢复快照（ADR 0033 票 08）：已退出会话记录（含 64KB 终态快照
+   * 文本；重启收尾置终态的行快照缺省）随 view 同一次 IPC 发出、不走按需
+   * 拉取（恢复传输惯例对齐）。快照只供 rail「已退出」组恢复与只读回看，
+   * 模型上下文组装不读它；同进程运行中的会话不经本字段——list-for 与
+   * terminal-* 事件是其呈现通道。
+   */
+  terminals: TerminalSessionRecord[];
   events: TaskEventEnvelope[];
   pendingInteractions: InteractionRecord[];
   activity: TaskActivity;

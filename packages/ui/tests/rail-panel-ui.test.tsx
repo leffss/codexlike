@@ -40,6 +40,8 @@ function railProps(overrides: Record<string, unknown> = {}) {
     onChangesCount() {},
     subagents: [],
     subagentFocus: null,
+    // 终端恢复快照（票 08）：SSR 静态结构测试不消费，恒空
+    restoredTerminals: [],
     ...overrides,
   };
 }
