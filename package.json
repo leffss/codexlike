@@ -60,6 +60,8 @@
     "test:e2e:subagent-interrupted": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-interrupted",
     "test:e2e:subagent-legacy": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-legacy",
     "test:e2e:subagent-work-plan": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-work-plan",
+    "test:e2e:terminal": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:terminal",
+    "test:e2e:terminal-restart": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:terminal-restart",
     "check:adr": "node scripts/check-adr.mjs",
     "check:e2e-locators": "node scripts/check-e2e-locators.mjs",
     "lint": "eslint .",

@@ -536,6 +536,10 @@ void app.whenReady().then(async () => {
           terminalSettings.shell,
           process.env["CODEXLIKE_SHELL"]
         ),
+      // 宿主完整环境（白名单过滤在工具层 filterEnv）：05 票装配遗漏——缺省
+      // 时 agent spawn 拿到空环境块，node-pty 对空 env 的 CreateProcess
+      // 间歇性报「Cannot create process, error code: 87」（09 票 e2e 揭示）
+      env: process.env,
     },
     webSearch: {
       searchSource: () => {
