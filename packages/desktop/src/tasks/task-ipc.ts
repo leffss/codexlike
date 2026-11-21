@@ -24,6 +24,8 @@ import {
   type WorktreeService,
 } from "@codexlike/agent-core/node";
 
+import type { TaskEvent } from "@codexlike/agent-core";
+
 import type { ProfileStore } from "../profiles/profile-store";
 import type { TaskExitRuntime } from "../lifecycle/application-exit";
 import { normalizeModelInput } from "../shared/model-value";
@@ -85,7 +87,12 @@ export function registerTaskHandlers(options: {
   concurrencyLimit?: () => number;
   /** 任务排队持久化（票 02 内存态；票 05 换真实实现）：缺省内存（单测装配）。 */
   taskQueueStore?: TaskQueueStore;
-}): TaskExitRuntime & { startInputQueues(): void; pumpTaskQueue(): void } {
+}): TaskExitRuntime & {
+  startInputQueues(): void;
+  pumpTaskQueue(): void;
+  /** 终端生命周期事件下发（ADR 0033 票03）：main.ts 装配桥接 manager.onEvent。 */
+  pushTaskEvent(taskId: string, event: TaskEvent): void;
+} {
   const {
     manager,
     profiles,
@@ -1394,6 +1401,26 @@ export function registerTaskHandlers(options: {
     }
   }
 
+  /**
+   * 执行现场之外的任务级事件下发（终端生命周期，ADR 0033 票03）：终端
+   * 会话宿主级常驻、在消息循环之外启停，经 ensureExecution 延续任务水位
+   * （与 acceptQueue 同构，空闲/终态任务的信封照常可挂），全部工作台
+   * 窗口收到同一权威信封。任务已移除（无现场可建）时静默丢弃——
+   * 视图已随任务撤下，无消费方。
+   */
+  function pushTaskEvent(taskId: string, event: TaskEvent): void {
+    const executionId = liveTasks.ensureExecution(taskId);
+    if (executionId === null) return;
+    const envelope = liveTasks.accept(taskId, executionId, event);
+    if (!envelope) return;
+    envelope.activity = activityOf(taskId);
+    for (const window of getWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC.taskEvents, envelope);
+      }
+    }
+  }
+
   return {
     /** 主进程服务装配完成后启用恢复；不依赖窗口、view 或渲染层加载。 */
     startInputQueues: continueInputQueues,
@@ -1402,6 +1429,8 @@ export function registerTaskHandlers(options: {
      * 调用——排队任务立即补位开跑；调小时 pump 自然无事可做（只拦新）。
      */
     pumpTaskQueue: runQueuePump,
+    /** 终端生命周期事件下发（ADR 0033 票03）：main.ts 装配桥接 manager.onEvent。 */
+    pushTaskEvent,
     hasWork: () =>
       starts.size > 0 ||
       tasks.size > 0 ||
