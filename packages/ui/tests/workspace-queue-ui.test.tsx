@@ -193,6 +193,22 @@ function setup() {
         files: [],
       })),
     },
+    // terminals 最小 stub：RailPanel 的 useTerminalSessions 挂载即拉取
+    //（本文件聚焦队列编辑，终端数据路径由 terminal-rail-switch 覆盖）
+    terminals: {
+      listFor: vi.fn(async () => []),
+      create: vi.fn(async () => ({ ok: false as const, reason: "stub" })),
+      write: vi.fn(async () => ({ ok: false as const, reason: "stub" })),
+      resize: vi.fn(async () => {}),
+      kill: vi.fn(async () => ({ ok: false as const, reason: "stub" })),
+      subscribe: vi.fn(async (sessionId: string) => ({
+        ok: false as const,
+        reason: sessionId,
+      })),
+      unsubscribe: vi.fn(async () => {}),
+      session: vi.fn(async () => null),
+      onSessionData: vi.fn(() => () => {}),
+    },
     onTaskEvent: (listener: (event: TaskEventEnvelope) => void) => {
       listeners.add(listener);
       return () => {

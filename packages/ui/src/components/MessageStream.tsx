@@ -566,6 +566,11 @@ function SegmentView(props: {
       <SubagentStreamMarker subagent={segment} onOpen={props.onOpenSubagent} />
     );
   }
+  if (segment.kind === "terminal") {
+    // 终端会话段（ADR 0033 票 04）：本票只落模型与 rail tab 归并，消息流
+    // 呈现（terminal 标记行 + 点击直跳 rail 详情）是 06 票——此处暂不渲染
+    return null;
+  }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;
   }
