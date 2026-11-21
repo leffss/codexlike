@@ -67,7 +67,7 @@ describe("RailPanel（SSR 静态结构）", () => {
     expect(html).toBe("");
   });
 
-  it("展开态：分隔条 + 右栏容器 + 三个描边 tab 按钮（默认「改动」选中）", () => {
+  it("展开态：分隔条 + 右栏容器 + 四个描边 tab 按钮（默认「改动」选中）", () => {
     const html = renderToStaticMarkup(createElement(RailPanel, railProps()));
     // 分隔条：separator 语义 + 可聚焦（键盘微调入口）
     expect(html).toMatch(
@@ -76,7 +76,7 @@ describe("RailPanel（SSR 静态结构）", () => {
     expect(html).toMatch(/data-testid="rail-separator"[^>]*tabindex="0"/);
     // 右栏容器
     expect(html).toMatch(/data-testid="rail-panel"/);
-    // tab：改动默认选中、规范与技能/子代理未选中（描边按钮非胶囊分段；
+    // tab：改动默认选中、规范与技能/子代理/终端未选中（描边按钮非胶囊分段；
     // SSR 属性序 aria-selected 在 data-testid 之前）
     expect(html).toMatch(
       /aria-selected="true"[^>]*data-testid="rail-tab-changes"/
@@ -90,6 +90,11 @@ describe("RailPanel（SSR 静态结构）", () => {
       /aria-selected="false"[^>]*data-testid="rail-tab-subagents"/
     );
     expect(html).not.toMatch(/data-testid="subagent-rail-badge"/);
+    // 终端 tab（ADR 0033 票 04）：SSR 时 hook 尚未拉取，无徽章
+    expect(html).toMatch(
+      /aria-selected="false"[^>]*data-testid="rail-tab-terminals"/
+    );
+    expect(html).not.toMatch(/data-testid="terminal-rail-badge"/);
   });
 
   it("子代理 tab 徽章：运行中/排队计数（不含已完成）", () => {
@@ -123,12 +128,13 @@ describe("RailPanel（SSR 静态结构）", () => {
     expect(html).not.toMatch(/data-testid="changes-branch"/);
   });
 
-  it("规范与技能/子代理 tab 容器在默认（改动 tab）下互斥不渲染", () => {
+  it("规范与技能/子代理/终端 tab 容器在默认（改动 tab）下互斥不渲染", () => {
     // 默认渲染改动 tab；其余 tab 未挂载（tab 互斥，e2e 覆盖切换），
-    // 此处断言互斥初始态：resources-panel / subagents-panel 不出现。
+    // 此处断言互斥初始态：resources-panel / subagents-panel / terminals-panel 不出现。
     const html = renderToStaticMarkup(createElement(RailPanel, railProps()));
     expect(html).toMatch(/data-testid="changes-panel"/);
     expect(html).not.toMatch(/data-testid="resources-panel"/);
     expect(html).not.toMatch(/data-testid="subagents-panel"/);
+    expect(html).not.toMatch(/data-testid="terminals-panel"/);
   });
 });

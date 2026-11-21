@@ -4,6 +4,7 @@ import type {
   InteractionRecord,
   TaskEvent,
   StoredMessage,
+  TerminalSessionRecord,
   ToolCallRecord,
   TranscriptItem,
 } from "@codexlike/agent-core";
@@ -13,8 +14,11 @@ import {
   applyTaskEvent,
   initialTranscript,
   mergeInteractions,
+  terminalSegmentsFromRecords,
+  upsertTerminalSession,
   type AssistantSegment,
   type MessageSegment,
+  type TerminalSegment,
 } from "../src/lib/task-view";
 
 function stored(overrides: Partial<StoredMessage> = {}): StoredMessage {
@@ -1240,5 +1244,167 @@ describe("段时刻打点（各段卡耗时与工具耗时的数据来源）", (
       startedAt: null,
       endedAt: null,
     });
+  });
+});
+
+describe("终端会话段（ADR 0033 票 04：消息流成员 + rail tab 列表数据源）", () => {
+  /** TerminalSessionRecord 样例（record 字段与 manager 下发对齐） */
+  function termRecord(
+    overrides: Partial<TerminalSessionRecord> = {}
+  ): TerminalSessionRecord {
+    return {
+      sessionId: "ts-1",
+      taskId: "s1",
+      name: "git-bash · 1",
+      shell: "git-bash",
+      origin: "user",
+      status: "running",
+      createdAt: "2026-11-21T08:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  /** 收窄取终端段（测试自身前提错误即抛） */
+  function termOf(items: MessageSegment[], index: number): TerminalSegment {
+    const item = seg(items, index);
+    if (item.kind !== "terminal") throw new Error(`段 ${index} 不是终端段`);
+    return item;
+  }
+
+  it("terminal-started 尾部追加终端段：record 字段映射、归当前轮", () => {
+    let items = applyTaskEvent([], {
+      type: "user-message",
+      message: stored({ id: "u1" }),
+    });
+    items = applyTaskEvent(items, {
+      type: "terminal-started",
+      record: termRecord(),
+    });
+    expect(kinds(items)).toEqual(["user", "terminal"]);
+    expect(termOf(items, 1)).toMatchObject({
+      kind: "terminal",
+      id: "ts-1",
+      sessionId: "ts-1",
+      turnId: "u1",
+      name: "git-bash · 1",
+      shell: "git-bash",
+      origin: "user",
+      status: "running",
+      createdAt: "2026-11-21T08:00:00.000Z",
+    });
+    // 快照不进段：64KB 终态文本与消息流无关（回看走 subscribe 的 buffered）
+    items = applyTaskEvent(items, {
+      type: "terminal-started",
+      record: termRecord({ sessionId: "ts-1", snapshot: "大段输出" }),
+    });
+    expect(termOf(items, 1)).not.toHaveProperty("snapshot");
+  });
+
+  it("terminal-exited 整段替换推进状态：段 id 与序号保持（封闭集操作二）", () => {
+    let items = applyTaskEvent([], {
+      type: "terminal-started",
+      record: termRecord(),
+    });
+    const startedSeq = termOf(items, 0).seq;
+    items = applyTaskEvent(items, {
+      type: "terminal-exited",
+      record: termRecord({
+        status: "exited",
+        exitedAt: "2026-11-21T08:05:00.000Z",
+        exitCode: 0,
+      }),
+    });
+    expect(kinds(items)).toEqual(["terminal"]);
+    const exited = termOf(items, 0);
+    expect(exited).toMatchObject({
+      id: "ts-1",
+      seq: startedSeq,
+      status: "exited",
+      exitedAt: "2026-11-21T08:05:00.000Z",
+      exitCode: 0,
+    });
+    // 迟到的重复 started（幂等防御）不把终态拉回 running
+    items = applyTaskEvent(items, {
+      type: "terminal-started",
+      record: termRecord(),
+    });
+    expect(termOf(items, 0).status).toBe("exited");
+  });
+
+  it("迟到 exited（错过 started）兜底建段（先例 tool-result 补齐终态卡）", () => {
+    const items = applyTaskEvent([], {
+      type: "terminal-exited",
+      record: termRecord({
+        status: "exited",
+        exitCode: 2,
+        exitedAt: "2026-11-21T08:05:00.000Z",
+      }),
+    });
+    expect(kinds(items)).toEqual(["terminal"]);
+    expect(termOf(items, 0)).toMatchObject({
+      sessionId: "ts-1",
+      status: "exited",
+      exitCode: 2,
+    });
+  });
+
+  it("terminalSegmentsFromRecords：list-for 初始清单 → 段列表（rail 列表重建数据源）", () => {
+    const segments = terminalSegmentsFromRecords([
+      termRecord(),
+      termRecord({
+        sessionId: "ts-2",
+        name: "git-bash · 2",
+        status: "exited",
+        exitCode: 0,
+        exitedAt: "2026-11-21T08:01:00.000Z",
+        snapshot: "快照文本",
+      }),
+    ]);
+    expect(segments.map((item) => item.sessionId)).toEqual(["ts-1", "ts-2"]);
+    expect(segments[0]).toMatchObject({ status: "running" });
+    expect(segments[1]).toMatchObject({
+      status: "exited",
+      exitCode: 0,
+      exitedAt: "2026-11-21T08:01:00.000Z",
+    });
+    // 快照不进段（大文本不进 React 状态）
+    expect(segments[1]).not.toHaveProperty("snapshot");
+    // 段 id 用 sessionId（渲染 key 与详情定位同一键）
+    expect(segments[0]!.id).toBe("ts-1");
+  });
+
+  it("upsertTerminalSession：rail 列表事件增量归并幂等（新增/替换双路径）", () => {
+    let sessions = terminalSegmentsFromRecords([termRecord()]);
+    // 新会话事件追加
+    sessions = upsertTerminalSession(
+      sessions,
+      termRecord({ sessionId: "ts-2", name: "git-bash · 2" })
+    );
+    expect(sessions.map((item) => item.sessionId)).toEqual(["ts-1", "ts-2"]);
+    // 退出事件替换状态，序位不变
+    sessions = upsertTerminalSession(
+      sessions,
+      termRecord({
+        sessionId: "ts-1",
+        status: "exited",
+        exitCode: 0,
+        exitedAt: "2026-11-21T08:02:00.000Z",
+      })
+    );
+    expect(sessions.map((item) => item.sessionId)).toEqual(["ts-1", "ts-2"]);
+    expect(sessions[0]).toMatchObject({ status: "exited", exitCode: 0 });
+    // 重复事件幂等
+    const before = sessions;
+    sessions = upsertTerminalSession(
+      sessions,
+      termRecord({
+        sessionId: "ts-1",
+        status: "exited",
+        exitCode: 0,
+        exitedAt: "2026-11-21T08:02:00.000Z",
+      })
+    );
+    expect(sessions).not.toBe(before);
+    expect(sessions.map((item) => item.sessionId)).toEqual(["ts-1", "ts-2"]);
   });
 });
