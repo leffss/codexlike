@@ -4,14 +4,14 @@
 
 **Blocked by:** 03, 04。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `terminal_sessions` 表建立，旧库打开自动补建、无迁移
-- [ ] 三条终止路径都落快照（不足 64KB 取全量）；快照内容为尾部原文
-- [ ] 重启后「已退出」组从库恢复并只读回看；重启前后 UI 呈现一致
-- [ ] 快照随 view 载荷并行字段下发，不走按需拉取（对齐恢复传输惯例）
-- [ ] 快照不进恢复后的模型上下文（与子代理记录同口径）
-- [ ] 单测覆盖建表/写入/快照重建（先例：persistence 与 subagent 快照测试）+ 重启手测记录 Comments
+- [x] `terminal_sessions` 表建立，旧库打开自动补建、无迁移
+- [x] 三条终止路径都落快照（不足 64KB 取全量）；快照内容为尾部原文
+- [x] 重启后「已退出」组从库恢复并只读回看；重启前后 UI 呈现一致
+- [x] 快照随 view 载荷并行字段下发，不走按需拉取（对齐恢复传输惯例）
+- [x] 快照不进恢复后的模型上下文（与子代理记录同口径）
+- [x] 单测覆盖建表/写入/快照重建（先例：persistence 与 subagent 快照测试）+ 重启手测记录 Comments（真实 SQLite 关库重开集成测试）
 
 ## Comments
 
@@ -24,3 +24,8 @@
 - 【04 票衔接】UI 恢复路径已就绪：落库后 rail 列表初始数据源只需扩展 `useTerminalSessions` 的初始拉取（本票给宿主下发恢复快照记录——对齐子代理快照的 view 并行字段）；TerminalSegment 模型/分组/已退出只读回看（subscribe buffered）已通，**record.snapshot 有意不进 React 状态**——恢复下发同样走 list 数据源（record 含 snapshot 字段），进详情再 subscribe 回放。
 - 【07 票衔接（两个挂点都有注释锚「【08 票衔接挂点】」）】①屏障 flush 快照写入：main.ts registerApplicationExit 的 releaseResources 内 killAll 调用处——killAll 返回即 exit 齐全快照已定格，逐条取 exited 记录落库，须在 app.quit 前；②重启收尾库层衔接：main.ts whenReady 启动收尾区 settleTerminalSessionsOnStartup 调用处——落库后同点位补「库中残留 running 行置终态（exitedAt/exitCode 用收尾时刻）」，须在 UI 从库读已退出列表之前。
 - 【07 票衔接】`tasks:archive` 已 async 化（拒绝变 rejection）——本票如新增 archive 相关用例按 `await invoke` / `rejects.toThrow` 写；archive 路径「先杀等 exit 再写归档」已就位，本票只需保证 exit 时快照落库覆盖该路径。
+- 落地：票分支 ts-08-snapshot-persistence commit `268dbd8`，集成合入 `142c278`。22 文件 +1296/−28；agent-core 670 绿（+8）/ desktop 571 绿（+8）/ ui 679 绿（+3），typecheck 0 错，pre-commit 全链过；e2e 实跑 smoke / subagent-recovery / exit-recovery 全过。
+- **恢复数据流**：spawn 即写骨架行（status=running）→ exit 定格 64KB 快照后 UPDATE 终态（kill / killAll 屏障 / 事件桥三路径收敛同一桥）；崩溃残留 running 行由 `settleTerminalSessionRowsOnStartup` 置终态（exitedAt=收尾时刻，exitCode/signal/快照缺省）。重启后内存注册表空 → `tasks:view` 并行字段 `view.terminals`（已退出记录含 snapshot）一次性下发 → WorkspacePage `restoredTerminals` → `useTerminalSessions(taskId, restored)` 经 `mergeTerminalRecords`（同 sessionId 去重、live 优先）合并成 rail 列表；record 含 snapshot 进数据源、进段投影丢弃（大文本不进 React 状态）。回看：已退出详情走既有 subscribe——注册表未命中经 `restoredSession` 查库行，**快照文本作 buffered 回放**（崩溃残留行回放空缓冲）。
+- **模型上下文边界**：TaskManager.terminalSessions 只有 view 并行字段一个消费者，transcript 组装不读该表（集成测试断言 view.history 不含快照文本）。归档任务重启后「已退出」组照常恢复（archive 只改 archived_at）。
+- 踩坑：①`useTerminalSessions` 新参数以**引用**进 effect 依赖会无限重跑（内联字面量/缺省参数每次新建数组）——已改内容键守卫（sessionId:status:exitedAt 拼接），曾把 worker 打到 OOM 假红，扩展此 hook 必须沿用；②desktop 测试加载 agent-core dist——lifecycle 测试吃过 `insertTerminalSession is not a function` 假红，重跑前先 build（AGENTS.md 既有坑）；③node:sqlite **外键约束默认开启**——terminal_sessions 落库前置父任务行。
+- flaky 记录：search-ipc.test.ts 一例负载敏感 flake（waitFor 4000ms 预算全量负载下 4112ms 超时；单独跑 3/3 过、全量复跑过）——与终端路径无涉，归 flaky 治理清单与 sidebar-archive 并列。
