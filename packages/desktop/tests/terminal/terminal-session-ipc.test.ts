@@ -11,6 +11,7 @@ import {
   type PtySpawnRequest,
 } from "@codexlike/agent-core/node";
 import type { BrowserWindow } from "electron";
+import type { TerminalSessionRecord } from "@codexlike/agent-core";
 
 import {
   IPC,
@@ -106,6 +107,8 @@ function createFakePort() {
 async function setup(options?: {
   shell?: string;
   env?: Record<string, string>;
+  /** 恢复兜底查询（票 08）：内存注册表无此会话时 subscribe 从库行取快照回放 */
+  restoredSession?: (sessionId: string) => TerminalSessionRecord | null;
 }) {
   const root = mkdtempSync(join(tmpdir(), "terminal-session-ipc-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
@@ -149,6 +152,7 @@ async function setup(options?: {
         string,
         string
       >),
+    restoredSession: options?.restoredSession,
     getWindow: () => window,
     pushTaskEvent: (taskId, event) => {
       // 桥契约收口：终端 IPC 只应下发 terminal-* 事件
@@ -278,6 +282,71 @@ it("字节流三段式：订阅携缓冲回放，实时输出走专用通道，�
   expect(invoke(IPC.terminals.subscribe, "nope")).toMatchObject({
     ok: false,
   });
+});
+
+/**
+ * 恢复回看兜底（ADR 0033 票 08）：重启后内存注册表为空，已退出会话只在
+ * terminal_sessions 表——subscribe 按现路径最小接通：注册表未命中时查库行，
+ * 快照作为 buffered 回放喂给 xterm（record.snapshot 不进 React 状态，
+ * TerminalSessionView 的 subscribe buffered 路径不变）。
+ */
+it("恢复会话 subscribe 兜底：注册表未命中时从库行取快照回放，库行也没有维持拒绝", async () => {
+  const restored = {
+    sessionId: "term-restored",
+    taskId: "task-1",
+    name: "git-bash · 1",
+    shell: "git-bash" as const,
+    origin: "user" as const,
+    status: "exited" as const,
+    createdAt: "2026-11-21T08:00:00.000Z",
+    exitedAt: "2026-11-21T08:05:00.000Z",
+    exitCode: 0,
+    snapshot: "重启前的输出尾部\n",
+  };
+  const app = await setup({
+    restoredSession: (sessionId: string) =>
+      sessionId === "term-restored" ? restored : null,
+  });
+
+  // 注册表无此会话：兜底查库行，快照作为 buffered 回放，record 为库行终态
+  const result = invoke(IPC.terminals.subscribe, "term-restored") as {
+    ok: boolean;
+    sessionId?: string;
+    record?: { status: string; snapshot?: string };
+    buffered?: string;
+    reason?: string;
+  };
+  expect(result.ok).toBe(true);
+  expect(result.sessionId).toBe("term-restored");
+  expect(result.record).toMatchObject({
+    status: "exited",
+    exitedAt: restored.exitedAt,
+  });
+  expect(result.buffered).toBe("重启前的输出尾部\n");
+
+  // 兜底订阅不登记实时转发（已退出会话无实时字节），退订幂等无副作用
+  invoke(IPC.terminals.unsubscribe, "term-restored");
+  expect(dataPayloads(app.sends)).toHaveLength(0);
+
+  // 库行也不存在（会话既不在注册表也不在库）：维持原拒绝
+  expect(invoke(IPC.terminals.subscribe, "nope")).toMatchObject({
+    ok: false,
+  });
+
+  // 缺省容忍：置终态但快照缺省的行（崩溃残留）回放空缓冲
+  const appNoSnapshot = await setup({
+    restoredSession: (sessionId: string) =>
+      sessionId === "term-crash"
+        ? { ...restored, sessionId: "term-crash", snapshot: undefined }
+        : null,
+  });
+  const crashed = invoke(IPC.terminals.subscribe, "term-crash") as {
+    ok: boolean;
+    buffered?: string;
+  };
+  expect(crashed.ok).toBe(true);
+  expect(crashed.buffered).toBe("");
+  expect(appNoSnapshot.records).toHaveLength(0);
 });
 
 it("输入写入 PTY，kill 终止进程树，退出事件经 pushTaskEvent 桥接", async () => {

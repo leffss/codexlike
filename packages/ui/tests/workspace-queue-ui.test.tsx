@@ -88,6 +88,7 @@ function taskView(taskId: string): TaskView {
     sequence: 1,
     history: [],
     subagents: [],
+    terminals: [],
     events: [],
     pendingInteractions: [],
     activity,

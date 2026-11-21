@@ -15,6 +15,7 @@ import type {
   GitFileDiff,
   GitStatus,
   TaskResourcesView,
+  TerminalSessionRecord,
 } from "@codexlike/agent-core";
 
 import { languageForPath } from "../lib/diff-language";
@@ -105,6 +106,12 @@ export function RailPanel(props: {
   subagents: SubagentSegment[];
   /** 定位信号（消息流标记行点击）：切到子代理 tab 并选中对应子代理 */
   subagentFocus: SubagentFocus | null;
+  /**
+   * 终端会话恢复快照（ADR 0033 票 08）：view 并行字段的已退出记录（含
+   * 快照文本）——useTerminalSessions 初始拉取的恢复数据源（重启后内存
+   * 注册表为空，record 进合并层数据源、进段投影丢弃快照）。
+   */
+  restoredTerminals: TerminalSessionRecord[];
 }) {
   const taskId = props.taskId;
   const hasTask = taskId !== null;
@@ -115,10 +122,11 @@ export function RailPanel(props: {
   const [snapshot, setSnapshot] = useState<SnapshotKey>("preview");
 
   // 终端会话列表（ADR 0033 票 04）：list-for 初始 + terminal-* 事件增量
-  // 归并，切任务时重建（hook 内 generation 守卫）；任务切换后清掉选中
-  // 文件同款口径，详情页选中态由 TerminalRailPanelBody 会话存在性自然
-  // 回退（会话随任务重建，切任务即回列表页语义）。
-  const terminalSessions = useTerminalSessions(taskId);
+  // 归并，切任务时重建（hook 内 generation 守卫）；票 08 起并入恢复快照
+  // 记录（props.restoredTerminals，view 并行字段）初始化「已退出」组。
+  // 任务切换后清掉选中文件同款口径，详情页选中态由 TerminalRailPanelBody
+  // 会话存在性自然回退（会话随任务重建，切任务即回列表页语义）。
+  const terminalSessions = useTerminalSessions(taskId, props.restoredTerminals);
 
   const { status, loading, error, refresh, version } = useGitStatus(
     taskId,

@@ -4,7 +4,7 @@ import type {
   TerminalSessionManager,
   TerminalShell,
 } from "@codexlike/agent-core/node";
-import type { TaskEvent } from "@codexlike/agent-core";
+import type { TaskEvent, TerminalSessionRecord } from "@codexlike/agent-core";
 
 import { IPC, type TerminalSessionDataPayload } from "../shared/ipc";
 import { filterSessionEnv } from "./session-env";
@@ -14,7 +14,8 @@ import { filterSessionEnv } from "./session-env";
  * 装配的单例）的渲染端操作面，独立 terminals namespace，对齐 tasks 三段式——
  *
  * - 快照段：session / listFor（单会话记录与任务内清单）
- * - 订阅段：subscribe（携会话记录与缓冲全量回放，不推读取水位）
+ * - 订阅段：subscribe（携会话记录与缓冲全量回放，不推读取水位；注册表
+ *   未命中时经 restoredSession 兜底查库行——恢复会话的快照回看，票 08）
  * - 事件段：sessionData 专用通道实时直写渲染端（高频字节流，绝不进
  *   React 状态）；生命周期 terminal-* 事件并入 taskEvents（pushTaskEvent
  *   桥接，live-tasks 白名单放行 terminal 类）。
@@ -41,9 +42,17 @@ export function registerTerminalSessionHandlers(options: {
   getWindow: () => BrowserWindow | null;
   /** 终端生命周期 → taskEvents 通道的桥（task-ipc 装配返回的 pushTaskEvent） */
   pushTaskEvent: (taskId: string, event: TaskEvent) => void;
+  /**
+   * 恢复回看兜底查询（ADR 0033 票 08）：内存注册表未命中时从 terminal_sessions
+   * 表取行（main.ts 注入 persistence.terminalSession）。重启后注册表为空，
+   * 已退出会话的只读回看经本兜底走既有 subscribe buffered 路径——快照作为
+   * 回放数据喂给 xterm，不进 React 状态。缺省未注入时未命中维持原拒绝。
+   */
+  restoredSession?: (sessionId: string) => TerminalSessionRecord | null;
 }): void {
   const { sessions, workspaceFor, shell, env, getWindow, pushTaskEvent } =
     options;
+  const restoredSession = options.restoredSession;
   /**
    * 字节流转发订阅（按 sessionId）：订阅幂等登记——同会话重复 subscribe
    * 不叠加监听（叠加会让 xterm 收到重复字节）。退订函数持有在 Map，
@@ -150,7 +159,20 @@ export function registerTerminalSessionHandlers(options: {
       }
       const record = sessions.session(sessionId);
       if (record === undefined) {
-        return { ok: false, reason: `终端会话不存在：${sessionId}` };
+        // 恢复回看兜底（ADR 0033 票 08）：重启后注册表为空，已退出会话只在
+        // terminal_sessions 表——快照作为 buffered 回放喂给既有回看路径
+        // （快照文本经 xterm 直写，不进 React 状态）；已退出会话无实时字节，
+        // 不登记转发。库行也没有时维持原拒绝。
+        const restored = restoredSession?.(sessionId) ?? null;
+        if (restored === null) {
+          return { ok: false, reason: `终端会话不存在：${sessionId}` };
+        }
+        return {
+          ok: true,
+          sessionId,
+          record: restored,
+          buffered: restored.snapshot ?? "",
+        };
       }
       if (!subscriptions.has(sessionId)) {
         subscriptions.set(

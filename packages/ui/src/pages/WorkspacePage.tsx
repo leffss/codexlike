@@ -40,6 +40,7 @@ import {
   type ProviderProfile,
   type ProjectRecord,
   type TaskResourcesView,
+  type TerminalSessionRecord,
   type ThinkingEffort,
   type WorkbenchTarget,
 } from "@codexlike/agent-core";
@@ -339,6 +340,12 @@ export function WorkspacePage(props: {
     setRailOpen(true);
     setSubagentFocus({ id: subagentId, seq: ++subagentFocusSeqRef.current });
   }, []);
+  // 终端会话恢复快照（ADR 0033 票 08）：当前任务 view 并行字段的已退出
+  // 记录（含快照文本），右栏终端 tab 初始拉取的恢复数据源——重启后内存
+  // 注册表为空，rail「已退出」组由此恢复（任务打开时随 view 一次刷新）
+  const [restoredTerminals, setRestoredTerminals] = useState<
+    TerminalSessionRecord[]
+  >([]);
   // 新建、加载与已有任务始终使用同一档位；滚动条宽度由消息流实际测量。
   const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
@@ -569,6 +576,8 @@ export function WorkspacePage(props: {
       setQueueState(EMPTY_QUEUE_STATE);
       // 排队首条（票 03）：随快照恢复，加载期间先清空防上个任务的值闪现
       setQueuedStart(null);
+      // 终端恢复快照（票 08）：加载期间先清空防上个任务的已退出组闪现
+      setRestoredTerminals([]);
       setWorkspaceFiles([]);
       setResources(null);
       toastState.retract("context-warning");
@@ -610,6 +619,8 @@ export function WorkspacePage(props: {
         queueSequenceRef.current = live.sequence;
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
+        // 终端恢复快照（票 08）：view 并行字段随任务打开一次刷新
+        setRestoredTerminals(view.terminals);
         setStreaming(live.activity.running);
         // 运行中恢复：从消息段重推运行起点（轮次起点），工时不因重开清零
         setRunStartedAt(
@@ -2051,6 +2062,7 @@ export function WorkspacePage(props: {
               onChangesCount={setChangesCount}
               subagents={subagentSegments}
               subagentFocus={subagentFocus}
+              restoredTerminals={restoredTerminals}
             />
           </div>
         </div>

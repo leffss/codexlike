@@ -43,6 +43,8 @@ function props(
     onChangesCount() {},
     subagents: [],
     subagentFocus: null,
+    // 终端恢复快照（票 08）：本文件聚焦 diff 刷新，恒空
+    restoredTerminals: [],
     ...overrides,
   };
 }

@@ -13,6 +13,7 @@ import {
   type ThinkingEffort,
 } from "../provider/language-model";
 import type { ProviderProfile } from "../provider/provider-profile";
+import type { TerminalSessionRecord } from "../terminal/types";
 import type { ToolDefinition } from "../tools/types";
 
 import { createAgentTask, type AgentTask } from "./agent-task";
@@ -159,6 +160,13 @@ export interface TaskManager {
    * 载荷的并行字段发给 UI；模型上下文组装不读这里（与 transcript 分离）。
    */
   subagents(taskId: string): SubagentSnapshot[];
+  /**
+   * 终端会话恢复快照（ADR 0033 票 08）：任务内会话行一次读出（含重启收尾
+   * 置终态的行，快照随行，按创建顺序）。恢复数据面经 view 载荷的并行字段
+   * 发给 UI 的「已退出」组；模型上下文组装不读这里——快照不进上下文，
+   * 与子代理记录同口径（结构性保证：本方法只有 view 并行字段一个消费者）。
+   */
+  terminalSessions(taskId: string): TerminalSessionRecord[];
   /** 惰性恢复任务对象；不存在返回 null；同 id 返回缓存实例 */
   get(taskId: string): AgentTask | null;
   /** 只读缓存实例的运行/最近一轮摘要；未实例化任务返回空状态。 */
@@ -490,6 +498,10 @@ export function createTaskManager(
         messages: messages.filter((row) => row.subagentId === record.id),
         toolCalls: toolCalls.filter((row) => row.subagentId === record.id),
       }));
+    },
+
+    terminalSessions(taskId) {
+      return persistence.listTerminalSessions(taskId);
     },
 
     get(taskId) {

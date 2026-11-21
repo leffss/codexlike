@@ -1,10 +1,17 @@
-import type { TerminalSessionManager } from "@codexlike/agent-core/node";
+import type { TerminalSessionEvent } from "@codexlike/agent-core";
+import type {
+  TaskPersistence,
+  TerminalSessionManager,
+} from "@codexlike/agent-core/node";
 
 /**
  * 终端会话生命周期硬边的宿主侧组合件（ADR 0033 票07）。manager（宿主级注册表）
  * 不按本票范围改动，这里只用其公开接口组合出三个生命周期动作：
  * 存活计数（确认提示口径）、closeTaskSessions（归档先杀后归档）、
  * settleTerminalSessionsOnStartup（重启收尾）。
+ * 票 08 追加快照落库三件：recordTerminalSessionEvent（事件 → 表行的落库桥）、
+ * persistExitedSessionSnapshots（退出屏障 flush）、
+ * settleTerminalSessionRowsOnStartup（重启收尾库层衔接）。
  */
 
 /**
@@ -94,4 +101,71 @@ export async function settleTerminalSessionsOnStartup(
       sessions.discard(record.sessionId);
     }
   }
+}
+
+/**
+ * 终端会话落库桥（ADR 0033 票 08）：manager.onEvent → `terminal_sessions`
+ * 表行。spawn 即写骨架行（status=running）——进程中途被杀也有「曾开过」
+ * 的留痕（先例 subagents 注册行 queued 即写，ADR 0021）；exit 事件定格
+ * 快照后一次推进终态（killAll 等 exit 齐全语义保证快照已定格再写）。
+ * exitCode/signal/快照缺省容忍（兜底置终态的 record 无 exitCode）。
+ * 目标行不存在时静默忽略（updateSubagent 同语义）。
+ */
+export function recordTerminalSessionEvent(
+  persistence: TaskPersistence,
+  event: TerminalSessionEvent
+): void {
+  if (event.kind === "terminal-started") {
+    persistence.insertTerminalSession(event.record);
+    return;
+  }
+  const { record } = event;
+  persistence.updateTerminalSession(record.sessionId, {
+    status: record.status,
+    exitedAt: record.exitedAt,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    snapshot: record.snapshot,
+  });
+}
+
+/**
+ * 退出屏障 flush 快照落库（ADR 0033 票 08，releaseResources 挂点）：killAll
+ * 返回即 exit 齐全（各会话快照已定格），逐条把现存任务的 exited 记录推进
+ * 落库——事件桥漏写的行由此兜底，已写过的行同值重写幂等。孤儿会话（归属
+ * 任务已移除，不在 taskIds）不推进：其行已随任务数据删除。须在 app.quit
+ * （closeStorage 关库）之前完成。
+ */
+export function persistExitedSessionSnapshots(
+  persistence: TaskPersistence,
+  sessions: TerminalSessionManager,
+  taskIds: readonly string[]
+): void {
+  for (const taskId of taskIds) {
+    for (const record of sessions.sessionsFor(taskId)) {
+      if (record.status !== "exited") continue;
+      persistence.updateTerminalSession(record.sessionId, {
+        status: record.status,
+        exitedAt: record.exitedAt,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        snapshot: record.snapshot,
+      });
+    }
+  }
+}
+
+/**
+ * 重启收尾库层衔接（ADR 0033 票 08，main.ts 启动收尾区挂点）：库中残留
+ * running 行按已退出置终态——exitedAt 用收尾时刻，exitCode/signal/快照
+ * 缺省（07 票锚口径 + 01 票兜底置终态 record 无 exitCode 的容忍）。须在
+ * UI 从库读「已退出」列表（view 并行字段的恢复数据源）之前完成。崩溃
+ * 进程的骨架行由此获得「曾开过 + 已终止」的留痕；正常重启时表中无
+ * running 行，no-op。
+ */
+export function settleTerminalSessionRowsOnStartup(
+  persistence: TaskPersistence,
+  settledAt: string
+): void {
+  persistence.settleRunningTerminalSessions(settledAt);
 }

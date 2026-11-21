@@ -15,6 +15,7 @@ import {
 
 import { RailPanel } from "../src/components/RailPanel";
 import { TerminalRailPanelBody } from "../src/components/TerminalRailPanel";
+import type { TerminalSessionRecord } from "@codexlike/agent-core";
 import type { TerminalSegment } from "../src/lib/task-view";
 
 // ===== xterm fake（vi.mock 工厂提升，自包含不引用 import 绑定）=====
@@ -74,8 +75,9 @@ const ipc = vi.hoisted(() => {
       | { ok: true; sessionId: string; record: unknown; buffered: string }
       | { ok: false; reason: string }
     >,
-    /** listFor 结果表（taskId → 会话记录清单；缺省空） */
-    listForResults: {} as Record<string, Array<Record<string, unknown>>>,
+    /** listFor 结果表（taskId → 会话记录清单；缺省空。恢复记录形状为
+     * TerminalSessionRecord——hoisted 内不引用 import 绑定，放宽为 unknown） */
+    listForResults: {} as Record<string, unknown[]>,
     /** create 结果表（taskId → 结果；缺省拒绝） */
     createResult: null as
       { ok: true; sessionId: string } | { ok: false; reason: string } | null,
@@ -454,6 +456,7 @@ describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并
       onChangesCount() {},
       subagents: [],
       subagentFocus: null,
+      restoredTerminals: [],
       ...overrides,
     };
   }
@@ -593,5 +596,61 @@ describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并
     await waitFor(() => {
       expect(ipc.state.calls.kill).toEqual(["ts-1"]);
     });
+  });
+
+  /**
+   * 恢复初始化（ADR 0033 票 08）：重启后 list-for 为空（注册表已清），
+   * view 并行字段的恢复快照记录（含快照文本）初始化「已退出」组——
+   * 重启前后 UI 呈现一致。
+   */
+  it("恢复快照记录初始化「已退出」组：list-for 为空时恢复记录进列表", async () => {
+    installStub();
+    // 重启形态：内存注册表空（list-for 空），恢复记录来自 view 并行字段
+    render(
+      <RailPanel {...railProps({ restoredTerminals: [restoredRecord()] })} />
+    );
+    // 重启形态无运行中会话：徽章不渲染（runningTerminals > 0 才挂），
+    // 直接切终端 tab 等「已退出」组内容
+    fireEvent.click(screen.getByTestId("rail-tab-terminals"));
+    expect(await screen.findByText("git-bash · 1")).not.toBeNull();
+    expect(screen.queryByTestId("terminal-rail-badge")).toBeNull();
+    // 分组：恢复记录全部落入「已退出」组（1 组，无运行中组）
+    expect(screen.getAllByTestId("terminal-rail-group-header")).toHaveLength(1);
+  });
+
+  /** 恢复记录样例（view 并行字段形状：record 含 snapshot 字段进数据源） */
+  function restoredRecord(): TerminalSessionRecord {
+    return {
+      sessionId: "ts-old",
+      taskId: "task-1",
+      name: "git-bash · 1",
+      shell: "git-bash",
+      origin: "user",
+      status: "exited",
+      createdAt: "2026-11-21T08:00:00.000Z",
+      exitedAt: "2026-11-21T08:01:00.000Z",
+      exitCode: 0,
+      snapshot: "重启前输出的尾部",
+    };
+  }
+
+  it("恢复快照记录与 list-for 同清单合并去重：不重不漏（同进程形态）", async () => {
+    installStub();
+    // 同进程：list-for 有运行中会话与同 id 已退出会话，恢复记录并入同一
+    // 清单（合并层去重 live 优先，rail 列表不重不漏）
+    ipc.state.listForResults["task-1"] = [
+      record({ sessionId: "ts-live", name: "git-bash · 2", status: "running" }),
+      restoredRecord(),
+    ];
+    render(
+      <RailPanel {...railProps({ restoredTerminals: [restoredRecord()] })} />
+    );
+    await screen.findByTestId("terminal-rail-badge");
+    fireEvent.click(screen.getByTestId("rail-tab-terminals"));
+    expect(await screen.findByText("git-bash · 2")).not.toBeNull();
+    expect(screen.getByText("git-bash · 1")).not.toBeNull();
+    expect(screen.getAllByTestId("terminal-rail-item")).toHaveLength(2);
+    // 运行中计数徽章只算运行中（恢复的已退出记录不计）
+    expect(screen.getByTestId("terminal-rail-badge").textContent).toBe("1");
   });
 });

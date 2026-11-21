@@ -30,6 +30,8 @@ const snapshot: TaskView = {
   history: [],
   // 子代理恢复快照（票 03/04）：hydrate 重建的并行数据面（见下方恢复用例）
   subagents: [],
+  // 终端会话恢复快照（ADR 0033 票 08）：rail 列表恢复面，消息流不消费
+  terminals: [],
   events: [delta(1, "第一段"), delta(2, "第二段")],
   pendingInteractions: [],
   activity,
@@ -393,6 +395,8 @@ it("思考的落盘恢复与内存重放衔接（票 02）：切走再切回运�
     events: [],
     // 子代理恢复快照（票 03/04）：本用例无子代理，空数组即旧路径
     subagents: [],
+    // 终端会话恢复快照（ADR 0033 票 08）：消息流恢复不消费，恒空
+    terminals: [],
     pendingInteractions: [],
     activity: { ...activity, running: false, outcome: "completed" },
   });
