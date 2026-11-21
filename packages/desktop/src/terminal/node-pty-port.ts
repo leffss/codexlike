@@ -123,7 +123,9 @@ function resolveBashPath(
 
 /** shell 类型 → 可执行文件与交互参数（持久会话要交互提示符，与前台工具的
  * -c 一次性执行不同）：git-bash 用 VS Code Git Bash profile 同款 --login -i，
- * powershell 去 banner，cmd 交互默认即提示符 */
+ * powershell 去 banner，cmd 无 NoLogo 旗标、以 /k cls 清掉启动 banner
+ * （conpty 实证：banner 输出后被 cls 转义序列清屏含 scrollback，首屏只剩
+ * 提示符；/k 保持交互不退出） */
 function buildShellCommand(
   shell: TerminalShell,
   resolveBash: () => string
@@ -132,7 +134,7 @@ function buildShellCommand(
     return { file: "powershell.exe", args: ["-NoLogo"] };
   }
   if (shell === "cmd") {
-    return { file: "cmd.exe", args: [] };
+    return { file: "cmd.exe", args: ["/k", "cls"] };
   }
   return { file: resolveBash(), args: ["--login", "-i"] };
 }

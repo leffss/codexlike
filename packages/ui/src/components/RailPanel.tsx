@@ -521,6 +521,7 @@ export function RailPanel(props: {
               creating={terminalSessions.creating}
               onKill={terminalSessions.killSession}
               killingSessionId={terminalSessions.killingSessionId}
+              onRename={terminalSessions.renameSession}
               focus={props.terminalFocus}
             />
           </div>

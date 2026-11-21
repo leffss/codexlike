@@ -75,7 +75,9 @@ export function useTerminalSessions(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restoredKey 已表达 restored 的内容变化
   }, [taskId, restoredKey]);
 
-  // terminal-* 事件增量归并（只吃本任务信封；record 为事件时刻完整副本）
+  // terminal-* 事件增量归并（只吃本任务信封；record 为事件时刻完整副本）。
+  // title-changed 同走 record 幂等 upsert（rail 列表跟随标题；消息流标记行
+  // 不消费——live-task 闸门不放行，保持启动时身份不重写历史）
   useEffect(() => {
     if (taskId === null) return;
     return window.codexlike.onTaskEvent((envelope) => {
@@ -83,7 +85,8 @@ export function useTerminalSessions(
       const event = envelope.event;
       if (
         event.type === "terminal-started" ||
-        event.type === "terminal-exited"
+        event.type === "terminal-exited" ||
+        event.type === "terminal-title-changed"
       ) {
         setSessions((previous) =>
           upsertTerminalSession(previous, event.record)
@@ -124,6 +127,16 @@ export function useTerminalSessions(
       });
   }, []);
 
+  /**
+   * 用户改名（标题功能轮）：提交 terminals:rename，成功后清单由
+   * terminal-title-changed 事件归并推进（事件即呈现，与 create 同口径）。
+   * 拒绝（会话退出竞态等）静默——改名入口仅 running 会话可见，明确拒绝
+   * 是正常竞态无需错误态。
+   */
+  const renameSession = useCallback((sessionId: string, title: string) => {
+    void window.codexlike.terminals.rename(sessionId, title).catch(() => {});
+  }, []);
+
   return {
     sessions,
     createError,
@@ -131,5 +144,6 @@ export function useTerminalSessions(
     createSession,
     killingSessionId,
     killSession,
+    renameSession,
   };
 }

@@ -188,7 +188,7 @@ export interface TerminalSegment extends SegmentBase {
   kind: "terminal";
   /** 会话 id（terminal-* 事件匹配键；详情页字节流订阅键，= 段 id） */
   sessionId: string;
-  /** 会话名（record.name，形如「git-bash · 1」；v1 不做重命名） */
+  /** 会话名（record.name，形如「git-bash · 1」，稳定标识不随标题变化） */
   name: string;
   shell: TerminalShell;
   /** 来源（列表富行标注 用户 / agent；ADR 0033 所有权边界） */
@@ -196,6 +196,11 @@ export interface TerminalSegment extends SegmentBase {
   status: TerminalSessionStatus;
   /** 创建时刻（ISO；已用时的计算基准） */
   createdAt: string;
+  /**
+   * 展示标题（标题功能轮）：OSC 0/2 动态值或用户改名；缺省回退 name 呈现
+   * （title ?? name）。消息流标记行不消费本字段——保持启动时身份不重写历史。
+   */
+  title?: string;
   /** 退出时刻（ISO；running 时缺失，已用时定格基准） */
   exitedAt?: string;
   exitCode?: number;
@@ -832,6 +837,12 @@ export function applyTaskEvent(
     case "terminal-exited":
       return upsertTerminal(items, event.record);
 
+    // 终端标题变化（标题功能轮）不进消息流：标记行是启动时刻的跳转锚，
+    // 保持启动时会话身份，标题跟随归 rail 列表（useTerminalSessions 直连
+    // onTaskEvent 归并），历史不重写
+    case "terminal-title-changed":
+      return items;
+
     case "error":
       // 出错即本轮终止：全部流态段收敛（打 endedAt），尾部追加错误段
       return append(settleStreamingSegments(items, nowEpoch()), {
@@ -1003,6 +1014,7 @@ function terminalSegmentOf(
     origin: record.origin,
     status: record.status,
     createdAt: record.createdAt,
+    ...(record.title !== undefined ? { title: record.title } : {}),
   };
   return {
     ...base,

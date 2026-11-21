@@ -135,9 +135,10 @@ export interface TaskPersistence {
   insertTerminalSession(record: TerminalSessionRecord): void;
   /**
    * 只更新状态机推进触碰的列（status / exitedAt / exitCode / signal /
-   * snapshot）：exit 事件定格快照后一次推进（killAll 等 exit 齐全语义保证
-   * 快照已定格再写）。归属与描述列（taskId / name / shell / origin /
-   * createdAt）建行后不变，不提供更新。目标不存在时静默忽略（与
+   * snapshot）与标题列（title / titleSource——标题功能轮：exit 事件定格
+   * 时把会话终态 record 携带的最终标题随 patch 落库，重启恢复的只读回看
+   * 行保留 OSC 动态值 / 用户改名）。归属与描述列（taskId / name / shell /
+   * origin / createdAt）建行后不变，不提供更新。目标不存在时静默忽略（与
    * updateSubagent 同语义）。
    */
   updateTerminalSession(
@@ -145,7 +146,13 @@ export interface TaskPersistence {
     patch: Partial<
       Pick<
         TerminalSessionRecord,
-        "status" | "exitedAt" | "exitCode" | "signal" | "snapshot"
+        | "status"
+        | "exitedAt"
+        | "exitCode"
+        | "signal"
+        | "snapshot"
+        | "title"
+        | "titleSource"
       >
     >
   ): void;
@@ -284,6 +291,8 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   exited_at TEXT,
   exit_code INTEGER,
   signal INTEGER,
+  title TEXT,
+  title_source TEXT,
   snapshot TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task
@@ -386,6 +395,8 @@ interface TerminalSessionRow {
   exited_at: string | null;
   exit_code: number | null;
   signal: number | null;
+  title: string | null;
+  title_source: string | null;
   snapshot: string | null;
 }
 
@@ -496,6 +507,16 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         `ALTER TABLE tasks ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`
       );
   }
+  // 旧库迁移（标题功能轮，ADR 0033 后续）：terminal_sessions 无标题列——
+  // OSC 动态值 / 用户改名随 exit 终态落库，重启恢复的只读回看行保留标题；
+  // 旧行 NULL（读回缺省回退 name 呈现）
+  const terminalColumns = db
+    .prepare("PRAGMA table_info(terminal_sessions)")
+    .all();
+  if (!terminalColumns.some((column) => column.name === "title"))
+    db.exec("ALTER TABLE terminal_sessions ADD COLUMN title TEXT");
+  if (!terminalColumns.some((column) => column.name === "title_source"))
+    db.exec("ALTER TABLE terminal_sessions ADD COLUMN title_source TEXT");
   const insertTask = db.prepare(
     "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve, main_input_tokens, main_output_tokens, subagent_input_tokens, subagent_output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
@@ -554,7 +575,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     "SELECT * FROM subagent_tool_calls WHERE task_id = ? ORDER BY created_at, rowid"
   );
   const insertTerminalSessionStmt = db.prepare(
-    "INSERT INTO terminal_sessions (id, task_id, name, origin, shell, status, created_at, exited_at, exit_code, signal, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO terminal_sessions (id, task_id, name, origin, shell, status, created_at, exited_at, exit_code, signal, title, title_source, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listTerminalSessionsStmt = db.prepare(
     "SELECT * FROM terminal_sessions WHERE task_id = ? ORDER BY created_at, rowid"
@@ -629,6 +650,13 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       origin: row.origin as TerminalSessionRecord["origin"],
       status: row.status as TerminalSessionRecord["status"],
       createdAt: row.created_at,
+      ...(row.title !== null ? { title: row.title } : {}),
+      ...(row.title_source !== null
+        ? {
+            titleSource:
+              row.title_source as TerminalSessionRecord["titleSource"],
+          }
+        : {}),
       ...(row.exited_at !== null ? { exitedAt: row.exited_at } : {}),
       ...(row.exit_code !== null ? { exitCode: row.exit_code } : {}),
       ...(row.signal !== null ? { signal: row.signal } : {}),
@@ -1191,6 +1219,8 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         record.exitedAt ?? null,
         record.exitCode ?? null,
         record.signal ?? null,
+        record.title ?? null,
+        record.titleSource ?? null,
         record.snapshot ?? null
       );
     },
@@ -1219,6 +1249,14 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       if (patch.snapshot !== undefined) {
         columns.push("snapshot = ?");
         values.push(patch.snapshot);
+      }
+      if (patch.title !== undefined) {
+        columns.push("title = ?");
+        values.push(patch.title);
+      }
+      if (patch.titleSource !== undefined) {
+        columns.push("title_source = ?");
+        values.push(patch.titleSource);
       }
       if (columns.length === 0) {
         return;

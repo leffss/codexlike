@@ -216,6 +216,8 @@ const api: CodexLikeApi = {
     resize: (sessionId, size) =>
       ipcRenderer.invoke(IPC.terminals.resize, sessionId, size),
     kill: (sessionId) => ipcRenderer.invoke(IPC.terminals.kill, sessionId),
+    rename: (sessionId, title) =>
+      ipcRenderer.invoke(IPC.terminals.rename, sessionId, title),
     subscribe: (sessionId) =>
       ipcRenderer.invoke(IPC.terminals.subscribe, sessionId),
     unsubscribe: (sessionId) =>

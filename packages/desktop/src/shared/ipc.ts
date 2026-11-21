@@ -206,6 +206,8 @@ export const IPC = {
     resize: "terminals:resize",
     /** 终止会话（用户 kill 不弹确认，非破坏性）；进程树终止由适配器保证 */
     kill: "terminals:kill",
+    /** 用户改名（标题功能轮）：设置展示标题，此后 OSC 动态更新不再覆盖 */
+    rename: "terminals:rename",
     /**
      * 订阅字节流并取初始回放：返回会话记录与当前缓冲全量（manager.bufferedOutput，
      * 不推读取水位——05 票工具 read 的水位语义不受影响）。重复订阅幂等。
@@ -474,6 +476,14 @@ export interface TerminalApi {
   resize(sessionId: string, size: PtySize): Promise<void>;
   /** 终止会话（进程树死透由适配器保证）；重复 kill 已退出会话返回明确拒绝 */
   kill(sessionId: string): Promise<{ ok: true } | TerminalActionFailure>;
+  /**
+   * 用户改名（标题功能轮）：设置展示标题（source=user），此后 OSC 动态更新
+   * 不再覆盖。会话不存在 / 已退出 / 空串 / 超长返回 ok:false（中文 reason）。
+   */
+  rename(
+    sessionId: string,
+    title: string
+  ): Promise<{ ok: true } | TerminalActionFailure>;
   /**
    * 订阅字节流并取初始回放（三段式的订阅段）：先订阅后读缓冲，订阅后的
    * 实时输出经 onSessionData 推送，不丢不重。重复订阅幂等（不叠加转发）。

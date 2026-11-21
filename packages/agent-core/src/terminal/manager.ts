@@ -7,15 +7,18 @@
  * 管理器是宿主级常驻实体——不挂消息循环、任务中断不杀会话（ADR 0033）。
  */
 import type { PtyPort, PtySize } from "./pty-port";
+import { createOscTitleScanner, type OscTitleScanner } from "./osc-title";
 import {
   DEFAULT_TERMINAL_BUFFER_MAX_BYTES,
   DEFAULT_TERMINAL_MAX_ALIVE_PER_TASK,
   TERMINAL_SNAPSHOT_BYTES,
+  TERMINAL_TITLE_MAX_CHARS,
   type TerminalActionFailure,
   type TerminalReadResult,
   type TerminalSessionEvent,
   type TerminalSessionRecord,
   type TerminalSpawnRequest,
+  type TerminalTitleSource,
 } from "./types";
 
 export interface TerminalSessionManagerOptions {
@@ -55,6 +58,15 @@ export interface TerminalSessionManager {
    * 模型侧需要分辨「已终止」与「本次操作生效」）。
    */
   kill(sessionId: string): { ok: true } | TerminalActionFailure;
+  /**
+   * 用户改名（标题功能轮）：设置展示标题（source=user），此后 OSC 动态更新
+   * 不再覆盖（手动命名优先）。已退出会话只读回看拒绝改名（记录已在库行，
+   * 改内存不一致）；title 经 trim，空串 / 超长拒绝。
+   */
+  rename(
+    sessionId: string,
+    title: string
+  ): { ok: true } | TerminalActionFailure;
   /**
    * 应用退出 flush（ADR 0033 退出屏障）：kill 全部存活会话并等待各自 exit
    * 事件（终态与快照在 exit 时机生成）；端口实现异常不发 exit 时经兜底超时
@@ -150,6 +162,8 @@ export function createTerminalSessionManager(
     waiters: Set<() => void>;
     /** 字节流转发订阅（desktop 直写 xterm.js 专用 IPC 通道） */
     dataListeners: Set<(data: string) => void>;
+    /** OSC 0/2 标题扫描（跨 chunk 有状态；与缓冲/转发互不干扰） */
+    titleScanner: OscTitleScanner;
   }
 
   const sessions = new Map<string, SessionEntry>();
@@ -217,6 +231,24 @@ export function createTerminalSessionManager(
       }
     }
     return count;
+  }
+
+  /**
+   * 设置展示标题并广播（OSC 动态写入与用户改名共用）：同值静默（shell 每
+   * 提示符刷一次标题，重复事件是噪音）；user 来源后 auto 不再覆盖。
+   */
+  function setTitle(
+    entry: SessionEntry,
+    title: string,
+    source: TerminalTitleSource
+  ): void {
+    if (entry.record.title === title) return;
+    entry.record = {
+      ...entry.record,
+      title,
+      titleSource: source,
+    };
+    emitEvent({ kind: "terminal-title-changed", record: { ...entry.record } });
   }
 
   /**
@@ -294,11 +326,18 @@ export function createTerminalSessionManager(
         lostUnread: false,
         waiters: new Set(),
         dataListeners: new Set(),
+        titleScanner: createOscTitleScanner(),
       };
       sessions.set(sessionId, entry);
       // PTY 输出统一进缓冲（水位读取与快照的数据源）+ 高频字节流转发
       process.onData((data) => {
         appendBuffer(entry, data);
+        // OSC 0/2 标题动态写入（用户改名后 source=user 不被覆盖）；同值
+        // 在 setTitle 内静默（shell 每提示符刷新是常态）
+        if (entry.record.titleSource !== "user") {
+          const title = entry.titleScanner.feed(data);
+          if (title !== null) setTitle(entry, title, "auto");
+        }
         for (const listener of entry.dataListeners) listener(data);
         for (const wake of entry.waiters) wake();
       });
@@ -344,6 +383,31 @@ export function createTerminalSessionManager(
         };
       }
       entry.process.kill();
+      return { ok: true };
+    },
+
+    rename(sessionId, title) {
+      const entry = sessions.get(sessionId);
+      if (entry === undefined) {
+        return { ok: false, reason: `终端会话不存在：${sessionId}` };
+      }
+      if (entry.record.status !== "running") {
+        return {
+          ok: false,
+          reason: `终端会话已退出，无法改名：${entry.record.name}`,
+        };
+      }
+      const trimmed = title.trim();
+      if (trimmed === "") {
+        return { ok: false, reason: "标题不能为空" };
+      }
+      if (trimmed.length > TERMINAL_TITLE_MAX_CHARS) {
+        return {
+          ok: false,
+          reason: `标题过长（上限 ${TERMINAL_TITLE_MAX_CHARS} 字符）`,
+        };
+      }
+      setTitle(entry, trimmed, "user");
       return { ok: true };
     },
 

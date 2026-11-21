@@ -45,6 +45,10 @@
   --surface-muted: #f7f6f3; /* Notion 暖灰：侧栏 / 输入卡等次级面 */
   --hover: rgba(55, 53, 47, 0.06);
   --selected: rgba(55, 53, 47, 0.09);
+  /* 终端选区高亮墨（= 前景墨）：xterm DOM renderer 把选区色与背景 blend 成
+   * 不透明 overlay 压在字形上方，色值带 α 会被 blend 吃掉；必须给不透明色，
+   * 透明感由下方 .terminal-xterm 规则的 opacity 补（契约见 lib/terminal-theme.ts） */
+  --terminal-selection: #37352f;
 
   /* 内容：暖黑 + 暖灰 */
   --fg: #37352f;
@@ -119,6 +123,8 @@
   --surface-muted: #2a2827;
   --hover: rgba(237, 233, 223, 0.06);
   --selected: rgba(237, 233, 223, 0.1);
+  /* 终端选区高亮墨：深色套取前景暖白同墨（浅色注释同款契约） */
+  --terminal-selection: #e6e4df;
 
   /* 内容：暖白 + 暖灰 */
   --fg: #e6e4df;
@@ -500,4 +506,15 @@ body {
 .overflow-scroll,
 .overflow-y-scroll {
   scrollbar-gutter: stable;
+}
+
+/*
+ * 终端选区透明感（lib/terminal-theme.ts 契约的另一半）：xterm DOM renderer
+ * 的选区 overlay 是不透明矩形（主题色先与背景 blend，压在字形上方）——
+ * 不压 opacity 时整块盖住选中文字（2026-11-21 选中不可读 bug）。α=0.3：
+ * 墨与前景同墨，默认字形区混合色恒等于字形原色（可读性上界），空白区呈
+ * 30% 淡墨高亮；只作用于选区 overlay，xterm 自身无同属性规则、无冲突。
+ */
+.terminal-xterm .xterm-selection div {
+  opacity: 0.3;
 }

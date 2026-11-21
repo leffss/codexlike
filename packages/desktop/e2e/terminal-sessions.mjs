@@ -40,6 +40,10 @@ const AGENT_TASK = "委派终端链路";
 // 这些数字，行节点精确匹配到它们即证明命令真实执行（输入回显不可能命中）。
 const USER_COMMAND = "echo $((1000+42))";
 const USER_OUTPUT = "1042";
+// 复制/粘贴链路（Windows Terminal 同款惯例）：粘贴值经算术展开 5137——粘贴
+// 原文不含输出数字，行节点精确匹配即证明粘贴文本真实进了 pty 执行。
+const PASTE_COMMAND = "echo $((5100+37))";
+const PASTE_OUTPUT = "5137";
 const AGENT_COMMAND = "echo $((7000+57))";
 const AGENT_OUTPUT = "7057";
 const AGENT_DONE = "agent 终端链路完成";
@@ -194,12 +198,13 @@ async function main() {
       "终端 tab 初始态应显示无会话文案"
     );
 
-    // 新建用户侧会话：运行中组出现，富行含会话名与「用户」来源标
+    // 新建用户侧会话：运行中组出现，富行含「用户」来源标 + OSC 动态标题
+    // （标题功能轮：git-bash 启动即发 OSC 0「MINGW64:<cwd>」，rail 行跟随；
+    // 会话名「git-bash · 1」仍在消息流标记行——标记行不跟随标题重写历史）
     await window.getByTestId("terminal-create").click();
-    const firstItem = window
-      .getByTestId("terminal-rail-item")
-      .filter({ hasText: "git-bash · 1" });
+    const firstItem = window.getByTestId("terminal-rail-item").first();
     await firstItem.waitFor({ timeout: 15000 });
+    await firstItem.filter({ hasText: "MINGW64:" }).waitFor({ timeout: 10000 });
     assert(
       (await firstItem.textContent()).includes("用户"),
       "用户侧会话富行应标注「用户」来源"
@@ -226,20 +231,153 @@ async function main() {
     // 详情页：顶栏 + xterm 手敲命令走真实输入路径（键盘 → onData → IPC write）
     await firstItem.click();
     await window.getByTestId("terminal-rail-detail-header").waitFor();
-    assert(
-      (await window.getByTestId("terminal-rail-title").textContent()) ===
-        "git-bash · 1",
-      "详情页标题应为会话名"
+    // 详情页标题 = OSC 动态值（title ?? name 口径，标题功能轮）
+    await window.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="terminal-rail-title"]')
+          ?.textContent?.startsWith("MINGW64:") === true,
+      undefined,
+      { timeout: 10000 }
     );
     assert(
       (await window.getByTestId("terminal-rail-kill").count()) === 1,
       "running 会话详情页应有终止按钮"
     );
+
+    // 用户改名（标题功能轮）：点标题 → 输入态 → 提交 → 顶栏与列表行跟随；
+    // source=user 后 shell 再刷 OSC 标题也不覆盖（manager 层口径，ui 断言
+    // 改名后行文本稳定为用户值）
+    await window.getByTestId("terminal-rail-title").click();
+    const renameInput = window.getByTestId("terminal-rename-input");
+    await renameInput.waitFor({ timeout: 5000 });
+    await renameInput.fill("部署终端");
+    await renameInput.press("Enter");
+    await window.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="terminal-rail-title"]')
+          ?.textContent === "部署终端",
+      undefined,
+      { timeout: 10000 }
+    );
+    console.log("[e2e] 用户改名：顶栏标题推进为用户值");
+
     await focusTerminal(window);
     await window.keyboard.type(USER_COMMAND);
     await window.keyboard.press("Enter");
     await xtermRowVisible(window, USER_OUTPUT);
+    // 新提示符到达 → shell 重发 OSC 标题（MINGW64:...）：source=user 不被覆盖
+    assert(
+      (await window.getByTestId("terminal-rail-title").textContent()) ===
+        "部署终端",
+      "shell 刷新 OSC 标题后用户改名应保持（手动命名优先）"
+    );
     console.log("[e2e] 用户侧手敲命令输出可见（xterm 文本层）");
+
+    // 选区可读性契约（2026-11-21 选中不可读修复）：xterm DOM renderer 的选区
+    // overlay 是不透明矩形压在字形上方，透明感靠 styles.css 的 opacity 压制
+    // （α=0.3）+ 高亮墨基色（--terminal-selection）。断言 overlay 计算样式：
+    // 未修复时 opacity=1 且 bg 是 blend 出的 ≈ 画布色（文字被整块盖住）。
+    {
+      const commandBox = await window.evaluate((marker) => {
+        const rows = document.querySelectorAll(
+          '[data-testid="terminal-xterm-host"] .xterm-rows > div'
+        );
+        for (const row of rows) {
+          if (row.textContent.includes(marker)) {
+            const rect = row.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            };
+          }
+        }
+        return null;
+      }, USER_COMMAND);
+      assert(commandBox !== null, "未找到命令回显行节点");
+      const startX = commandBox.x + 3;
+      const centerY = commandBox.y + commandBox.height / 2;
+      await window.mouse.move(startX, centerY);
+      await window.mouse.down();
+      await window.mouse.move(
+        startX + Math.min(commandBox.width - 5, 200),
+        centerY,
+        { steps: 8 }
+      );
+      await window.mouse.up();
+      const overlayStyle = await window.evaluate(() => {
+        const overlay = document.querySelector(
+          ".terminal-xterm .xterm-selection div"
+        );
+        if (overlay === null) return null;
+        const style = getComputedStyle(overlay);
+        return { opacity: style.opacity, background: style.backgroundColor };
+      });
+      assert(overlayStyle !== null, "选中后应存在选区 overlay");
+      assert(
+        overlayStyle.opacity === "0.3",
+        `选区 overlay 应压 opacity 0.3（实际 ${overlayStyle.opacity}）`
+      );
+      assert(
+        overlayStyle.background === "rgb(55, 53, 47)",
+        `选区基色应为高亮墨 --terminal-selection（实际 ${overlayStyle.background}）`
+      );
+      await window.getByTestId("terminal-xterm-host").click();
+      console.log("[e2e] 选区可读性契约（overlay α=0.3 + 高亮墨基色）");
+    }
+
+    // 复制/粘贴链路（真 OS 剪贴板）：预置剪贴板 → Ctrl+V 粘贴进 pty 执行 →
+    // 拖选回显行 → Ctrl+Shift+C 复制 → 读回 OS 剪贴板核对选区文本。
+    await focusTerminal(window);
+    await app.evaluate(({ clipboard }, command) => {
+      clipboard.writeText(command);
+    }, PASTE_COMMAND);
+    await window.keyboard.press("Control+v");
+    await window.keyboard.press("Enter");
+    await xtermRowVisible(window, PASTE_OUTPUT);
+    console.log("[e2e] Ctrl+V 粘贴进 pty 执行（算术展开输出可见）");
+    {
+      const pasteBox = await window.evaluate((marker) => {
+        const rows = document.querySelectorAll(
+          '[data-testid="terminal-xterm-host"] .xterm-rows > div'
+        );
+        for (const row of rows) {
+          if (row.textContent.includes(marker)) {
+            const rect = row.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            };
+          }
+        }
+        return null;
+      }, PASTE_COMMAND);
+      assert(pasteBox !== null, "未找到粘贴回显行节点");
+      const startX = pasteBox.x + 3;
+      const centerY = pasteBox.y + pasteBox.height / 2;
+      await window.mouse.move(startX, centerY);
+      await window.mouse.down();
+      await window.mouse.move(
+        startX + Math.min(pasteBox.width - 5, 200),
+        centerY,
+        { steps: 8 }
+      );
+      await window.mouse.up();
+      await window.keyboard.press("Control+Shift+c");
+      const copied = await app.evaluate(({ clipboard }) =>
+        clipboard.readText()
+      );
+      assert(
+        copied.includes(PASTE_COMMAND),
+        `Ctrl+Shift+C 后 OS 剪贴板应含选区原文：${JSON.stringify(copied)}`
+      );
+      await window.getByTestId("terminal-xterm-host").click();
+      console.log("[e2e] Ctrl+Shift+C 复制选区到 OS 剪贴板");
+    }
 
     // kill（用户 kill 不弹确认，ADR 0033）：详情页原位转只读回看，输出仍在
     await window.getByTestId("terminal-rail-kill").click();
@@ -309,10 +447,14 @@ async function main() {
     );
     await agentMarker.click();
     await window.getByTestId("terminal-rail-detail-header").waitFor();
-    assert(
-      (await window.getByTestId("terminal-rail-title").textContent()) ===
-        "git-bash · 2",
-      "直跳应落在 agent 会话详情页"
+    // 直跳落在 agent 会话详情页：标题为 OSC 动态值（title ?? name，标题功能轮）
+    await window.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="terminal-rail-title"]')
+          ?.textContent?.startsWith("MINGW64:") === true,
+      undefined,
+      { timeout: 10000 }
     );
     assert(
       (await window
@@ -354,9 +496,9 @@ async function main() {
       "agent 会话详情页应原位转只读回看"
     );
     await window.getByTestId("terminal-rail-back").click();
-    const exitedItems = window
-      .getByTestId("terminal-rail-item")
-      .filter({ hasText: "git-bash · " });
+    // 会话名已不用于行定位（rail 行展示标题），只数行数：两行 = 用户侧改名会话
+    // + agent 侧会话（都在「已退出」组，空组不渲染 → 唯一组头）
+    const exitedItems = window.getByTestId("terminal-rail-item");
     assert(
       (await exitedItems.count()) === 2,
       "「已退出」组应有两个会话（用户侧 + agent 侧）"

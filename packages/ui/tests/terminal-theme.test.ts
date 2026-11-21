@@ -3,17 +3,22 @@ import { describe, expect, it } from "vitest";
 import { xtermPaletteFromTokens } from "../src/lib/terminal-theme";
 
 describe("terminal-theme：语义 token → xterm palette（一处收口映射）", () => {
-  it("基础面槽位取对应语义 token（背景/前景/光标/选区）", () => {
+  it("基础面槽位取对应语义 token（背景/前景/光标/选区高亮墨）", () => {
     const palette = xtermPaletteFromTokens({
       "--canvas": "#1f1e1c",
       "--fg": "#e6e4df",
-      "--selected": "rgba(237, 233, 223, 0.1)",
+      "--terminal-selection": "#e6e4df",
     });
     expect(palette.background).toBe("#1f1e1c");
     expect(palette.foreground).toBe("#e6e4df");
     expect(palette.cursor).toBe("#e6e4df");
     expect(palette.cursorAccent).toBe("#1f1e1c");
-    expect(palette.selectionBackground).toBe("rgba(237, 233, 223, 0.1)");
+    // 选区基色 = 不透明高亮墨（--terminal-selection，与前景同墨）：xterm DOM
+    // renderer 把主题选区色与背景 blend 成不透明 overlay 压在字形上方，低透明
+    // 度 token 会被 blend 吃掉 α、混出 ≈ 背景色整块盖字（2026-11-21 选中不可
+    // 读 bug）；配合 styles.css 对 overlay div 的 opacity 压制，字形区混合色
+    // 恒等于字形原色，空区呈淡墨高亮
+    expect(palette.selectionBackground).toBe("#e6e4df");
   });
 
   it("ANSI 16 色借语义色 token：red/green/yellow/blue/magenta/cyan/white + black", () => {

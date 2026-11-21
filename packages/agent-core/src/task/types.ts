@@ -386,4 +386,10 @@ export type TaskEvent =
    * 终端会话退出：record 含终态（exitedAt / exitCode / 终态 64KB 快照）。
    * 迟到的残留输出不进入快照（快照定格于退出时刻）。
    */
-  | { type: "terminal-exited"; record: TerminalSessionRecord };
+  | { type: "terminal-exited"; record: TerminalSessionRecord }
+  /**
+   * 终端会话标题变化（标题功能轮）：OSC 0/2 动态写入或用户改名，record 为
+   * 变化后完整副本。只进 rail 列表归并（useTerminalSessions 直连 onTaskEvent），
+   * 消息流标记行保持启动时身份、不跟随标题重写历史（live-task 闸门不放行）。
+   */
+  | { type: "terminal-title-changed"; record: TerminalSessionRecord };

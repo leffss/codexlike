@@ -112,10 +112,11 @@ async function main() {
 
     await openTerminalRailTab(window);
     await window.getByTestId("terminal-create").click();
-    const item = window
-      .getByTestId("terminal-rail-item")
-      .filter({ hasText: "git-bash · 1" });
+    // rail 行展示 OSC 动态标题（标题功能轮）：git-bash 启动即发 MINGW64:<cwd>，
+    // 行文本跟随 shell 标题而非默认名
+    const item = window.getByTestId("terminal-rail-item").first();
     await item.waitFor({ timeout: 15000 });
+    await item.filter({ hasText: "MINGW64:" }).waitFor({ timeout: 10000 });
     await item.click();
     await window.getByTestId("terminal-rail-detail-header").waitFor();
     await focusTerminal(window);
@@ -186,12 +187,15 @@ async function main() {
       .waitFor({ timeout: 10000 });
 
     // 「已退出」组从库恢复：重启后内存注册表空，view.terminals 并行字段
-    // 下发已退出记录 → rail 列表恢复（08 票断言路径）
+    // 下发已退出记录 → rail 列表恢复（08 票断言路径）。恢复行展示标题
+    // （标题功能轮）：exit 时刻 record 的 OSC 标题已随终态落库，重启后
+    // 从库行读回——行文本 MINGW64: 前缀即标题列往返的端到端证据
     await openTerminalRailTab(window);
-    const restoredItem = window
-      .getByTestId("terminal-rail-item")
-      .filter({ hasText: "git-bash · 1" });
+    const restoredItem = window.getByTestId("terminal-rail-item").first();
     await restoredItem.waitFor({ timeout: 15000 });
+    await restoredItem
+      .filter({ hasText: "MINGW64:" })
+      .waitFor({ timeout: 10000 });
     const headers = window.getByTestId("terminal-rail-group-header");
     assert(
       (await headers.count()) === 1 &&

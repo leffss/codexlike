@@ -181,7 +181,9 @@ describe("node-pty-port spawn（shell 命令行映射与环境透传）", () => 
     expect(fakePty.spawnCalls[0]?.file).toBe("powershell.exe");
     expect(fakePty.spawnCalls[0]?.args).toEqual(["-NoLogo"]);
     expect(fakePty.spawnCalls[1]?.file).toBe("cmd.exe");
-    expect(fakePty.spawnCalls[1]?.args).toEqual([]);
+    // cmd 无 NoLogo 旗标：/k cls 先清屏再去提示符（conpty 实证 banner 被
+    // 清掉且含 scrollback 清理），交互语义 /k 保持不变
+    expect(fakePty.spawnCalls[1]?.args).toEqual(["/k", "cls"]);
   });
 });
 

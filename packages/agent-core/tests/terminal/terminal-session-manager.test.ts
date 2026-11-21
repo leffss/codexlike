@@ -685,3 +685,89 @@ describe("TerminalSessionManager 会话注册（fake PtyPort 驱动）", () => {
     expect(manager.session(agent.sessionId)?.origin).toBe("agent");
   });
 });
+
+describe("TerminalSessionManager 标题（OSC 0/2 动态 + 用户改名）", () => {
+  it("OSC 标题到达：record.title 更新（source=auto）并发 terminal-title-changed 事件", () => {
+    const port = new FakePtyPort();
+    const manager = createTerminalSessionManager({ port });
+    const spawned = manager.spawn({ ...spawnArgs("task-1") });
+    expect(spawned.ok).toBe(true);
+    if (!spawned.ok) throw new Error("spawn 应成功");
+
+    const events: string[] = [];
+    const records: Array<{ title?: string; titleSource?: string }> = [];
+    manager.onEvent((event) => {
+      events.push(event.kind);
+      if (event.kind === "terminal-title-changed") {
+        records.push({
+          title: event.record.title,
+          titleSource: event.record.titleSource,
+        });
+      }
+    });
+
+    port.spawned[0]!.emitData("\u001b]0;MINGW64:/tmp\u0007");
+    expect(manager.session(spawned.sessionId)?.title).toBe("MINGW64:/tmp");
+    expect(manager.session(spawned.sessionId)?.titleSource).toBe("auto");
+    expect(events).toEqual(["terminal-title-changed"]);
+    expect(records).toEqual([{ title: "MINGW64:/tmp", titleSource: "auto" }]);
+  });
+
+  it("conpty exe 路径回声不产生标题事件；重复同值标题不重复发事件", () => {
+    const port = new FakePtyPort();
+    const manager = createTerminalSessionManager({ port });
+    const spawned = manager.spawn({ ...spawnArgs("task-1") });
+    if (!spawned.ok) throw new Error("spawn 应成功");
+
+    let titleEvents = 0;
+    manager.onEvent((event) => {
+      if (event.kind === "terminal-title-changed") titleEvents += 1;
+    });
+    // powershell 启动回声：exe 绝对路径 → 过滤不发
+    port.spawned[0]!.emitData(
+      "\u001b]0;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u0007"
+    );
+    expect(titleEvents).toBe(0);
+    // shell 每提示符刷新同值标题 → 只在首次变化时发事件
+    port.spawned[0]!.emitData("\u001b]2;cwd\u0007");
+    port.spawned[0]!.emitData("\u001b]2;cwd\u0007");
+    expect(titleEvents).toBe(1);
+  });
+
+  it("rename 设置标题（source=user），此后 OSC 更新不再覆盖且不发事件", () => {
+    const port = new FakePtyPort();
+    const manager = createTerminalSessionManager({ port });
+    const spawned = manager.spawn({ ...spawnArgs("task-1") });
+    if (!spawned.ok) throw new Error("spawn 应成功");
+
+    expect(manager.rename(spawned.sessionId, "  构建服务器  ")).toEqual({
+      ok: true,
+    });
+    expect(manager.session(spawned.sessionId)?.title).toBe("构建服务器");
+    expect(manager.session(spawned.sessionId)?.titleSource).toBe("user");
+
+    let titleEvents = 0;
+    manager.onEvent((event) => {
+      if (event.kind === "terminal-title-changed") titleEvents += 1;
+    });
+    port.spawned[0]!.emitData("\u001b]0;MINGW64:/other\u0007");
+    expect(manager.session(spawned.sessionId)?.title).toBe("构建服务器");
+    expect(titleEvents).toBe(0);
+  });
+
+  it("rename 拒绝面：会话不存在 / 已退出 / 空串 / 超长，中文 reason", () => {
+    const port = new FakePtyPort();
+    const manager = createTerminalSessionManager({ port });
+    const spawned = manager.spawn({ ...spawnArgs("task-1") });
+    if (!spawned.ok) throw new Error("spawn 应成功");
+
+    expect(manager.rename("no-such", "x")?.ok).toBe(false);
+    expect(manager.rename(spawned.sessionId, "   ")?.ok).toBe(false);
+    expect(manager.rename(spawned.sessionId, "长".repeat(101))?.ok).toBe(false);
+    // 已退出：只读回看不可改名
+    port.spawned[0]!.emitExit({ exitCode: 0 });
+    const refused = manager.rename(spawned.sessionId, "新名");
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toContain("已退出");
+  });
+});

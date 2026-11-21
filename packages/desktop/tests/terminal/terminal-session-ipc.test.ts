@@ -138,7 +138,9 @@ async function setup(options?: {
     taskId: string;
     event: Extract<
       TaskEventEnvelope["event"],
-      { type: "terminal-started" | "terminal-exited" }
+      {
+        type: "terminal-started" | "terminal-exited" | "terminal-title-changed";
+      }
     >;
   }[] = [];
   let shellSetting = options?.shell ?? "git-bash";
@@ -158,7 +160,8 @@ async function setup(options?: {
       // 桥契约收口：终端 IPC 只应下发 terminal-* 事件
       if (
         event.type !== "terminal-started" &&
-        event.type !== "terminal-exited"
+        event.type !== "terminal-exited" &&
+        event.type !== "terminal-title-changed"
       ) {
         throw new Error(`意外的任务事件：${event.type}`);
       }
@@ -453,4 +456,50 @@ it("session/listFor 提供快照段：单会话与任务内清单（含已退出
         .status
     ).toBe("exited")
   );
+});
+
+it("改名与 OSC 标题（标题功能轮）：rename 生效、标题变化桥接 terminal-title-changed", async () => {
+  const app = await setup();
+  const { sessionId } = invoke(IPC.terminals.create, {
+    taskId: "task-1",
+  }) as { ok: true; sessionId: string };
+
+  // OSC 0 标题到达 → record.title 更新（source=auto）→ 桥接 title-changed
+  app.records[0]!.emitData("\u001b]0;MINGW64:/tmp\u0007");
+  const bridged = app.pushed.filter(
+    (item) => item.event.type === "terminal-title-changed"
+  );
+  expect(bridged).toHaveLength(1);
+  expect(bridged[0]!.event.record).toMatchObject({
+    sessionId,
+    title: "MINGW64:/tmp",
+    titleSource: "auto",
+  });
+  // 用户改名 → source=user，此后 OSC 不再覆盖
+  expect(invoke(IPC.terminals.rename, sessionId, "  部署终端  ")).toEqual({
+    ok: true,
+  });
+  expect(app.sessions.session(sessionId)).toMatchObject({
+    title: "部署终端",
+    titleSource: "user",
+  });
+  app.records[0]!.emitData("\u001b]0;MINGW64:/other\u0007");
+  expect(app.sessions.session(sessionId)).toMatchObject({
+    title: "部署终端",
+  });
+  // 改名后桥接仍逐次下发（rail 列表呈现跟随）
+  expect(
+    app.pushed.filter((item) => item.event.type === "terminal-title-changed")
+  ).toHaveLength(2);
+
+  // 拒绝面：空串 / 会话不存在（中文 reason 原样返回）
+  expect(invoke(IPC.terminals.rename, sessionId, "   ")).toMatchObject({
+    ok: false,
+  });
+  expect(invoke(IPC.terminals.rename, "no-such", "x")).toMatchObject({
+    ok: false,
+  });
+  // 参数不合法：中文异常抛回渲染进程
+  expect(() => invoke(IPC.terminals.rename, sessionId, 42)).toThrow("标题");
+  expect(() => invoke(IPC.terminals.rename, "", "x")).toThrow("sessionId");
 });

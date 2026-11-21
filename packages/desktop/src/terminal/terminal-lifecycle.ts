@@ -109,7 +109,9 @@ export async function settleTerminalSessionsOnStartup(
 /**
  * 终端会话退出推进的 update patch（code review 修复轮收敛：原先事件桥与
  * 退出屏障各写一份同款字段清单）：status/exitedAt/exitCode/signal/snapshot
- * 五列，即 persistence.updateTerminalSession 契约注释声明的可更新全集。
+ * 五列 + 标题两列（标题功能轮：终态 record 携带的最终标题随终态落库，重启
+ * 恢复的只读回看行保留 OSC 动态值 / 用户改名），即
+ * persistence.updateTerminalSession 契约注释声明的可更新全集。
  * exitCode/signal/快照缺省容忍（兜底置终态的 record 无 exitCode）。
  */
 function terminalExitPatch(record: TerminalSessionRecord): {
@@ -118,6 +120,8 @@ function terminalExitPatch(record: TerminalSessionRecord): {
   exitCode?: number;
   signal?: number;
   snapshot?: string;
+  title?: string;
+  titleSource?: TerminalSessionRecord["titleSource"];
 } {
   return {
     status: record.status,
@@ -125,6 +129,10 @@ function terminalExitPatch(record: TerminalSessionRecord): {
     exitCode: record.exitCode,
     signal: record.signal,
     snapshot: record.snapshot,
+    ...(record.title !== undefined ? { title: record.title } : {}),
+    ...(record.titleSource !== undefined
+      ? { titleSource: record.titleSource }
+      : {}),
   };
 }
 
@@ -132,9 +140,10 @@ function terminalExitPatch(record: TerminalSessionRecord): {
  * 终端会话落库桥（ADR 0033 票 08）：manager.onEvent → `terminal_sessions`
  * 表行。spawn 即写骨架行（status=running）——进程中途被杀也有「曾开过」
  * 的留痕（先例 subagents 注册行 queued 即写，ADR 0021）；exit 事件定格
- * 快照后一次推进终态（killAll 等 exit 齐全语义保证快照已定格再写）。
- * exitCode/signal/快照缺省容忍（兜底置终态的 record 无 exitCode）。
- * 目标行不存在时静默忽略（updateSubagent 同语义）。
+ * 快照后一次推进终态（killAll 等 exit 齐全语义保证快照已定格再写）；
+ * 标题变化（标题功能轮）即时落标题两列——行随内存 record 同步，应用中途
+ * 被杀时库行不丢改名。exitCode/signal/快照缺省容忍（兜底置终态的 record
+ * 无 exitCode）。目标行不存在时静默忽略（updateSubagent 同语义）。
  */
 export function recordTerminalSessionEvent(
   persistence: TaskPersistence,
@@ -142,6 +151,16 @@ export function recordTerminalSessionEvent(
 ): void {
   if (event.kind === "terminal-started") {
     persistence.insertTerminalSession(event.record);
+    return;
+  }
+  if (event.kind === "terminal-title-changed") {
+    const { record } = event;
+    persistence.updateTerminalSession(record.sessionId, {
+      ...(record.title !== undefined ? { title: record.title } : {}),
+      ...(record.titleSource !== undefined
+        ? { titleSource: record.titleSource }
+        : {}),
+    });
     return;
   }
   const { record } = event;

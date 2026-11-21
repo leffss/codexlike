@@ -31,8 +31,15 @@ interface LiveExecution {
  * 终端会话是宿主级常驻、任务中断不杀（ADR 0033）——事件可能在无执行现场
  * （空闲）、已终态（terminalAt > 0）或用户停止（stopped）后到达，三个关口
  * 都须放行：它们是任务级状态快照事件，不是执行现场的新正文/工具。
+ * 标题变化（标题功能轮）同为会话级状态：只进 rail 列表归并（useTerminal
+ * Sessions 直连 onTaskEvent），消息流闸门（ui live-task）不放行、标记行不
+ * 重写历史。
  */
-const TERMINAL_EVENT_TYPES = ["terminal-started", "terminal-exited"];
+const TERMINAL_EVENT_TYPES = [
+  "terminal-started",
+  "terminal-exited",
+  "terminal-title-changed",
+];
 
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();

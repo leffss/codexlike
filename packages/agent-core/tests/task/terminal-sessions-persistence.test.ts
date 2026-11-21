@@ -254,3 +254,40 @@ describe("terminal_sessions 落库（票 08）", () => {
     reopened.close();
   });
 });
+
+describe("terminal_sessions 标题列（标题功能轮）", () => {
+  it("标题随 exit patch 落库：关库重开读回 OSC 动态值 / 用户改名；旧行 NULL 读回缺省", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    // 骨架行无标题 → 读回无 title 字段（回退 name 呈现）
+    store.insertTerminalSession(runningRecord());
+    store.updateTerminalSession("term-1", {
+      status: "exited",
+      exitedAt: "2026-11-21T08:01:00.000Z",
+      exitCode: 0,
+      snapshot: "output",
+      title: "部署终端",
+      titleSource: "user",
+    });
+    store.close();
+    const reopened = createSqliteTaskStore(dbPath);
+    const rows = reopened.listTerminalSessions("task-1");
+    expect(rows[0]).toMatchObject({
+      sessionId: "term-1",
+      title: "部署终端",
+      titleSource: "user",
+      status: "exited",
+    });
+    reopened.close();
+
+    // 无标题的会话（OSC 未发过、未改名）：读回 title/titleSource 缺省
+    const plain = createSqliteTaskStore(":memory:");
+    plain.insertTask(taskRecord());
+    plain.insertTerminalSession(runningRecord({ sessionId: "term-2" }));
+    const row = plain.listTerminalSessions("task-1")[0]!;
+    expect(row.title).toBeUndefined();
+    expect(row.titleSource).toBeUndefined();
+    plain.close();
+  });
+});

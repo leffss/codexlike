@@ -195,6 +195,10 @@ function installBrowserStub(): void {
         ok: false as const,
         reason: "dev 预览环境不支持终端会话",
       }),
+      rename: async () => ({
+        ok: false as const,
+        reason: "dev 预览环境不支持终端会话",
+      }),
       subscribe: async (sessionId: string) => ({
         ok: false as const,
         reason: `dev 预览环境不支持终端会话：${sessionId}`,

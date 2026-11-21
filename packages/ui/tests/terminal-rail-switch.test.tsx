@@ -44,6 +44,14 @@ const xtermFakes = vi.hoisted(() => {
       this.dataHandler = cb;
       return { dispose: () => {} };
     };
+    /** 复制/粘贴接线（attachCustomKeyEventHandler 捕获，用例手动派发按键） */
+    keyHandler: ((event: KeyboardEvent) => boolean) | null = null;
+    attachCustomKeyEventHandler = (cb: (event: KeyboardEvent) => boolean) => {
+      this.keyHandler = cb;
+    };
+    /** 选区态（用例按需覆写模拟「已有选区」） */
+    hasSelection = () => false;
+    getSelection = () => "";
     dispose = () => {};
     constructor(opts: FakeOpts) {
       this.opts = opts;
@@ -214,6 +222,7 @@ function bodyProps(
     creating: false,
     onKill() {},
     killingSessionId: null,
+    onRename() {},
     focus: null,
     ...overrides,
   };
@@ -637,6 +646,137 @@ describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律�
   });
 });
 
+describe("TerminalSessionView 复制/粘贴接线（Ctrl+C/V + Shift 变体）", () => {
+  /**
+   * jsdom 无 navigator.clipboard：注入可控 fake。Electron 渲染端
+   * navigator.clipboard 即 OS 剪贴板（AssistantActions 同款用法）。
+   */
+  function installClipboard() {
+    const clipboard = {
+      written: [] as string[],
+      readTextResult: "粘贴内容",
+      writeText: async (text: string) => {
+        clipboard.written.push(text);
+      },
+      readText: async () => clipboard.readTextResult,
+    };
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: clipboard,
+      configurable: true,
+    });
+    return clipboard;
+  }
+
+  /** attachCustomKeyEventHandler 只消费这五个字段，极简事件即可 */
+  function keyEvent(
+    overrides: {
+      ctrlKey?: boolean;
+      shiftKey?: boolean;
+      key?: string;
+      type?: string;
+    } = {}
+  ): KeyboardEvent {
+    return {
+      type: "keydown",
+      ctrlKey: true,
+      shiftKey: false,
+      key: "c",
+      ...overrides,
+    } as KeyboardEvent;
+  }
+
+  async function mountTerm() {
+    installStub();
+    render(<TerminalRailPanelBody {...bodyProps()} />);
+    fireEvent.click(listItemAt(0));
+    await waitFor(() => {
+      expect(xtermFakes.instances).toHaveLength(1);
+    });
+    return xtermFakes.instances[0]!;
+  }
+
+  it("Ctrl+C 有选区：选区文本进剪贴板、吞键不透传 ^C", async () => {
+    const clipboard = installClipboard();
+    const term = await mountTerm();
+    term.hasSelection = () => true;
+    term.getSelection = () => "选中输出";
+    expect(term.keyHandler!(keyEvent())).toBe(false);
+    await waitFor(() => {
+      expect(clipboard.written).toEqual(["选中输出"]);
+    });
+    expect(ipc.state.calls.write).toEqual([]);
+  });
+
+  it("Ctrl+C 无选区：透传返回 true（SIGINT 主路径不吞）", async () => {
+    const clipboard = installClipboard();
+    const term = await mountTerm();
+    expect(term.keyHandler!(keyEvent())).toBe(true);
+    expect(clipboard.written).toEqual([]);
+  });
+
+  it("Ctrl+Shift+C 恒复制；无选区吞键但不写剪贴板", async () => {
+    const clipboard = installClipboard();
+    const term = await mountTerm();
+    term.hasSelection = () => true;
+    term.getSelection = () => "命令行文本";
+    expect(term.keyHandler!(keyEvent({ shiftKey: true }))).toBe(false);
+    await waitFor(() => {
+      expect(clipboard.written).toEqual(["命令行文本"]);
+    });
+    // 清空 written 后验证无选区分支：吞键（不 SIGINT）但剪贴板不动
+    clipboard.written.length = 0;
+    term.hasSelection = () => false;
+    term.getSelection = () => "";
+    expect(term.keyHandler!(keyEvent({ shiftKey: true }))).toBe(false);
+    expect(clipboard.written).toEqual([]);
+  });
+
+  it("Ctrl+V：读剪贴板写入 pty（terminals:write 原文透传）", async () => {
+    installClipboard();
+    const term = await mountTerm();
+    expect(term.keyHandler!(keyEvent({ key: "v" }))).toBe(false);
+    await waitFor(() => {
+      expect(ipc.state.calls.write).toEqual([
+        { sessionId: "ts-1", data: "粘贴内容" },
+      ]);
+    });
+  });
+
+  it("已退出会话 Ctrl+V：吞键不写（只读回看）", async () => {
+    installClipboard();
+    installStub();
+    render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg({
+              status: "exited",
+              exitCode: 0,
+              exitedAt: "2026-11-21T08:01:00.000Z",
+            }),
+          ],
+        })}
+      />
+    );
+    fireEvent.click(listItemAt(0));
+    await waitFor(() => {
+      expect(xtermFakes.instances).toHaveLength(1);
+    });
+    const term = xtermFakes.instances[0]!;
+    expect(term.keyHandler!(keyEvent({ key: "v" }))).toBe(false);
+    expect(ipc.state.calls.write).toEqual([]);
+  });
+
+  it("非剪贴板组合键一律透传：Ctrl+C 之外的 Ctrl 系、无 Ctrl 的普通键", async () => {
+    installClipboard();
+    const term = await mountTerm();
+    expect(term.keyHandler!(keyEvent({ key: "d" }))).toBe(true);
+    expect(term.keyHandler!(keyEvent({ key: "v", ctrlKey: false }))).toBe(true);
+    expect(term.keyHandler!(keyEvent({ type: "keyup" }))).toBe(true);
+    expect(ipc.state.calls.write).toEqual([]);
+  });
+});
+
 describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并）", () => {
   /** RailPanel 所需 props（改动 tab 默认；终端 tab 数据由 hook 拉取） */
   function railProps(
@@ -878,5 +1018,83 @@ describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并
     expect(screen.getAllByTestId("terminal-rail-item")).toHaveLength(2);
     // 运行中计数徽章只算运行中（恢复的已退出记录不计）
     expect(screen.getByTestId("terminal-rail-badge").textContent).toBe("1");
+  });
+});
+
+describe("TerminalSessionDetail 改名（标题功能轮）", () => {
+  /** 进详情页并进入改名输入态，返回输入框元素 */
+  async function openRenameInput(
+    onRename: (sessionId: string, title: string) => void
+  ) {
+    installStub();
+    render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [termSeg({ title: "构建服务器" })],
+          onRename,
+        })}
+      />
+    );
+    fireEvent.click(listItemAt(0));
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-rail-detail-header")).toBeTruthy();
+    });
+    expect(screen.getByTestId("terminal-rail-title").textContent).toBe(
+      "构建服务器"
+    );
+    fireEvent.click(screen.getByTestId("terminal-rail-title"));
+    return screen.getByTestId("terminal-rename-input");
+  }
+
+  it("点标题进输入态，Enter 提交 trim 后的值经 onRename", async () => {
+    const onRename = vi.fn();
+    const input = await openRenameInput(onRename);
+    fireEvent.change(input, { target: { value: "  部署终端  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith("ts-1", "部署终端");
+    // 提交后回到展示态
+    expect(screen.queryByTestId("terminal-rename-input")).toBeNull();
+  });
+
+  it("Esc 取消不提交；同值提交不触发 onRename", async () => {
+    const onRename = vi.fn();
+    const input = await openRenameInput(onRename);
+    fireEvent.change(input, { target: { value: "改一半" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("terminal-rename-input")).toBeNull();
+
+    // 再进编辑态：同值（含首尾空白）提交不触发
+    fireEvent.click(screen.getByTestId("terminal-rail-title"));
+    const again = screen.getByTestId("terminal-rename-input");
+    fireEvent.change(again, { target: { value: "  构建服务器  " } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it("已退出会话标题为纯文本，无改名入口", async () => {
+    installStub();
+    const onRename = vi.fn();
+    render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg({
+              status: "exited",
+              exitCode: 0,
+              exitedAt: "2026-11-21T08:01:00.000Z",
+            }),
+          ],
+          onRename,
+        })}
+      />
+    );
+    fireEvent.click(listItemAt(0));
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-rail-detail-header")).toBeTruthy();
+    });
+    // 纯文本 span：点击不产生输入态
+    fireEvent.click(screen.getByTestId("terminal-rail-title"));
+    expect(screen.queryByTestId("terminal-rename-input")).toBeNull();
   });
 });

@@ -68,9 +68,16 @@ export function registerTerminalSessionHandlers(options: {
         type: "terminal-started",
         record: event.record,
       });
-    } else {
+    } else if (event.kind === "terminal-exited") {
       pushTaskEvent(event.record.taskId, {
         type: "terminal-exited",
+        record: event.record,
+      });
+    } else {
+      // 标题变化（标题功能轮）：只进 rail 列表归并，消息流标记行保持启动时
+      // 身份（live-task 闸门不放行 terminal-title-changed，不重写历史）
+      pushTaskEvent(event.record.taskId, {
+        type: "terminal-title-changed",
         record: event.record,
       });
     }
@@ -148,6 +155,19 @@ export function registerTerminalSessionHandlers(options: {
         throw new Error("终止终端：sessionId 必须是非空字符串");
       }
       return sessions.kill(sessionId);
+    }
+  );
+
+  ipcMain.handle(
+    IPC.terminals.rename,
+    (_e: IpcMainInvokeEvent, sessionId: unknown, title: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("终端改名：sessionId 必须是非空字符串");
+      }
+      if (typeof title !== "string") {
+        throw new Error("终端改名：标题必须是字符串");
+      }
+      return sessions.rename(sessionId, title);
     }
   );
 

@@ -11,6 +11,16 @@ import type { ITheme } from "@xterm/xterm";
  * （diff 红绿、警告黄）与语义 token 的语义一致，且随 data-theme 翻转。
  * bright 系列与基础系列同色（VS Code 默认主题同款做法），仅 brightBlack
  * 用最弱前景（注释灰）与 brightWhite 用前景主色区分两端。
+ *
+ * 选区基色契约（2026-11-21 选中不可读修复）：xterm DOM renderer 把
+ * selectionBackground 与背景 blend 成**不透明** overlay 矩形压在字形上方
+ * （z-index 1，行容器 static），主题色带 α 会在 blend 里被吃掉、混出
+ * ≈ 背景色整块盖住文字。故 selectionBackground 必须是**不透明高亮墨**
+ * （--terminal-selection，与前景同墨），透明感由 styles.css 对
+ * .xterm-selection div 的 opacity 压制补回（α=0.3）：overlay 与其下内容
+ * 按不透明度混合，墨与前景同墨时默认字形区混合色恒等于字形原色
+ * （可读性上界），ANSI 彩字略压暗仍可读，空白区呈 30% 淡墨高亮。
+ * 改选区观感改 --terminal-selection + 该 opacity，不改此处。
  */
 
 /** xterm palette 消费的语义色值表（全部为 CSS 变量名，读取时求值） */
@@ -19,7 +29,7 @@ const PALETTE_TOKENS = {
   foreground: "--fg",
   cursor: "--fg",
   cursorAccent: "--canvas",
-  selectionBackground: "--selected",
+  selectionBackground: "--terminal-selection",
   black: "--accent",
   red: "--danger-fg",
   green: "--ok-fg",

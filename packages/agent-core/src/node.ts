@@ -140,4 +140,9 @@ export {
   DEFAULT_TERMINAL_BUFFER_MAX_BYTES,
   DEFAULT_TERMINAL_MAX_ALIVE_PER_TASK,
   TERMINAL_SNAPSHOT_BYTES,
+  TERMINAL_TITLE_MAX_CHARS,
 } from "./terminal/types";
+// OSC 0/2 标题扫描（标题功能轮）：纯逻辑无 IO，宿主侧无直接消费方
+// （管理器内部消费），导出供测试与后续宿主复用
+export { createOscTitleScanner } from "./terminal/osc-title";
+export type { OscTitleScanner } from "./terminal/osc-title";

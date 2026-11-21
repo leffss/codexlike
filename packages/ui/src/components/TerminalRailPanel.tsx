@@ -21,10 +21,16 @@ import TerminalSessionView from "./TerminalSessionView";
  *
  * 结构（拆页导航）：列表页 ↔ 详情页两页互斥。列表页为默认入口——头行
  * 计数摘要 +「+ 新建会话」（超上限的中文 reason 直接展示，不另造错误态）
- * + 按状态分组（运行中 → 已退出，空组不渲染；富行两行式：会话名 +
+ * + 按状态分组（运行中 → 已退出，空组不渲染；富行两行式：标题 +
  * 状态/来源/shell 类型/已用时元信息，来源标注 用户 / agent）；点行进详情页——顶栏
- * 返回 + 状态点 + 状态文案 + 会话名 + 已用时 + kill（running 才有，用户
- * kill 不弹确认，ADR 0033 非破坏性）+ 主体 xterm.js 终端区。
+ * 返回 + 状态点 + 状态文案 + 标题（running 可点击改名，标题功能轮）+ 已用时
+ * + kill（running 才有，用户 kill 不弹确认，ADR 0033 非破坏性）+ 主体
+ * xterm.js 终端区。
+ *
+ * 标题口径（标题功能轮）：展示标题 = session.title ?? session.name——OSC 0/2
+ * 动态值或用户改名后携带 title，缺省回退默认名；改名提交经 terminals:rename
+ * （manager 置 source=user，此后 OSC 更新不再覆盖），清单由
+ * terminal-title-changed 事件归并推进。
  *
  * 数据面（票面口径）：列表数据源 = `terminals:list-for` 初始 +
  * `terminal-*` 事件增量归并（useTerminalSessions hook，RailPanel 装配），
@@ -68,6 +74,8 @@ export function TerminalRailPanelBody(props: {
   onKill: (sessionId: string) => void;
   /** 终止请求进行中的 sessionId（按钮禁用防重复点击） */
   killingSessionId: string | null;
+  /** 用户改名（标题功能轮；提交 terminals:rename，清单经事件归并推进） */
+  onRename: (sessionId: string, title: string) => void;
   /** 消息流标记行点击直跳（票 06，ADR 0032 语义：直落详情页不落列表页） */
   focus: TerminalFocus | null;
 }) {
@@ -106,6 +114,7 @@ export function TerminalRailPanelBody(props: {
           onBack={() => setPage("list")}
           onKill={props.onKill}
           killing={props.killingSessionId === selected.sessionId}
+          onRename={props.onRename}
         />
       </div>
     );
@@ -187,11 +196,12 @@ export function TerminalRailPanelBody(props: {
                       <span className="pt-1.5">
                         <TerminalStatusDot session={item} />
                       </span>
+                      {/* 展示标题：OSC 动态值 / 用户改名优先，缺省回退默认名 */}
                       <span
                         className="min-w-0 flex-1 truncate text-xs leading-5 text-fg"
-                        title={item.name}
+                        title={item.title ?? item.name}
                       >
-                        {item.name}
+                        {item.title ?? item.name}
                       </span>
                     </span>
                     <span className="flex w-full items-center gap-2 pl-4 text-xs text-fg-subtle">
@@ -234,9 +244,24 @@ export function TerminalSessionDetail(props: {
   onKill: (sessionId: string) => void;
   /** 终止请求进行中（按钮禁用；退出由 terminal-exited 事件推进呈现） */
   killing: boolean;
+  /** 用户改名（标题功能轮；running 可改，已退出只读回看不改） */
+  onRename: (sessionId: string, title: string) => void;
 }) {
   const { session } = props;
   const exited = isExitedTerminalStatus(session.status);
+  // 展示标题 = title ?? name（OSC 动态值 / 用户改名优先，缺省回退默认名）。
+  // 改名 inline 编辑：点标题进输入态，Enter / 失焦提交（trim 后同值不提交），
+  // Esc 取消；已退出会话保持纯文本（manager 侧同样拒绝，双保险）。
+  const displayTitle = session.title ?? session.name;
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const commitRename = () => {
+    setRenaming(false);
+    const trimmed = renameDraft.trim();
+    if (trimmed !== "" && trimmed !== displayTitle) {
+      props.onRename(session.sessionId, trimmed);
+    }
+  };
   return (
     <>
       <div
@@ -269,13 +294,42 @@ export function TerminalSessionDetail(props: {
           <span className={`shrink-0 text-xs ${terminalStatusClass(session)}`}>
             {statusText(session)}
           </span>
-          <span
-            data-testid="terminal-rail-title"
-            className="min-w-0 flex-1 truncate text-xs text-fg"
-            title={session.name}
-          >
-            {session.name}
-          </span>
+          {renaming ? (
+            <input
+              data-testid="terminal-rename-input"
+              value={renameDraft}
+              autoFocus
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitRename();
+                if (event.key === "Escape") setRenaming(false);
+              }}
+              onBlur={commitRename}
+              aria-label="终端会话标题"
+              className="min-w-0 flex-1 rounded border border-line bg-surface px-1 py-0.5 text-xs text-fg outline-none focus:input-focus-ring"
+            />
+          ) : exited ? (
+            <span
+              data-testid="terminal-rail-title"
+              className="min-w-0 flex-1 truncate text-xs text-fg"
+              title={displayTitle}
+            >
+              {displayTitle}
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid="terminal-rail-title"
+              title={`${displayTitle}（点击改名）`}
+              onClick={() => {
+                setRenameDraft(displayTitle);
+                setRenaming(true);
+              }}
+              className="min-w-0 flex-1 truncate text-left text-xs text-fg hover:text-fg-muted"
+            >
+              {displayTitle}
+            </button>
+          )}
         </span>
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-fg-muted">
           {/* 已用时：running 实时跳动、exited 定格（创建 → 退出的存续时长） */}

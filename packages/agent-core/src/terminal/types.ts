@@ -12,12 +12,18 @@ export type TerminalSessionOrigin = "user" | "agent";
 /** 会话状态机：running → exited（终态由进程 exit 事件驱动，kill 不直接置终态） */
 export type TerminalSessionStatus = "running" | "exited";
 
+/**
+ * 标题来源：auto = shell OSC 0/2 序列动态写入（跟随 shell/cwd/前台程序）；
+ * user = 用户手动改名（改名后 auto 更新不再覆盖，手动命名优先）。
+ */
+export type TerminalTitleSource = "auto" | "user";
+
 /** 终端会话记录（rail 列表 / 详情 / 落库共用形状） */
 export interface TerminalSessionRecord {
   sessionId: string;
   /** 归属任务（会话按任务组织，ADR 0033：拒绝宿主级按工作区组织） */
   taskId: string;
-  /** 默认名「shell 类型 · 任务内序号」（v1 不做重命名） */
+  /** 默认名「shell 类型 · 任务内序号」（稳定标识，不随标题变化） */
   name: string;
   shell: TerminalShell;
   origin: TerminalSessionOrigin;
@@ -30,6 +36,13 @@ export interface TerminalSessionRecord {
   exitCode?: number;
   /** 终止信号编号（正常退出缺省） */
   signal?: number;
+  /**
+   * 展示标题（v1 的「不做重命名」在标题功能轮放开）：缺省回退 name 呈现；
+   * OSC 0/2 动态写入（source=auto）或用户改名（source=user）后携带。
+   */
+  title?: string;
+  /** 标题来源；title 携带时必有 */
+  titleSource?: TerminalTitleSource;
   /**
    * 终态快照：最后 64KB 输出文本（spec「输出不全量落库」，08 票落库供回看）。
    * 仅 exited 会话携带；running 时 undefined。
@@ -44,7 +57,8 @@ export interface TerminalSessionRecord {
  */
 export type TerminalSessionEvent =
   | { kind: "terminal-started"; record: TerminalSessionRecord }
-  | { kind: "terminal-exited"; record: TerminalSessionRecord };
+  | { kind: "terminal-exited"; record: TerminalSessionRecord }
+  | { kind: "terminal-title-changed"; record: TerminalSessionRecord };
 
 /** spawn 请求：来源与归属由调用方（工具层 / 面板）给定 */
 export interface TerminalSpawnRequest {
@@ -87,3 +101,6 @@ export interface TerminalReadResult {
  * 用户创建超限提示）。设置值经 TerminalSessionManagerOptions.maxAlivePerTask 覆盖。
  */
 export const DEFAULT_TERMINAL_MAX_ALIVE_PER_TASK = 5;
+
+/** 展示标题字符上限（OSC 动态值与用户改名同一口径，rail 富行截断呈现） */
+export const TERMINAL_TITLE_MAX_CHARS = 100;

@@ -120,6 +120,38 @@ export default function TerminalSessionView(props: {
           void window.codexlike.terminals.write(sessionId, data);
         });
         detach.push(() => dataDisposable.dispose());
+        // 复制/粘贴接线（Windows Terminal 同款惯例，2026-11-21「无法复制」修复）：
+        // xterm 键入直通 pty，剪贴板组合键须在此拦下——返回 false 吞键（不进
+        // onData / pty）。Ctrl+Shift+C 恒复制；Ctrl+C 有选区复制、无选区透传
+        // （^C = SIGINT，中断长命令的主路径不能吞）；Ctrl+V / Ctrl+Shift+V
+        // 粘贴进 pty，已退出会话只读回看吞掉粘贴。剪贴板走 navigator.clipboard
+        // （Electron 渲染端同 OS 剪贴板，AssistantActions 同款）。
+        term.attachCustomKeyEventHandler((event) => {
+          if (event.type !== "keydown" || !event.ctrlKey) return true;
+          const key = event.key.toLowerCase();
+          if (key === "c" && (event.shiftKey || term.hasSelection())) {
+            const selection = term.getSelection();
+            if (selection !== "") {
+              void navigator.clipboard.writeText(selection);
+            }
+            return false;
+          }
+          if (key === "v") {
+            if (exitedRef.current) return false;
+            void navigator.clipboard
+              .readText()
+              .then((text) => {
+                if (text !== "") {
+                  void window.codexlike.terminals.write(sessionId, text);
+                }
+              })
+              .catch(() => {
+                // 剪贴板读取被拒（无焦点/权限）：静默放弃，不影响输入主链
+              });
+            return false;
+          }
+          return true;
+        });
         // fit 后尺寸上报（PTY 尺寸对齐容器）；后续由 ResizeObserver 驱动
         reportSize(sessionId, fit);
         const observer = new ResizeObserver(() => {
@@ -160,7 +192,7 @@ export default function TerminalSessionView(props: {
     <div
       ref={hostRef}
       data-testid="terminal-xterm-host"
-      className="min-h-0 flex-1 overflow-hidden bg-canvas p-1"
+      className="terminal-xterm min-h-0 flex-1 overflow-hidden bg-canvas p-1"
     />
   );
 }

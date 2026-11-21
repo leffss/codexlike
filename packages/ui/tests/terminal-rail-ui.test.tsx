@@ -39,6 +39,7 @@ function bodyProps(
     creating: false,
     onKill() {},
     killingSessionId: null,
+    onRename() {},
     focus: null,
     ...overrides,
   };
@@ -167,6 +168,29 @@ describe("TerminalRailPanelBody 列表页（SSR 静态结构，ADR 0032 拆页�
     )?.[0];
     expect(button).toContain("disabled");
   });
+
+  it("列表行展示标题（标题功能轮）：title 缺省回退默认名（title ?? name）", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        TerminalRailPanelBody,
+        bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({
+              sessionId: "ts-2",
+              id: "ts-2",
+              name: "git-bash · 2",
+              title: "构建服务器",
+            }),
+          ],
+        })
+      )
+    );
+    // OSC 动态值 / 用户改名优先
+    expect(html).toContain("构建服务器");
+    // 无标题的会话回退默认名
+    expect(html).toContain("git-bash · 1");
+  });
 });
 
 describe("TerminalSessionDetail 详情壳（SSR 到容器边界；xterm 交互区是 canvas 不做 SSR）", () => {
@@ -176,6 +200,7 @@ describe("TerminalSessionDetail 详情壳（SSR 到容器边界；xterm 交互�
         session: termSeg(),
         onBack() {},
         onKill() {},
+        onRename() {},
         killing: false,
       })
     );
@@ -200,6 +225,7 @@ describe("TerminalSessionDetail 详情壳（SSR 到容器边界；xterm 交互�
         }),
         onBack() {},
         onKill() {},
+        onRename() {},
         killing: false,
       })
     );
@@ -218,10 +244,46 @@ describe("TerminalSessionDetail 详情壳（SSR 到容器边界；xterm 交互�
         }),
         onBack() {},
         onKill() {},
+        onRename() {},
         killing: false,
       })
     );
     expect(html).toContain("退出码 1");
+  });
+
+  it("改名入口（标题功能轮）：running 标题可点击改名并展示 title ?? name；exited 纯文本无入口", () => {
+    const running = renderToStaticMarkup(
+      createElement(TerminalSessionDetail, {
+        session: termSeg({ title: "构建服务器" }),
+        onBack() {},
+        onKill() {},
+        onRename() {},
+        killing: false,
+      })
+    );
+    // running：标题是 button（点击改名），展示 OSC / 改名值而非默认名
+    expect(running).toMatch(
+      /<button[^>]*data-testid="terminal-rail-title"[^>]*>/
+    );
+    expect(running).toContain("构建服务器");
+    expect(running).toContain("点击改名");
+
+    const exited = renderToStaticMarkup(
+      createElement(TerminalSessionDetail, {
+        session: termSeg({
+          status: "exited",
+          exitCode: 0,
+          exitedAt: "2026-11-21T08:01:30.000Z",
+        }),
+        onBack() {},
+        onKill() {},
+        onRename() {},
+        killing: false,
+      })
+    );
+    // exited：只读回看标题为纯文本 span，无改名入口
+    expect(exited).toMatch(/<span[^>]*data-testid="terminal-rail-title"[^>]*>/);
+    expect(exited).not.toContain("点击改名");
   });
 });
 
