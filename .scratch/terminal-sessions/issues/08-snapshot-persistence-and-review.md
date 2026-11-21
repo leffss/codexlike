@@ -22,3 +22,5 @@
 - 【03 票衔接】生命周期事件已走 TaskEvent（terminal-started/exited，exited 含快照）——本票落库后，「已退出」组的重启恢复数据源从内存 manager 换为 `terminal_sessions` 表；view 快照并行字段下发的桥接点先例是 task-ipc.ts `pushTaskEvent` 与子代理快照的 view 并行字段（notes §2/§4）。
 - 【与 07 接续】07 票在退出屏障留 flush 快照挂点——本票接通：屏障 flush 时对存活会话 killAll（已并入 releaseResources）后逐条落库（killAll 等exit 齐全语义保证快照已定格再写库）。
 - 【04 票衔接】UI 恢复路径已就绪：落库后 rail 列表初始数据源只需扩展 `useTerminalSessions` 的初始拉取（本票给宿主下发恢复快照记录——对齐子代理快照的 view 并行字段）；TerminalSegment 模型/分组/已退出只读回看（subscribe buffered）已通，**record.snapshot 有意不进 React 状态**——恢复下发同样走 list 数据源（record 含 snapshot 字段），进详情再 subscribe 回放。
+- 【07 票衔接（两个挂点都有注释锚「【08 票衔接挂点】」）】①屏障 flush 快照写入：main.ts registerApplicationExit 的 releaseResources 内 killAll 调用处——killAll 返回即 exit 齐全快照已定格，逐条取 exited 记录落库，须在 app.quit 前；②重启收尾库层衔接：main.ts whenReady 启动收尾区 settleTerminalSessionsOnStartup 调用处——落库后同点位补「库中残留 running 行置终态（exitedAt/exitCode 用收尾时刻）」，须在 UI 从库读已退出列表之前。
+- 【07 票衔接】`tasks:archive` 已 async 化（拒绝变 rejection）——本票如新增 archive 相关用例按 `await invoke` / `rejects.toThrow` 写；archive 路径「先杀等 exit 再写归档」已就位，本票只需保证 exit 时快照落库覆盖该路径。
