@@ -6,7 +6,9 @@ import {
   TerminalRailPanelBody,
   TerminalSessionDetail,
 } from "../src/components/TerminalRailPanel";
-import type { TerminalSegment } from "../src/lib/task-view";
+import { TerminalStreamMarker } from "../src/components/TerminalStreamMarker";
+import { MessageStream } from "../src/components/MessageStream";
+import type { MessageSegment, TerminalSegment } from "../src/lib/task-view";
 
 /** 终端段样例（record 字段对齐 TerminalSessionRecord 呈现投影） */
 function termSeg(overrides: Partial<TerminalSegment> = {}): TerminalSegment {
@@ -37,6 +39,7 @@ function bodyProps(
     creating: false,
     onKill() {},
     killingSessionId: null,
+    focus: null,
     ...overrides,
   };
 }
@@ -214,5 +217,71 @@ describe("TerminalSessionDetail 详情壳（SSR 到容器边界；xterm 交互�
       })
     );
     expect(html).toContain("退出码 1");
+  });
+});
+
+describe("TerminalStreamMarker（消息流标记行，ADR 0033 票 06）", () => {
+  it("单行标记：终端徽章 + 启动动作文案（agent 会话）+ 状态 + 引导，不含终端正文", () => {
+    const html = renderToStaticMarkup(
+      createElement(TerminalStreamMarker, {
+        session: termSeg({ origin: "agent" }),
+      })
+    );
+    expect(html).toMatch(/data-testid="terminal-stream-marker"/);
+    expect(html).toMatch(
+      /data-testid="terminal-stream-marker-toggle"[^>]*data-terminal-state="running"/
+    );
+    // 动作动词摘要（票面例：「启动了终端会话 git-bash · 1」）+ agent 来源标注
+    expect(html).toContain("启动了终端会话 git-bash · 1");
+    expect(html).toContain("agent");
+    expect(html).toContain("运行中");
+    expect(html).toContain("右栏查看 →");
+    // 终端正文不进流（xterm 在 rail 详情页）
+    expect(html).not.toMatch(/data-testid="terminal-xterm-host"/);
+  });
+
+  it("用户手开的会话：无启动动词，来源标注「用户」", () => {
+    const html = renderToStaticMarkup(
+      createElement(TerminalStreamMarker, { session: termSeg() })
+    );
+    expect(html).not.toContain("启动了终端会话");
+    expect(html).toContain("终端会话 git-bash · 1");
+    expect(html).toContain("用户");
+  });
+
+  it("已退出会话：状态文案原位可见（定格回看语义与 rail 富行一致）", () => {
+    const html = renderToStaticMarkup(
+      createElement(TerminalStreamMarker, {
+        session: termSeg({
+          origin: "agent",
+          status: "exited",
+          exitCode: 1,
+          exitedAt: "2026-11-21T08:02:00.000Z",
+        }),
+      })
+    );
+    expect(html).toMatch(
+      /data-testid="terminal-stream-marker-toggle"[^>]*data-terminal-state="exited"/
+    );
+    expect(html).toContain("退出码 1");
+  });
+
+  it("经 MessageStream 渲染：terminal 段是标记行而非 null（票 06 换呈现）", () => {
+    const items: MessageSegment[] = [
+      {
+        kind: "user",
+        id: "u1",
+        seq: 1,
+        turnId: "u1",
+        responseId: null,
+        content: "起个终端跑构建",
+      },
+      termSeg({ origin: "agent" }),
+    ];
+    const html = renderToStaticMarkup(
+      createElement(MessageStream, { items, taskId: "t1" })
+    );
+    expect(html).toMatch(/data-testid="terminal-stream-marker"/);
+    expect(html).toContain("启动了终端会话 git-bash · 1");
   });
 });

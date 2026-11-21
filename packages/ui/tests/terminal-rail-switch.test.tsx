@@ -14,7 +14,11 @@ import {
 } from "@testing-library/react";
 
 import { RailPanel } from "../src/components/RailPanel";
-import { TerminalRailPanelBody } from "../src/components/TerminalRailPanel";
+import {
+  TerminalRailPanelBody,
+  type TerminalFocus,
+} from "../src/components/TerminalRailPanel";
+import { MessageStream } from "../src/components/MessageStream";
 import type { TerminalSessionRecord } from "@codexlike/agent-core";
 import type { TerminalSegment } from "../src/lib/task-view";
 
@@ -210,6 +214,7 @@ function bodyProps(
     creating: false,
     onKill() {},
     killingSessionId: null,
+    focus: null,
     ...overrides,
   };
 }
@@ -284,6 +289,200 @@ describe("TerminalRailPanelBody 拆页导航（列表页 ↔ 详情页）", () =
     );
     expect(screen.queryByTestId("terminal-rail-kill")).toBeNull();
     expect(screen.getByText("只读回看")).not.toBeNull();
+  });
+});
+
+describe("TerminalRailPanelBody focus 直跳（票 06，ADR 0032 语义照搬）", () => {
+  /** 当前是否在详情页（顶栏返回按钮为详情页锚点） */
+  function onDetailPage(): boolean {
+    return screen.queryByTestId("terminal-rail-back") !== null;
+  }
+
+  /** 详情顶栏标题（当前选中会话身份） */
+  function detailTitle(): string | null {
+    return screen.queryByTestId("terminal-rail-title")?.textContent ?? null;
+  }
+
+  function listItemAt(index: number): HTMLElement {
+    const item = screen.getAllByTestId("terminal-rail-item")[index];
+    if (item === undefined)
+      throw new Error(`terminal-rail-item[${index}] 不存在`);
+    return item;
+  }
+
+  it("标记行 focus 直跳详情页（不落列表页），选中目标会话", () => {
+    installStub();
+    render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+          ],
+          focus: { sessionId: "ts-2", seq: 1 },
+        })}
+      />
+    );
+    // 直跳详情页：选中的是 focus 目标而非默认列表入口
+    expect(onDetailPage()).toBe(true);
+    expect(detailTitle()).toBe("git-bash · 2");
+  });
+
+  it("seq 幂等守卫：静态数据 rerender 不重放，手动返回列表不强行拉回", () => {
+    installStub();
+    const focus: TerminalFocus = { sessionId: "ts-2", seq: 1 };
+    const { rerender } = render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+          ],
+          focus,
+        })}
+      />
+    );
+    expect(onDetailPage()).toBe(true);
+    // 用户手动返回列表页
+    fireEvent.click(screen.getByTestId("terminal-rail-back"));
+    expect(onDetailPage()).toBe(false);
+    // 静态 rerender（新数组引用 + 同 seq focus）：守卫不重放，保持列表页
+    rerender(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+            termSeg({ sessionId: "ts-3", id: "ts-3", name: "git-bash · 3" }),
+          ],
+          focus,
+        })}
+      />
+    );
+    expect(onDetailPage()).toBe(false);
+    expect(screen.getAllByTestId("terminal-rail-item")).toHaveLength(3);
+  });
+
+  it("段晚于点击到达：focus 先到 sessions 后到，目标入列后补跳详情页", () => {
+    installStub();
+    const { rerender } = render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [termSeg()],
+          focus: { sessionId: "ts-9", seq: 1 },
+        })}
+      />
+    );
+    // 目标尚不在列表：停在列表页（不跳到空选中）
+    expect(onDetailPage()).toBe(false);
+    // terminal-started 事件让目标会话入列：补跳直落详情页
+    rerender(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-9", id: "ts-9", name: "git-bash · 9" }),
+          ],
+          focus: { sessionId: "ts-9", seq: 1 },
+        })}
+      />
+    );
+    expect(onDetailPage()).toBe(true);
+    expect(detailTitle()).toBe("git-bash · 9");
+  });
+
+  it("运行中流式更新不把手动选择拉回 focus 目标（先例 SubagentRailPanelBody）", () => {
+    installStub();
+    const { rerender } = render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+            termSeg({ sessionId: "ts-3", id: "ts-3", name: "git-bash · 3" }),
+          ],
+          focus: { sessionId: "ts-3", seq: 1 },
+        })}
+      />
+    );
+    expect(detailTitle()).toBe("git-bash · 3");
+    // 用户返回列表并手动点选 ts-2
+    fireEvent.click(screen.getByTestId("terminal-rail-back"));
+    fireEvent.click(listItemAt(1));
+    expect(detailTitle()).toBe("git-bash · 2");
+    // 流式 rerender（新 sessions 引用 + 同 focus）：手动选择保持
+    rerender(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+            termSeg({ sessionId: "ts-3", id: "ts-3", name: "git-bash · 3" }),
+          ],
+          focus: { sessionId: "ts-3", seq: 1 },
+        })}
+      />
+    );
+    expect(onDetailPage()).toBe(true);
+    expect(detailTitle()).toBe("git-bash · 2");
+  });
+
+  it("seq 递增重新定位：标记行重复点击（同 id）仍能重新跳转", () => {
+    installStub();
+    const { rerender } = render(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+          ],
+          focus: { sessionId: "ts-2", seq: 1 },
+        })}
+      />
+    );
+    expect(detailTitle()).toBe("git-bash · 2");
+    fireEvent.click(screen.getByTestId("terminal-rail-back"));
+    // 同 id 新 seq：重新定位（消费守卫只拦同 seq 重放）
+    rerender(
+      <TerminalRailPanelBody
+        {...bodyProps({
+          sessions: [
+            termSeg(),
+            termSeg({ sessionId: "ts-2", id: "ts-2", name: "git-bash · 2" }),
+          ],
+          focus: { sessionId: "ts-2", seq: 2 },
+        })}
+      />
+    );
+    expect(onDetailPage()).toBe(true);
+    expect(detailTitle()).toBe("git-bash · 2");
+  });
+});
+
+describe("MessageStream 终端标记行接线（票 06）", () => {
+  it("terminal 段渲染标记行；点击携带 sessionId 透传 onOpenTerminal", () => {
+    installStub();
+    const onOpenTerminal = vi.fn();
+    render(
+      <MessageStream
+        items={[
+          {
+            kind: "user",
+            id: "u1",
+            seq: 1,
+            turnId: "u1",
+            responseId: null,
+            content: "起个终端",
+          },
+          termSeg({ origin: "agent" }),
+        ]}
+        taskId="task-1"
+        onOpenTerminal={onOpenTerminal}
+      />
+    );
+    fireEvent.click(screen.getByTestId("terminal-stream-marker-toggle"));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+    expect(onOpenTerminal).toHaveBeenCalledWith("ts-1");
   });
 });
 
@@ -456,6 +655,7 @@ describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并
       onChangesCount() {},
       subagents: [],
       subagentFocus: null,
+      terminalFocus: null,
       restoredTerminals: [],
       ...overrides,
     };
@@ -506,6 +706,32 @@ describe("RailPanel 终端 tab（useTerminalSessions 数据装载与事件归并
     expect(await screen.findByTestId("terminals-panel")).not.toBeNull();
     expect(screen.getAllByTestId("terminal-rail-item")).toHaveLength(3);
     expect(screen.getAllByTestId("terminal-rail-group-header")).toHaveLength(2);
+  });
+
+  it("terminalFocus 定位信号（票 06）：自动切终端 tab 并直跳详情页，不落列表页", async () => {
+    installStub();
+    ipc.state.listForResults["task-1"] = [
+      record({ sessionId: "ts-1", status: "running" }),
+      record({ sessionId: "ts-2", name: "git-bash · 2", status: "running" }),
+    ];
+    render(
+      <RailPanel
+        {...railProps({ terminalFocus: { sessionId: "ts-2", seq: 1 } })}
+      />
+    );
+    // 自动切 tab（无需手点 rail-tab-terminals）
+    expect(await screen.findByTestId("terminals-panel")).not.toBeNull();
+    // 直跳详情页：顶栏标题锚定 focus 目标
+    await waitFor(() => {
+      expect(screen.queryByTestId("terminal-rail-back")).not.toBeNull();
+    });
+    expect(screen.getByTestId("terminal-rail-title").textContent).toBe(
+      "git-bash · 2"
+    );
+    // 详情页订阅对应会话字节流
+    await waitFor(() => {
+      expect(ipc.state.calls.subscribe).toEqual(["ts-2"]);
+    });
   });
 
   it("terminal-* 事件增量归并：started 追加、exited 推进并同步徽章", async () => {

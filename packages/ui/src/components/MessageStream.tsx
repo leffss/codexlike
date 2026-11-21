@@ -59,6 +59,7 @@ import { BackToLatestButton } from "./BackToLatestButton";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentStreamMarker } from "./SubagentStreamMarker";
+import { TerminalStreamMarker } from "./TerminalStreamMarker";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolGroupView } from "./ToolSequence";
 import { PlanMarkerRow } from "./WorkPlanCard";
@@ -102,6 +103,8 @@ export function MessageStream(props: {
   taskTitle?: string | null;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位选中 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
   /** /status 报告块关闭（ADR 0031）：按段 id 从消息列表移除该报告 */
   onDismissStatus?: (id: string) => void;
 }) {
@@ -350,6 +353,7 @@ export function MessageStream(props: {
                     taskTitle={props.taskTitle}
                     planIndexById={planIndexById}
                     onOpenSubagent={props.onOpenSubagent}
+                    onOpenTerminal={props.onOpenTerminal}
                     onDismissStatus={props.onDismissStatus}
                   />
                 ))}
@@ -425,6 +429,8 @@ function TurnGroupItem(props: {
   planIndexById?: Map<string, number>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
   /** /status 报告块关闭（ADR 0031）：透传至 SegmentView → MessageBubble */
   onDismissStatus?: (id: string) => void;
 }) {
@@ -469,6 +475,7 @@ function TurnGroupItem(props: {
             taskTitle={props.taskTitle}
             planIndexById={props.planIndexById}
             onOpenSubagent={props.onOpenSubagent}
+            onOpenTerminal={props.onOpenTerminal}
             onDismissStatus={props.onDismissStatus}
           />
         ))}
@@ -495,6 +502,8 @@ function ToolSequenceView(props: {
   planIndexById?: Map<string, number>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
   /** /status 报告块关闭（ADR 0031）：透传至 SegmentView → MessageBubble */
   onDismissStatus?: (id: string) => void;
 }) {
@@ -510,6 +519,7 @@ function ToolSequenceView(props: {
         questionDraft={props.questionDraft}
         taskTitle={props.taskTitle}
         onOpenSubagent={props.onOpenSubagent}
+        onOpenTerminal={props.onOpenTerminal}
         onDismissStatus={props.onDismissStatus}
       />
     );
@@ -545,6 +555,8 @@ function SegmentView(props: {
   taskTitle?: string | null;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
+  /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
   /** /status 报告块关闭（ADR 0031）：透传至 MessageBubble */
   onDismissStatus?: (id: string) => void;
 }) {
@@ -567,9 +579,11 @@ function SegmentView(props: {
     );
   }
   if (segment.kind === "terminal") {
-    // 终端会话段（ADR 0033 票 04）：本票只落模型与 rail tab 归并，消息流
-    // 呈现（terminal 标记行 + 点击直跳 rail 详情）是 06 票——此处暂不渲染
-    return null;
+    // 终端会话段（ADR 0033 票 06）：正文在右栏详情页，流内单行标记，
+    // 点击直跳 rail 终端 tab 详情页（幂等守卫照 SubagentFocus seq 模式）
+    return (
+      <TerminalStreamMarker session={segment} onOpen={props.onOpenTerminal} />
+    );
   }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;
