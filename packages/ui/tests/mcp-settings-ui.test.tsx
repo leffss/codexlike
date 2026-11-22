@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+// MCP 设置分区：超时两项输入解析与表体渲染（node 断言在 jsdom 下同样成立）+
+// 逐工具启停乐观更新的交互面（jsdom + testing-library，先例 process-pills-bar-ui）。
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   parseMcpCallTimeoutInput,
@@ -97,5 +100,133 @@ describe("MCP 分区超时表体渲染", () => {
     expect(ok).toContain("text-ok-fg");
     const failed = renderBody({ message: "保存失败", messageError: true });
     expect(failed).toContain("text-danger-fg");
+  });
+});
+
+// ===== 逐工具启停乐观更新（jsdom 交互）=====
+// 受控 checkbox 的 change 事件同步阶段，React 会把 DOM checked 回写为当前
+// state；IPC 往返完成前若不乐观翻转本地 state，点击呈现「勾上→闪回」
+// （desktop e2e mcp 场景 check() 断言稳定踩中的窗口，2026-11-23 修复轮）。
+// jsdom 走同一套 ReactDOM 受控逻辑，点击后同步读 checked 即可复现该窗口。
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+
+import { McpSettingsSection } from "../src/components/McpSettingsSection";
+
+const ipc = vi.hoisted(() => {
+  const state = {
+    toggleCalls: [] as Array<[string, boolean]>,
+    releaseToggle: null as null | (() => void),
+    disabledTools: new Set<string>(),
+  };
+  const stub = {
+    overview: async () => ({
+      servers: [
+        {
+          config: { id: "srv-1", name: "fake", command: "node", args: ["x"] },
+          status: "connected",
+          error: null,
+          tools: [
+            { name: "mcp_fake_echo", description: "回声", enabled: true },
+            {
+              name: "mcp_fake_crash",
+              description: "崩溃样例",
+              enabled: !state.disabledTools.has("mcp_fake_crash"),
+            },
+          ],
+        },
+      ],
+    }),
+    // IPC 手工放行：toggle 调用先挂起，releaseToggle 模拟主进程生效
+    //（disabled 集合更新后 refresh 可见），复刻「乐观先行、往返后校准」。
+    setToolEnabled: (toolName: string, enabled: boolean) => {
+      state.toggleCalls.push([toolName, enabled]);
+      return new Promise<void>((resolve) => {
+        state.releaseToggle = () => {
+          if (enabled) state.disabledTools.delete(toolName);
+          else state.disabledTools.add(toolName);
+          resolve();
+        };
+      });
+    },
+  };
+  return { state, stub };
+});
+
+beforeEach(() => {
+  window.codexlike = {
+    ...window.codexlike,
+    agentSettings: {
+      get: async () => ({
+        mcpCallTimeoutSeconds: 30,
+        mcpConnectTimeoutSeconds: 15,
+      }),
+    },
+    mcp: ipc.stub,
+  } as unknown as typeof window.codexlike;
+});
+
+afterEach(() => {
+  cleanup();
+  ipc.state.toggleCalls = [];
+  ipc.state.releaseToggle = null;
+  ipc.state.disabledTools.clear();
+});
+
+describe("逐工具启停乐观更新", () => {
+  it("点击瞬间同步翻转呈现（不等 IPC 往返），受控回写不再闪回旧值", async () => {
+    render(createElement(McpSettingsSection));
+    const crashToggle = (await screen.findByTestId(
+      "mcp-tool-toggle-mcp_fake_crash"
+    )) as HTMLInputElement;
+    expect(crashToggle.checked).toBe(true);
+
+    fireEvent.click(crashToggle);
+    // 同步断言：此刻 IPC 仍挂起，property 已与点击一致——乐观翻转让
+    // React 的受控回写写入新值；不修复时这里被回写为 true（闪回）。
+    expect(crashToggle.checked).toBe(false);
+    expect(crashToggle.closest("label")?.textContent).toContain("已禁用");
+    expect(ipc.state.toggleCalls).toEqual([["mcp_fake_crash", false]]);
+
+    // IPC 往返生效 → refresh 校准，呈现稳定不回弹
+    ipc.state.releaseToggle?.();
+    await waitFor(() => {
+      expect(ipc.state.toggleCalls).toHaveLength(1);
+      expect(crashToggle.checked).toBe(false);
+      expect(crashToggle.closest("label")?.textContent).toContain("已禁用");
+    });
+  });
+
+  it("禁用→再启用同口径：点击瞬间同步勾回，往返后保持", async () => {
+    render(createElement(McpSettingsSection));
+    const crashToggle = (await screen.findByTestId(
+      "mcp-tool-toggle-mcp_fake_crash"
+    )) as HTMLInputElement;
+
+    fireEvent.click(crashToggle);
+    ipc.state.releaseToggle?.();
+    await waitFor(() => {
+      expect(crashToggle.checked).toBe(false);
+    });
+
+    fireEvent.click(crashToggle);
+    // 同步断言：再启用同样不等 IPC，点击瞬间即勾回
+    expect(crashToggle.checked).toBe(true);
+    expect(crashToggle.closest("label")?.textContent).toContain("已启用");
+    expect(ipc.state.toggleCalls).toEqual([
+      ["mcp_fake_crash", false],
+      ["mcp_fake_crash", true],
+    ]);
+
+    ipc.state.releaseToggle?.();
+    await waitFor(() => {
+      expect(crashToggle.checked).toBe(true);
+      expect(crashToggle.closest("label")?.textContent).toContain("已启用");
+    });
   });
 });

@@ -165,6 +165,20 @@ export function McpSettingsSection() {
   }
 
   async function toggleTool(toolName: string, enabled: boolean) {
+    // 乐观翻转先行：受控 checkbox 的 change 事件同步阶段，React 会把 DOM
+    // checked 回写为当前 state（旧值），IPC 往返完成前用户点击呈现
+    // 「勾上→闪回」（e2e mcp 场景 check() 断言稳定踩中的窗口，2026-11-23）。
+    // 先翻转本地 state 让回写与点击一致，往返结束后 refresh 校准。
+    setServers((prev) =>
+      prev === null
+        ? prev
+        : prev.map((view) => ({
+            ...view,
+            tools: view.tools.map((tool) =>
+              tool.name === toolName ? { ...tool, enabled } : tool
+            ),
+          }))
+    );
     await window.codexlike.mcp.setToolEnabled(toolName, enabled);
     await refresh();
   }
