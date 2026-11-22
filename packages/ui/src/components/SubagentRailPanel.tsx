@@ -40,8 +40,10 @@ import {
 } from "../lib/subagent-status";
 import { thinkingSummary } from "../lib/thinking-summary";
 import type { SubagentSegment, ToolCallSegment } from "../lib/task-view";
-import { groupConsecutiveTools } from "../lib/turn-view";
+import { foldTerminalReads, groupConsecutiveTools } from "../lib/turn-view";
 import { useTickingNow } from "../lib/use-ticking-now";
+
+import { TerminalReadMarker } from "./TerminalReadMarker";
 
 /**
  * 子代理检视面板（ADR 0020 正文收纳右栏；tab 体拆页导航为 ADR 0032，
@@ -110,6 +112,10 @@ function groupSubagents(subagents: SubagentSegment[]): Array<{
 export function SubagentRailPanelBody(props: {
   subagents: SubagentSegment[];
   focus: SubagentFocus | null;
+  /** 终端会话名索引（ADR 0033 read 锚点）：sessionId → record.name */
+  terminalNames?: Map<string, string>;
+  /** read 锚点「右栏查看」：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
 }) {
   const { subagents } = props;
   const [page, setPage] = useState<"list" | "detail">("list");
@@ -227,7 +233,11 @@ export function SubagentRailPanelBody(props: {
             </button>
           </span>
         </div>
-        <SubagentDetail subagent={selected} />
+        <SubagentDetail
+          subagent={selected}
+          terminalNames={props.terminalNames}
+          onOpenTerminal={props.onOpenTerminal}
+        />
       </div>
     );
   }
@@ -327,7 +337,13 @@ export function SubagentRailPanelBody(props: {
  * 每秒改高度，豁免内容变化显色信号（滚动/悬停信号照旧），否则滚动条
  * 反复闪烁显色（lib/scrollbar-visibility 的豁免约定）。
  */
-export function SubagentDetail(props: { subagent: SubagentSegment }) {
+export function SubagentDetail(props: {
+  subagent: SubagentSegment;
+  /** 终端会话名索引（ADR 0033 read 锚点）：sessionId → record.name */
+  terminalNames?: Map<string, string>;
+  /** read 锚点「右栏查看」：开右栏终端 tab 并直跳详情页（主消息流同款） */
+  onOpenTerminal?: (sessionId: string) => void;
+}) {
   const { subagent } = props;
   // ===== 滚动跟随状态机（票 03 FOLLOWING/DETACHED 语汇）=====
   const container = useRef<HTMLDivElement | null>(null);
@@ -485,7 +501,11 @@ export function SubagentDetail(props: { subagent: SubagentSegment }) {
             subagentId={subagent.id}
           />
         )}
-        <SubagentToolSequence subagent={subagent} />
+        <SubagentToolSequence
+          subagent={subagent}
+          terminalNames={props.terminalNames}
+          onOpenTerminal={props.onOpenTerminal}
+        />
         {subagent.state === "running" && <SubagentRunningIndicator />}
         {subagent.state === "queued" && (
           <p className="text-xs text-warn-fg">
@@ -547,7 +567,13 @@ export function SubagentDetail(props: { subagent: SubagentSegment }) {
  * 不再以终态折叠清单堆在复制按钮之下。update_plan 排除出卡片序列：
  * 计划由底部工作计划卡呈现（与主消息流「计划不走通用卡」同源口径）。
  */
-function SubagentToolSequence(props: { subagent: SubagentSegment }) {
+function SubagentToolSequence(props: {
+  subagent: SubagentSegment;
+  /** 终端会话名索引（ADR 0033 read 锚点） */
+  terminalNames?: Map<string, string>;
+  /** read 锚点「右栏查看」：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
+}) {
   const { subagent } = props;
   // 适配成主流工具段形状以复用分组：seq/turnId/responseId 是流上下文
   // 字段，卡片与分组都不读，占位不参与呈现；id 保留真实调用 id（开合
@@ -576,11 +602,21 @@ function SubagentToolSequence(props: { subagent: SubagentSegment }) {
   if (calls.length === 0) return null;
   return (
     <ul data-testid="subagent-tool-sequence" className="flex flex-col gap-2">
-      {groupConsecutiveTools(calls).map((item) =>
+      {foldTerminalReads(groupConsecutiveTools(calls)).map((item) =>
         item.kind === "group" ? (
           <ToolGroupView key={`group-${item.segments[0]?.id}`} item={item} />
         ) : item.kind === "single" ? (
           <ToolCallCard key={item.segment.id} call={item.segment} />
+        ) : item.kind === "terminal-read" ? (
+          // terminal_read 锚点（ADR 0033 read 锚点，主消息流同款）：子代理
+          // 会话归主任务（host port 携带主任务 taskId），「右栏查看」直跳
+          // 终端详情页；无会话名索引时回退 sessionId 呈现不阻断
+          <TerminalReadMarker
+            key={`terminal-read-${item.sessionId}`}
+            item={item}
+            sessionName={props.terminalNames?.get(item.sessionId)}
+            onOpen={props.onOpenTerminal}
+          />
         ) : null
       )}
     </ul>

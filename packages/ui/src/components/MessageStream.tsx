@@ -1,6 +1,7 @@
 import {
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -46,6 +47,7 @@ import type {
 } from "../lib/task-view";
 import { thinkingSummary } from "../lib/thinking-summary";
 import {
+  foldTerminalReads,
   formatDurationCn,
   formatWorkDuration,
   groupConsecutiveTools,
@@ -53,9 +55,11 @@ import {
   type ToolSequenceItem,
   type TurnView,
 } from "../lib/turn-view";
+import { terminalNameIndex } from "../lib/terminal-read-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 import { AssistantActions } from "./AssistantActions";
 import { BackToLatestButton } from "./BackToLatestButton";
+import { TerminalReadMarker } from "./TerminalReadMarker";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
 import { SubagentStreamMarker } from "./SubagentStreamMarker";
@@ -245,6 +249,15 @@ export function MessageStream(props: {
     lastTurnRunning: props.streaming === true,
   });
 
+  // 终端会话名索引（ADR 0033 read 锚点）：read 锚点行按 sessionId 显示
+  // 会话名，源取全部终端段的 name（= record.name 稳定标识）；无对应段
+  // （跨任务回看旧锚点）由锚点行组件回退 sessionId 呈现。
+  // memo：组件经 useTickingNow 每秒重渲染，O(items) 派生不随 tick 重跑
+  const terminalNames = useMemo(
+    () => terminalNameIndex(props.items),
+    [props.items]
+  );
+
   // 工作计划（ADR 0016）：计划段序号（流内标记行「计划更新 N」的 N，
   // 跨轮累计），一次遍历供各轮标记行共用
   const planIndexById = new Map(
@@ -352,6 +365,7 @@ export function MessageStream(props: {
                     questionDraft={props.questionDraft}
                     taskTitle={props.taskTitle}
                     planIndexById={planIndexById}
+                    terminalNames={terminalNames}
                     onOpenSubagent={props.onOpenSubagent}
                     onOpenTerminal={props.onOpenTerminal}
                     onDismissStatus={props.onDismissStatus}
@@ -427,6 +441,8 @@ function TurnGroupItem(props: {
   taskTitle?: string | null;
   /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
   planIndexById?: Map<string, number>;
+  /** 终端会话名索引（ADR 0033 read 锚点）：sessionId → record.name */
+  terminalNames?: Map<string, string>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
   /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
@@ -451,17 +467,19 @@ function TurnGroupItem(props: {
             questionDraft={props.questionDraft}
           />
         )}
-        {groupConsecutiveTools(turn.segments).map((item) => (
+        {foldTerminalReads(groupConsecutiveTools(turn.segments)).map((item) => (
           <ToolSequenceView
             key={
               item.kind === "group"
                 ? `group-${item.segments[0]?.id}`
-                : `single-${item.segment.id}`
+                : item.kind === "terminal-read"
+                  ? `terminal-read-${item.sessionId}`
+                  : `single-${item.segment.id}`
             }
             item={item}
             showActions={
               !turn.running &&
-              item.kind !== "group" &&
+              (item.kind === "single" || item.kind === "passthrough") &&
               item.segment.id === turn.finalAssistantId
             }
             processAssistant={
@@ -474,6 +492,7 @@ function TurnGroupItem(props: {
             questionDraft={props.questionDraft}
             taskTitle={props.taskTitle}
             planIndexById={props.planIndexById}
+            terminalNames={props.terminalNames}
             onOpenSubagent={props.onOpenSubagent}
             onOpenTerminal={props.onOpenTerminal}
             onDismissStatus={props.onDismissStatus}
@@ -500,6 +519,8 @@ function ToolSequenceView(props: {
   taskTitle?: string | null;
   /** 计划段序号（跨轮累计，流内标记行「计划更新 N」用，ADR 0016） */
   planIndexById?: Map<string, number>;
+  /** 终端会话名索引（ADR 0033 read 锚点）：sessionId → record.name */
+  terminalNames?: Map<string, string>;
   /** 子代理标记行点击（ADR 0020）：开右栏子代理 tab 并定位 */
   onOpenSubagent?: (subagentId: string) => void;
   /** 终端标记行点击（ADR 0033 票 06）：开右栏终端 tab 并直跳详情页 */
@@ -521,6 +542,17 @@ function ToolSequenceView(props: {
         onOpenSubagent={props.onOpenSubagent}
         onOpenTerminal={props.onOpenTerminal}
         onDismissStatus={props.onDismissStatus}
+      />
+    );
+  }
+  if (item.kind === "terminal-read") {
+    // terminal_read 轮内锚点（ADR 0033「消息流 read 锚点」）：历次读取
+    // 收敛为单行可展开锚点行，右栏跳转与终端标记行同款接线
+    return (
+      <TerminalReadMarker
+        item={item}
+        sessionName={props.terminalNames?.get(item.sessionId)}
+        onOpen={props.onOpenTerminal}
       />
     );
   }

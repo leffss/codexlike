@@ -109,6 +109,14 @@ export function RailPanel(props: {
   /** 定位信号（消息流终端标记行点击，ADR 0033 票 06）：切到终端 tab 并直跳详情页 */
   terminalFocus: TerminalFocus | null;
   /**
+   * 终端会话名索引（ADR 0033 read 锚点）：sessionId → 会话名，子代理详情
+   * 工具流的 read 锚点行按此显示会话名；无对应会话（跨任务旧锚点）回退
+   * sessionId 呈现
+   */
+  terminalNames?: Map<string, string>;
+  /** read 锚点「右栏查看」（子代理详情流）：开右栏终端 tab 并直跳详情页 */
+  onOpenTerminal?: (sessionId: string) => void;
+  /**
    * 终端会话恢复快照（ADR 0033 票 08）：view 并行字段的已退出记录（含
    * 快照文本）——useTerminalSessions 初始拉取的恢复数据源（重启后内存
    * 注册表为空，record 进合并层数据源、进段投影丢弃快照）。
@@ -504,6 +512,8 @@ export function RailPanel(props: {
             <SubagentRailPanelBody
               subagents={props.subagents}
               focus={props.subagentFocus}
+              terminalNames={props.terminalNames}
+              onOpenTerminal={props.onOpenTerminal}
             />
           </div>
         ) : tab === "terminals" ? (

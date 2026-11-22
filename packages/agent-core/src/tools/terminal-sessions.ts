@@ -159,6 +159,10 @@ function formatReadOutput(result: TerminalReadResult): string {
   if (result.status === "exited") {
     lines.push("[会话已退出——以上是退出前的最后输出，缓冲保留可继续读取]");
   } else if (data.length === 0) {
+    // 空读标记文案是跨包契约：ui 侧 read 锚点（packages/ui/src/lib/
+    // terminal-read-view.ts isNoOutputRead）按前缀「[暂无新输出」判定空读
+    // 并在锚点行展开态做极简呈现——改措辞须两处同步，否则空读静默变
+    // 「+N 字符」增量行
     lines.push("[暂无新输出——会话运行中，可用 wait=true 等待新输出]");
   }
   return lines.join("\n");

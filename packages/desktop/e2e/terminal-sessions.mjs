@@ -566,6 +566,23 @@ async function main() {
     );
     console.log("[e2e] agent kill 审批放行 → 标记行/详情/列表推进 exited");
 
+    // ===== read 锚点行（ADR 0033「消息流 read 锚点」）：两条链的
+    // terminal_read 各收敛为单行可展开锚点，历次读取不再逐张成卡 =====
+    const readMarkerTexts = await window
+      .getByTestId("terminal-read-marker")
+      .allTextContents();
+    assert(
+      readMarkerTexts.length === 2,
+      `两条链各应有一个 read 锚点行：${JSON.stringify(readMarkerTexts)}`
+    );
+    assert(
+      readMarkerTexts.some((text) =>
+        text.includes("读取终端「git-bash · 1」· 1 次")
+      ),
+      `用户链 read 锚点应按会话名计数呈现：${JSON.stringify(readMarkerTexts)}`
+    );
+    console.log("[e2e] read 锚点行：两链 terminal_read 收敛为单行锚点");
+
     // ===== 请求体验证：工具结果回填真实可见（模型侧链路证据） =====
     const requests = seenBodies.map((body) => JSON.parse(body));
     const withCall = (callId) =>

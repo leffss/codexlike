@@ -1,6 +1,10 @@
 import { PLAN_TOOL_NAME } from "./plan-view";
 import { isTerminalSubagentState } from "./subagent-status";
 import type { MessageSegment, ToolCallSegment, UserSegment } from "./task-view";
+import {
+  TERMINAL_READ_TOOL,
+  terminalReadSessionId,
+} from "./terminal-read-view";
 
 /**
  * 轮次聚合（ADR 0011 呈现分层第三层、ADR 0015 逐段呈现，GLOSSARY「轮次」「过程段」）。
@@ -109,7 +113,23 @@ export type ToolSequenceItem =
       hasError: boolean;
     }
   /** 非工具段（思考/中间正文/子代理/交互/错误/状态）：原样透传，保持时序不丢段 */
-  | { kind: "passthrough"; segment: MessageSegment };
+  | { kind: "passthrough"; segment: MessageSegment }
+  /**
+   * terminal_read 轮内锚点（ADR 0033「消息流 read 锚点」）：一轮内对同一
+   * 会话的历次读取（含跨思考段）归并一项，calls 保持时序原序、锚点位置 =
+   * 首个 read 的时序位置；历次详情展开锚点行可见（数据层段不变，仅呈现收敛）
+   */
+  | TerminalReadItem;
+
+/**
+ * terminal_read 轮内锚点视图项：sessionId 聚合键 + 历次调用段（时序原序，
+ * 单一事实源——计数、最新增量、历次列表均由 calls 现场派生）
+ */
+export interface TerminalReadItem {
+  kind: "terminal-read";
+  sessionId: string;
+  calls: ToolCallSegment[];
+}
 
 /**
  * 轮内段序列 → 连续同类工具统计分组（spec 用户故事 29：「Read × 5」）。
@@ -168,4 +188,68 @@ export function groupConsecutiveTools(
   }
   flush();
   return items;
+}
+
+/**
+ * terminal_read 轮内锚点聚合（ADR 0033「消息流 read 锚点」）：分组序列里
+ * 同一会话的全部读取调用（single 与 group 形态均展开、跨 passthrough 归并）
+ * 收敛为一个 terminal-read 锚点项，位置 = 首个 read 的时序位置；其余段
+ * 原样透传保持时序。参数畸形（sessionId 解析失败）的 read 调用退回原卡，
+ * 呈现不丢段。无 read 调用时原样返回。
+ */
+export function foldTerminalReads(
+  items: ToolSequenceItem[]
+): ToolSequenceItem[] {
+  // 第一遍：按会话收集历次调用（时序原序）；无任何 read 时免第二遍
+  const callsBySession = new Map<string, ToolCallSegment[]>();
+  const collect = (call: ToolCallSegment): void => {
+    const sessionId = terminalReadSessionId(call);
+    if (sessionId === undefined) return;
+    const list = callsBySession.get(sessionId);
+    if (list === undefined) callsBySession.set(sessionId, [call]);
+    else list.push(call);
+  };
+  for (const item of items) {
+    if (
+      item.kind === "single" &&
+      item.segment.toolName === TERMINAL_READ_TOOL
+    ) {
+      collect(item.segment);
+    } else if (item.kind === "group" && item.toolName === TERMINAL_READ_TOOL) {
+      for (const segment of item.segments) collect(segment);
+    }
+  }
+  if (callsBySession.size === 0) return items;
+
+  // 第二遍：read 段所在项的位置放锚点（item 内逐段判定——group 项可能含
+  // 多个会话的调用，各会话锚点按段序依次落位）；已锚定会话的后续项移除；
+  // 参数畸形的段退回原卡呈现（段序保真：畸形卡与锚点按原时序穿插）
+  const anchored = new Set<string>();
+  const output: ToolSequenceItem[] = [];
+  for (const item of items) {
+    const readCalls: ToolCallSegment[] =
+      item.kind === "single" && item.segment.toolName === TERMINAL_READ_TOOL
+        ? [item.segment]
+        : item.kind === "group" && item.toolName === TERMINAL_READ_TOOL
+          ? item.segments
+          : [];
+    if (readCalls.length === 0) {
+      output.push(item);
+      continue;
+    }
+    for (const call of readCalls) {
+      const sessionId = terminalReadSessionId(call);
+      if (sessionId === undefined) {
+        output.push({ kind: "single", segment: call });
+        continue;
+      }
+      if (anchored.has(sessionId)) continue;
+      anchored.add(sessionId);
+      const calls = callsBySession.get(sessionId) ?? [];
+      if (calls.length > 0) {
+        output.push({ kind: "terminal-read", sessionId, calls });
+      }
+    }
+  }
+  return output;
 }

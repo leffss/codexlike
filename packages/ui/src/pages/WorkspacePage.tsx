@@ -69,6 +69,7 @@ import { ArchiveTerminalDialog } from "../components/ArchiveTerminalDialog";
 import { TASK_CONTENT_WIDTH_CLASS } from "../lib/content-width";
 import { reportLaunchState } from "../lib/launch-state";
 import { useWorkspaceSharing } from "../lib/workspace-sharing";
+import { terminalNameIndex } from "../lib/terminal-read-view";
 import {
   appendLocalSegment,
   mergeInteractions,
@@ -324,6 +325,13 @@ export function WorkspacePage(props: {
       ...merged,
     ];
   }, [currentId, messages, queuedVisible, queuedStart, workspaceState]);
+  // 终端会话名索引（ADR 0033 read 锚点）：供右栏子代理详情工具流的
+  // read 锚点行按会话名呈现（主消息流在 MessageStream 内自派生，同款
+  // terminalNameIndex 规则、不同数据源实例）
+  const terminalNames = useMemo(
+    () => terminalNameIndex(displayMessages),
+    [displayMessages]
+  );
   // 子代理段（ADR 0020）：右栏「子代理」tab 的数据来源（消息段过滤）
   const subagentSegments = useMemo(
     () =>
@@ -2077,6 +2085,8 @@ export function WorkspacePage(props: {
               subagentFocus={subagentFocus}
               terminalFocus={terminalFocus}
               restoredTerminals={restoredTerminals}
+              terminalNames={terminalNames}
+              onOpenTerminal={openTerminalFromStream}
             />
           </div>
         </div>
