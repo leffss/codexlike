@@ -55,7 +55,7 @@ import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
 import { TaskQueuedNotice } from "../components/TaskQueuedNotice";
-import { WorkPlanCardFromSegments } from "../components/WorkPlanCard";
+import { ProcessPillsBar } from "../components/ProcessPillsBar";
 import {
   type TitlebarContext,
   type TitlebarTask,
@@ -1897,22 +1897,28 @@ export function WorkspacePage(props: {
                     ) : undefined
                   }
                 />
-                {/* 工作计划进度折叠卡（GLOSSARY「工作计划」，ADR 0019，原型
-                  变体 C 转正）：位于消息正文与消息队列/输入框（或交互面板）
-                  之间——取代退役的 fixed 悬浮进度环徽章（ADR 0016）。宽度
-                  对齐正文列：左右 padding 对齐消息流滚动容器的 px-4（右缘再
-                  补滚动槽宽），contentWidthClass 的居中基准与消息列、输入区
-                  完全一致（同下方自动批准卡先例）。无计划时渲染 null 不占
-                  布局行。 */}
+                {/* 任务过程胶囊条（GLOSSARY「工作计划」，ADR 0034，原型变体
+                  B 转正，快照见 prototype/tri-list-cards 分支）：位于消息
+                  正文与消息队列/输入框（或交互面板）之间——取代主任务位的
+                  长条形折叠卡（ADR 0019；子代理详情页折叠卡保留）。一行三
+                  胶囊（计划/子代理/终端）按内容宽度居中，点开向上弹出浮动
+                  对话框（锚定被点胶囊），行点击直跳右栏详情（ADR 0032 语义）。
+                  宽度对齐正文列：左右 padding 对齐消息流滚动容器的 px-4（右
+                  缘再补滚动槽宽），contentWidthClass 的居中基准与消息列、
+                  输入区完全一致（同下方自动批准卡先例）。三类皆空渲染 null
+                  不占布局行。 */}
                 <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
                   <div className={contentWidthClass}>
-                    {/* 草稿态（currentId === null）无 update_plan 段，卡本就
-                      渲染 null；条件短路使 FromSegments 的 taskId 收紧为
-                      非空（开合记忆作用域二选一，见 WorkPlanCardScope） */}
+                    {/* 草稿态（currentId === null）无消息段，条本就渲染
+                      null；条件短路使 taskId 收紧为非空（终端 hook 按
+                      任务装配） */}
                     {currentId !== null && (
-                      <WorkPlanCardFromSegments
-                        items={displayMessages}
+                      <ProcessPillsBar
                         taskId={currentId}
+                        messages={displayMessages}
+                        restoredTerminals={restoredTerminals}
+                        onOpenSubagent={openSubagentFromStream}
+                        onOpenTerminal={openTerminalFromStream}
                       />
                     )}
                   </div>
