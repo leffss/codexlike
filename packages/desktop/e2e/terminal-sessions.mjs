@@ -277,12 +277,15 @@ async function main() {
     await window.waitForTimeout(400); // 行节点随 conpty 重绘抖动，等稳定再拖选
     console.log("[e2e] 用户侧手敲命令输出可见（xterm 文本层）");
 
-    // 选区可读性契约（2026-11-21 选中不可读修复）：xterm DOM renderer 的选区
-    // overlay 是不透明矩形压在字形上方，透明感靠 styles.css 的 opacity 压制
-    // （α=0.3）+ 高亮墨基色（--terminal-selection）。断言 overlay 计算样式：
-    // 未修复时 opacity=1 且 bg 是 blend 出的 ≈ 画布色（文字被整块盖住）。
-    // 拖选目标用输出行（xterm-rows 只含视口内行，PS1 单行化后回显行可能
-    // 刚好滚出视口顶部，输出行有 xtermRowVisible 背书必在视口内）。
+    // 选区可读性契约（2026-11-22「选中全黑」修复）：xterm 6 行工厂把压平洗
+    // 染色（blend(#fff, #37352f@0x4d) = rgb(195,194,192)）inline 画进选中格
+    // span、字形之下；.xterm-selection overlay 层（压字形上方、恒不透明）由
+    // styles.css display:none 隐藏。断言两个面：①选中 span 计算背景色 = 洗
+    // 染值（不透明墨主题下这里是 rgb(55,53,47)=墨底墨字全黑，即本轮根因）；
+    // ②overlay 层不可见。焦点态/失焦态色值同构（Inactive 变体同 α 同 blend），
+    // 断言对焦点状态鲁棒。拖选目标用输出行（xterm-rows 只含视口内行，PS1
+    // 单行化后回显行可能刚好滚出视口顶部，输出行有 xtermRowVisible 背书必
+    // 在视口内）。
     {
       const commandBox = await window.evaluate((marker) => {
         const rows = document.querySelectorAll(
@@ -312,25 +315,49 @@ async function main() {
         { steps: 8 }
       );
       await window.mouse.up();
-      const overlayStyle = await window.evaluate(() => {
-        const overlay = document.querySelector(
-          ".terminal-xterm .xterm-selection div"
+      const selectionPaint = await window.evaluate((marker) => {
+        const host = document.querySelector(
+          '[data-testid="terminal-xterm-host"]'
         );
-        if (overlay === null) return null;
-        const style = getComputedStyle(overlay);
-        return { opacity: style.opacity, background: style.backgroundColor };
-      });
-      assert(overlayStyle !== null, "选中后应存在选区 overlay");
+        const container = host.querySelector(".xterm-selection");
+        const overlayDisplay =
+          container === null ? null : getComputedStyle(container).display;
+        let paintedSpans = 0;
+        const sampleBackgrounds = [];
+        // 只采样被拖选的那一行：光标块（cursor=前景墨色块）在提示符行也有
+        // 非透明背景，全终端采样会把它误收进来
+        const rows = host.querySelectorAll(".xterm-rows > div");
+        let targetRow = null;
+        for (const row of rows) {
+          if (row.textContent.includes(marker)) targetRow = row;
+        }
+        if (targetRow !== null) {
+          for (const span of targetRow.querySelectorAll("span")) {
+            const bg = getComputedStyle(span).backgroundColor;
+            if (bg !== "rgba(0, 0, 0, 0)") {
+              paintedSpans += 1;
+              if (sampleBackgrounds.length < 3) sampleBackgrounds.push(bg);
+            }
+          }
+        }
+        return { overlayDisplay, paintedSpans, sampleBackgrounds };
+      }, USER_OUTPUT);
       assert(
-        overlayStyle.opacity === "0.3",
-        `选区 overlay 应压 opacity 0.3（实际 ${overlayStyle.opacity}）`
+        selectionPaint.overlayDisplay === "none",
+        `选区 overlay 层应 display:none 隐藏（实际 ${selectionPaint.overlayDisplay}）`
       );
       assert(
-        overlayStyle.background === "rgb(55, 53, 47)",
-        `选区基色应为高亮墨 --terminal-selection（实际 ${overlayStyle.background}）`
+        selectionPaint.paintedSpans > 0,
+        "选中格 span 应有 inline 选区背景（洗染色）"
+      );
+      assert(
+        selectionPaint.sampleBackgrounds.every(
+          (bg) => bg === "rgb(195, 194, 192)"
+        ),
+        `选中 span 背景应为压平洗染 rgb(195, 194, 192)（实际 ${JSON.stringify(selectionPaint.sampleBackgrounds)}）`
       );
       await window.getByTestId("terminal-xterm-host").click();
-      console.log("[e2e] 选区可读性契约（overlay α=0.3 + 高亮墨基色）");
+      console.log("[e2e] 选区可读性契约（span 洗染色 + overlay 隐藏）");
     }
 
     // 复制/粘贴链路（真 OS 剪贴板）：先探测环境可用性——进程树挂在非交互

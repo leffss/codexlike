@@ -45,10 +45,12 @@
   --surface-muted: #f7f6f3; /* Notion 暖灰：侧栏 / 输入卡等次级面 */
   --hover: rgba(55, 53, 47, 0.06);
   --selected: rgba(55, 53, 47, 0.09);
-  /* 终端选区高亮墨（= 前景墨）：xterm DOM renderer 把选区色与背景 blend 成
-   * 不透明 overlay 压在字形上方，色值带 α 会被 blend 吃掉；必须给不透明色，
-   * 透明感由下方 .terminal-xterm 规则的 opacity 补（契约见 lib/terminal-theme.ts） */
-  --terminal-selection: #37352f;
+  /* 终端选区基色：前景墨 @ α≈0.3（8 位 hex）。xterm 6 主题契约：带 α 的
+   * selectionBackground 会被 blend 成压平的浅色洗染（light 下 = blend(#fff,
+   * #37352f@0x4d) = rgb(195,194,192)）画进选中格 span 背景、字形之下，字形
+   * 保持原色可读；给不透明色 blend 原样返回纯墨、直接画成单元格背景——墨底
+   * 墨字整块全黑（2026-11-22「选中全黑」根因）。契约见 lib/terminal-theme.ts */
+  --terminal-selection: #37352f4d;
 
   /* 内容：暖黑 + 暖灰 */
   --fg: #37352f;
@@ -123,8 +125,8 @@
   --surface-muted: #2a2827;
   --hover: rgba(237, 233, 223, 0.06);
   --selected: rgba(237, 233, 223, 0.1);
-  /* 终端选区高亮墨：深色套取前景暖白同墨（浅色注释同款契约） */
-  --terminal-selection: #e6e4df;
+  /* 终端选区基色：前景暖白 @ α≈0.3（浅色注释同款契约），深底下 blend 出亮洗染 */
+  --terminal-selection: #e6e4df4d;
 
   /* 内容：暖白 + 暖灰 */
   --fg: #e6e4df;
@@ -509,12 +511,16 @@ body {
 }
 
 /*
- * 终端选区透明感（lib/terminal-theme.ts 契约的另一半）：xterm DOM renderer
- * 的选区 overlay 是不透明矩形（主题色先与背景 blend，压在字形上方）——
- * 不压 opacity 时整块盖住选中文字（2026-11-21 选中不可读 bug）。α=0.3：
- * 墨与前景同墨，默认字形区混合色恒等于字形原色（可读性上界），空白区呈
- * 30% 淡墨高亮；只作用于选区 overlay，xterm 自身无同属性规则、无冲突。
+ * 终端选区 overlay 层整体隐藏（lib/terminal-theme.ts 契约的另一半）：xterm 6
+ * DOM renderer 的选区是双层渲染——选中格 span 已由行工厂拿到压平洗染色
+ * （inline background-color，画在字形之下、cell 级精度、焦点/失焦两态齐备），
+ * 而 .xterm-selection overlay（z-index 1）压在字形上方且色值恒为不透明洗染，
+ * α=1 直接盖字。隐藏 overlay 让 span 级绘制成为唯一选区渲染源（2026-11-22
+ * 「选中全黑」修复：此前对 overlay div 压 opacity 0.3 的旧契约基于「只有
+ * overlay 在画选区」的误判——实际 span 背景同时画进了纯墨，overlay 压透明
+ * 救不了它，e2e 只断言 overlay 计算样式因此假绿）。若未来 xterm 升级移除
+ * span 级选区绘制，此规则需随之重审——e2e 选中 span 背景色断言是守门。
  */
-.terminal-xterm .xterm-selection div {
-  opacity: 0.3;
+.terminal-xterm .xterm-selection {
+  display: none;
 }

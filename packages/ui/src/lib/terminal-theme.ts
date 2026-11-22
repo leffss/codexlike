@@ -12,15 +12,17 @@ import type { ITheme } from "@xterm/xterm";
  * bright 系列与基础系列同色（VS Code 默认主题同款做法），仅 brightBlack
  * 用最弱前景（注释灰）与 brightWhite 用前景主色区分两端。
  *
- * 选区基色契约（2026-11-21 选中不可读修复）：xterm DOM renderer 把
- * selectionBackground 与背景 blend 成**不透明** overlay 矩形压在字形上方
- * （z-index 1，行容器 static），主题色带 α 会在 blend 里被吃掉、混出
- * ≈ 背景色整块盖住文字。故 selectionBackground 必须是**不透明高亮墨**
- * （--terminal-selection，与前景同墨），透明感由 styles.css 对
- * .xterm-selection div 的 opacity 压制补回（α=0.3）：overlay 与其下内容
- * 按不透明度混合，墨与前景同墨时默认字形区混合色恒等于字形原色
- * （可读性上界），ANSI 彩字略压暗仍可读，空白区呈 30% 淡墨高亮。
- * 改选区观感改 --terminal-selection + 该 opacity，不改此处。
+ * 选区基色契约（2026-11-22「选中全黑」修复）：selectionBackground 必须带
+ * α（8 位 hex，前景墨 @ 0.3）。xterm 6 的主题解析把带 α 的选区色 blend 成
+ * 压平洗染（selectionBackgroundOpaque = blend(背景, 选区色@原α)），行工厂
+ * 再把洗染色以 inline background-color 画进选中格 span、字形之下（焦点态
+ * 与失焦态同构），字形保持原色可读；给不透明色时 blend 对 α=1 原样返回
+ * 纯墨——纯墨直接画成单元格背景，墨底墨字整块全黑。xterm 自身默认选区色
+ * 同为 rgba α=0.3（VS Code 同款惯例），此契约是回到库的设计正路。
+ * 另：.xterm-selection overlay 层（z-index 1 压字形上方、色值恒为不透明
+ * 洗染）由 styles.css display:none 隐藏——它是旧渲染机制的残留层，span 级
+ * 绘制已是唯一选区渲染源，留着只会盖字。改选区观感改 --terminal-selection，
+ * 不改此处。
  */
 
 /** xterm palette 消费的语义色值表（全部为 CSS 变量名，读取时求值） */

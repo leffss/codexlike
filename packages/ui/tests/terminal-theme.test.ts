@@ -7,18 +7,18 @@ describe("terminal-theme：语义 token → xterm palette（一处收口映射�
     const palette = xtermPaletteFromTokens({
       "--canvas": "#1f1e1c",
       "--fg": "#e6e4df",
-      "--terminal-selection": "#e6e4df",
+      "--terminal-selection": "#e6e4df4d",
     });
     expect(palette.background).toBe("#1f1e1c");
     expect(palette.foreground).toBe("#e6e4df");
     expect(palette.cursor).toBe("#e6e4df");
     expect(palette.cursorAccent).toBe("#1f1e1c");
-    // 选区基色 = 不透明高亮墨（--terminal-selection，与前景同墨）：xterm DOM
-    // renderer 把主题选区色与背景 blend 成不透明 overlay 压在字形上方，低透明
-    // 度 token 会被 blend 吃掉 α、混出 ≈ 背景色整块盖字（2026-11-21 选中不可
-    // 读 bug）；配合 styles.css 对 overlay div 的 opacity 压制，字形区混合色
-    // 恒等于字形原色，空区呈淡墨高亮
-    expect(palette.selectionBackground).toBe("#e6e4df");
+    // 选区基色必须带 α（8 位 hex，前景墨 @ 0.3）：xterm 6 主题解析把带 α 的
+    // 选区色 blend 成压平洗染色、由行工厂画进选中格 span 背景字形之下；给
+    // 不透明色 blend 原样返回纯墨、直接画成单元格背景 = 墨底墨字全黑
+    // （2026-11-22「选中全黑」根因）。映射函数纯透传，此处锁定「带 α 色值
+    // 原样进入 palette」与 8 位 hex 形态
+    expect(palette.selectionBackground).toBe("#e6e4df4d");
   });
 
   it("ANSI 16 色借语义色 token：red/green/yellow/blue/magenta/cyan/white + black", () => {
