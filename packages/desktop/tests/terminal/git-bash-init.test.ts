@@ -29,6 +29,12 @@ describe("git-bash 托管 init 文件（窄面板单行提示符）", () => {
     expect(content).toContain(
       'export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"'
     );
+    // locale 兜底（非登录也没有 profile.d/lang.sh）：守卫口径与 lang.sh 一致
+    // （LC_ALL/LC_CTYPE/LANG 全未设置才兜底），readline 在 C locale 下逐字节
+    // 计宽——CJK 分支名长提示符重绘叠印（2026-11-22「有的项目文字叠印」）
+    expect(content).toContain(
+      'test -z "${LC_ALL:-${LC_CTYPE:-$LANG}}" && export LANG=C.UTF-8'
+    );
     // 用户链：bash_profile 优先，缺失回退 bashrc
     expect(content).toContain(". ~/.bash_profile");
     expect(content).toContain(". ~/.bashrc");

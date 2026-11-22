@@ -533,6 +533,15 @@ export async function launchApp({ homeDir, workspaceDir, env }) {
     CODEXLIKE_TEST_USER_DATA: join(homeDir, "electron-user-data"),
     // 生产模式：不带 VITE_DEV_SERVER_URL，主进程以 file:// 加载 ui/dist
     VITE_DEV_SERVER_URL: "",
+    // GUI 启动忠实度：资源管理器/开始菜单启动的应用没有 LANG/LC_*（Windows
+    // 默认不设），从终端跑 e2e 会继承 shell locale——曾让「非登录 bash 无
+    // LANG → readline C locale 逐字节计宽 → CJK 分支名提示符重绘叠印」在本
+    // 机永远探不到（2026-11-22 根因轮）。这里显式剥离对齐用户环境；git-bash
+    // 由托管 init 兜底 C.UTF-8。空串 = bash 侧 test -z 判空同未设置。
+    LANG: "",
+    LC_ALL: "",
+    LC_CTYPE: "",
+    LC_COLLATE: "",
     ...(env ?? {}),
   };
   const app = await electron.launch(launchTarget(fullEnv));

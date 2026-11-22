@@ -7,15 +7,27 @@ import { join } from "node:path";
  * /etc/profile.d/git-prompt.sh 无条件设置，env 覆盖不掉）路径一长就折成
  * 两三行——每个会话开头都是几行英文噪音。方案：会话以**非登录交互** spawn
  * 并 `--init-file` 指向本文件（--login 下 init-file 被 bash 忽略，实证），
- * 文件自补 PATH（与 /etc/profile 同序）、保用户链（~/.bash_profile /
- * ~/.bashrc）、单行紧凑提示符。OSC 0 标题转义必须保留在 PS1 里——动态
- * 标题功能（terminal-title-changed）依赖每次提示符刷新标题。
+ * 文件自补 PATH（与 /etc/profile 同序）、兜底 UTF-8 locale、保用户链
+ * （~/.bash_profile / ~/.bashrc）、单行紧凑提示符。OSC 0 标题转义必须保留
+ * 在 PS1 里——动态标题功能（terminal-title-changed）依赖每次提示符刷新
+ * 标题。
  */
 
 export const GIT_BASH_INIT_FILE_CONTENT = `# CodexLike 终端会话 git-bash 初始化（应用生成，勿手改——每次启动覆盖）
-# 非 --login：自补 PATH（与 /etc/profile 同序），保用户链，单行提示符。
+# 非 --login：自补 PATH（与 /etc/profile 同序），兜底 locale，保用户链，
+# 单行提示符。
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 export MSYSTEM=MINGW64
+# locale 兜底（2026-11-22「有的项目终端文字叠印」根因轮）：登录态由
+# /etc/profile.d/lang.sh 兜底（locale -uU 取 Windows 用户区域），非登录交互
+# 没人设 LANG——资源管理器启动的应用没有 LANG，readline 按 C locale 逐字节
+# 计宽（CJK 每字 3 字节 vs 终端渲染 2 列），长中文分支名提示符（__git_ps1）
+# 宽度错算，命令结束后重绘提示符从错列开始，提示符残片与上一条命令输出
+# 叠印成乱码块（分支名/cwd 含中文的项目必现，纯 ASCII 项目不触发）。仅在
+# LC_ALL/LC_CTYPE/LANG 全未设置时兜底，用户显式选择不覆盖；C.UTF-8 只修
+# 字符集语义，不换消息/排序语言。应用内因果实验：同 CJK 分支仓库仅翻转
+# LANG，剥离腿整屏叠印、C.UTF-8 腿完全干净。
+test -z "\${LC_ALL:-\${LC_CTYPE:-$LANG}}" && export LANG=C.UTF-8
 if test -f ~/.bash_profile; then
 	. ~/.bash_profile
 elif test -f ~/.bashrc; then
