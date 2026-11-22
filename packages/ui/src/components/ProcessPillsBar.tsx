@@ -358,7 +358,10 @@ export function ProcessPillsBar(props: {
               : openKey === "subagents"
                 ? `子代理 · ${subagents.length} 个`
                 : `终端 · ${sessions.length} 个`}
-            <span className="ml-auto font-mono text-[10px] text-fg-subtle">
+            <span
+              data-testid={`process-pill-popover-${openKey}-state`}
+              className="ml-auto font-mono text-[10px] text-fg-subtle"
+            >
               {openKey === "plan" && allDone
                 ? "全部完成"
                 : openKey === "plan" && active !== undefined

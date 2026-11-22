@@ -1,9 +1,10 @@
-// E2E 工作计划（GLOSSARY「工作计划」「计划项」，ADR 0016 派生层 + ADR 0019 呈现）：
-// 1) 模型调 update_plan → 正文与输入区之间的进度折叠卡出现（百分比徽章 +
-//    N/M 计数 + 收起态预览当前/下一步，aria 携带当前步骤），流内调用处只留
-//    一行极简标记，不渲染通用工具卡；
+// E2E 工作计划（GLOSSARY「工作计划」「计划项」「过程胶囊条」，ADR 0016 派生层
+// + ADR 0019 呈现 + ADR 0034 胶囊条转正；主任务位折叠卡已退役）：
+// 1) 模型调 update_plan → 计划胶囊出现（N/M 计数），浮层默认收起，点开见
+//    头部当前步骤预览、toggle 收起；流内调用处只留一行极简标记，不渲染通用
+//    工具卡；
 // 2) 相邻两次 update_plan 不折叠成工具组（分组排除），标记行逐次累计；
-// 3) 卡随最新调用全量替换（计数/全部完成态），点击展开完整步骤清单
+// 3) 胶囊随最新调用全量替换（计数），浮层头部全部完成态 + 完整步骤清单
 //    （完成项删除线）；
 // 4) 工具结果（中文统计摘要）回传模型，下一轮请求体可查。
 // 运行：pnpm test:e2e:work-plan（先 pnpm build）。
@@ -100,42 +101,36 @@ async function main() {
     await window.getByTestId("settings-back").click();
     await prepareDraft(window, { approvalMode: "assist" });
 
-    // ---- 场景 1：首次 update_plan → 进度折叠卡 + 单条流内标记 ----
+    // ---- 场景 1：首次 update_plan → 计划胶囊 + 单条流内标记 ----
     await window.getByTestId("composer-input").fill("列个计划");
     await window.getByTestId("composer-send").click();
-    await window.getByTestId("plan-card").waitFor({ timeout: 30_000 });
+    await window.getByTestId("process-pill-plan").waitFor({ timeout: 30_000 });
     await window
       .getByTestId("message-assistant")
       .getByText("计划已建立")
       .waitFor({ timeout: 30_000 });
     assert(
-      (await window.getByTestId("plan-card-count").textContent()) === "1/3",
-      "卡计数应为 1/3"
+      (await window.getByTestId("process-pill-plan-count").textContent()) ===
+        "1/3",
+      "胶囊计数应为 1/3"
     );
     assert(
-      (await window.getByTestId("plan-card-percent").textContent()) === "33%",
-      "卡百分比徽章应为 33%"
+      (await window.getByTestId("process-pill-popover-plan").count()) === 0,
+      "默认收起：浮层不渲染"
     );
+    // 点开浮层：头部右侧预览当前（进行中）步骤，toggle 收起
+    await window.getByTestId("process-pill-plan").click();
+    await window.getByTestId("process-pill-popover-plan").waitFor();
     assert(
-      (await window.getByTestId("plan-card-current").textContent()) ===
-        "梳理分区清单",
-      "收起态应预览当前步骤"
+      (await window
+        .getByTestId("process-pill-popover-plan-state")
+        .textContent()) === "梳理分区清单",
+      "浮层头部应预览当前步骤"
     );
+    await window.getByTestId("process-pill-plan").click();
     assert(
-      (await window.getByTestId("plan-card-next").textContent()) ===
-        "下一步：输出布局方案",
-      "收起态应预览下一步"
-    );
-    const cardLabel = await window
-      .getByTestId("plan-card-toggle")
-      .getAttribute("aria-label");
-    assert(
-      cardLabel !== null && cardLabel.includes("梳理分区清单"),
-      `卡 aria 应携带当前步骤：${cardLabel ?? "(空)"}`
-    );
-    assert(
-      (await window.getByTestId("plan-card-panel").count()) === 0,
-      "默认收起：完整步骤清单不渲染"
+      (await window.getByTestId("process-pill-popover-plan").count()) === 0,
+      "toggle 后浮层收起"
     );
     assert(
       (await window.getByTestId("plan-marker-row").count()) === 1,
@@ -147,7 +142,7 @@ async function main() {
         .count()) === 0,
       "update_plan 不得渲染通用工具卡"
     );
-    console.log("[e2e] 首次更新：进度折叠卡 + 流内单条标记（无工具卡）");
+    console.log("[e2e] 首次更新：计划胶囊（1/3）+ 流内单条标记（无工具卡）");
 
     // ---- 场景 2：相邻两次更新 → 分组排除 + 全量替换 + 结果回传 ----
     await window.getByTestId("composer-input").fill("推进计划到完成");
@@ -165,34 +160,40 @@ async function main() {
       "相邻 update_plan 不得折叠成工具组"
     );
     assert(
-      (await window.getByTestId("plan-card-count").textContent()) === "3/3",
-      "卡应随最新调用全量替换为 3/3"
+      (await window.getByTestId("process-pill-plan-count").textContent()) ===
+        "3/3",
+      "胶囊应随最新调用全量替换为 3/3"
     );
-    const summaryLabel = await window
-      .getByTestId("plan-card-toggle")
-      .getAttribute("aria-label");
+    // 全部完成态：浮层头部显示「全部完成」
+    await window.getByTestId("process-pill-plan").click();
+    await window.getByTestId("process-pill-popover-plan").waitFor();
     assert(
-      summaryLabel !== null && summaryLabel.includes("全部完成"),
-      `全部完成后卡 aria 应显示「全部完成」：${summaryLabel ?? "(空)"}`
+      (await window
+        .getByTestId("process-pill-popover-plan-state")
+        .textContent()) === "全部完成",
+      "全部完成后浮层头部应显示「全部完成」"
     );
+    await window.getByTestId("process-pill-plan").click();
     const planResult = toolResult(seenBodies.at(-1) ?? "", "plan-c3");
     assert(
       typeof planResult === "string" && planResult.includes("工作计划已更新"),
       `工具结果（中文统计摘要）应回传模型：${planResult ?? "(未找到)"}`
     );
-    console.log("[e2e] 相邻更新分组排除、卡全量替换、统计结果回传");
+    console.log("[e2e] 相邻更新分组排除、胶囊全量替换、统计结果回传");
 
-    // ---- 场景 3：展开折叠卡 → 完整步骤清单（完成项删除线） ----
-    await window.getByTestId("plan-card-toggle").click();
-    await window.getByTestId("plan-card-panel").waitFor();
+    // ---- 场景 3：点开计划浮层 → 完整步骤清单（完成项删除线） ----
+    await window.getByTestId("process-pill-plan").click();
+    await window.getByTestId("process-pill-popover-plan").waitFor();
     assert(
-      (await window.getByTestId("plan-card-panel").textContent())?.includes(
-        "调研布局代码"
-      ) === true,
-      "展开清单应显示完整步骤列表"
+      (
+        await window.getByTestId("process-pill-popover-plan").textContent()
+      )?.includes("调研布局代码") === true,
+      "浮层清单应显示完整步骤列表"
     );
     const lineThroughCount = await window.evaluate(() => {
-      const panel = document.querySelector('[data-testid="plan-card-panel"]');
+      const panel = document.querySelector(
+        '[data-testid="process-pill-popover-plan"]'
+      );
       if (panel === null) return 0;
       return [...panel.querySelectorAll("span")].filter((span) =>
         span.className.includes("line-through")
@@ -202,7 +203,7 @@ async function main() {
       lineThroughCount === 3,
       `三个完成项都应有删除线，实际 ${lineThroughCount}`
     );
-    console.log("[e2e] 展开面板显示完整步骤（完成项删除线）");
+    console.log("[e2e] 浮层显示完整步骤（完成项删除线）");
 
     await closeApp(app);
     console.log("[e2e] 工作计划场景通过 ✅");

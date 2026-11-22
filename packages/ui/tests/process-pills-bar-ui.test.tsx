@@ -227,6 +227,26 @@ describe("ProcessPillsBar（ADR 0034）", () => {
     expect(popover.textContent).toContain("已完成步骤");
     expect(popover.textContent).toContain("进行中步骤");
     expect(popover.textContent).toContain("工作计划 · 2 步");
+    // 头部右侧状态预览：进行中步骤内容（desktop e2e work-plan 的断言锚点）
+    expect(
+      screen.getByTestId("process-pill-popover-plan-state").textContent
+    ).toBe("进行中步骤");
+  });
+
+  it("计划浮层头部状态：全部步骤完成时显示「全部完成」", () => {
+    installStubReady();
+    renderBar({
+      messages: [
+        planSeg("p1", "t1", [
+          { content: "步骤一", status: "completed" },
+          { content: "步骤二", status: "completed" },
+        ]),
+      ],
+    });
+    fireEvent.click(screen.getByTestId("process-pill-plan"));
+    expect(
+      screen.getByTestId("process-pill-popover-plan-state").textContent
+    ).toBe("全部完成");
   });
 
   it("行点击直跳：子代理行回调携带段 id 且浮层收起；终端行回调携带 sessionId", async () => {
