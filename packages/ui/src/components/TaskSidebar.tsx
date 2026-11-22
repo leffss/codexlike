@@ -827,7 +827,7 @@ export function TaskSidebar(props: {
       {/* 拖拽分隔条（右栏 rail-separator 同款交互：拖拽/双击复位/←→微调）。
           骑缝 absolute 定位（-right-1.5 压在正文列上）：不占 flex 布局——
           占位会恒压窄正文容器 6px，width-tiers 的 @min-[1280px]/task 断点
-          在临界窗口宽下掉档（6xl→4xl，2026-11-19 实测回归）。 */}
+          在临界窗口宽下掉档（7xl→5xl，2026-11-19 实测回归）。 */}
       <div
         role="separator"
         aria-orientation="vertical"

@@ -6,13 +6,18 @@
 // 场景：
 // 1) 新建、已有与加载中使用同一三档内容列；草稿场景的就地收纳行（票01）
 //    与消息流对齐，正式任务无页内工作区行（路径在标题栏徽章内）。
-// 2) 窗口内容区 1280px（任务容器 992px ≥864）→ 4xl 档：
-//    assistant 内容宽突破旧 768px 锁死值且 ≤896px（max-w-4xl 上限）。
-// 3) 窗口内容区 1600px（容器 1312px ≥1280）→ 6xl 档：内容列留白 192px，上限 1152px；
+// 2) 窗口内容区 1280px（任务容器 960px ≥864）→ 5xl 档：
+//    assistant 内容宽突破旧 768px 锁死值（2026-11-22 上限自 max-w-4xl 上移
+//    一档至 max-w-5xl；此宽度下留白生效、上限不 bind，档位由计算样式断言钉住）。
+// 3) 窗口内容区 1616px（容器 1296px ≥1280，留 16px 断点余量）→ 7xl 档：内容列留白 192px，上限 1280px
+//    （2026-11-22 自 max-w-6xl/1152px 上移一档；此宽度下上限不 bind，计算样式断言钉住）；
 //    头部 / 消息流左右缘对齐，输入卡片左右各外扩 12px；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
-// 5) 窗口内容区 1060px（容器 772px <864）→ 基础档：内容列回落全宽（<896px）；
+// 5) 窗口内容区 1060px（容器 740px <864）→ 基础档：内容列回落全宽（<1024px）；
 //    票04 窗口底线（1000）之上留出夹紧/取整余量，窄档基线不再压 minWidth 线。
+// 5b) 窗口内容区 1520px（容器 1200px，5xl 档）→ max-w-5xl 上限几何生效：
+//    留白后可用宽 1072px−滚动槽 > 1024px，内容列钉在 1024px
+//    （调宽前钉在 896px，此腿是上限上移的直接几何证据）。
 // 6) ADR 0018 右栏重基线：检视右栏为常驻分栏（推窄消息流，非 overlay），
 //    默认宽 400px（窄容器自动夹取，正文最小宽 480 保底），分隔条可拖拽；
 //    标题栏「右栏开关」唯一开合入口，tab 互斥切换由右栏自带描边按钮承担。
@@ -85,6 +90,19 @@ async function assertContentWidth(window, { min, max, label }) {
     `${label}：assistant 内容宽 ${box.width} 应在 [${min}, ${max}]`
   );
   return box;
+}
+
+/** 档位断言（计算样式）：内容列当前生效的 max-width（浏览器解析为 px 值）。
+ *  上限只在更宽窗口才几何生效（本机 7xl 生效点窗口 ≥1824px 摆不下），
+ *  用 computed maxWidth 钉住「档位类已切换」，与几何断言互补。 */
+async function assertActiveMaxWidth(window, expectedPx, label) {
+  const maxWidth = await window
+    .getByTestId("message-list")
+    .evaluate((el) => getComputedStyle(el).maxWidth);
+  assert(
+    maxWidth === `${expectedPx}px`,
+    `${label}：内容列生效上限应为 ${expectedPx}px，实际 ${maxWidth}`
+  );
 }
 
 /** 文档不承担滚动，消息区和输入区始终留在窗口内容区内。 */
@@ -264,50 +282,56 @@ async function main() {
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
 
-    // 场景 2：4xl 档（容器 992px）：突破 768px 旧锁死，上限 896px
-    const tier4 = await assertContentWidth(window, {
+    // 场景 2：5xl 档（容器 960px）：突破 768px 旧锁死；此宽度下留白生效、
+    // max-w-5xl 上限不 bind，档位切换由计算样式断言钉住（2026-11-22 上移前为 896px）
+    const tier5xl = await assertContentWidth(window, {
       min: 769,
-      max: 896,
-      label: "4xl 档（容器 992px）",
+      max: 1024,
+      label: "5xl 档（容器 960px）",
     });
+    await assertActiveMaxWidth(window, 1024, "5xl 档（容器 960px）");
     assert(
-      tier4.width > 768,
-      `4xl 档 assistant 内容宽 ${tier4.width} 必须突破旧 768px 锁死值`
+      tier5xl.width > 768,
+      `5xl 档 assistant 内容宽 ${tier5xl.width} 必须突破旧 768px 锁死值`
     );
 
-    // 场景 3：6xl 档（窗口内容区 1600 → 容器 1312px ≥1280）：留白 192px，上限 1152px
-    await resizeWindow(app, 1600, 900);
+    // 场景 3：7xl 档（窗口内容区 1616 → 容器 1296px ≥1280）：留白 192px，上限 1280px。
+    // 窗口不取 1600：容器恰压 1280 断点线零余量，DPI 夹紧/取整掉档会让
+    // expectedWide±2 假红（2026-11-22 注释换算修正轮顺手抬 16px 余量）。
+    // 此宽度下上限同样不 bind，档位切换由计算样式断言钉住（上移前为 1152px）。
+    await resizeWindow(app, 1616, 900);
     const wideGutter = await window
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
     const expectedWide = Math.min(
-      1600 - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
-      1152
+      1616 - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
+      1280
     );
-    const tier6 = await assertContentWidth(window, {
+    const tier7xl = await assertContentWidth(window, {
       min: expectedWide - 2,
       max: expectedWide + 2,
-      label: "6xl 档（容器 1312px）",
+      label: "7xl 档（容器 1280px）",
     });
+    await assertActiveMaxWidth(window, 1280, "7xl 档（容器 1280px）");
     assert(
-      tier6.width > tier4.width,
-      `容器放宽后内容列应变宽：${tier6.width} > ${tier4.width}`
+      tier7xl.width > tier5xl.width,
+      `容器放宽后内容列应变宽：${tier7xl.width} > ${tier5xl.width}`
     );
 
     // 头部与消息列对齐，输入卡片左右各外扩 12px。
-    await assertAligned(window, "message-list", "6xl 档");
+    await assertAligned(window, "message-list", "7xl 档");
 
     // 用户气泡限宽右对齐：右缘与 assistant 内容列右缘对齐
     const userBox = await window.getByTestId("message-user").boundingBox();
     assert(userBox !== null, "用户消息必须可见");
     assert(
-      userBox.width < tier6.width,
-      `用户气泡应限宽（${userBox.width} < 内容列 ${tier6.width}）`
+      userBox.width < tier7xl.width,
+      `用户气泡应限宽（${userBox.width} < 内容列 ${tier7xl.width}）`
     );
     assert(
-      Math.abs(userBox.x + userBox.width - (tier6.x + tier6.width)) <= 2,
+      Math.abs(userBox.x + userBox.width - (tier7xl.x + tier7xl.width)) <= 2,
       `用户气泡应右对齐内容列右缘：气泡右缘 ${userBox.x + userBox.width}，内容列右缘 ${
-        tier6.x + tier6.width
+        tier7xl.x + tier7xl.width
       }`
     );
 
@@ -345,7 +369,7 @@ async function main() {
       `消息流滚动容器不应有横向溢出：scroll ${metrics.stream.scrollWidth} > client ${metrics.stream.clientWidth}`
     );
 
-    // 场景 5：基础档（窗口内容区 1060 → 容器 772px <864）：内容列回落全宽。
+    // 场景 5：基础档（窗口内容区 1060 → 容器 740px <864）：内容列回落全宽。
     // 票04 窗口底线：窄档基线从 1000 提到 1060——1000 压 minWidth 线，
     // 夹紧 + DPI 取整会让 content 实际宽出 1~2px，精确档位断言不再成立。
     await resizeWindow(app, 1060, 800);
@@ -355,15 +379,29 @@ async function main() {
     const expectedFull = 1060 - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
-      max: 895,
-      label: "基础档（容器 772px）",
+      max: 1023,
+      label: "基础档（容器 740px）",
     });
     assert(
-      tierBase.width < tier4.width,
-      `容器收窄后内容列应变窄：${tierBase.width} < ${tier4.width}`
+      tierBase.width < tier5xl.width,
+      `容器收窄后内容列应变窄：${tierBase.width} < ${tier5xl.width}`
     );
 
     await assertAligned(window, "message-list", "基础档已有任务");
+
+    // 场景 5b：5xl 上限几何生效（窗口内容区 1520 → 容器 1200px，5xl 档）：
+    // 留白后可用宽 1200−32−96−滚动槽 ≈ 1057px > 1024px，内容列钉在上限
+    // 1024px（2026-11-22 上移前钉在 896px，此腿是上限上移的直接几何证据）。
+    await resizeWindow(app, 1520, 900);
+    const tier5xlBound = await assertContentWidth(window, {
+      min: 1022,
+      max: 1026,
+      label: "5xl 上限几何生效（容器 1200px）",
+    });
+    assert(
+      tier5xlBound.width > tierBase.width,
+      `容器放宽后内容列应超过基础档：${tier5xlBound.width} > ${tierBase.width}`
+    );
 
     // 两轮回复在低窗口内溢出：复制反馈的 sr-only 元素不得越过消息流撑大文档。
     // 真实内容溢出时滚动槽仍保持原宽度，输入区和标题不横跳。
