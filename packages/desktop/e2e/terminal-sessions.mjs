@@ -395,9 +395,16 @@ async function main() {
         );
         await window.mouse.up();
         await window.keyboard.press("Control+Shift+c");
-        const copied = await app.evaluate(({ clipboard }) =>
-          clipboard.readText()
-        );
+        // 渲染进程的 navigator.clipboard.writeText 是异步写（Electron 45 剪贴板
+        // 全 Promise 化），主进程 readText 若紧跟其后读到的还是旧内容——轮询等
+        // 写入落地（修复「双粘贴」轮实证的读旧竞态，非产品缺陷）
+        let copied = "";
+        for (let i = 0; i < 30 && !copied.includes(PASTE_OUTPUT); i++) {
+          copied = await app.evaluate(({ clipboard }) => clipboard.readText());
+          if (!copied.includes(PASTE_OUTPUT)) {
+            await window.waitForTimeout(100);
+          }
+        }
         assert(
           copied.includes(PASTE_OUTPUT),
           `Ctrl+Shift+C 后 OS 剪贴板应含选区原文：${JSON.stringify(copied)}`

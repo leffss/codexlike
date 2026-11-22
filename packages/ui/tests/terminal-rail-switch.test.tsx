@@ -59,7 +59,11 @@ const xtermFakes = vi.hoisted(() => {
     }
   }
   const instances: FakeTerminal[] = [];
-  return { FakeTerminal, FakeFitAddon, instances };
+  /** ResizeObserver 回调捕获表（字节闸门用例手动 fire，模拟布局稳定） */
+  const resizeObserverCallbacks: Array<
+    (entries: unknown[], observer: unknown) => void
+  > = [];
+  return { FakeTerminal, FakeFitAddon, instances, resizeObserverCallbacks };
 });
 
 vi.mock("@xterm/xterm", () => ({ Terminal: xtermFakes.FakeTerminal }));
@@ -166,6 +170,7 @@ const ipc = vi.hoisted(() => {
 
 function resetFakes() {
   xtermFakes.instances.length = 0;
+  xtermFakes.resizeObserverCallbacks.length = 0;
   ipc.state.calls.subscribe = [];
   ipc.state.calls.unsubscribe = [];
   ipc.state.calls.write = [];
@@ -185,6 +190,20 @@ function resetFakes() {
 const clipboardState = { readTextResult: "粘贴内容" };
 
 function installStub() {
+  // jsdom 未实现 ResizeObserver（TerminalSessionView 字节闸门依赖 observer
+  // 触发的稳定 fit）：捕获回调供用例手动 fire。afterEach 的
+  // unstubAllGlobals 会清桩，故随 installStub 每用例重装
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe = () => {};
+      unobserve = () => {};
+      disconnect = () => {};
+      constructor(cb: (entries: unknown[], observer: unknown) => void) {
+        xtermFakes.resizeObserverCallbacks.push(cb);
+      }
+    }
+  );
   window.codexlike = {
     ...window.codexlike,
     // onTaskEvent 挂顶层（hook 订阅信封通道）；terminals 子命名空间独立
@@ -503,6 +522,12 @@ describe("MessageStream 终端标记行接线（票 06）", () => {
 });
 
 describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律）", () => {
+  /** 手动 fire 两次 ResizeObserver（提案尺寸恒定 → 稳定 fit → 字节闸门打开） */
+  function fireStableResize() {
+    for (const cb of [...xtermFakes.resizeObserverCallbacks]) cb([], {});
+    for (const cb of [...xtermFakes.resizeObserverCallbacks]) cb([], {});
+  }
+
   it("订阅时序：onSessionData 监听先于 subscribe 注册（不丢登记窗口字节）", async () => {
     installStub();
     render(<TerminalRailPanelBody {...bodyProps()} />);
@@ -526,6 +551,9 @@ describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律�
     await waitFor(() => {
       expect(xtermFakes.instances).toHaveLength(1);
     });
+    // 字节闸门（首屏渲染竞态修复）：稳定 fit 前 buffered 不落 xterm
+    expect(xtermFakes.instances[0]!.written).toEqual([]);
+    fireStableResize();
     const term = xtermFakes.instances[0]!;
     expect(term.written).toEqual(["历史输出\n"]);
     // 实时字节直写（listener 通道 → term.write，绕过 React）
@@ -556,6 +584,9 @@ describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律�
       expect(xtermFakes.instances).toHaveLength(1);
     });
     const term = xtermFakes.instances[0]!;
+    // 闸门未开（布局未稳定）：攒住不冲
+    expect(term.written).toEqual([]);
+    fireStableResize();
     expect(term.written).toEqual(["回放", "订阅窗口字节"]);
   });
 
@@ -580,10 +611,14 @@ describe("TerminalSessionView 字节流接线（fake Terminal；双通道纪律�
     render(<TerminalRailPanelBody {...bodyProps()} />);
     fireEvent.click(listItemAt(0));
     await waitFor(() => {
-      expect(ipc.state.calls.resize).toEqual([
-        { sessionId: "ts-1", cols: 80, rows: 24 },
-      ]);
+      expect(xtermFakes.instances).toHaveLength(1);
     });
+    // 闸门未开前不上报（pty 不经历过渡尺寸）；稳定 fit 后恰一次
+    expect(ipc.state.calls.resize).toEqual([]);
+    fireStableResize();
+    expect(ipc.state.calls.resize).toEqual([
+      { sessionId: "ts-1", cols: 80, rows: 24 },
+    ]);
   });
 
   it("已退出会话：disableStdin 传给 Terminal、onData 不透传 write（只读回看）", async () => {
@@ -687,6 +722,8 @@ describe("TerminalSessionView 复制/粘贴接线（Ctrl+C/V + Shift 变体）",
       ctrlKey: true,
       shiftKey: false,
       key: "c",
+      // 处理器吞键分支会显式 preventDefault（「双粘贴」修复），假事件需带桩
+      preventDefault: () => {},
       ...overrides,
     } as KeyboardEvent;
   }

@@ -164,6 +164,8 @@ export function createTerminalSessionManager(
     dataListeners: Set<(data: string) => void>;
     /** OSC 0/2 标题扫描（跨 chunk 有状态；与缓冲/转发互不干扰） */
     titleScanner: OscTitleScanner;
+    /** 当前 PTY 尺寸（同尺寸 resize 去重基准） */
+    size: PtySize;
   }
 
   const sessions = new Map<string, SessionEntry>();
@@ -327,6 +329,7 @@ export function createTerminalSessionManager(
         waiters: new Set(),
         dataListeners: new Set(),
         titleScanner: createOscTitleScanner(),
+        size: request.size ?? { cols: 80, rows: 24 },
       };
       sessions.set(sessionId, entry);
       // PTY 输出统一进缓冲（水位读取与快照的数据源）+ 高频字节流转发
@@ -368,6 +371,15 @@ export function createTerminalSessionManager(
       const entry = sessions.get(sessionId);
       // resize 的调用时机（UI 视口变化）可能晚于会话退出，静默忽略即可
       if (entry === undefined || entry.record.status !== "running") return;
+      // 同尺寸去重（2026-11-22 首屏垃圾行修复）：UI 的 ResizeObserver 初始
+      // fire 与 fit 会以相同尺寸重复上报，而 conpty 对每次 resize 都做全屏
+      // 重绘——重复 resize 产生的多轮重绘字节与 xterm DOM 渲染器 diff 交错，
+      // 正是首屏「单字形平铺整行」渲染垃圾的触发窗（回放实验实证）。尺寸没
+      // 变就不动 PTY。
+      if (entry.size.cols === size.cols && entry.size.rows === size.rows) {
+        return;
+      }
+      entry.size = size;
       entry.process.resize(size);
     },
 

@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 
 import type { FitAddon } from "@xterm/addon-fit";
+// xterm 结构样式必须显式引入（包不带 style 字段自动注入；2026-11-22 首屏
+// 垃圾行 + 复制空选区两项的终极根因：产物缺此 CSS，.xterm 失去 position:
+// relative（viewport 绝对定位塌陷、选区层坐标基准错乱），字形 span 失去
+// white-space: pre 等排版约束——终端在「几乎能用」的退化结构下运行）
+import "@xterm/xterm/css/xterm.css";
 import type { Terminal } from "@xterm/xterm";
 
 import { terminalXtermTheme } from "../lib/terminal-theme";
@@ -96,7 +101,6 @@ export default function TerminalSessionView(props: {
         });
         term.loadAddon(fit);
         term.open(host);
-        fit.fit();
         mountRef.current = {
           term,
           fit,
@@ -105,13 +109,62 @@ export default function TerminalSessionView(props: {
             term.dispose();
           },
         };
-        // 回放先行（登记时刻为止的缓冲全量），攒冲的实时字节随后按序补
-        if (subscribed.buffered !== "") term.write(subscribed.buffered);
-        if (pendingRef.current.length > 0) {
-          for (const chunk of pendingRef.current) term.write(chunk);
-          pendingRef.current = [];
-        }
-        readyRef.current = true;
+        // 首屏渲染竞态根治（2026-11-22「首屏重复字符垃圾行」）：此前 open 后同步
+        // fit + 立即回放，布局未定时 fit#1 会给出过渡尺寸（实测 46 行）、
+        // ResizeObserver 随后再补一次（47 行）——两次 pty resize 使 conpty 做
+        // 两轮全屏重绘，重绘字节与 xterm 6.0.0 DOM 渲染器的行 diff 交错，产出
+        // buffer 里不存在的「单字形平铺整行」垃圾（字节层干净、term.refresh
+        // 无法自愈，回放实验 + 真实应用探针实证）。改为字节闸门：回放与实时
+        // 字节一律先攒后冲，首个「稳定」fit（相邻两次 observer 触发的提案尺寸
+        // 一致；50ms 兜底定时器防单 fire 环境卡死）后才按序冲入——字节流恒在
+        // 最终尺寸下消费，首个 pty resize（也是唯一一次首屏 resize）只发生一次。
+        let fitted = false;
+        let lastProposed: { cols: number; rows: number } | null = null;
+        let stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+        const flushPendingWrites = () => {
+          // 回放先行（登记时刻为止的缓冲全量），攒冲的实时字节随后按序补；
+          // 稳定 fit 前到达的 conpty 重绘字节也在 pending 里，时序天然保序
+          if (subscribed.buffered !== "") term.write(subscribed.buffered);
+          if (pendingRef.current.length > 0) {
+            for (const chunk of pendingRef.current) term.write(chunk);
+            pendingRef.current = [];
+          }
+          readyRef.current = true;
+        };
+        const openGate = () => {
+          fitted = true;
+          if (stabilityTimer !== null) {
+            clearTimeout(stabilityTimer);
+            stabilityTimer = null;
+          }
+          fit.fit();
+          reportSize(sessionId, fit);
+          flushPendingWrites();
+        };
+        const applyFit = () => {
+          if (fitted) {
+            fit.fit();
+            reportSize(sessionId, fit);
+            return;
+          }
+          const dims = fit.proposeDimensions();
+          if (dims === undefined) return;
+          const stable =
+            lastProposed !== null &&
+            lastProposed.cols === dims.cols &&
+            lastProposed.rows === dims.rows;
+          if (stable) {
+            openGate();
+            return;
+          }
+          lastProposed = { cols: dims.cols, rows: dims.rows };
+          if (stabilityTimer === null) {
+            stabilityTimer = setTimeout(() => {
+              stabilityTimer = null;
+              if (!fitted) openGate();
+            }, 50);
+          }
+        };
         // 键入原样透传（用户敲的含回车 `\r` 由 onData 自然给出）；已退出
         // 会话 disableStdin 后 onData 不再触发，双保险按状态过滤。
         // onData 返回 IDisposable（对象非函数），包装后退订
@@ -127,6 +180,10 @@ export default function TerminalSessionView(props: {
         // 粘贴进 pty，已退出会话只读回看吞掉粘贴。复制走 navigator.clipboard
         // （写无焦点约束）；粘贴走 clipboard IPC 桥——navigator.clipboard
         // .readText 在文档无 OS 焦点时静默返回空串，主进程读无此约束。
+        // preventDefault 必须显式调（2026-11-22「双粘贴」修复）：返回 false 只
+        // 让 xterm 跳过自己的按键处理，不拦浏览器默认行为——Chromium 仍由
+        // Ctrl+V 生成原生 paste 事件、xterm 内建 paste 处理器再插一份，与 IPC
+        // 桥粘贴叠加成两份（e2e 粘贴腿实证）。
         term.attachCustomKeyEventHandler((event) => {
           if (event.type !== "keydown" || !event.ctrlKey) return true;
           const key = event.key.toLowerCase();
@@ -135,9 +192,11 @@ export default function TerminalSessionView(props: {
             if (selection !== "") {
               void navigator.clipboard.writeText(selection);
             }
+            event.preventDefault();
             return false;
           }
           if (key === "v") {
+            event.preventDefault();
             if (exitedRef.current) return false;
             void window.codexlike.clipboard
               .read()
@@ -153,15 +212,18 @@ export default function TerminalSessionView(props: {
           }
           return true;
         });
-        // fit 后尺寸上报（PTY 尺寸对齐容器）；后续由 ResizeObserver 驱动
-        reportSize(sessionId, fit);
+        // 尺寸驱动（fit 后上报 PTY 对齐容器）：observer 初始 fire 即带最终布局，
+        // 相邻两次提案尺寸一致后打开字节闸门；闸门未开前 reportSize 也不发出，
+        // pty 全程不经历过渡尺寸（首屏唯一一次 resize 即最终尺寸）
         const observer = new ResizeObserver(() => {
           if (mountRef.current === null) return;
-          fit.fit();
-          reportSize(sessionId, mountRef.current.fit);
+          applyFit();
         });
         observer.observe(host);
-        detach.push(() => observer.disconnect());
+        detach.push(() => {
+          observer.disconnect();
+          if (stabilityTimer !== null) clearTimeout(stabilityTimer);
+        });
         // 主题翻转（ADR 0006 light/dark）：重读语义 token 换算 palette
         const themeObserver = new MutationObserver(() => {
           if (mountRef.current === null) return;
