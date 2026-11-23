@@ -579,7 +579,12 @@ export function WorkspacePage(props: {
   );
 
   const openTask = useCallback(
-    async (id: string) => {
+    /**
+     * countAsViewed=false：冷启动自动恢复（启动现场/回退链）不算「查看」
+     * ——中断等终态未读提醒（d87c04e 口径）保留到用户显式打开才熄灭；
+     * 该路径下 live 无执行现场，markViewed 只是 recoveredViewed 记账。
+     */
+    async (id: string, options?: { countAsViewed?: boolean }) => {
       reportWorkbenchTarget({ kind: "task", taskId: id });
       setDraftProjectId(undefined);
       workspaceState.activeDraftProjectId = undefined;
@@ -649,9 +654,10 @@ export function WorkspacePage(props: {
         setCompacting(
           live.activity.running && live.activity.operation === "compact"
         );
-        void window.codexlike.tasks
-          .markViewed(id, live.sequence)
-          .then(() => refreshTasks());
+        if (options?.countAsViewed !== false)
+          void window.codexlike.tasks
+            .markViewed(id, live.sequence)
+            .then(() => refreshTasks());
       } catch (error) {
         if (!isCurrent()) return;
         setMessages(
@@ -714,7 +720,7 @@ export function WorkspacePage(props: {
       if (coldStart && target?.kind === "task") {
         const remembered = list.find((task) => task.id === target.taskId);
         if (remembered !== undefined) {
-          await openTask(remembered.id);
+          await openTask(remembered.id, { countAsViewed: false });
           return;
         }
       } else if (coldStart && target?.kind === "new") {
@@ -736,7 +742,7 @@ export function WorkspacePage(props: {
         currentIdRef.current === null &&
         workspaceState.activeDraftProjectId === undefined
       ) {
-        await openTask(latest.id);
+        await openTask(latest.id, { countAsViewed: false });
       }
     })();
     return () => {
