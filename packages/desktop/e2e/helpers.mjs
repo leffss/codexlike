@@ -477,12 +477,19 @@ async function listenSafePort(server) {
 /**
  * 本地 OpenAI 兼容 mock 骨架：
  * - POST …/chat/completions → 收集请求体后交给 onChat(ctx)，ctx 含应答工具集与
- *   { body, index（第几个请求，从 1 起）, port }；onChat 必须自行应答（工具/文本/JSON/404）。
+ *   { body, index（第几个工作轮请求，从 1 起）, port }；onChat 必须自行应答（工具/文本/JSON/404）。
  * - 其余 method/path 交给 onOther(req, res)，返回 true 表示已处理，否则骨架回 404。
- * 返回 { server, port, seenBodies, requestCount() }。
+ * - options（票 01 goal-mode）：{ isVerdictRequest?, onVerdict? }——请求体命中
+ *   isVerdictRequest 时改走判定线 onVerdict(ctx, { body, index（判定线独立计数，从 1 起）, port })，
+ *   不进入 onChat、不消耗工作轮 index（两条脚本化响应线互不串线）；
+ *   ctx 额外携带 verdictRound（按 body.stream 自适应 SSE/JSON 应答完成判定结论）。
+ *   不传 options 时行为与旧签名完全一致（无判定线，index 即全局请求序）。
+ * 返回 { server, port, seenBodies（含判定请求体）, requestCount()（全部 chat 请求数）}。
  */
-export async function startMockProvider(onChat, onOther) {
+export async function startMockProvider(onChat, onOther, options) {
   let requestCount = 0;
+  let workCount = 0;
+  let verdictCount = 0;
   const seenBodies = [];
   const server = http.createServer((req, res) => {
     if (
@@ -497,9 +504,22 @@ export async function startMockProvider(onChat, onOther) {
       });
       req.on("end", () => {
         seenBodies.push(body);
-        onChat(createChatContext(res, server.address().port), {
+        const port = server.address().port;
+        if (options !== undefined && options.isVerdictRequest?.(body)) {
+          verdictCount += 1;
+          // ctx 为原始应答工具集；判定线专用增强（verdictRound）由
+          // goal-stub.mjs 的包装层注入，骨架不感知判定领域逻辑。
+          options.onVerdict(createChatContext(res, port), {
+            body,
+            index: verdictCount,
+            port,
+          });
+          return;
+        }
+        workCount += 1;
+        onChat(createChatContext(res, port), {
           body,
-          index: requestCount,
+          index: workCount,
         });
       });
       return;
