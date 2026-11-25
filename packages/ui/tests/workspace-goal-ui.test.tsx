@@ -59,6 +59,8 @@ function goalOf(
     updatedAt: "2026-11-25T08:00:00.000Z",
     idleStreak: 0,
     failureStreak: 0,
+    budgetTokens: null,
+    baselineTokens: 0,
     ...overrides,
   };
 }
@@ -91,6 +93,11 @@ function task(id: string): TaskListItem {
     archivedAt: null,
     createdAt: "2026-11-18T08:00:00Z",
     updatedAt: "2026-11-18T08:00:00Z",
+    // 任务用量账目（GLOSSARY「任务用量」四列）：主任务 700 + 300 = 1000
+    mainInputTokens: 700,
+    mainOutputTokens: 300,
+    subagentInputTokens: 0,
+    subagentOutputTokens: 0,
     activity,
   };
 }
@@ -171,6 +178,10 @@ function setup() {
       send: vi.fn(async () => {}),
       goalSet: vi.fn<CodexLikeApi["tasks"]["goalSet"]>(async (taskId, text) =>
         goalOf("active", { taskId, text })
+      ),
+      goalSetBudget: vi.fn<CodexLikeApi["tasks"]["goalSetBudget"]>(
+        async (taskId, tokens) =>
+          goalOf("active", { taskId, budgetTokens: tokens })
       ),
     } satisfies Partial<CodexLikeApi["tasks"]>,
     providerProfiles: { list: vi.fn(async () => [profile]) },
@@ -532,5 +543,76 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
       { activity }
     );
     await waitFor(() => expect(listCalls()).toBeGreaterThan(afterStart));
+  });
+
+  it("进度行的预算用量 = 任务用量账目 − 目标基线，取任务列表的最新账目（目标事件后随列表刷新）", async () => {
+    const { api, listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    // 账目 1000、基线 600 → 目标用量 400
+    await emit(
+      {
+        type: "goal-changed",
+        goal: goalOf("active", { budgetTokens: 200_000, baselineTokens: 600 }),
+      },
+      { activity }
+    );
+    expect(screen.getByTestId("goal-budget-spent").textContent).toBe("400");
+
+    // 判定之后账目增长（判定的 usage 入账）：列表刷新，用量随之更新
+    api.tasks.list.mockResolvedValue([
+      { ...task("A"), mainInputTokens: 1500 },
+      task("B"),
+    ]);
+    await emit({ type: "goal-verification", verification });
+    await waitFor(() =>
+      expect(screen.getByTestId("goal-budget-spent").textContent).toBe("1,200")
+    );
+  });
+
+  it("预算受限：进度行写明状态与原因；「加预算」一键提交 goalSetBudget，宿主快照到达后显示新预算而停留状态不变", async () => {
+    const { api, listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    await emit(
+      {
+        type: "goal-changed",
+        goal: goalOf("budget-limited", { budgetTokens: 200_000 }),
+      },
+      { activity }
+    );
+    expect(statusText()).toBe("预算受限");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "目标用量已达到 token 预算"
+    );
+
+    fireEvent.click(screen.getByTestId("goal-budget-add"));
+    fireEvent.click(screen.getAllByTestId("goal-budget-quick-add")[0]!);
+
+    await waitFor(() =>
+      expect(api.tasks.goalSetBudget).toHaveBeenCalledWith("A", 300_000)
+    );
+    // 加预算不自动恢复：状态仍是预算受限；宿主下发的新快照让预算显示更新
+    expect(statusText()).toBe("预算受限");
+    await emit(
+      {
+        type: "goal-changed",
+        goal: goalOf("budget-limited", { budgetTokens: 300_000 }),
+      },
+      { activity }
+    );
+    expect(screen.getByTestId("goal-budget-limit").textContent).toBe("300,000");
+  });
+
+  it("未达成：进度行写明状态与原因（连续空转），不提供加预算入口", async () => {
+    const { listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    await emit(
+      { type: "goal-changed", goal: goalOf("unmet", { idleStreak: 3 }) },
+      { activity }
+    );
+    expect(statusText()).toBe("未达成");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "连续 3 轮判定未过且无实质工具活动"
+    );
+    expect(screen.queryByTestId("goal-budget-add")).toBeNull();
   });
 });

@@ -8,7 +8,9 @@ import type {
   AgentResourceSnapshot,
   TaskResourceState,
 } from "../context/resource-types";
+import { taskUsageTokens } from "../goal/budget";
 import {
+  GOAL_STATUS_NAMES,
   GOAL_TEXT_MAX_LENGTH,
   type GoalRecord,
   type GoalVerdict,
@@ -223,6 +225,15 @@ export interface TaskManager {
    * 累计时长随转换记账：离开进行中闭合当前段，进入进行中另起一段。
    */
   transitionGoal(taskId: string, transition: GoalTransition): GoalRecord;
+  /**
+   * 设定 / 调整当前目标的 token 预算（ADR 0035「护栏」；入口是进度行上的预算
+   * 显示与设置，票 05）。只对未结束的目标（进行中 / 已暂停 / 预算受限 /
+   * 未达成）生效——已完成 / 已清除的目标是历史，不再改写；预算受限的目标
+   * 加预算后仍需显式恢复（恢复入口在控制面）。调整预算不是状态机转换：
+   * 目标状态、累计时长、连续计数与对账基线都不受影响。
+   * 预算须为正整数（tokens）；任务不存在、无目标以中文错误拒绝。
+   */
+  setGoalBudget(taskId: string, tokens: number): GoalRecord;
   /**
    * 撤销尚未执行的目标（宿主在首轮启动失败时的回滚：设定与首轮是一个意图，
    * 首轮没起来就不留「进行中却没有回合」的半成品）。当前目标已有验证记录
@@ -712,6 +723,12 @@ export function createTaskManager(
         updatedAt: timestamp,
         idleStreak: 0,
         failureStreak: 0,
+        // 预算是目标级参数，缺省不限；入口是进度行上的预算设置（票 05）
+        budgetTokens: null,
+        // 对账基线：目标设定时刻的任务用量账目，目标消耗自此起算
+        baselineTokens: taskUsageTokens(
+          persistence.listTasks().find((item) => item.id === taskId)!
+        ),
       };
       persistence.insertGoal(goal);
       return { ...goal };
@@ -736,6 +753,19 @@ export function createTaskManager(
         updatedAt: next.updatedAt,
       });
       return next;
+    },
+
+    setGoalBudget(taskId, tokens) {
+      if (!persistence.listTasks().some((task) => task.id === taskId))
+        throw new Error(`任务不存在：${taskId}`);
+      if (!Number.isSafeInteger(tokens) || tokens <= 0)
+        throw new Error("token 预算必须是正整数");
+      const goal = persistence.listGoals(taskId).at(-1);
+      if (goal === undefined) throw new Error("任务尚未设定目标");
+      if (goal.status === "completed" || goal.status === "cleared")
+        throw new Error(`目标${GOAL_STATUS_NAMES[goal.status]}，不能修改预算`);
+      persistence.updateGoal(goal.id, { budgetTokens: tokens });
+      return { ...goal, budgetTokens: tokens };
     },
 
     /** 当前目标的验证记录（goalVerifications 与 verifyGoal 的轮次计数共用） */

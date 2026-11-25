@@ -184,8 +184,9 @@ export interface TaskPersistence {
   deleteGoal(id: string): void;
   /**
    * 只更新状态机推进触碰的列（status / activeMs / activeSince / 两个连续计数 /
-   * updatedAt）与编辑目标触碰的 text；归属与设定时间（taskId / createdAt）
-   * 建行后不变。目标不存在时静默忽略（与 updateTask 同语义）。
+   * updatedAt）、编辑目标触碰的 text 与调整预算触碰的 budgetTokens；归属与
+   * 设定时间（taskId / createdAt）、对账基线（baselineTokens）建行后不变。
+   * 目标不存在时静默忽略（与 updateTask 同语义）。
    */
   updateGoal(
     id: string,
@@ -198,6 +199,7 @@ export interface TaskPersistence {
         | "activeSince"
         | "idleStreak"
         | "failureStreak"
+        | "budgetTokens"
         | "updatedAt"
       >
     >
@@ -354,7 +356,9 @@ CREATE TABLE IF NOT EXISTS goals (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   idle_streak INTEGER NOT NULL DEFAULT 0,
-  failure_streak INTEGER NOT NULL DEFAULT 0
+  failure_streak INTEGER NOT NULL DEFAULT 0,
+  budget_tokens INTEGER,
+  baseline_tokens INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_goals_task_created
   ON goals(task_id, created_at);
@@ -486,6 +490,8 @@ interface GoalRow {
   updated_at: string;
   idle_streak: number;
   failure_streak: number;
+  budget_tokens: number | null;
+  baseline_tokens: number;
 }
 
 interface GoalVerificationRow {
@@ -642,6 +648,14 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         `ALTER TABLE goals ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`
       );
   }
+  // 旧库迁移（goal-mode 票 05）：goals 表没有预算与对账基线列——旧行未设预算
+  // （NULL = 不限，预算护栏对既有目标不生效）、基线 0
+  if (!goalColumns.some((existing) => existing.name === "budget_tokens"))
+    db.exec("ALTER TABLE goals ADD COLUMN budget_tokens INTEGER");
+  if (!goalColumns.some((existing) => existing.name === "baseline_tokens"))
+    db.exec(
+      "ALTER TABLE goals ADD COLUMN baseline_tokens INTEGER NOT NULL DEFAULT 0"
+    );
   const goalVerificationColumns = db
     .prepare("PRAGMA table_info(goal_verifications)")
     .all();
@@ -719,7 +733,7 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     "SELECT * FROM terminal_sessions WHERE task_id = ? ORDER BY created_at, rowid"
   );
   const insertGoalStmt = db.prepare(
-    "INSERT INTO goals (id, task_id, text, status, active_ms, active_since, created_at, updated_at, idle_streak, failure_streak) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO goals (id, task_id, text, status, active_ms, active_since, created_at, updated_at, idle_streak, failure_streak, budget_tokens, baseline_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listGoalsStmt = db.prepare(
     "SELECT * FROM goals WHERE task_id = ? ORDER BY created_at, rowid"
@@ -1450,7 +1464,9 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         record.createdAt,
         record.updatedAt,
         record.idleStreak,
-        record.failureStreak
+        record.failureStreak,
+        record.budgetTokens,
+        record.baselineTokens
       );
     },
 
@@ -1469,6 +1485,9 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         updatedAt: row.updated_at,
         idleStreak: row.idle_streak ?? 0,
         failureStreak: row.failure_streak ?? 0,
+        // 未设预算（NULL）= 不限；基线旧行缺列时读回列默认值 0
+        budgetTokens: row.budget_tokens ?? null,
+        baselineTokens: row.baseline_tokens ?? 0,
       }));
     },
 
@@ -1499,6 +1518,10 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       if (patch.failureStreak !== undefined) {
         columns.push("failure_streak = ?");
         values.push(patch.failureStreak);
+      }
+      if (patch.budgetTokens !== undefined) {
+        columns.push("budget_tokens = ?");
+        values.push(patch.budgetTokens);
       }
       if (patch.updatedAt !== undefined) {
         columns.push("updated_at = ?");

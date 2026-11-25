@@ -1081,6 +1081,8 @@ it("目标状态与判定结论按任务水位接续（ADR 0035）：goal-change
     updatedAt: "2026-11-25T08:00:00.000Z",
     idleStreak: 0,
     failureStreak: 0,
+    budgetTokens: null,
+    baselineTokens: 0,
   };
   const verification: GoalVerificationRecord = {
     id: "gv-1",

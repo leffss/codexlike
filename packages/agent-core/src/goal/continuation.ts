@@ -29,14 +29,21 @@ export type GoalContinuationBasis =
 
 /**
  * 「实质工具活动」的判据（空转计数只对「判定未过且无实质工具活动」的轮次
- * 累加，规格「护栏」）：一轮之内除 `update_plan` 外出现过任何工具调用即算
- * 有活动——只改计划不算，避免「每轮只动计划」被判为有进展而永不阻断。
- * 宿主按本轮的工具调用事件逐条套用本函数。
- * 注意：被用户拒绝或参数无效的调用同样发过工具调用事件，按本定义计入活动
- * （是否收紧到「实际执行成功」由票 05 的阻断逻辑决定）。
+ * 累加，规格「护栏」）：一轮之内除 `update_plan` 外出现过**实际执行了**的
+ * 工具调用即算有活动。宿主按本轮的 tool-result 事件逐条套用本函数。
+ * - 只改计划不算（`update_plan` 除外）：避免「每轮只动计划」被判为有进展；
+ * - 未执行的调用不算（票 05 编排者裁决）：被审批策略拒绝、被用户拒绝、
+ *   参数无效、工具不存在、被中断的调用都没有产生任何效果——每轮只发出被拒
+ *   的调用同样是空转，若算活动则永不阻断、无限消耗 token；
+ * - 实际执行但结果出错（如命令非零退出）仍算：护栏识别的是「什么都没做成」
+ *   的空转，不是「做了但失败」。
+ * executed 缺省（来源未标注）按已执行计：不把未知的调用误判成空转。
  */
-export function isGoalToolActivity(toolName: string): boolean {
-  return toolName !== UPDATE_PLAN;
+export function isGoalToolActivity(
+  toolName: string,
+  executed: boolean = true
+): boolean {
+  return executed && toolName !== UPDATE_PLAN;
 }
 
 /** 续跑指令首部：声明这是内部指令而非用户发言，并复述目标原文（长跑中不跑偏） */

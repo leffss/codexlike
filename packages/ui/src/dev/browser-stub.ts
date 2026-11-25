@@ -120,6 +120,28 @@ function installBrowserStub(): void {
           activeSince: now,
           createdAt: now,
           updatedAt: now,
+          idleStreak: 0,
+          failureStreak: 0,
+          budgetTokens: null,
+          baselineTokens: 0,
+        };
+      },
+      // 目标模式护栏（ADR 0035）：dev 预览没有目标账目可读，预算原样记下、用量按 0
+      goalSetBudget: async (taskId: string, tokens: number) => {
+        const now = new Date().toISOString();
+        return {
+          id: `goal-${taskId}`,
+          taskId,
+          text: "",
+          status: "active" as const,
+          activeMs: 0,
+          activeSince: now,
+          createdAt: now,
+          updatedAt: now,
+          idleStreak: 0,
+          failureStreak: 0,
+          budgetTokens: tokens,
+          baselineTokens: 0,
         };
       },
     },

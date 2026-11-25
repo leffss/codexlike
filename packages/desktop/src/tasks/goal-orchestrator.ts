@@ -1,6 +1,9 @@
 import {
+  GOAL_MAX_IDLE_ROUNDS,
   GOAL_MAX_VERIFICATION_FAILURES,
   buildGoalContinuationInput,
+  isGoalBudgetExceeded,
+  taskUsageTokens,
   type GoalContinuationBasis,
   type GoalRecord,
   type GoalTransition,
@@ -25,6 +28,11 @@ import type { TaskEventEnvelope } from "../shared/ipc";
  *                             连续 GOAL_MAX_VERIFICATION_FAILURES 轮才转已暂停
  *   回合被中断 / 出错 → 不判定，直接已暂停（不让目标停在「进行中却没有回合在跑」）
  *
+ * 两道护栏（票 05），都在每次判定之后、下一轮发起之前生效（不打断在途回合）：
+ *   空转阻断：连续 GOAL_MAX_IDLE_ROUNDS 轮未过且无实质工具活动 → 未达成；
+ *   token 预算：目标用量达到预算 → 预算受限（未设预算 = 不限）。
+ * 两者都是非终止态，经控制面恢复后从暂停点续跑。
+ *
  * 每一轮回合是一次独立的宿主执行（各自的执行登记、中断通道与事件现场）；
  * 「两轮之间」目标仍在推进——这段循环的存活状态记在这里（loops），宿主据此
  * 把任务视为持续执行：输入队列不自动消费、占任务并发一席、侧栏显示运行中。
@@ -43,6 +51,11 @@ export type GoalBoundaryResult =
   | { action: "continue"; verification: GoalVerificationRecord }
   /** 目标已转「已暂停」 */
   | { action: "paused"; reason: GoalPauseReason }
+  /**
+   * 护栏阻断（票 05）：目标已转「未达成」或「预算受限」——非终止，加预算 /
+   * 调整后可恢复；循环随之结束，由上一轮的执行收尾负责唤醒输入队列
+   */
+  | { action: "blocked"; reason: GoalBlockReason; status: GoalRecord["status"] }
   /** 未发起判定或未改目标状态（目标被暂停 / 应用退出） */
   | { action: "skipped" };
 
@@ -56,6 +69,13 @@ export type GoalPauseReason =
   | "verification-interrupted"
   /** 完成判定连续不可用，达到暂停阈值 */
   | "verification-unavailable";
+
+/** 目标被护栏阻断（转「未达成」/「预算受限」）的原因 */
+export type GoalBlockReason =
+  /** 连续 GOAL_MAX_IDLE_ROUNDS 轮判定未过且无实质工具活动 */
+  | "idle"
+  /** 目标用量达到 token 预算（目标设定以来任务用量账目的增量） */
+  | "budget-exceeded";
 
 /** 目标事件（任务级信封，经 task:events 下发到全部工作台窗口） */
 export type GoalEvent = Extract<
@@ -253,6 +273,32 @@ export function createGoalOrchestrator(deps: {
       ) {
         pauseIfActive(taskId);
         return { action: "paused", reason: "verification-unavailable" };
+      }
+      // 空转阻断（票 05 护栏）：连续 GOAL_MAX_IDLE_ROUNDS 轮判定未过且没有
+      // 实质工具活动——agent 什么都没做成，续跑只会继续空耗。转「未达成」
+      // （非终止），原因经目标记录上的 idleStreak 与进度行对用户可见。计数由
+      // agent-core 逐轮记账：判定自身故障的轮次保持原值（不参与空转判定），
+      // 有实质工具活动的未过轮清零——两者都不会误触。
+      if ((manager.goal(taskId)?.idleStreak ?? 0) >= GOAL_MAX_IDLE_ROUNDS) {
+        return {
+          action: "blocked",
+          reason: "idle",
+          status: applyTransition(taskId, "unmet").status,
+        };
+      }
+      // token 预算（票 05 护栏）：目标设定以来的任务用量增量（GLOSSARY「任务
+      // 用量」：主任务各轮、子代理、压缩与判定自身都在账上）达到预算即转
+      // 「预算受限」。账目与预算都在此刻重读——判定的 usage 刚入账，预算可能在
+      // 判定在途时被调过。未设预算恒不超（isGoalBudgetExceeded）。
+      const usageTokens = taskUsageTokens(
+        manager.list().find((item) => item.id === taskId)
+      );
+      if (isGoalBudgetExceeded(manager.goal(taskId)!, usageTokens)) {
+        return {
+          action: "blocked",
+          reason: "budget-exceeded",
+          status: applyTransition(taskId, "budget-limit").status,
+        };
       }
       loops.set(taskId, "turn");
       return { action: "continue", verification };

@@ -233,23 +233,7 @@ describe("续跑循环：判定未过自动续跑", () => {
     current = await fail(current);
     expect(app.goalOf(task.id)?.idleStreak).toBe(2);
 
-    // 第 3 轮：只更新工作计划（不算实质工具活动）→ 空转计数继续累加到 3
-    current.toolCall("update_plan", {
-      steps: [{ content: "看起来在干活", status: "in_progress" }],
-    });
-    current = await fail(await holdContinuation(app));
-    expect(app.goalOf(task.id)?.idleStreak).toBe(3);
-    expect(
-      app
-        .verificationsOf(task.id)
-        .map((record) => [record.round, record.outcome, record.toolActivity])
-    ).toEqual([
-      [1, "unpassed", false],
-      [2, "unpassed", false],
-      [3, "unpassed", false],
-    ]);
-
-    // 第 4 轮：调用写入类工具（审批后执行）→ 有实质工具活动，空转计数清零
+    // 第 3 轮：调用写入类工具（审批后实际执行）→ 有实质工具活动，空转计数清零
     current.toolCall("note", { text: "真正的改动" });
     await waitFor(() =>
       expect(invoke("pendingApprovals", task.id).length).toBe(1)
@@ -262,19 +246,40 @@ describe("续跑循环：判定未过自动续跑", () => {
     );
     current = await fail(await holdContinuation(app));
     expect(app.goalOf(task.id)?.idleStreak).toBe(0);
-    expect(app.verificationsOf(task.id)[3]).toMatchObject({
-      round: 4,
+    expect(app.verificationsOf(task.id)[2]).toMatchObject({
+      round: 3,
       outcome: "unpassed",
       toolActivity: true,
     });
+    expect(executed).toEqual(["真正的改动"]);
 
-    // 空转计数只记账不阻断（阻断在票 05）：目标仍在续跑
+    // 第 4 轮：只更新工作计划（不算实质工具活动）→ 空转计数重新从 1 起算
+    // （计数到 3 的阻断在票 05，见 goal-guardrails-ipc.test.ts）
+    current.toolCall("update_plan", {
+      steps: [{ content: "看起来在干活", status: "in_progress" }],
+    });
+    current = await fail(await holdContinuation(app));
+    expect(app.goalOf(task.id)?.idleStreak).toBe(1);
+    expect(
+      app
+        .verificationsOf(task.id)
+        .map((record) => [record.round, record.outcome, record.toolActivity])
+    ).toEqual([
+      [1, "unpassed", false],
+      [2, "unpassed", false],
+      [3, "unpassed", true],
+      [4, "unpassed", false],
+    ]);
+
     current.write("继续推进");
     current.finish();
     (await app.nextVerdict()).respond(PASSED);
     await app.idle(task.id);
-    expect(app.goalOf(task.id)?.status).toBe("completed");
-  }, 15_000);
+    expect(app.goalOf(task.id)).toMatchObject({
+      status: "completed",
+      idleStreak: 0,
+    });
+  }, 20_000);
 });
 
 describe("判定自身故障（fail-open 定案）", () => {

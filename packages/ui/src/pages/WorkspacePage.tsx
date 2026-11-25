@@ -36,7 +36,9 @@ import {
 } from "../lib/live-task";
 
 import {
+  goalSpentTokens,
   resolveComposerSubmission,
+  taskUsageTokens,
   type ApprovalMode,
   type GoalRecord,
   type ProviderProfile,
@@ -2078,6 +2080,13 @@ export function WorkspacePage(props: {
                         verifying={goalVerifying}
                         pauseReason={
                           goal === null ? null : goalPauseReason(goal)
+                        }
+                        // 目标用量 = 任务用量账目 − 目标基线：取任务列表的最新账目
+                        // （目标事件驱动列表刷新，预算显示随每轮判定之后更新）
+                        spentTokens={
+                          goal === null || current === null
+                            ? 0
+                            : goalSpentTokens(goal, taskUsageTokens(current))
                         }
                       />
                     </div>

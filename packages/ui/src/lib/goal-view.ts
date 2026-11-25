@@ -60,22 +60,47 @@ export function goalStatusText(goal: GoalRecord, verifying: boolean): string {
 }
 
 /**
- * 进度行的暂停原因说明：目标因「完成判定连续不可用」被暂停时写明原因
- * （票 03 编排者裁决：原因对用户可见，复用既有「已暂停」态，不新设用户态）。
- * 手动暂停 / 出错暂停等没有对应的持久化原因，返回 null（进度行只显示「已暂停」）。
+ * 进度行的停留原因说明：目标不在进行中、且停留有可说明的原因时写明。
+ * - 已暂停：因「完成判定连续不可用」被暂停时写明（票 03 编排者裁决：原因对
+ *   用户可见，复用既有「已暂停」态，不新设用户态）；手动暂停 / 出错暂停没有
+ *   对应的持久化原因，不显示；
+ * - 未达成：连续空转阻断（票 05 护栏）——连续 GOAL_MAX_IDLE_ROUNDS 轮判定
+ *   未过且无实质工具活动；
+ * - 预算受限：token 预算阻断（票 05 护栏）——具体用量与预算由预算控件呈现。
+ * 进行中与终态（已完成 / 已清除）没有停留原因，返回 null。
  */
 export function goalPauseReason(goal: GoalRecord): string | null {
-  if (
-    goal.status !== "paused" ||
-    goal.failureStreak < GOAL_MAX_VERIFICATION_FAILURES
-  )
-    return null;
+  if (goal.status === "unmet")
+    return `连续 ${goal.idleStreak} 轮判定未过且无实质工具活动`;
+  if (goal.status === "budget-limited") return "目标用量已达到 token 预算";
+  if (goal.status !== "paused") return null;
+  if (goal.failureStreak < GOAL_MAX_VERIFICATION_FAILURES) return null;
   return `完成判定连续 ${goal.failureStreak} 次不可用`;
 }
 
 /** 判定在途的标记行占位文案：「第 N 次迭代 · 验证中」 */
 export function goalVerifyingText(round: number): string {
   return `第 ${round} 次迭代 · 验证中`;
+}
+
+/**
+ * token 数量文案（进度行的用量 / 预算）：千分位分组。与地区设置无关的稳定
+ * 格式（1,234,567），不随系统语言变化。
+ */
+export function formatGoalTokens(tokens: number): string {
+  return String(Math.trunc(tokens)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * 预算输入解析（进度行上的预算设置，ADR 0035「护栏」）：输入框文本 → token 数。
+ * 接受正整数（数字输入框的值，允许首尾空白）；空输入、零与负数、小数、科学
+ * 计数、非数字一律无效（返回 null，由调用方提示）。合法性与宿主同源——正整数。
+ */
+export function parseGoalBudgetInput(text: string): number | null {
+  const normalized = text.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return value > 0 && Number.isSafeInteger(value) ? value : null;
 }
 
 /**

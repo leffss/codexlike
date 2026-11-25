@@ -1079,7 +1079,7 @@ describe("TaskPersistence 子代理过程表（ADR 0021，票 02）", () => {
 });
 
 describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
-  /** 最小合法目标记录（设定即写的形状：进行中、累计时长 0、连续计数 0） */
+  /** 最小合法目标记录（设定即写的形状：进行中、累计时长 0、连续计数 0、未设预算） */
   function goalRow(overrides: Partial<GoalRecord> = {}): GoalRecord {
     return {
       id: "goal-1",
@@ -1092,6 +1092,8 @@ describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
       updatedAt: "2026-11-10T08:00:01.000Z",
       idleStreak: 0,
       failureStreak: 0,
+      budgetTokens: null,
+      baselineTokens: 0,
       ...overrides,
     };
   }
@@ -1336,6 +1338,63 @@ describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
         createdAt: "2026-11-10T08:08:00.000Z",
       })
     );
+    reopened.close();
+  });
+
+  it("旧库迁移（goal-mode 票 05）：goals 表没有预算与对账基线列——打开即补列，旧行按「未设预算、基线 0」读回，重开幂等", () => {
+    const dbPath = tempDbPath();
+    // 票 02 / 03 时代的表形状：有连续计数列，没有预算与对账基线列
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE goals (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        text TEXT NOT NULL, status TEXT NOT NULL,
+        active_ms INTEGER NOT NULL DEFAULT 0, active_since TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        idle_streak INTEGER NOT NULL DEFAULT 0,
+        failure_streak INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO tasks VALUES ('legacy-budget', '旧目标任务', 'C:\\work\\old', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO goals VALUES ('goal-old', 'legacy-budget', '让示例测试全部通过', 'active', 0, '2026-11-10T08:00:01.000Z', '2026-11-10T08:00:01.000Z', '2026-11-10T08:00:01.000Z', 1, 0);
+    `);
+    raw.close();
+
+    const store = createSqliteTaskStore(dbPath);
+    // 旧行：未设预算（不限，护栏不生效）、基线 0；票 03 的列照旧
+    expect(store.listGoals("legacy-budget")[0]).toMatchObject({
+      id: "goal-old",
+      idleStreak: 1,
+      budgetTokens: null,
+      baselineTokens: 0,
+    });
+    // 补列后按新 schema 写入与更新正常
+    store.insertGoal(
+      goalRow({
+        id: "goal-new",
+        taskId: "legacy-budget",
+        budgetTokens: 50_000,
+        baselineTokens: 700,
+      })
+    );
+    store.updateGoal("goal-old", { budgetTokens: 20_000 });
+    store.close();
+
+    // 重开幂等：列已存在不再补，数据原样
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(
+      reopened
+        .listGoals("legacy-budget")
+        .map((row) => [row.id, row.budgetTokens, row.baselineTokens])
+    ).toEqual([
+      ["goal-old", 20_000, 0],
+      ["goal-new", 50_000, 700],
+    ]);
     reopened.close();
   });
 

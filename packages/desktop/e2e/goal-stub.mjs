@@ -70,8 +70,8 @@ export function goalVerdictText(verdict, format = "raw") {
   return raw;
 }
 
-/** 非流式 chat completion 应答（content 携带判定文本） */
-function verdictCompletion(text) {
+/** 非流式 chat completion 应答（content 携带判定文本；usage 在顶层） */
+function verdictCompletion(text, usage) {
   return {
     id: "chatcmpl-e2e-goal-verdict",
     object: "chat.completion",
@@ -84,6 +84,15 @@ function verdictCompletion(text) {
         finish_reason: "stop",
       },
     ],
+    ...(usage === undefined
+      ? {}
+      : {
+          usage: {
+            prompt_tokens: usage.promptTokens,
+            completion_tokens: usage.completionTokens,
+            total_tokens: usage.promptTokens + usage.completionTokens,
+          },
+        }),
   };
 }
 
@@ -91,17 +100,33 @@ function verdictCompletion(text) {
  * 给判定线 ctx 注入 verdictRound：按请求体 stream 字段自适应应答——
  * 流式走 SSE 文本帧（不带 tools 的 streamText 判定路径），非流式走
  * chat completion JSON（generateText 判定路径），两条路径票 02 任选皆可踩。
+ * usage 缺省取 provider 级配置，可按次覆盖（票 05：判定自身的消耗计入预算）。
  * 返回构造的判定文本，供场景直接断言。
  */
-function enhanceVerdictContext(ctx, body) {
+function enhanceVerdictContext(ctx, body, defaultUsage) {
   return {
     ...ctx,
-    verdictRound(verdict, format = "raw") {
+    verdictRound(verdict, format = "raw", usage = defaultUsage) {
       const text = goalVerdictText(verdict, format);
-      if (/"stream"\s*:\s*true/.test(body)) ctx.textRound(text);
-      else ctx.respondJson(verdictCompletion(text));
+      if (/"stream"\s*:\s*true/.test(body)) ctx.textRound(text, usage);
+      else ctx.respondJson(verdictCompletion(text, usage));
       return text;
     },
+  };
+}
+
+/**
+ * 工作轮线 ctx：各收尾类方法的 usage 缺省取 provider 级配置，可按次覆盖。
+ */
+function workContextWithUsage(ctx, defaultUsage) {
+  return {
+    ...ctx,
+    textRound: (text, usage = defaultUsage) => ctx.textRound(text, usage),
+    textChunksRound: (chunks, interval = 30, usage = defaultUsage) =>
+      ctx.textChunksRound(chunks, interval, usage),
+    toolCallRound: (callId, name, args, usage = defaultUsage) =>
+      ctx.toolCallRound(callId, name, args, usage),
+    finishWith: (reason, usage = defaultUsage) => ctx.finishWith(reason, usage),
   };
 }
 
@@ -110,7 +135,10 @@ function enhanceVerdictContext(ctx, body) {
  * - work(ctx, { body, index })：工作轮应答（契约同 startMockProvider 的 onChat，
  *   index 只数工作轮请求，从 1 起；缺省回占位文本，漏配立即可见）；
  * - verdict(ctx, { body, index })：判定应答（index 只数判定请求，从 1 起；
- *   ctx 额外携带 verdictRound(verdict, format)；缺省回未通过占位结论）；
+ *   ctx 额外携带 verdictRound(verdict, format, usage)；缺省回未通过占位结论）；
+ * - usage：provider 级缺省 usage（{ promptTokens, completionTokens }）——两条线
+ *   每次应答都上报；各收尾类方法可按次覆盖。不给则应答不带 usage（任务用量
+ *   记 0，既有场景行为不变）；
  * - isVerdictRequest：识别特征注入，缺省 isGoalVerificationRequest；
  * - onOther：透传 startMockProvider 的非 chat 路径处理器。
  * 返回值同 startMockProvider（server/port/seenBodies/requestCount）。
@@ -118,19 +146,22 @@ function enhanceVerdictContext(ctx, body) {
 export async function startGoalMockProvider({
   work,
   verdict,
+  usage,
   isVerdictRequest = isGoalVerificationRequest,
   onOther,
 } = {}) {
-  return startMockProvider(
+  const workScript =
     work ??
-      ((ctx) => {
-        ctx.textRound("（工作轮未脚本化）");
-      }),
+    ((ctx) => {
+      ctx.textRound("（工作轮未脚本化）");
+    });
+  return startMockProvider(
+    (ctx, state) => workScript(workContextWithUsage(ctx, usage), state),
     onOther,
     {
       isVerdictRequest,
       onVerdict(ctx, { body, index }) {
-        const enhanced = enhanceVerdictContext(ctx, body);
+        const enhanced = enhanceVerdictContext(ctx, body, usage);
         if (verdict === undefined) {
           enhanced.verdictRound({
             passed: false,

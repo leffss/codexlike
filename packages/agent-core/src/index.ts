@@ -74,6 +74,7 @@ export type {
   GoalVerificationRecord,
 } from "./goal/types";
 export {
+  GOAL_MAX_IDLE_ROUNDS,
   GOAL_MAX_VERIFICATION_FAILURES,
   GOAL_STATUSES,
   GOAL_STATUS_NAMES,
@@ -82,6 +83,14 @@ export {
 } from "./goal/types";
 export type { GoalTransition } from "./goal/state-machine";
 export { advanceGoal, isGoalOpen } from "./goal/state-machine";
+// 目标模式护栏（ADR 0035，票 05）：token 预算的对账口径——目标是任务上的实体，
+// 消耗 = 任务用量账目（GLOSSARY「任务用量」四列之和）− 目标设定时拍下的基线。
+// 纯函数、浏览器安全：宿主编排器（判定后对账）与界面（进度行的用量显示）共用
+export {
+  goalSpentTokens,
+  isGoalBudgetExceeded,
+  taskUsageTokens,
+} from "./goal/budget";
 
 // 执行设置常量（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：纯常量浏览器安全，
 // desktop 存储校验与 ui 表单回退共用同一默认值/范围来源

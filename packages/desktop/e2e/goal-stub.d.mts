@@ -10,28 +10,42 @@ export interface GoalVerdict {
   nextAction: string;
 }
 
+/** 一次模型调用应答携带的真实 usage（票 05：token 预算对账需要确定性的用量） */
+export interface StubUsage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
 /** 判定结论应答形态（票 02 解析容错的对象面） */
 export type GoalVerdictFormat = "raw" | "code-fence" | "string-wrapped";
 
-/** /chat/completions 应答工具集（骨架 startMockProvider 提供的 ctx） */
+/**
+ * /chat/completions 应答工具集（骨架 startMockProvider 提供的 ctx）。各收尾类
+ * 方法可带 usage：随收尾帧上报；不给则应答不带 usage（任务用量记 0）。
+ */
 export interface ChatContext {
   port: number;
-  send(payload: Record<string, unknown>): void;
-  finishWith(reason: string): void;
+  send(payload: Record<string, unknown>, usage?: StubUsage): void;
+  finishWith(reason: string, usage?: StubUsage): void;
   toolCallRound(
     callId: string,
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    usage?: StubUsage
   ): void;
-  textRound(text: string): void;
-  textChunksRound(chunks: string[], interval?: number): void;
+  textRound(text: string, usage?: StubUsage): void;
+  textChunksRound(chunks: string[], interval?: number, usage?: StubUsage): void;
   respondJson(payload: unknown): void;
   notFound(): void;
 }
 
 /** 判定线 ctx：在 ChatContext 之上注入 verdictRound（返回构造文本供断言） */
 export type VerdictContext = ChatContext & {
-  verdictRound(verdict: GoalVerdict, format?: GoalVerdictFormat): string;
+  verdictRound(
+    verdict: GoalVerdict,
+    format?: GoalVerdictFormat,
+    usage?: StubUsage
+  ): string;
 };
 
 /** 脚本回调的请求状态（index 只数本线请求，从 1 起） */
@@ -61,6 +75,8 @@ export declare function goalVerdictText(
 export declare function startGoalMockProvider(options?: {
   work?: (ctx: ChatContext, state: ChatScriptState) => void;
   verdict?: (ctx: VerdictContext, state: ChatScriptState) => void;
+  /** provider 级缺省 usage：两条线每次应答都上报（可按次覆盖）；不给则不上报 */
+  usage?: StubUsage;
   isVerdictRequest?: (bodyText: string) => boolean;
   onOther?: (req: IncomingMessage, res: ServerResponse) => boolean | undefined;
 }): Promise<MockProviderHandle>;

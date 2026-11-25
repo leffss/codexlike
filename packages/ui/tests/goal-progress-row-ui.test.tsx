@@ -11,6 +11,7 @@ import {
 } from "@codexlike/agent-core";
 
 import { GoalProgressRow } from "../src/components/GoalProgressRow";
+import { goalPauseReason } from "../src/lib/goal-view";
 
 function goalOf(
   status: GoalStatus,
@@ -27,6 +28,8 @@ function goalOf(
     updatedAt: "2026-11-25T08:00:00.000Z",
     idleStreak: 0,
     failureStreak: 0,
+    budgetTokens: null,
+    baselineTokens: 0,
     ...overrides,
   };
 }
@@ -138,5 +141,59 @@ describe("GoalProgressRow（目标进度行）", () => {
     rerender(<GoalProgressRow goal={goalOf("paused")} pauseReason={null} />);
     expect(statusText()).toBe("已暂停");
     expect(screen.queryByTestId("goal-progress-reason")).toBeNull();
+  });
+
+  it("护栏阻断的停留原因：未达成写明连续空转；预算受限写明达到预算并给出「加预算」入口", () => {
+    const { rerender } = render(
+      <GoalProgressRow
+        goal={goalOf("unmet", { idleStreak: 3 })}
+        pauseReason={goalPauseReason(goalOf("unmet", { idleStreak: 3 }))}
+      />
+    );
+    expect(statusText()).toBe("未达成");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "连续 3 轮判定未过且无实质工具活动"
+    );
+
+    const limited = goalOf("budget-limited", { budgetTokens: 200_000 });
+    rerender(
+      <GoalProgressRow
+        goal={limited}
+        pauseReason={goalPauseReason(limited)}
+        spentTokens={203_000}
+      />
+    );
+    expect(statusText()).toBe("预算受限");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "目标用量已达到 token 预算"
+    );
+    expect(screen.getByTestId("goal-budget-trigger").textContent).toBe(
+      "用量 203,000 / 200,000"
+    );
+    expect(screen.getByTestId("goal-budget-trigger").dataset.over).toBe("true");
+    expect(screen.getByTestId("goal-budget-add").textContent).toBe("加预算");
+  });
+
+  it("token 预算控件挂在行上（单一挂载点）：未设预算显示「预算 不限」入口，已设预算显示 用量 / 预算", () => {
+    const { rerender } = render(
+      <GoalProgressRow goal={goalOf("active")} spentTokens={1234} />
+    );
+    expect(screen.getByTestId("goal-budget-trigger").textContent).toBe(
+      "预算 不限"
+    );
+    expect(screen.queryByTestId("goal-budget-add")).toBeNull();
+
+    rerender(
+      <GoalProgressRow
+        goal={goalOf("active", { budgetTokens: 200_000 })}
+        spentTokens={1234}
+      />
+    );
+    expect(screen.getByTestId("goal-budget-trigger").textContent).toBe(
+      "用量 1,234 / 200,000"
+    );
+    expect(screen.getByTestId("goal-budget-trigger").dataset.over).toBe(
+      undefined
+    );
   });
 });

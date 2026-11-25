@@ -65,11 +65,30 @@ export const FAILED: Verdict = {
   nextAction: "继续实现剩余步骤",
 };
 
+/** 一次模型调用应答携带的真实 usage（OpenAI 兼容协议的 prompt / completion tokens） */
+export interface Usage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** usage 的协议形状；未给出时不带 usage 字段（任务用量按「没报记 0」不入账） */
+function usageField(usage: Usage | undefined): Record<string, unknown> {
+  if (usage === undefined) return {};
+  return {
+    usage: {
+      prompt_tokens: usage.promptTokens,
+      completion_tokens: usage.completionTokens,
+      total_tokens: usage.promptTokens + usage.completionTokens,
+    },
+  };
+}
+
 /** 一条到达 mock、尚未应答的判定请求 */
 export interface PendingVerdict {
   /** 判定请求体（可断言其形状：无 tools、带标记） */
   body: Record<string, unknown>;
-  respond(verdict: Verdict): void;
+  /** 以给定结论应答；usage 计入任务用量（判定自身的消耗，票 05 的预算对账含它） */
+  respond(verdict: Verdict, usage?: Usage): void;
   /** 以 HTTP 401 失败（不可自动重试类，SDK 不会先重试） */
   fail(): void;
   /** HTTP 200 但正文不是判定结论（坏输出） */
@@ -83,12 +102,15 @@ export interface PendingRound {
   lastUserText: string;
   /** 流式应答一帧正文 */
   write(content: string): void;
-  /** 收尾（finish_reason=stop） */
-  finish(): void;
+  /** 收尾（finish_reason=stop）；usage 计入任务用量 */
+  finish(usage?: Usage): void;
   /** 以 HTTP 401 失败：回合以模型请求错误终止 */
   fail(): void;
-  /** 让模型发起一次工具调用；工具结果回填后的下一次请求是新的 PendingRound */
-  toolCall(name: string, args: Record<string, unknown>): void;
+  /**
+   * 让模型发起一次工具调用；工具结果回填后的下一次请求是新的 PendingRound。
+   * args 为字符串时原样作为工具入参的 JSON（可构造非法入参：SDK 解析失败的调用）
+   */
+  toolCall(name: string, args: Record<string, unknown> | string): void;
 }
 
 /** 以 HTTP 401 拒绝一次模型请求 */
@@ -242,7 +264,7 @@ export async function setupGoalApp(
         messages: { role: string; content: unknown }[];
       };
       if (body.includes("[goal-verification]")) {
-        const completion = (content: string) => {
+        const completion = (content: string, usage?: Usage) => {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(
             JSON.stringify({
@@ -252,12 +274,14 @@ export async function setupGoalApp(
                   finish_reason: "stop",
                 },
               ],
+              ...usageField(usage),
             })
           );
         };
         verdicts.push({
           body: parsed,
-          respond: (verdict) => completion(JSON.stringify(verdict)),
+          respond: (verdict, usage) =>
+            completion(JSON.stringify(verdict), usage),
           fail: () => unauthorized(res),
           garbage: (text = "我觉得已经做完了，不用再改了。") =>
             completion(text),
@@ -268,13 +292,16 @@ export async function setupGoalApp(
         .reverse()
         .find((message) => message.role === "user");
       const text = String(lastUser?.content);
-      const frame = (choice: Record<string, unknown>) => {
+      const frame = (
+        choice: Record<string, unknown>,
+        chunk: Record<string, unknown> = {}
+      ) => {
         if (!res.headersSent) {
           res.writeHead(200, { "content-type": "text/event-stream" });
           res.flushHeaders();
         }
         res.write(
-          `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, ...choice }] })}\n\n`
+          `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock", choices: [{ index: 0, ...choice }], ...chunk })}\n\n`
         );
       };
       const done = () => res.end("data: [DONE]\n\n");
@@ -285,8 +312,10 @@ export async function setupGoalApp(
           lastUserText: text,
           write: (content) =>
             frame({ delta: { content }, finish_reason: null }),
-          finish: () => {
-            frame({ delta: {}, finish_reason: "stop" });
+          finish: (usage) => {
+            // usage 随收尾帧一并上报（OpenAI 兼容流式协议：usage 在 chunk 顶层，
+            // 任一帧携带即被采用）
+            frame({ delta: {}, finish_reason: "stop" }, usageField(usage));
             done();
           },
           fail: () => unauthorized(res),
@@ -298,7 +327,11 @@ export async function setupGoalApp(
                     index: 0,
                     id: `call-${requestCount}`,
                     type: "function",
-                    function: { name, arguments: JSON.stringify(args) },
+                    function: {
+                      name,
+                      arguments:
+                        typeof args === "string" ? args : JSON.stringify(args),
+                    },
                   },
                 ],
               },

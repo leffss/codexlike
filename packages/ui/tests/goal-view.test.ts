@@ -24,6 +24,8 @@ function goalOf(
     updatedAt: "2026-11-25T08:00:00.000Z",
     idleStreak: 0,
     failureStreak: 0,
+    budgetTokens: null,
+    baselineTokens: 0,
     ...overrides,
   };
 }

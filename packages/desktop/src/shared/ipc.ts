@@ -177,6 +177,11 @@ export const IPC = {
      * 用户消息发出（首轮），任务进入目标模式。
      */
     goalSet: "tasks:goal-set",
+    /**
+     * 目标模式（ADR 0035「护栏」）：设定 / 调整当前目标的 token 预算——
+     * 进度行上预算显示与设置的入口（预算是目标级参数，不进执行设置）。
+     */
+    goalSetBudget: "tasks:goal-set-budget",
   },
   /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
   searchSettings: {
@@ -784,6 +789,14 @@ export interface TaskApi {
     text: string,
     options?: GoalSendOptions
   ): Promise<GoalRecord>;
+  /**
+   * 设定 / 调整当前目标的 token 预算（ADR 0035「护栏」）：返回更新后的目标记录，
+   * 同时下发 goal-changed 快照。只对未结束的目标生效（进行中 / 已暂停 /
+   * 预算受限 / 未达成）；预算须为正整数（tokens），任务不存在 / 无目标 /
+   * 目标已结束以中文异常抛回。预算受限的目标加预算后不自动恢复——恢复经
+   * 控制面。
+   */
+  goalSetBudget(taskId: string, tokens: number): Promise<GoalRecord>;
 }
 
 /** `window.codexlike` 的完整 API 形状（续：任务域之外的设置与事件面） */

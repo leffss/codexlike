@@ -896,7 +896,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
               if (terminated) return;
               const completed = { ...base, output, isError };
               persistence.insertToolCall(completed);
-              yield { type: "tool-result", call: completed };
+              // executed：工具执行器是否确实跑过（被拒绝 / 参数无效 / 未注册 /
+              // 中断的调用只有错误结果、没有执行）——目标模式的空转计数据此
+              // 只认实际执行了的调用
+              yield {
+                type: "tool-result",
+                call: completed,
+                executed: executed !== null,
+              };
               resultParts.push({
                 type: "tool-result",
                 toolCallId: call.providerCallId,
@@ -923,7 +930,8 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
                 };
                 const completed = { ...base, ...reported };
                 persistence.insertToolCall(completed);
-                yield { type: "tool-result", call: completed };
+                // 委派已被接受、子代理跑过（即使报告为失败）：算实际执行
+                yield { type: "tool-result", call: completed, executed: true };
                 resultParts.push({
                   type: "tool-result",
                   toolCallId: providerCallId,

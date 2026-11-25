@@ -320,8 +320,18 @@ export type TaskEvent =
    * 审批拦截（工单 04）将发生在本事件与 tool-result 之间。
    */
   | { type: "tool-call"; call: ToolCallRecord }
-  /** 工具执行完成：call.output 已填（截断后）、isError 标记失败；记录同时落库 */
-  | { type: "tool-result"; call: ToolCallRecord }
+  /**
+   * 工具执行完成：call.output 已填（截断后）、isError 标记失败；记录同时落库。
+   * 注意 isError 不等于「没执行」——被拒绝 / 参数无效 / 未注册 / 被中断的调用
+   * 同样以 isError 结果收尾。executed 如实区分两者（票 05「实质工具活动」的
+   * 判据：只有实际执行了的调用才算活动）：
+   * - true：工具的执行器确实跑过（结果成功或出错，如命令非零退出）；
+   * - false：没有执行——已被用户中断、工具未注册、参数无效、被审批策略拒绝、
+   *   被用户拒绝、审批被取消；
+   * - 缺省（undefined）：来源未标注，消费方按「已执行」计（保守：不把未知的
+   *   调用判成空转）。
+   */
+  | { type: "tool-result"; call: ToolCallRecord; executed?: boolean }
   /**
    * 工具执行暂停，等待用户审批（suggest 模式下的终端命令）。
    * 发出后任务进入 waiting-approval 状态；审批响应经 respondApproval 唤醒循环。

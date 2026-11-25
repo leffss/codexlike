@@ -521,8 +521,8 @@ describe("续跑指令构造（buildGoalContinuationInput）", () => {
 });
 
 describe("实质工具活动（isGoalToolActivity）——空转计数的判据", () => {
-  it("只改计划不算活动：update_plan 为 false，其余任何工具调用都算", () => {
-    expect(isGoalToolActivity("update_plan")).toBe(false);
+  it("只改计划不算活动：update_plan 为 false，其余实际执行了的工具调用都算", () => {
+    expect(isGoalToolActivity("update_plan", true)).toBe(false);
     for (const name of [
       "run_terminal_command",
       "read_file",
@@ -532,7 +532,7 @@ describe("实质工具活动（isGoalToolActivity）——空转计数的判据"
       "web_search",
       "mcp__github__search",
     ]) {
-      expect(isGoalToolActivity(name)).toBe(true);
+      expect(isGoalToolActivity(name, true)).toBe(true);
     }
   });
 });

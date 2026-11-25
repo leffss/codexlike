@@ -96,6 +96,9 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
     // 目标模式（ADR 0035）：/goal 设定目标（原文作为首轮用户消息发出）
     goalSet: (taskId, text, options) =>
       ipcRenderer.invoke(channels.goalSet, taskId, text, options),
+    // 目标模式（ADR 0035「护栏」）：设定 / 调整当前目标的 token 预算
+    goalSetBudget: (taskId, tokens) =>
+      ipcRenderer.invoke(channels.goalSetBudget, taskId, tokens),
   };
 }
 

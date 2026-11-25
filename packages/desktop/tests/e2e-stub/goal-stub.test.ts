@@ -310,3 +310,108 @@ describe("startMockProvider 既有语义回归（不带判定 options）", () =>
     expect(indexes).toEqual([1, 2, 3]);
   });
 });
+
+/** 解析 SSE 流式响应里出现的全部 usage（chunk 顶层的 OpenAI 兼容协议形状） */
+function sseUsages(raw: string): unknown[] {
+  const usages: unknown[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    const payload = line.slice("data: ".length);
+    if (payload === "[DONE]") continue;
+    const usage = JSON.parse(payload).usage;
+    if (usage !== undefined) usages.push(usage);
+  }
+  return usages;
+}
+
+const OPENAI_USAGE = {
+  prompt_tokens: 10,
+  completion_tokens: 20,
+  total_tokens: 30,
+};
+
+describe("usage 脚本化（票 05：token 预算对账需要确定性的用量）", () => {
+  const USAGE = { promptTokens: 10, completionTokens: 20 };
+  const PASSED = { passed: true, reason: "目标已达成", nextAction: "" };
+
+  it("工作轮 textRound 可带 usage：随流式收尾帧上报（chunk 顶层，OpenAI 兼容协议）", async () => {
+    const handle = await startGoalMockProvider({
+      work(ctx) {
+        ctx.textRound("回复", USAGE);
+      },
+    });
+    handles.push({ close: () => handle.server.close() });
+    const response = await postChat(handle.port, workRoundBody("x"));
+    expect(sseContent(response.text)).toBe("回复");
+    expect(sseUsages(response.text)).toEqual([OPENAI_USAGE]);
+  });
+
+  it("不给 usage 时帧里不带 usage 字段（既有场景的应答逐字节不变）", async () => {
+    const handle = await startGoalMockProvider({
+      work(ctx) {
+        ctx.textRound("回复");
+        ctx.toolCallRound("call-1", "read_file", {});
+        ctx.textChunksRound(["甲", "乙"], 1);
+      },
+    });
+    handles.push({ close: () => handle.server.close() });
+    for (let round = 0; round < 3; round += 1) {
+      const response = await postChat(handle.port, workRoundBody("x"));
+      expect(sseUsages(response.text)).toEqual([]);
+    }
+  });
+
+  it("textChunksRound / toolCallRound 同样可带 usage（收尾帧上报）", async () => {
+    const handle = await startGoalMockProvider({
+      work(ctx, { index }) {
+        if (index === 1) ctx.textChunksRound(["甲", "乙"], 1, USAGE);
+        else ctx.toolCallRound("call-1", "read_file", {}, USAGE);
+      },
+    });
+    handles.push({ close: () => handle.server.close() });
+    for (let round = 0; round < 2; round += 1) {
+      const response = await postChat(handle.port, workRoundBody("x"));
+      expect(sseUsages(response.text)).toEqual([OPENAI_USAGE]);
+    }
+  });
+
+  it("provider 级缺省 usage：两条线的每次应答都上报（场景级一行配置）", async () => {
+    const handle = await startGoalMockProvider({
+      usage: USAGE,
+      work(ctx) {
+        ctx.textRound("工作轮");
+      },
+      verdict(ctx) {
+        ctx.verdictRound(PASSED);
+      },
+    });
+    handles.push({ close: () => handle.server.close() });
+    const work = await postChat(handle.port, workRoundBody("x"));
+    expect(sseUsages(work.text)).toEqual([OPENAI_USAGE]);
+    // 判定是非流式 generateText：usage 在 chat completion JSON 的顶层
+    const verdict = await postChat(handle.port, verdictRoundBody(false));
+    expect((await verdict.json()).usage).toEqual(OPENAI_USAGE);
+  });
+
+  it("verdictRound 可按次覆盖 usage（流式与非流式两条路径）", async () => {
+    const heavy = { promptTokens: 100, completionTokens: 200 };
+    const handle = await startGoalMockProvider({
+      usage: USAGE,
+      verdict(ctx, { index }) {
+        if (index === 1) ctx.verdictRound(PASSED, "raw", heavy);
+        else ctx.verdictRound(PASSED, "raw", heavy);
+      },
+    });
+    handles.push({ close: () => handle.server.close() });
+    const nonStream = await postChat(handle.port, verdictRoundBody(false));
+    expect((await nonStream.json()).usage).toEqual({
+      prompt_tokens: 100,
+      completion_tokens: 200,
+      total_tokens: 300,
+    });
+    const stream = await postChat(handle.port, verdictRoundBody(true));
+    expect(sseUsages(stream.text)).toEqual([
+      { prompt_tokens: 100, completion_tokens: 200, total_tokens: 300 },
+    ]);
+  });
+});

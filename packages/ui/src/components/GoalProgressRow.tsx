@@ -1,5 +1,6 @@
 import type { GoalRecord, GoalStatus } from "@codexlike/agent-core";
 
+import { GoalBudgetControl } from "./GoalBudgetControl";
 import {
   formatGoalElapsed,
   goalElapsedMs,
@@ -38,16 +39,22 @@ function GoalIcon() {
 /**
  * 目标进度行（ADR 0035，GLOSSARY「目标」）：输入框上方常驻的一行——目标
  * 摘要、状态（六态称谓；完成判定在途时显示副状态「验证中」）、累计时长、
- * 暂停原因（如因完成判定连续不可用而暂停时写明）。进行中时长达实时跳动，
- * 离开进行中（已暂停 / 已完成等）即定格。没有目标时不占布局行（空态）。
- * 暂停 / 恢复 / 编辑 / 清除按钮组在票 04 接入本行。
+ * 停留原因（因完成判定连续不可用而暂停、护栏阻断为未达成 / 预算受限时写明）、
+ * token 预算控件（用量 / 预算的显示与设置，独立组件 GoalBudgetControl）。
+ * 进行中时长达实时跳动，离开进行中（已暂停 / 已完成等）即定格。没有目标时
+ * 不占布局行（空态）。暂停 / 恢复 / 编辑 / 清除按钮组在票 04 接入本行。
  */
 export function GoalProgressRow(props: {
   goal: GoalRecord | null;
   /** 完成判定在途（宿主活动态的 goalPhase = verifying）：状态显示「验证中」 */
   verifying?: boolean;
-  /** 暂停原因说明（goalPauseReason 给出；没有可说明的原因时不渲染） */
+  /** 停留原因说明（goalPauseReason 给出；没有可说明的原因时不渲染） */
   pauseReason?: string | null;
+  /**
+   * 目标设定以来的任务用量（tokens）：预算控件的用量显示。
+   * = 当前任务用量账目 − 目标基线（goalSpentTokens），由宿主的任务列表给出。
+   */
+  spentTokens?: number;
 }) {
   const { goal } = props;
   const verifying = props.verifying === true;
@@ -94,6 +101,8 @@ export function GoalProgressRow(props: {
       >
         {formatGoalElapsed(goalElapsedMs(goal, now))}
       </span>
+      {/* token 预算控件（票 05 护栏）：独立组件，行上只有这一个挂载点 */}
+      <GoalBudgetControl goal={goal} spentTokens={props.spentTokens ?? 0} />
     </div>
   );
 }

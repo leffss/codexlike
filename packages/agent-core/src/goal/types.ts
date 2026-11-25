@@ -10,7 +10,7 @@
  * - `active` 进行中（「验证中」是进度行的副状态，不独立成态）
  * - `paused` 已暂停（Stop / 暂停操作；可恢复）
  * - `completed` 已完成（完成判定通过）
- * - `unmet` 未达成（连续 3 空转轮阻断）
+ * - `unmet` 未达成（连续 3 空转轮阻断，阈值 GOAL_MAX_IDLE_ROUNDS）
  * - `budget-limited` 预算受限（token 预算超限，非终止）
  * - `cleared` 已清除
  */
@@ -70,6 +70,18 @@ export interface GoalRecord {
    * GOAL_MAX_VERIFICATION_FAILURES 时把目标转为已暂停。
    */
   failureStreak: number;
+  /**
+   * token 预算（票 05 护栏，规格故事 13）：目标级参数，不进执行设置。
+   * 目标设定以来的任务用量增量达到该值即转「预算受限」（非终止，加预算后
+   * 可恢复）。null = 未设预算（不限，默认）。
+   */
+  budgetTokens: number | null;
+  /**
+   * 对账基线：目标设定时刻的任务用量账目（GLOSSARY「任务用量」四列之和）。
+   * 目标消耗 = 当前账目 − 基线——任务此前的用量不计入，同一任务先后有多个
+   * 目标时各算各的；恢复（暂停 / 预算受限 / 未达成 → 进行中）不重置基线。
+   */
+  baselineTokens: number;
 }
 
 /** 目标文本长度上限（字符；超出以「目标文本过长」拒绝） */
@@ -108,6 +120,13 @@ export const GOAL_VERIFICATION_OUTCOMES: readonly GoalVerificationOutcome[] = [
  * 卡死」：单次故障照常续跑，判定持续不可用才停下等人处理）。
  */
 export const GOAL_MAX_VERIFICATION_FAILURES = 3;
+
+/**
+ * 连续多少轮「判定未过且无实质工具活动」后把目标转为「未达成」（ADR 0035
+ * 「护栏」：空转阻断）。规格定值 3，不做成配置项——阈值的意义是拦住「什么
+ * 都没做成却一直烧 token」的循环，对任何目标都一样。
+ */
+export const GOAL_MAX_IDLE_ROUNDS = 3;
 
 /**
  * 逐轮验证记录（goal_verifications 表一行）：目标模式下每轮判定落一条，

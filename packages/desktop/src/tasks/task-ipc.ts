@@ -373,7 +373,8 @@ export function registerTaskHandlers(options: {
    * 任务继续占任务并发一席、输入队列不消费（GLOSSARY「目标模式」）。
    * 判定未过 / 判定不可用时，注销上一轮的执行登记后由 goal 编排器发起续跑轮
    * （两次独立的宿主执行；两轮之间目标循环仍在进行，输入队列的显式守卫接管
-   * 互锁）。toolActivity：本轮是否出现过实质工具调用（空转计数的输入）。
+   * 互锁）。toolActivity：本轮是否出现过实质工具活动（空转计数的输入：只认
+   * 实际执行了的工具调用）。
    */
   async function settleAfterStream(
     taskId: string,
@@ -925,8 +926,8 @@ export function registerTaskHandlers(options: {
     if (fromUser && queues.isPaused(taskId)) {
       queues.beginInterjection(taskId);
     }
-    // 本轮是否出现过实质工具调用：目标模式空转计数的输入（idle 边界带给编排器；
-    // 只改计划不算，见 isGoalToolActivity）
+    // 本轮是否出现过实质工具活动：目标模式空转计数的输入（idle 边界带给编排器；
+    // 只认实际执行了的调用、只改计划不算，见 isGoalToolActivity）
     let toolActivity = false;
     try {
       // 先 await 第一个事件（user-message / goal-continuation）：任务并发拒绝等
@@ -959,9 +960,12 @@ export function registerTaskHandlers(options: {
             !head.done;
             head = await iterator.next()
           ) {
+            // 实质工具活动只认实际执行了的调用（isGoalToolActivity）：按 tool-result
+            // 事件判别——agent-core 在结果事件上如实标注了是否执行。被用户拒绝、
+            // 参数无效、工具不存在的调用同样发过 tool-call 事件，但什么都没做
             if (
-              head.value.type === "tool-call" &&
-              isGoalToolActivity(head.value.call.toolName)
+              head.value.type === "tool-result" &&
+              isGoalToolActivity(head.value.call.toolName, head.value.executed)
             ) {
               toolActivity = true;
             }
@@ -1635,6 +1639,31 @@ export function registerTaskHandlers(options: {
           return manager.goal(taskId)!;
         })()
       )
+  );
+
+  /**
+   * 设定 / 调整当前目标的 token 预算（ADR 0035「护栏」，票 05）：进度行上预算
+   * 显示与设置的入口。调整预算不是状态机转换——目标状态与循环存活状态都不动
+   * （进行中的目标即刻按新预算在下一次判定后对账；预算受限的目标加预算后仍需
+   * 经控制面恢复）。更新后的快照经 goal-changed 下发。全程无 await。
+   */
+  ipcMain.handle(
+    IPC.tasks.goalSetBudget,
+    (_e: IpcMainInvokeEvent, taskId: unknown, tokens: unknown) => {
+      assertOpen();
+      if (typeof taskId !== "string" || !taskId.trim())
+        throw new Error("设定预算：参数不合法");
+      // IPC 边界不信任渲染进程：预算只接受正整数（tokens）
+      if (
+        typeof tokens !== "number" ||
+        !Number.isSafeInteger(tokens) ||
+        tokens <= 0
+      )
+        throw new Error("token 预算必须是正整数");
+      const goal = manager.setGoalBudget(taskId, tokens);
+      pushTaskEvent(taskId, { type: "goal-changed", goal });
+      return goal;
+    }
   );
 
   function continueInputQueues() {

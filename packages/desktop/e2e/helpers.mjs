@@ -358,15 +358,33 @@ export async function prepareDraft(
     await selectComposerOption(window, "approval-mode-select", approvalMode);
 }
 
-/** OpenAI 兼容 SSE 单帧（chat.completion.chunk 包装） */
-function sseChunk(payload) {
+/** OpenAI 兼容 SSE 单帧（chat.completion.chunk 包装）；extra 展开到 chunk 顶层（如 usage） */
+function sseChunk(payload, extra = {}) {
   return `data: ${JSON.stringify({
     id: "chatcmpl-e2e",
     object: "chat.completion.chunk",
     created: 0,
     model: "mock-model",
     choices: [{ index: 0, ...payload }],
+    ...extra,
   })}\n\n`;
+}
+
+/**
+ * 一次模型调用应答携带的真实 usage（goal-mode 票 05：token 预算对账需要
+ * 确定性的用量）。{ promptTokens, completionTokens }。
+ */
+
+/** usage 的 OpenAI 兼容协议形状；未给出时不带 usage 字段（既有场景的应答逐字节不变） */
+function usageChunk(usage) {
+  if (usage === undefined) return {};
+  return {
+    usage: {
+      prompt_tokens: usage.promptTokens,
+      completion_tokens: usage.completionTokens,
+      total_tokens: usage.promptTokens + usage.completionTokens,
+    },
+  };
 }
 
 /**
@@ -376,19 +394,21 @@ function sseChunk(payload) {
  * - textChunksRound：多段慢速流（客户端断开时停止）
  * - respondJson：非流式 JSON（generateText 路径，如提交消息生成）
  * - notFound：404；port：本 server 端口（构造回环 URL 用）
+ * 各收尾类方法可带 usage：随收尾帧上报（流式协议里 usage 在 chunk 顶层，
+ * SDK 取流中任一帧携带的 usage），任务用量据此入账。
  */
 function createChatContext(res, port) {
-  const send = (payload) => {
+  const send = (payload, usage) => {
     if (!res.headersSent) {
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
       });
     }
-    res.write(sseChunk(payload));
+    res.write(sseChunk(payload, usageChunk(usage)));
   };
-  const finishWith = (reason) => {
-    send({ delta: {}, finish_reason: reason });
+  const finishWith = (reason, usage) => {
+    send({ delta: {}, finish_reason: reason }, usage);
     res.write("data: [DONE]\n\n");
     res.end();
   };
@@ -397,7 +417,7 @@ function createChatContext(res, port) {
     port,
     send,
     finishWith,
-    toolCallRound(callId, name, args) {
+    toolCallRound(callId, name, args, usage) {
       send({
         delta: {
           tool_calls: [
@@ -411,13 +431,13 @@ function createChatContext(res, port) {
         },
         finish_reason: null,
       });
-      setTimeout(() => finishWith("tool_calls"), 30);
+      setTimeout(() => finishWith("tool_calls", usage), 30);
     },
-    textRound(text) {
+    textRound(text, usage) {
       send({ delta: { content: text }, finish_reason: null });
-      setTimeout(() => finishWith("stop"), 30);
+      setTimeout(() => finishWith("stop", usage), 30);
     },
-    textChunksRound(chunks, interval = 30) {
+    textChunksRound(chunks, interval = 30, usage) {
       let index = 0;
       const timer = setInterval(() => {
         try {
@@ -426,7 +446,7 @@ function createChatContext(res, port) {
             return;
           }
           clearInterval(timer);
-          finishWith("stop");
+          finishWith("stop", usage);
         } catch {
           clearInterval(timer);
         }
