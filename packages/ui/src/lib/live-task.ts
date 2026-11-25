@@ -49,6 +49,12 @@ export interface LiveTask {
    * 随 view.goal 恢复、随 goal-changed 事件接续；null = 当前无目标（进度行不占位）。
    */
   goal: GoalRecord | null;
+  /**
+   * 目标的暂停说明（票 04）：宿主在 goal-changed 上附带的暂停原因（pauseReason），
+   * 只在原因不由目标记录本身推得时出现——如目标循环的下一轮没能发起。随事件
+   * 接续、不落库（快照恢复从空开始）；之后不带原因的状态快照到达即清除。
+   */
+  goalPauseNote: string | null;
 }
 
 function applyLiveEvent(
@@ -164,6 +170,10 @@ export function receiveLiveEvent(
         : state.queuedStart,
     goal:
       envelope.event.type === "goal-changed" ? envelope.event.goal : state.goal,
+    goalPauseNote:
+      envelope.event.type === "goal-changed"
+        ? (envelope.event.pauseReason ?? null)
+        : state.goalPauseNote,
   };
 }
 
@@ -193,6 +203,7 @@ export function hydrateLiveTask(
     queueState: view.queueState ?? EMPTY_QUEUE_STATE,
     queuedStart,
     goal: view.goal ?? null,
+    goalPauseNote: null,
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

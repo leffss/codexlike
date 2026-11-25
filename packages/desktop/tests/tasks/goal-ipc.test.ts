@@ -327,14 +327,15 @@ describe("输入队列互锁（ADR 0035「暂停阀门」）", () => {
     expect(app.pendingVerdicts()).toBe(0);
   }, 15_000);
 
-  it("续跑期间队列持续互锁；目标离开进行中（已暂停）后，排队消息可恢复自动逐条发出", async () => {
+  it("续跑期间队列持续互锁；目标进行中点停止 → 已暂停，排队消息随即自动逐条发出（规格故事 12：不置队列暂停）", async () => {
     const app = await setupGoalApp();
     const task = await app.newTask("goal-queue-paused");
     await invoke("goal-set", task.id, "让示例测试全部通过", {
       providerProfileId: app.profile.id,
     });
     const round = await app.hold("让示例测试全部通过");
-    await invoke("send", task.id, "补充一句", app.profile.id);
+    await invoke("send", task.id, "补充甲", app.profile.id);
+    await invoke("send", task.id, "补充乙", app.profile.id);
 
     // 未过 → 自动续跑：目标仍在进行中，排队消息照旧不被发出
     round.write("首轮回复");
@@ -346,24 +347,33 @@ describe("输入队列互锁（ADR 0035「暂停阀门」）", () => {
       "建立任务-goal-queue-paused",
       "让示例测试全部通过",
     ]);
-    expect(app.queueTexts(task.id)).toEqual(["补充一句"]);
+    expect(app.queueTexts(task.id)).toEqual(["补充甲", "补充乙"]);
 
-    // 续跑轮进行中点停止：目标转已暂停（离开进行中）。停止路径沿用既有规则——
-    // 有排队消息时输入队列进入「队列暂停」，手动恢复后自动发出（修正见票 04）
+    // 续跑轮进行中点停止：目标转已暂停（离开进行中），排队消息自动逐条发出——
+    // 无需手动恢复队列（输入队列不进入「队列暂停」）
     expect(invoke("interrupt", task.id)).toBe(true);
-    await app.idle(task.id);
-    expect(app.goalOf(task.id)?.status).toBe("paused");
-    expect(invoke("view", task.id).queueState.paused).toBe(true);
-    invoke("queueResume", task.id);
-    await app.reply("补充一句");
+    const first = await app.hold("补充甲");
+    expect(invoke("view", task.id).queueState).toMatchObject({
+      paused: false,
+    });
+    // 逐条消费：甲的回复未完成前乙不得发出
+    expect(app.hasRequest("补充乙")).toBe(false);
+    first.write("甲的处理结果");
+    first.finish();
+    await app.reply("补充乙");
     await app.idle(task.id);
 
     expect(app.userTexts(task.id)).toEqual([
       "建立任务-goal-queue-paused",
       "让示例测试全部通过",
-      "补充一句",
+      "补充甲",
+      "补充乙",
     ]);
     expect(app.queueTexts(task.id)).toEqual([]);
+    // 排队消息作为普通回合运行：目标保持已暂停，不判定、不续跑
+    expect(app.goalOf(task.id)?.status).toBe("paused");
+    expect(app.pendingVerdicts()).toBe(0);
+    expect(invoke("execution", task.id).running).toBe(false);
   }, 15_000);
 
   it("应用退出屏障：中断在途判定时不做任何目标编排（目标状态原样，重启后的恢复由恢复链路负责）", async () => {

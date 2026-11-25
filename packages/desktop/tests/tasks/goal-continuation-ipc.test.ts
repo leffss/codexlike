@@ -492,7 +492,7 @@ describe("中断语义", () => {
     expect(app.goalOf(task.id)?.status).toBe("paused");
   }, 15_000);
 
-  it("轮间窗口点停止时有排队消息：不趁停止抢发（与在途回合被停止一致），同时并发名额让出", async () => {
+  it("轮间窗口点停止时有排队消息：目标转已暂停后排队消息自动发出（唤醒在暂停之后），同时并发名额让出", async () => {
     const app = await setupGoalApp({ concurrencyLimit: () => 1 });
     const task = await app.newTask("goal-stop-between-queue");
     const round = await startGoal(app, task.id);
@@ -513,30 +513,43 @@ describe("中断语义", () => {
     expect(invoke("interrupt", task.id)).toBe(true);
     expect(app.goalOf(task.id)?.status).toBe("paused");
     gate.release();
-    await settle(400);
-    await app.idle(task.id);
 
-    // 排队消息没有趁停止抢发；输入队列按既有停止规则进入「队列暂停」
-    // （目标已离开进行中后应改为恢复自动发出——修正见票 04）
-    expect(app.hasRequest("补充一句")).toBe(false);
+    // 循环结束让出并发名额、输入队列解除互锁：排队消息自动发出（无需手动恢复
+    // 队列），任务排队里的任务也开跑。两条首条执行共用唯一的并发席，先后不定，
+    // 但都必须各自跑完
+    const outstanding = new Set(["补充一句", "排队等待的任务"]);
+    while (outstanding.size > 0) {
+      const current = await app.holdWhere((text) => outstanding.has(text));
+      outstanding.delete(current.lastUserText);
+      current.write(`${current.lastUserText}的处理结果`);
+      current.finish();
+      await settle(300);
+    }
+    await waitFor(() =>
+      expect(
+        invoke("list").every((item: any) => item.activity?.running !== true)
+      ).toBe(true)
+    );
+
+    // 排队消息是普通回合：目标保持已暂停，不发判定、不续跑；待发起的续跑轮作废
+    expect(app.goalOf(task.id)?.status).toBe("paused");
+    expect(app.pendingVerdicts()).toBe(0);
     expect(app.hasRequestWhere(isContinuation)).toBe(false);
-    expect(invoke("view", task.id).queueState.paused).toBe(true);
-    // 循环结束让出了并发名额：任务排队里的任务开跑
-    const other = await app.hold("排队等待的任务");
-    other.write("排队任务的处理结果");
-    other.finish();
-
-    // 手动恢复队列后，排队消息才发出
-    await settle(300);
-    invoke("queueResume", task.id);
-    await app.reply("补充一句");
-    await app.idle(task.id);
     expect(app.userTexts(task.id)).toEqual([
       "建立任务-goal-stop-between-queue",
       GOAL,
       "补充一句",
     ]);
-    expect(app.goalOf(task.id)?.status).toBe("paused");
+    expect(invoke("view", task.id).queueState).toMatchObject({
+      paused: false,
+      queue: [],
+    });
+    const other = app.manager
+      .list()
+      .find((item) => item.title === "排队等待的任务");
+    expect(app.userTexts(other!.id)).toEqual(["排队等待的任务"]);
+    // 没有任何多余的模型请求（建任务、首轮、判定、排队消息、排队任务各一次）
+    expect(app.requestCount()).toBe(5);
   }, 15_000);
 
   it("续跑轮出错（模型请求失败）：不判定，目标转已暂停", async () => {
@@ -585,10 +598,12 @@ describe("中断语义", () => {
       "user",
       "assistant",
     ]);
-    // 已离开进行中：任务回到普通形态，输入队列恢复（不再互锁）
+    // 已离开进行中：任务回到普通形态，输入队列恢复（不再互锁）。暂停原因对用户
+    // 可见：随已暂停的状态快照下发（票 04 追加 C——不再只进主进程日志）
     expect(app.goalEvents(task.id).at(-1)?.event).toMatchObject({
       type: "goal-changed",
       goal: { status: "paused" },
+      pauseReason: expect.stringContaining("Provider Profile 不存在"),
     });
   }, 15_000);
 });

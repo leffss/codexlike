@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProviderProfile } from "@codexlike/agent-core";
 
 import {
+  busyCommandFeedback,
   formatTaskStatus,
   matchModelsForModelSwitch,
   planSlashCommand,
@@ -376,6 +377,37 @@ describe("formatTaskStatus（/status 展示文案）", () => {
     const text = formatTaskStatus(statusInfo());
     expect(text).toContain("未选择");
     expect(text).toContain("未发现");
+  });
+});
+
+/** 票 04 追加 B：忙时斜杠命令的本地命令反馈——目标进行中的口径 */
+describe("busyCommandFeedback（忙时斜杠命令的本地命令反馈）", () => {
+  it("普通任务执行中：既有文案不变——命令不入队，回复结束后可用", () => {
+    expect(busyCommandFeedback("status", { goalRunning: false })).toBe(
+      "命令 /status 不入队：回复结束后可用（输入已保留）"
+    );
+  });
+
+  it("目标进行中执行 /compact：专门提示先暂停目标（完成判定依赖完整历史），不执行压缩", () => {
+    const text = busyCommandFeedback("compact", { goalRunning: true });
+    expect(text).toBe(
+      "目标进行中不能压缩历史：请先暂停目标（完成判定依赖完整历史）（输入已保留）"
+    );
+  });
+
+  it("目标进行中执行其他命令：仍是不入队（不开后门），可用时机说准为目标暂停或结束后", () => {
+    for (const name of [
+      "rename",
+      "model",
+      "status",
+      "new",
+      "archive",
+      "goal",
+    ] as const) {
+      expect(busyCommandFeedback(name, { goalRunning: true })).toBe(
+        `命令 /${name} 不入队：目标暂停或结束后可用（输入已保留）`
+      );
+    }
   });
 });
 

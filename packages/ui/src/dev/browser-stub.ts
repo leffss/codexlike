@@ -20,6 +20,23 @@ import {
 
 const THEME_KEY = "codexlike.theme";
 
+/** dev 预览的目标记录样例（契约形状见 GoalRecord）：恒为「进行中」 */
+function devGoal(taskId: string, text: string) {
+  const now = new Date().toISOString();
+  return {
+    id: `goal-${Date.now()}`,
+    taskId,
+    text,
+    status: "active" as const,
+    activeMs: 0,
+    activeSince: now,
+    createdAt: now,
+    updatedAt: now,
+    idleStreak: 0,
+    failureStreak: 0,
+  };
+}
+
 function installBrowserStub(): void {
   if (typeof window === "undefined") return;
   if (window.codexlike !== undefined) return;
@@ -109,19 +126,18 @@ function installBrowserStub(): void {
       respondInteraction: async () => false,
       // 目标模式（ADR 0035）：/goal 设定——dev 预览不跑宿主编排，只回一个
       // 「进行中」的目标记录供进度行呈现（契约形状见 GoalRecord）
-      goalSet: async (taskId: string, text: string) => {
-        const now = new Date().toISOString();
-        return {
-          id: `goal-${Date.now()}`,
-          taskId,
-          text: text.trim(),
-          status: "active" as const,
-          activeMs: 0,
-          activeSince: now,
-          createdAt: now,
-          updatedAt: now,
-        };
-      },
+      goalSet: async (taskId: string, text: string) =>
+        devGoal(taskId, text.trim()),
+      // 目标模式控制面（ADR 0035 票 04）：dev 预览不跑宿主编排，恢复 / 编辑只回
+      // 「进行中」的记录供进度行呈现；清除回「已清除」（进度行随之退场）
+      goalResume: async (taskId: string) => devGoal(taskId, ""),
+      goalEdit: async (taskId: string, text: string) =>
+        devGoal(taskId, text.trim()),
+      goalClear: async (taskId: string) => ({
+        ...devGoal(taskId, ""),
+        status: "cleared" as const,
+        activeSince: null,
+      }),
     },
     searchSettings: {
       get: async () => ({ apiKey: "" }),

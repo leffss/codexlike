@@ -12,6 +12,7 @@ import {
 import {
   APPROVAL_MODES,
   DEFAULT_TASK_CONCURRENCY_LIMIT,
+  canTransitionGoal,
   isGoalToolActivity,
   parseThinkingEffort,
   workbenchKey,
@@ -1094,6 +1095,10 @@ export function registerTaskHandlers(options: {
       if (typeof taskId !== "string") {
         throw new Error("interrupt：taskId 必须是字符串");
       }
+      // 本次停止是否让目标离开进行中（Stop = 暂停，ADR 0035）：循环在本进程存活
+      //（在途回合 / 判定在途 / 轮间窗口），或本次调用直接把尚未开跑的目标转
+      // 已暂停。循环存活状态取停止之前的值——下方的 goals.pause 会结束循环。
+      const goalLoop = goals.isRunning(taskId);
       // 有活跃流则打断（abort 贯穿流式层与工具层）；空闲任务幂等返回 false
       const interrupted = interrupts.interrupt(taskId);
       if (interrupted) {
@@ -1121,11 +1126,18 @@ export function registerTaskHandlers(options: {
         // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。中断排队
         // 任务同理：排队期间追加的输入队列消息不因其他任务释放名额而
         // 自动发出，由用户重新发消息（插话语义）或手动恢复触发。
-        queues.pause(taskId);
+        //
+        // 例外——目标进行中被停止（Stop = 暂停）：不置队列暂停。规格故事 12
+        // 「暂停或完成后逐条自动发出——补充指令不丢也不打断目标」：目标转
+        // 已暂停后互锁解除，排队消息自动逐条发出，作为普通回合运行，目标
+        // 保持已暂停等用户恢复。唤醒必须晚于目标离开进行中（在途回合由收尾
+        // 时 end() 唤醒，轮间窗口由下方 goalPaused 的补唤醒）——早了会被
+        // 循环存活状态挡住而漏发。
+        if (!(goalLoop || goalPaused)) queues.pause(taskId);
       }
-      // 目标在两轮之间被停止：循环是在执行收尾之外结束的，补一次唤醒（并发
-      // 名额让出、各任务输入队列重泵）。放在上面的停止规则之后——排队消息
-      // 已进入「队列暂停」，这次唤醒不会取走队首，与在途回合被停止时一致。
+      // 目标在两轮之间被停止（或首轮尚未开跑即被停止）：循环是在执行收尾之外
+      // 结束的，补一次唤醒（输入队列恢复消费、并发名额让出）。排在目标转
+      // 已暂停之后，排队消息不会趁停止抢在暂停落定之前发出。
       if (goalPaused) wakeAfterLoopEnd(taskId);
       return interrupted || removed || goalPaused;
     }
@@ -1386,6 +1398,11 @@ export function registerTaskHandlers(options: {
           }
           await resumeAcceptedStart();
           assertOpen();
+          // 目标进行中（ADR 0035）：压缩会改写完成判定所依赖的完整历史，先暂停
+          // 目标——与渲染层的命令提示同一口径（规格故事 18）。目标循环期间任务
+          // 恒为执行中，这里给出的原因比通用的「任务正在执行」更贴近用户该做的事。
+          if (goals.isRunning(taskId))
+            throw new Error("目标进行中，请先暂停目标再压缩历史");
           const { executionId, controller, end } = beginExecution(taskId);
           emit({ taskId, executionId, event: { type: "compact-start" } });
           try {
@@ -1633,6 +1650,124 @@ export function registerTaskHandlers(options: {
             throw error;
           }
           return manager.goal(taskId)!;
+        })()
+      )
+  );
+
+  /**
+   * 目标控制操作的任务侧前置（恢复 / 编辑 / 清除共用）：应用未在退出、任务存在
+   * 且未归档。action 是操作的中文动词（「恢复」「编辑」「清除」），用于拒绝文案。
+   */
+  function assertGoalTask(taskId: string, action: string): void {
+    assertOpen();
+    const record = manager.list().find((item) => item.id === taskId);
+    if (!record) throw new Error("任务不存在或已移除");
+    if (record.archivedAt !== null)
+      throw new Error(`任务已归档，请先恢复任务再${action}目标`);
+  }
+
+  /**
+   * 恢复目标的前置（ADR 0035 控制面）：与下方的状态机恢复之间不得 await——
+   * 检查通过到目标转回进行中是同一同步段。
+   */
+  function assertGoalResumable(taskId: string): void {
+    assertGoalTask(taskId, "恢复");
+    const goal = manager.goal(taskId);
+    if (goal === null) throw new Error("任务尚未设定目标");
+    // 不在可恢复的状态（进行中 / 已完成 / 已清除）：越界转换交状态机以中文错误拒绝
+    if (!canTransitionGoal(goal.status, "resume")) return;
+    // 可恢复的状态下，续跑轮的发起处要求任务空闲：真有回合在跑或等待用户回应时
+    // 发起会被拒，目标随即转回已暂停——提前以明确原因拒绝，不留一次多余的暂停。
+    // 这里只看真实在途执行（目标此刻不在进行中，循环不存活）。
+    const executionState = management.execution(taskId, true);
+    if (executionState?.waitingForUser)
+      throw new Error("任务正在等待审批或问答，请先回应后再恢复目标");
+    if (executionState?.running)
+      throw new Error("任务正在执行，请等回复结束后再恢复目标");
+    if (taskQueue.isQueued(taskId))
+      throw new Error("任务排队中，请等待开跑后再恢复目标");
+  }
+
+  /**
+   * 恢复目标（ADR 0035 控制面，GLOSSARY「目标」）：状态机转回进行中，随即由
+   * goal 编排器以内部输入从暂停点发起下一轮（不产生用户气泡；累计时长与逐轮
+   * 验证记录延续）。暂停不另设通道——Stop = 暂停，走 tasks:interrupt。
+   * 下一轮没能发起时目标已回已暂停、原因已随状态快照下发（进度行的暂停
+   * 原因），这里把同一原因抛回渲染层呈现失败。
+   */
+  ipcMain.handle(
+    IPC.tasks.goalResume,
+    (_e: IpcMainInvokeEvent, taskId: unknown) =>
+      track(
+        (async () => {
+          if (typeof taskId !== "string" || !taskId.trim())
+            throw new Error("恢复目标：参数不合法");
+          // 首个 await 之前是同一同步段：前置检查通过到目标转回进行中之间无交错窗口
+          assertGoalResumable(taskId);
+          const result = await goals.resume(taskId);
+          if (!result.started && result.paused) throw new Error(result.reason);
+          return manager.goal(taskId)!;
+        })()
+      )
+  );
+
+  /**
+   * 编辑目标文本（ADR 0035 控制面，GLOSSARY「目标」）：原地更新同一条目标记录
+   * 并下发完整快照——逐轮验证记录按目标归属、不存目标文本，编辑前的历史原样
+   * 保留；下一次完成判定按新文本发起。进行中不能编辑（先暂停目标，与 /compact
+   * 同口径：完成判定以目标文本为判据，不与在途判定竞态）。
+   */
+  ipcMain.handle(
+    IPC.tasks.goalEdit,
+    (_e: IpcMainInvokeEvent, taskId: unknown, text: unknown) =>
+      track(
+        (async () => {
+          if (
+            typeof taskId !== "string" ||
+            !taskId.trim() ||
+            typeof text !== "string"
+          )
+            throw new Error("编辑目标：参数不合法");
+          assertGoalTask(taskId, "编辑");
+          return goals.edit(taskId, text);
+        })()
+      )
+  );
+
+  /**
+   * 清除目标（ADR 0035 控制面，GLOSSARY「目标」）：目标转「已清除」并下发完整
+   * 快照（界面据此让进度行退场），任务回到普通对话形态——循环结束，输入队列
+   * 恢复自动消费、并发名额让出；逐轮验证记录与消息流的标记行仍随任务留痕。
+   * 进行中清除时循环立即收场：在途回合或完成判定一并中断（与 Stop 同一路径
+   * ——不留结论、不续跑），回合收尾时的 end() 负责唤醒输入队列与并发名额；
+   * 轮间窗口没有在途执行，由这里的补唤醒收尾。目标不在进行中时清除只改状态：
+   * 正在运行的普通回合（如暂停后发出的排队消息）不属于目标循环，照常跑完。
+   */
+  ipcMain.handle(
+    IPC.tasks.goalClear,
+    (_e: IpcMainInvokeEvent, taskId: unknown) =>
+      track(
+        (async () => {
+          if (typeof taskId !== "string" || !taskId.trim())
+            throw new Error("清除目标：参数不合法");
+          assertGoalTask(taskId, "清除");
+          if (manager.goal(taskId) === null)
+            throw new Error("任务尚未设定目标");
+          // 清除之前循环是否在本进程存活（在途回合 / 判定在途 / 轮间窗口）
+          const loopAlive = goals.isRunning(taskId);
+          // 状态机先于一切：转换被拒绝（如已清除后再清除）时抛错返回，不动任何执行
+          const goal = goals.transition(taskId, "clear");
+          if (loopAlive) {
+            if (interrupts.interrupt(taskId)) {
+              // 在途回合或判定：与 Stop 同一路径——idle 边界见到目标已清除即
+              // 不再判定、不再续跑，end() 唤醒输入队列与并发名额
+              liveTasks.stop(taskId);
+            } else {
+              // 轮间窗口：没有在途执行，循环是在执行收尾之外结束的
+              wakeAfterLoopEnd(taskId);
+            }
+          }
+          return goal;
         })()
       )
   );

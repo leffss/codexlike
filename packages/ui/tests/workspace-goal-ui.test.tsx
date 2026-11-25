@@ -76,7 +76,7 @@ const verification: GoalVerificationRecord = {
   createdAt: "2026-11-25T08:00:09.000Z",
 };
 
-function task(id: string): TaskListItem {
+function task(id: string, archived = false): TaskListItem {
   return {
     id,
     title: `任务 ${id}`,
@@ -88,15 +88,15 @@ function task(id: string): TaskListItem {
     model: "test-model",
     approvalMode: "ask",
     status: "idle",
-    archivedAt: null,
+    archivedAt: archived ? "2026-11-25T09:00:00.000Z" : null,
     createdAt: "2026-11-18T08:00:00Z",
     updatedAt: "2026-11-18T08:00:00Z",
     activity,
   };
 }
 
-/** 任务 A 带着一个已完成的目标（进度行的恢复数据源），任务 B 没有目标 */
-function taskView(taskId: string): TaskView {
+/** 任务 A 带着一个目标（进度行的恢复数据源，缺省为已完成），任务 B 没有目标 */
+function taskView(taskId: string, goal: GoalRecord | null): TaskView {
   return {
     taskId,
     executionId: null,
@@ -108,7 +108,7 @@ function taskView(taskId: string): TaskView {
     pendingInteractions: [],
     activity,
     queueState: { queue: [], paused: false, sendingId: null },
-    goal: taskId === "A" ? goalOf("completed") : null,
+    goal: taskId === "A" ? goal : null,
   };
 }
 
@@ -130,7 +130,14 @@ function workbenchEntry(text = ""): WorkbenchEntry {
   };
 }
 
-function setup() {
+/** 装配选项：任务 A 的初始目标（缺省已完成） */
+interface SetupOptions {
+  goal?: GoalRecord | null;
+}
+
+function setup(options: SetupOptions = {}) {
+  const initialGoal =
+    options.goal === undefined ? goalOf("completed") : options.goal;
   const disk = new Map<string, WorkbenchEntry>([
     [JSON.stringify({ kind: "task", taskId: "A" }), workbenchEntry("A 原草稿")],
     [JSON.stringify({ kind: "task", taskId: "B" }), workbenchEntry("B 原草稿")],
@@ -159,7 +166,7 @@ function setup() {
     } satisfies Partial<CodexLikeApi["application"]>,
     tasks: {
       list: vi.fn(async () => [task("A"), task("B")]),
-      view: vi.fn(async (id: string) => taskView(id)),
+      view: vi.fn(async (id: string) => taskView(id, initialGoal)),
       resources: vi.fn(async () => null),
       workspaceFiles: vi.fn(async () => []),
       status: vi.fn(async () => null),
@@ -169,8 +176,19 @@ function setup() {
         runningTasks: [],
       })),
       send: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => true),
+      compact: vi.fn(async () => ({ compactedMessages: 2 })),
       goalSet: vi.fn<CodexLikeApi["tasks"]["goalSet"]>(async (taskId, text) =>
         goalOf("active", { taskId, text })
+      ),
+      goalResume: vi.fn<CodexLikeApi["tasks"]["goalResume"]>(async (taskId) =>
+        goalOf("active", { taskId })
+      ),
+      goalEdit: vi.fn<CodexLikeApi["tasks"]["goalEdit"]>(async (taskId, text) =>
+        goalOf("paused", { taskId, text })
+      ),
+      goalClear: vi.fn<CodexLikeApi["tasks"]["goalClear"]>(async (taskId) =>
+        goalOf("cleared", { taskId })
       ),
     } satisfies Partial<CodexLikeApi["tasks"]>,
     providerProfiles: { list: vi.fn(async () => [profile]) },
@@ -227,8 +245,8 @@ function statusText(): string {
   return screen.getByTestId("goal-progress-status").textContent ?? "";
 }
 
-async function openWorkspace() {
-  const fixture = setup();
+async function openWorkspace(options: SetupOptions = {}) {
+  const fixture = setup(options);
   render(<WorkspacePage state={fixture.state} onOpenSettings={() => {}} />);
   await waitFor(() => expect(composer().value).toBe("A 原草稿"));
   return fixture;
@@ -532,5 +550,274 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
       { activity }
     );
     await waitFor(() => expect(listCalls()).toBeGreaterThan(afterStart));
+  });
+
+  /** 进度行上的控制面控件（按钮 / 编辑框）；不存在返回 null */
+  const control = (id: string) => screen.queryByTestId(id);
+
+  /** 在输入框键入并以 Enter 提交（回复进行中输入框没有发送按钮，Enter 与「加入队列」等效） */
+  function submitByEnter(text: string) {
+    fireEvent.change(composer(), { target: { value: text } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+  }
+
+  it("暂停按钮：与停止按钮同一通道（调用 interrupt），成功走本地命令反馈", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("active") });
+
+    fireEvent.click(control("goal-pause")!);
+
+    await waitFor(() => expect(api.tasks.interrupt).toHaveBeenCalledWith("A"));
+    expect(feedback()).toContain("目标已暂停");
+    expect(api.tasks.goalResume).not.toHaveBeenCalled();
+  });
+
+  it("暂停失败：原因以本地命令反馈呈现，目标状态不变", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("active") });
+    vi.mocked(api.tasks.interrupt).mockRejectedValueOnce(
+      new Error("应用正在退出，请取消退出后再操作")
+    );
+
+    fireEvent.click(control("goal-pause")!);
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "暂停目标失败：应用正在退出，请取消退出后再操作"
+      )
+    );
+    expect(statusText()).toBe("进行中");
+  });
+
+  it("恢复按钮：调用 goalResume；成功后进度行转「进行中」并走本地命令反馈", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+    expect(control("goal-resume")).not.toBeNull();
+
+    fireEvent.click(control("goal-resume")!);
+
+    await waitFor(() => expect(feedback()).toContain("目标已恢复"));
+    expect(api.tasks.goalResume).toHaveBeenCalledWith("A");
+    expect(statusText()).toBe("进行中");
+    // 进行中：暂停可用、恢复不出现、编辑不可用
+    expect(control("goal-pause")).not.toBeNull();
+    expect(control("goal-resume")).toBeNull();
+    expect(control("goal-edit")!.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("恢复失败：原因以本地命令反馈呈现，目标保持已暂停", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+    vi.mocked(api.tasks.goalResume).mockRejectedValueOnce(
+      new Error("任务正在执行，请等回复结束后再恢复目标")
+    );
+
+    fireEvent.click(control("goal-resume")!);
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "恢复目标失败：任务正在执行，请等回复结束后再恢复目标"
+      )
+    );
+    expect(statusText()).toBe("已暂停");
+    // 没能恢复：按钮回来可重试
+    await waitFor(() =>
+      expect(control("goal-resume")!.hasAttribute("disabled")).toBe(false)
+    );
+  });
+
+  it("编辑：进度行进入编辑、保存调用 goalEdit；成功后摘要更新并走本地命令反馈", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+
+    fireEvent.click(control("goal-edit")!);
+    const input = screen.getByTestId("goal-edit-input") as HTMLTextAreaElement;
+    expect(input.value).toBe("让示例测试全部通过");
+    fireEvent.change(input, { target: { value: "修订后的目标" } });
+    fireEvent.click(screen.getByTestId("goal-edit-save"));
+
+    await waitFor(() => expect(feedback()).toContain("目标已更新"));
+    expect(api.tasks.goalEdit).toHaveBeenCalledWith("A", "修订后的目标");
+    await waitFor(() =>
+      expect(screen.queryByTestId("goal-edit-input")).toBeNull()
+    );
+    expect(screen.getByTestId("goal-progress-summary").textContent).toBe(
+      "修订后的目标"
+    );
+  });
+
+  it("编辑失败：原因以本地命令反馈呈现，编辑框保持、内容不丢", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+    vi.mocked(api.tasks.goalEdit).mockRejectedValueOnce(
+      new Error("目标进行中，不能编辑：请先暂停目标")
+    );
+
+    fireEvent.click(control("goal-edit")!);
+    fireEvent.change(screen.getByTestId("goal-edit-input"), {
+      target: { value: "修订后的目标" },
+    });
+    fireEvent.click(screen.getByTestId("goal-edit-save"));
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "编辑目标失败：目标进行中，不能编辑：请先暂停目标"
+      )
+    );
+    expect(
+      (screen.getByTestId("goal-edit-input") as HTMLTextAreaElement).value
+    ).toBe("修订后的目标");
+  });
+
+  it("清除：调用 goalClear；进度行退场、标记行保留，走本地命令反馈", async () => {
+    const { api, listeners } = await openWorkspace({ goal: goalOf("paused") });
+    const emit = emitter(listeners);
+    await emit({ type: "goal-verification", verification }, { activity });
+    expect(screen.getByTestId("goal-verification-marker")).toBeTruthy();
+
+    fireEvent.click(control("goal-clear")!);
+
+    await waitFor(() => expect(feedback()).toContain("目标已清除"));
+    expect(api.tasks.goalClear).toHaveBeenCalledWith("A");
+    await waitFor(() =>
+      expect(screen.queryByTestId("goal-progress-row")).toBeNull()
+    );
+    // 逐轮验证记录的标记行仍随任务可回看
+    expect(screen.getByTestId("goal-verification-marker").textContent).toBe(
+      "第 1 次迭代 · 已完成"
+    );
+  });
+
+  it("清除失败：原因以本地命令反馈呈现，进度行保留", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+    vi.mocked(api.tasks.goalClear).mockRejectedValueOnce(
+      new Error("任务已归档，请先恢复任务再清除目标")
+    );
+
+    fireEvent.click(control("goal-clear")!);
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "清除目标失败：任务已归档，请先恢复任务再清除目标"
+      )
+    );
+    expect(screen.getByTestId("goal-progress-row")).toBeTruthy();
+  });
+
+  it("已清除的目标：状态快照到达时进度行退场；重启恢复（快照为已清除）也不渲染", async () => {
+    const { listeners } = await openWorkspace({ goal: goalOf("paused") });
+    const emit = emitter(listeners);
+
+    await emit({ type: "goal-changed", goal: goalOf("cleared") }, { activity });
+    expect(screen.queryByTestId("goal-progress-row")).toBeNull();
+
+    cleanup();
+    await openWorkspace({ goal: goalOf("cleared") });
+    expect(screen.queryByTestId("goal-progress-row")).toBeNull();
+  });
+
+  it("已归档的任务：进度行只读，不提供目标操作", async () => {
+    const { api, listeners } = await openWorkspace({ goal: goalOf("paused") });
+    expect(screen.getByTestId("goal-controls")).toBeTruthy();
+
+    // 任务变为已归档（任务列表刷新后）：目标操作撤下，目标与状态照常可见
+    vi.mocked(api.tasks.list).mockResolvedValue([task("A", true), task("B")]);
+    await emitter(listeners)(
+      { type: "goal-changed", goal: goalOf("paused") },
+      { activity }
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("goal-controls")).toBeNull()
+    );
+    expect(statusText()).toBe("已暂停");
+  });
+
+  it("下一轮没能发起而暂停：宿主附带的原因显示为进度行的暂停原因，之后不带原因的快照即清除", async () => {
+    const { listeners } = await openWorkspace({ goal: goalOf("active") });
+    const emit = emitter(listeners);
+
+    await emit(
+      {
+        type: "goal-changed",
+        goal: goalOf("paused"),
+        pauseReason:
+          "无法发起下一轮：所选 Provider Profile 不存在，请重新选择模型",
+      },
+      { activity }
+    );
+    expect(statusText()).toBe("已暂停");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "无法发起下一轮：所选 Provider Profile 不存在，请重新选择模型"
+    );
+
+    await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
+    expect(screen.queryByTestId("goal-progress-reason")).toBeNull();
+  });
+
+  it("/compact 在目标进行中：专门提示先暂停目标，不执行压缩、输入保留", async () => {
+    const { api, listeners } = await openWorkspace({ goal: goalOf("active") });
+    const emit = emitter(listeners);
+    // 目标循环期间任务恒为执行中（以运行中的活动态模拟续跑轮进行中）
+    await emit({ type: "goal-changed", goal: goalOf("active") });
+    await screen.findByTestId("composer-enqueue");
+
+    submitByEnter("/compact");
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "目标进行中不能压缩历史：请先暂停目标（完成判定依赖完整历史）（输入已保留）"
+      )
+    );
+    expect(api.tasks.compact).not.toHaveBeenCalled();
+    expect(composer().value).toBe("/compact");
+  });
+
+  it("/compact 在目标已暂停 / 已完成时照常可用", async () => {
+    const { api } = await openWorkspace({ goal: goalOf("paused") });
+
+    submit("/compact");
+
+    // 发送参数与直发消息同一组快照：任务保存的模型随压缩请求传入
+    await waitFor(() =>
+      expect(api.tasks.compact).toHaveBeenCalledWith(
+        "A",
+        "profile",
+        "test-model"
+      )
+    );
+    expect(feedback()).toContain("已压缩");
+  });
+
+  it("其他斜杠命令在目标进行中：仍是「忙时命令不入队」，可用时机说准为目标暂停或结束后", async () => {
+    const { api, listeners } = await openWorkspace({ goal: goalOf("active") });
+    const emit = emitter(listeners);
+    await emit({ type: "goal-changed", goal: goalOf("active") });
+    await screen.findByTestId("composer-enqueue");
+
+    submitByEnter("/status");
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "命令 /status 不入队：目标暂停或结束后可用（输入已保留）"
+      )
+    );
+    expect(composer().value).toBe("/status");
+  });
+
+  it("普通任务忙时从命令菜单选中无参命令（Enter）：提示不入队，输入同样保留", async () => {
+    const { api, listeners } = await openWorkspace({ goal: null });
+    // 回复进行中（没有目标）：以运行中的活动态模拟
+    await emitter(listeners)({
+      type: "queue-changed",
+      reason: "enqueue",
+      queue: [],
+      paused: false,
+      sendingId: null,
+    });
+    await screen.findByTestId("composer-enqueue");
+
+    submitByEnter("/status");
+
+    await waitFor(() =>
+      expect(feedback()).toContain(
+        "命令 /status 不入队：回复结束后可用（输入已保留）"
+      )
+    );
+    expect(api.tasks.send).not.toHaveBeenCalled();
+    expect(composer().value).toBe("/status");
   });
 });

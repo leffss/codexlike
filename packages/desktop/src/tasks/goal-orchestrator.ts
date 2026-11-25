@@ -57,6 +57,19 @@ export type GoalPauseReason =
   /** 完成判定连续不可用，达到暂停阈值 */
   | "verification-unavailable";
 
+/**
+ * 目标循环下一轮的发起结局（continueTurn / resume 的返回值）：
+ * - started：回合已开始；
+ * - 发起失败：目标已转已暂停，reason 是对用户可见的原因（随已暂停的状态
+ *   快照下发到进度行，控制面的调用方据此呈现失败）；
+ * - 未发起且不动目标状态：目标已不在进行中（如等待期间被停止 / 清除），
+ *   或应用正在退出（目标状态原样，重启后的恢复由恢复链路负责）。
+ */
+export type GoalContinueResult =
+  | { started: true }
+  | { started: false; paused: true; reason: string }
+  | { started: false; paused: false; reason: null };
+
 /** 目标事件（任务级信封，经 task:events 下发到全部工作台窗口） */
 export type GoalEvent = Extract<
   TaskEventEnvelope["event"],
@@ -105,21 +118,82 @@ export function createGoalOrchestrator(deps: {
   /**
    * 推进当前目标的状态机并下发状态快照；离开进行中即循环结束——这是循环
    * 存活状态与目标状态保持一致的单点（外部一律经此，见返回对象上的 transition）。
+   * pauseReason：本次转已暂停的原因（只在原因不由目标记录本身推得时给出，
+   * 随快照下发到进度行的暂停原因；见 continueTurn 的发起失败路径）。
    */
-  function applyTransition(taskId: string, change: GoalTransition): GoalRecord {
+  function applyTransition(
+    taskId: string,
+    change: GoalTransition,
+    pauseReason?: string
+  ): GoalRecord {
     const goal = manager.transitionGoal(taskId, change);
     if (goal.status !== "active") endLoop(taskId);
-    deps.emit(taskId, { type: "goal-changed", goal });
+    deps.emit(taskId, {
+      type: "goal-changed",
+      goal,
+      ...(pauseReason === undefined ? {} : { pauseReason }),
+    });
     return goal;
   }
 
   /** 进行中的目标转「已暂停」；不在进行中（含无目标）时幂等无操作 */
-  function pauseIfActive(taskId: string): GoalRecord | null {
+  function pauseIfActive(taskId: string, reason?: string): GoalRecord | null {
     if (manager.goal(taskId)?.status !== "active") {
       endLoop(taskId);
       return null;
     }
-    return applyTransition(taskId, "pause");
+    return applyTransition(taskId, "pause", reason);
+  }
+
+  /**
+   * 发起目标循环的下一轮（续跑轮 / 恢复后的首轮共用的再入点）：以内部输入
+   * 走宿主发送主路径，消息流不产生用户气泡。调用方须先注销上一轮的执行
+   * 登记（上一轮回合与续跑轮是两次独立的宿主执行）。
+   * - 判定未过：下一步方向与判定理由进入续跑指令；
+   * - 判定不可用：如实告知模型上一轮完成判定不可用、请继续推进；
+   * - 恢复（票 04）：目标转回进行中后以 resume 调本方法从暂停点再入循环。
+   * 只对进行中的目标生效（其余情形无操作，循环随之结束）。启动失败：目标转
+   * 已暂停（不留「进行中却没有回合」），失败原因随已暂停的状态快照下发
+   * （进度行的暂停原因）并作为结果返回；应用退出中则目标状态原样。
+   */
+  async function continueTurn(
+    taskId: string,
+    basis: GoalContinuationBasis
+  ): Promise<GoalContinueResult> {
+    const goal = manager.goal(taskId);
+    if (deps.isStopping() || goal === null || goal.status !== "active") {
+      endLoop(taskId);
+      return { started: false, paused: false, reason: null };
+    }
+    loops.set(taskId, "turn");
+    try {
+      await deps.startTurn(taskId, buildGoalContinuationInput(goal, basis));
+    } catch (error) {
+      endLoop(taskId);
+      if (deps.isStopping()) {
+        return { started: false, paused: false, reason: null };
+      }
+      console.error("[tasks] 目标续跑轮发起失败，目标已暂停", error);
+      const reason = `无法发起下一轮：${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      // 等待期间目标已被用户停止 / 清除时不再改它的状态，也就不算「因发起失败而暂停」
+      return pauseIfActive(taskId, reason) === null
+        ? { started: false, paused: false, reason: null }
+        : { started: false, paused: true, reason };
+    }
+    return { started: true };
+  }
+
+  /**
+   * 编辑当前目标的文本（票 04 的控制面）：原地更新同一条目标记录并下发完整
+   * 快照。文本校验与可编辑的状态由 agent-core 给出（进行中 / 已完成 / 已清除
+   * 不能编辑），被拒时抛错返回、不下发；状态与循环存活状态都不受影响。
+   */
+  function edit(taskId: string, text: string): GoalRecord {
+    const goal = manager.editGoal(taskId, text);
+    deps.emit(taskId, { type: "goal-changed", goal });
+    return goal;
   }
 
   return {
@@ -259,34 +333,23 @@ export function createGoalOrchestrator(deps: {
     },
 
     /**
-     * 发起目标循环的下一轮（续跑轮 / 恢复后的首轮共用的再入点）：以内部输入
-     * 走宿主发送主路径，消息流不产生用户气泡。调用方须先注销上一轮的执行
-     * 登记（上一轮回合与续跑轮是两次独立的宿主执行）。
-     * - 判定未过：下一步方向与判定理由进入续跑指令；
-     * - 判定不可用：如实告知模型上一轮完成判定不可用、请继续推进；
-     * - 恢复（票 04）：目标转回进行中后以 resume 调本方法从暂停点再入循环。
-     * 只对进行中的目标生效（其余情形无操作，循环随之结束）。启动失败：目标转
-     * 已暂停（不留「进行中却没有回合」）；应用退出中则目标状态原样。
+     * 恢复（票 04 的控制面入口）：可恢复的状态（已暂停 / 预算受限 / 未达成）经
+     * 状态机转回进行中（进行中区段另起、连续计数清零；越界转换由 agent-core
+     * 状态机以中文错误拒绝——抛错返回，循环存活状态与事件都未动），随即以内部
+     * 输入从暂停点再入循环（continueTurn，basis = resume）。
+     * 调用方须保证任务此刻空闲：真有回合在跑或等待用户回应时，续跑轮的发起处
+     * 会以「任务正在执行或等待用户回应」拒绝，目标随即转回已暂停。
      */
-    async continueTurn(
-      taskId: string,
-      basis: GoalContinuationBasis
-    ): Promise<void> {
-      const goal = manager.goal(taskId);
-      if (deps.isStopping() || goal === null || goal.status !== "active") {
-        endLoop(taskId);
-        return;
-      }
-      loops.set(taskId, "turn");
-      try {
-        await deps.startTurn(taskId, buildGoalContinuationInput(goal, basis));
-      } catch (error) {
-        endLoop(taskId);
-        if (deps.isStopping()) return;
-        console.error("[tasks] 目标续跑轮发起失败，目标已暂停", error);
-        pauseIfActive(taskId);
-      }
+    async resume(taskId: string): Promise<GoalContinueResult> {
+      applyTransition(taskId, "resume");
+      return continueTurn(taskId, { kind: "resume" });
     },
+
+    /** 见上方 continueTurn 的说明（公开接缝：续跑轮与恢复后的首轮共用） */
+    continueTurn,
+
+    /** 编辑目标文本（见上方 edit 的说明） */
+    edit,
 
     /**
      * 编排异常的兜底：结束循环，进行中的目标转已暂停——编排器出错不得把目标

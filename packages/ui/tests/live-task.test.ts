@@ -1179,3 +1179,69 @@ it("目标状态与判定结论按任务水位接续（ADR 0035）：goal-change
   // 标记行归入当轮（轮次分组不因它另起一轮）
   expect(groupTurns(restored.items).map((turn) => turn.turnId)).toEqual(["u1"]);
 });
+
+it("目标暂停说明随 goal-changed 接续（票 04 追加 C）：宿主附带 pauseReason 时记下，之后不带原因的快照即清除；清除下发「已清除」的目标记录", () => {
+  const idle = { ...activity, running: false, outcome: "completed" as const };
+  const goal: GoalRecord = {
+    id: "goal-1",
+    taskId: "a",
+    text: "让示例测试全部通过",
+    status: "active",
+    activeMs: 0,
+    activeSince: null,
+    createdAt: "2026-11-25T08:00:00.000Z",
+    updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
+  };
+  const goalEvent = (
+    sequence: number,
+    status: GoalRecord["status"],
+    pauseReason?: string
+  ): TaskEventEnvelope => ({
+    ...delta(sequence, ""),
+    activity: idle,
+    event: {
+      type: "goal-changed",
+      goal: { ...goal, status },
+      ...(pauseReason === undefined ? {} : { pauseReason }),
+    },
+  });
+  const reason = "无法发起下一轮：所选 Provider Profile 不存在，请重新选择模型";
+
+  // 快照恢复：暂停说明不落库，重启后从空开始
+  let state = hydrateLiveTask({ ...snapshot, activity: idle, events: [] });
+  expect(state.goalPauseNote).toBeNull();
+
+  // 下一轮没能发起而暂停：已暂停的快照附带原因
+  state = receiveLiveEvent(state, goalEvent(3, "paused", reason));
+  expect(state.goalPauseNote).toBe(reason);
+  expect(state.goal?.status).toBe("paused");
+  // 与目标无关的任务级事件不清除说明
+  state = receiveLiveEvent(state, {
+    ...delta(4, ""),
+    activity: idle,
+    event: {
+      type: "queue-changed",
+      reason: "enqueue",
+      queue: [],
+      paused: false,
+      sendingId: null,
+    },
+  });
+  expect(state.goalPauseNote).toBe(reason);
+  // 之后的状态快照不带原因（恢复 / 手动暂停）：说明随之清除
+  state = receiveLiveEvent(state, goalEvent(5, "active"));
+  expect(state.goalPauseNote).toBeNull();
+
+  // 清除：下发的是「已清除」的目标记录（界面据此让进度行退场）
+  state = receiveLiveEvent(state, goalEvent(6, "cleared"));
+  expect(state.goal?.status).toBe("cleared");
+
+  // 加载期间缓冲的事件同样接续到暂停说明
+  const buffered = hydrateLiveTask(
+    { ...snapshot, activity: idle, events: [] },
+    [goalEvent(3, "paused", reason)]
+  );
+  expect(buffered.goalPauseNote).toBe(reason);
+});

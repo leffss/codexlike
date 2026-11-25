@@ -1,6 +1,8 @@
 import {
   GOAL_MAX_VERIFICATION_FAILURES,
   GOAL_STATUS_NAMES,
+  canTransitionGoal,
+  isGoalEditable,
   type GoalRecord,
   type GoalVerificationRecord,
 } from "@codexlike/agent-core";
@@ -57,6 +59,33 @@ export function goalSummary(text: string): string {
 export function goalStatusText(goal: GoalRecord, verifying: boolean): string {
   if (goal.status === "active" && verifying) return "验证中";
   return GOAL_STATUS_NAMES[goal.status];
+}
+
+/** 进度行控制面四个操作的可用性（票 04，ADR 0035「控制面」） */
+export interface GoalControls {
+  /** 暂停：与停止按钮同一语义（Stop = 暂停） */
+  pause: boolean;
+  /** 恢复：从暂停点续跑 */
+  resume: boolean;
+  /** 编辑：修改目标文本 */
+  edit: boolean;
+  /** 清除：目标转「已清除」，任务回到普通对话 */
+  clear: boolean;
+}
+
+/**
+ * 控制面按钮组的六态可用性矩阵（ADR 0035「状态机六态」）：直接取自状态机的
+ * 转换表与可编辑状态，界面不另存一份——能暂停 ⟺ 进行中；能恢复 ⟺ 已暂停 /
+ * 预算受限 / 未达成；能清除 ⟺ 未清除的任一状态；能编辑 ⟺ 三种可恢复态
+ * （进行中需先暂停，已完成是定稿的历史）。已清除没有任何可用的操作。
+ */
+export function goalControls(goal: Pick<GoalRecord, "status">): GoalControls {
+  return {
+    pause: canTransitionGoal(goal.status, "pause"),
+    resume: canTransitionGoal(goal.status, "resume"),
+    edit: isGoalEditable(goal.status),
+    clear: canTransitionGoal(goal.status, "clear"),
+  };
 }
 
 /**

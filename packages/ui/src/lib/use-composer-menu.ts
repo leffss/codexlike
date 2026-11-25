@@ -155,11 +155,15 @@ export function useComposerMenu(
     } else {
       const command = item as SlashCommandDef;
       if (command.argumentHint === null) {
-        // 无参命令选中即提交，清空输入防重复
-        onTextCommit("");
+        // 无参命令选中即提交。输入先留作命令原文，由发送路径在受理后清空：
+        // 忙时（回复进行中）命令不入队不执行、提示「输入已保留」，这段输入必须
+        // 还在才能原样重发——不能在提交之前先行清空。
+        const text = `/${command.name}`;
+        onTextCommit(text);
         setMenu(null);
-        dismissedRef.current = null;
-        if (canSubmit) onSend(`/${command.name}`);
+        // 菜单不因这段命令原文自动重开（与 Esc 关闭同款签名）
+        dismissedRef.current = `${text.length}:${text.length}:${text}`;
+        if (canSubmit) onSend(text);
       } else {
         commitText(`/${command.name} `, `/${command.name} `.length);
       }

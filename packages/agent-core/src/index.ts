@@ -81,7 +81,12 @@ export {
   GOAL_VERIFICATION_OUTCOMES,
 } from "./goal/types";
 export type { GoalTransition } from "./goal/state-machine";
-export { advanceGoal, isGoalOpen } from "./goal/state-machine";
+export {
+  advanceGoal,
+  canTransitionGoal,
+  isGoalEditable,
+  isGoalOpen,
+} from "./goal/state-machine";
 
 // 执行设置常量（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：纯常量浏览器安全，
 // desktop 存储校验与 ui 表单回退共用同一默认值/范围来源
