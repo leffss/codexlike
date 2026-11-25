@@ -160,6 +160,16 @@
 - **编排器的公开方法是返回对象上的成员**：方法之间互调要先把被调方提成工厂内的局部函数再暴露，否则 `continueTurn is not defined`。
 - **清除在途回合时，已清除的快照活动态仍是运行中**：中断尚未落定，界面会短暂显示「没有进度行、仍在流式中」，随后由中断的终态事件收回——与事实一致，不是缺陷。
 
+### 写给票 05（护栏：token 预算与空转阻断）
+
+- **本票没有碰的部分**：`afterTurn` 里判定之后的逻辑、任何预算记账或空转阻断都没有动；`goals.isRunning` / `phase` / `turnStarted` / `pause` / `abandon` / `transition(taskId, change)` 的签名不变。
+- **恢复**：`tasks:goal-resume` 对已暂停 / 预算受限 / 未达成走同一条路径（状态机 `resume` → `continueTurn({ kind: "resume" })`），后两态已有单测；ui 的恢复按钮对这三态一致可用。票 05 只需把目标转到这两个状态，「加预算或改目标后可恢复」即成立。
+- **编辑**：预算受限 / 未达成可编辑（`isGoalEditable`）。**清除**：任何未清除的状态都可清除。
+- **转「未达成 / 预算受限」时让进度行写明原因的两条路**：(a) 不改宿主——ui 的 `goalPauseReason(goal)` 按目标记录推导（票 05 票面原计划）；(b) 经快照携带——编排器内部 `applyTransition` 已支持可选的暂停说明（随 `goal-changed.pauseReason` 下发、不落库，ui 侧 `LiveTask.goalPauseNote` → 进度行），但公开的 `goals.transition` 还没有暴露这个参数，要用需给它加一个可选第三参数（一处改动）。两种原因同时存在时界面优先显示 (a)。
+- **`continueTurn` 的返回值**由 `void` 变为 `GoalContinueResult`（已发起 / 发起失败并已暂停 / 未发起）；`settleAfterStream` 里的既有调用不读返回值，不受影响。
+- **进度行的结构**（挂预算显示时注意）：行尾是按钮组容器 `goal-controls`（`shrink-0`）；只读信息（摘要 / 暂停原因 / 状态 / 时长）在带 `role="status"` 的内层 span 里，摘要是其中唯一 `flex-1` 的元素；编辑态（`goal-edit-form`）会整体替换这一行的内容。预算显示作为独立组件挂在时长之后、按钮组之前即可，注意不要落进 `role="status"` 的播报区，也不要在编辑态下丢失。
+- **合并**：两票按所有权边界会改到同一批文件（编排器、`task-ipc.ts`、`shared/ipc.ts`、`preload.ts`、进度行、`goal-view.ts`、`WorkspacePage.tsx`、`browser-stub.ts`、`goal-harness.ts` 与几份 goal 测试，另有两个 `package.json` 与 e2e README 的链尾）。本票的新增都是追加形态，便于后合入者对照：三个 IPC handler 位于 `goal-set` handler 之后、`continueInputQueues` 之前；IPC 表键紧随 `goalSet`；`test:e2e:all` 链尾追加的是 `&& node e2e/goal-controls.mjs`（票 05 的场景接在它后面即可）。`goal-harness.ts` 新增了 `PendingRound.json(content)`，可应答非流式请求（压缩等）。
+
 ### 写给票 06（重启恢复为暂停态）
 
 - 重启时需要收场的循环内状态仍然只有编排器内存里的循环存活状态（`loops`），进程重启自然清空；本票没有新增别的循环内状态。新增的不落库状态只有 ui 的暂停说明（`goalPauseNote`），重启后消失——已暂停的目标只显示「已暂停」。
