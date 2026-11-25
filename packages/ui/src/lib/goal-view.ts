@@ -1,8 +1,13 @@
-import type { GoalRecord, GoalVerificationRecord } from "@codexlike/agent-core";
+import {
+  GOAL_MAX_VERIFICATION_FAILURES,
+  GOAL_STATUS_NAMES,
+  type GoalRecord,
+  type GoalVerificationRecord,
+} from "@codexlike/agent-core";
 
 /**
  * 目标模式呈现层纯函数（ADR 0035，GLOSSARY「目标」「完成判定」）：
- * 累计时长的求值与文案、进度行摘要、判定标记行文案。
+ * 累计时长的求值与文案、进度行摘要与状态、判定标记行文案。
  * 状态称谓取 agent-core 的 GOAL_STATUS_NAMES（单一来源），这里不另存副本。
  */
 
@@ -45,11 +50,59 @@ export function goalSummary(text: string): string {
     : firstLine;
 }
 
-/** 判定标记行文案（GLOSSARY「完成判定」）：「第 N 次迭代 · 已完成 / 未完成」 */
+/**
+ * 进度行状态：六态称谓；进行中的目标在完成判定在途时显示副状态「验证中」
+ * （ADR 0035「进行中（验证中为进度行副状态）」）。「验证中」只属于进行中。
+ */
+export function goalStatusText(goal: GoalRecord, verifying: boolean): string {
+  if (goal.status === "active" && verifying) return "验证中";
+  return GOAL_STATUS_NAMES[goal.status];
+}
+
+/**
+ * 进度行的暂停原因说明：目标因「完成判定连续不可用」被暂停时写明原因
+ * （票 03 编排者裁决：原因对用户可见，复用既有「已暂停」态，不新设用户态）。
+ * 手动暂停 / 出错暂停等没有对应的持久化原因，返回 null（进度行只显示「已暂停」）。
+ */
+export function goalPauseReason(goal: GoalRecord): string | null {
+  if (
+    goal.status !== "paused" ||
+    goal.failureStreak < GOAL_MAX_VERIFICATION_FAILURES
+  )
+    return null;
+  return `完成判定连续 ${goal.failureStreak} 次不可用`;
+}
+
+/** 判定在途的标记行占位文案：「第 N 次迭代 · 验证中」 */
+export function goalVerifyingText(round: number): string {
+  return `第 ${round} 次迭代 · 验证中`;
+}
+
+/**
+ * 判定标记行文案（GLOSSARY「完成判定」）：「第 N 次迭代 · 已完成 / 未完成 /
+ * 判定不可用」。判定不可用是判定自身故障、没有结论——如实呈现，不写成
+ * 判定给出的「未完成」。
+ */
 export function goalVerificationText(
-  verification: Pick<GoalVerificationRecord, "round" | "passed">
+  verification: Pick<GoalVerificationRecord, "round" | "outcome">
 ): string {
-  return `第 ${verification.round} 次迭代 · ${
-    verification.passed ? "已完成" : "未完成"
-  }`;
+  const conclusion =
+    verification.outcome === "passed"
+      ? "已完成"
+      : verification.outcome === "unpassed"
+        ? "未完成"
+        : "判定不可用";
+  return `第 ${verification.round} 次迭代 · ${conclusion}`;
+}
+
+/**
+ * 未完成时的下一步方向一句摘要（规格故事 10）：「下一步：…」。
+ * 判定没有给出方向、或结论不是未完成（通过 / 判定不可用）时没有摘要。
+ */
+export function goalNextStepText(
+  verification: Pick<GoalVerificationRecord, "outcome" | "nextAction">
+): string | null {
+  if (verification.outcome !== "unpassed" || verification.nextAction === "")
+    return null;
+  return `下一步：${verification.nextAction}`;
 }

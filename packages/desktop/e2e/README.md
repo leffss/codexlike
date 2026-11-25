@@ -53,6 +53,7 @@
 | 34  | workspace-opener    | `workspace-opener.mjs`     | 工作区打开器（GLOSSARY）：标题栏分裂按钮草稿态可用、候选列表（E2E 钩子全量）、点选即打开并记默认、主按钮用默认、重启后默认保留                                               |
 | 35  | goal-stub           | `goal-stub-probe.mjs`      | stub 双线探针（goal-mode 票 01）：工作轮 / 判定线各自按脚本应答、互不串线                                                                                                    |
 | 36  | goal                | `goal-mode.mjs`            | 目标模式最小闭环（ADR 0035）：/goal 设定 → 首轮 → 判定通过 → 已完成；队列互锁、Stop = 暂停、重启可读                                                                         |
+| 37  | goal-continuation   | `goal-continuation.mjs`    | 目标模式续跑循环（ADR 0035 票 03）：两轮判定未过自动续跑（验证中占位、无用户气泡、队列持续互锁）→ 第三轮通过 → 已完成，三行标记留痕、重启可回看                              |
 
 链外（不进 test:e2e:all）：
 

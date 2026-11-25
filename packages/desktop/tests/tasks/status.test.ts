@@ -324,3 +324,30 @@ describe("buildTaskStatus 已压缩标记（工单 08）", () => {
     expect(status.compacted).toBeNull();
   });
 });
+
+describe("buildTaskStatus 目标模式续跑指令（ADR 0035 票 03）", () => {
+  it("goal-continuation 消息进入模型上下文：计入上下文用量估算与消息数", () => {
+    const withContinuation: StoredMessage[] = [
+      messages[0]!,
+      {
+        id: "g1",
+        taskId: "s1",
+        role: "goal-continuation",
+        content: "继续",
+        createdAt: "t",
+      },
+    ];
+    const status = buildTaskStatus({
+      record: record(),
+      messages: withContinuation,
+      agentsMd: emptyDiscovery,
+      providerProfileName: null,
+      latestCompact: null,
+    });
+
+    // 与实际上下文一致：续跑指令以 user 角色进入模型上下文，估算不能漏掉它
+    expect(status.messageCount).toBe(2);
+    // “你好” 2 tokens + “继续” 2 tokens
+    expect(status.estimatedContextTokens).toBe(4);
+  });
+});

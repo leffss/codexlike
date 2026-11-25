@@ -211,14 +211,33 @@ export interface TerminalSegment extends SegmentBase {
 
 /**
  * 完成判定标记行段（ADR 0035，GLOSSARY「完成判定」）：目标模式每轮判定在
- * 消息流原位留一行「第 N 次迭代 · 已完成/未完成」。结论本身随任务落库
- * （任务时间线的 goal-verification 条目），重启后由时间线重建；运行期由
- * goal-verification 事件追加。先例 PlanMarkerRow（流内极简标记行）。
+ * 消息流原位留一行「第 N 次迭代 · 验证中 / 已完成 / 未完成 / 判定不可用」。
+ * 同一行有两个形态：
+ * - 验证中（pending）：判定在途、尚无结论的占位——运行期由 goal-verifying
+ *   事件追加，结论到达后原位升级为同一行（序号与轮次归属不变）；判定在途被
+ *   中断则随目标离开进行中撤下。占位不落库，重启恢复后不存在。
+ * - 结论（verification）：运行期由 goal-verification 事件入流；重启后由任务
+ *   时间线的 goal-verification 条目重建。
+ * 先例 PlanMarkerRow（update_plan 的流内极简标记）。
  */
-export interface GoalVerificationSegment extends SegmentBase {
-  kind: "goal-verification";
-  verification: GoalVerificationRecord;
+export interface GoalVerificationPending {
+  goalId: string;
+  round: number;
 }
+
+export type GoalVerificationSegment = SegmentBase &
+  (
+    | {
+        kind: "goal-verification";
+        verification: GoalVerificationRecord;
+        pending?: undefined;
+      }
+    | {
+        kind: "goal-verification";
+        pending: GoalVerificationPending;
+        verification?: undefined;
+      }
+  );
 
 /** 消息段：消息流时序序列的最小呈现单元 */
 export type MessageSegment =
@@ -334,6 +353,8 @@ function goalVerificationSegmentOf(
 /**
  * 完成判定结论入流（goal-verification 事件）：尾部追加标记行段；同一记录
  * 重复到达（重放 / 迟到）幂等不重复。
+ * 已有同一轮的「验证中」占位行时原位升级——保持占位行的序号与轮次归属
+ * （封闭集操作二：状态迁移保持段 id 与序号），「验证中 → 结论」是同一行。
  */
 export function appendGoalVerification(
   items: MessageSegment[],
@@ -341,11 +362,70 @@ export function appendGoalVerification(
 ): MessageSegment[] {
   if (
     items.some(
-      (item) => item.kind === "goal-verification" && item.id === verification.id
+      (item) =>
+        item.kind === "goal-verification" &&
+        item.verification?.id === verification.id
     )
   )
     return items;
-  return append(items, goalVerificationSegmentOf(verification, items));
+  const placeholderIndex = items.findIndex(
+    (item) =>
+      item.kind === "goal-verification" &&
+      item.pending !== undefined &&
+      item.pending.goalId === verification.goalId &&
+      item.pending.round === verification.round
+  );
+  const concluded = goalVerificationSegmentOf(verification, items);
+  if (placeholderIndex === -1) return append(items, concluded);
+  const placeholder = items[placeholderIndex]!;
+  return items.map((item, index) =>
+    index === placeholderIndex
+      ? { ...concluded, seq: placeholder.seq, turnId: placeholder.turnId }
+      : item
+  );
+}
+
+/** 验证中占位 → 标记行段（归当前轮；同一目标同时至多一个占位） */
+function pendingGoalSegmentOf(
+  pending: GoalVerificationPending,
+  segments: MessageSegment[]
+): GoalVerificationSegment {
+  return {
+    kind: "goal-verification",
+    id: `goal-verifying-${pending.goalId}-${pending.round}`,
+    seq: nextSeq(segments),
+    turnId: deriveTurnId(segments, `goal-verifying-${pending.round}`),
+    responseId: null,
+    pending,
+  };
+}
+
+/**
+ * 完成判定开始（goal-verifying 事件）：尾部追加「第 N 次迭代 · 验证中」
+ * 占位行。已有占位行时幂等（不叠第二个「验证中」）。
+ */
+export function beginGoalVerification(
+  items: MessageSegment[],
+  pending: GoalVerificationPending
+): MessageSegment[] {
+  if (items.some((item) => item.kind === "goal-verification" && item.pending))
+    return items;
+  return append(items, pendingGoalSegmentOf(pending, items));
+}
+
+/**
+ * 目标离开进行中（已暂停 / 已完成 / 清除…）：撤下还没出结论的「验证中」
+ * 占位行——判定在途被中断时不留结论，界面不能停在永远的「验证中」。
+ * 已有结论的标记行是留痕，不受影响。
+ */
+export function dropPendingGoalVerifications(
+  items: MessageSegment[]
+): MessageSegment[] {
+  if (!items.some((item) => item.kind === "goal-verification" && item.pending))
+    return items;
+  return items.filter(
+    (item) => !(item.kind === "goal-verification" && item.pending)
+  );
 }
 
 /** 按 id 整段替换（封闭集操作二）：保持段 id 与序号不变 */
@@ -585,6 +665,10 @@ function messageSegments(
       return [{ ...base, kind: "error", content: message.content }];
     case "compact-summary":
       return [{ ...base, kind: "compact-summary", content: message.content }];
+    // 续跑指令（ADR 0035「续跑轮是内部输入，不产生用户气泡」）：消息流不呈现
+    // ——既不是用户发言，轮内的回复与工具照常各自成段，归入目标所在的轮次
+    case "goal-continuation":
+      return [];
   }
 }
 
@@ -624,6 +708,10 @@ export function applyTaskEvent(
   event: TaskEvent
 ): MessageSegment[] {
   switch (event.type) {
+    // 续跑轮的内部输入（ADR 0035）：不产生用户段，回复照常入流
+    case "goal-continuation":
+      return items;
+
     case "user-message":
       if (items.some((item) => item.id === event.message.id)) return items;
       return append(items, {

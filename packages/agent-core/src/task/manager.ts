@@ -12,6 +12,7 @@ import {
   GOAL_TEXT_MAX_LENGTH,
   type GoalRecord,
   type GoalVerdict,
+  type GoalVerificationOutcome,
   type GoalVerificationRecord,
 } from "../goal/types";
 import {
@@ -21,8 +22,9 @@ import {
 } from "../goal/state-machine";
 import {
   buildGoalVerificationPrompt,
-  failOpenGoalVerdict,
   requestGoalVerdict,
+  unavailableGoalVerdict,
+  type GoalVerdictResult,
   type GoalVerificationResult,
 } from "../goal/verifier";
 import {
@@ -230,16 +232,24 @@ export interface TaskManager {
   /**
    * 完成判定（GLOSSARY「完成判定」，ADR 0035）：对「进行中」的目标发起一次
    * 独立模型请求（任务当前模型、不带工具、输入 = 目标文本 + 完整消息历史），
-   * 结论落为下一轮验证记录。只落记录、不改目标状态——通过/未通过的后续
-   * 处置由宿主编排器决定（通过 → 完成；未通过 → 续跑或暂停）。
+   * 结论落为下一轮验证记录。只落记录与逐轮记账、不改目标状态——通过/未通过
+   * 的后续处置由宿主编排器决定（通过 → 完成；未通过 → 续跑）。
    * 必须在回合空闲边界调用（与 sendMessage / compact 不并发）。
-   * 目标已不在进行中（如等待期间被暂停）时返回 skipped，不发请求。
+   * 目标已不在进行中（如等待期间被暂停）时返回 skipped，不发请求；
+   * 判定在途被中断返回 aborted，不留结论。
    * profile 为任务上次发送所用的 Provider Profile（宿主在主进程解密后传入）；
-   * 缺省表示任务当前模型不可用，按 fail-open 落未通过记录。
+   * 缺省表示任务当前模型不可用，记为「判定不可用」。
+   * toolActivity：刚结束的这一轮是否有实质工具活动（宿主按本轮事件统计，
+   * 定义见 isGoalToolActivity；缺省按「有」计）——空转计数只对「未过且无
+   * 活动」的轮次累加，结果落为目标记录上的 idleStreak / failureStreak。
    */
   verifyGoal(
     taskId: string,
-    options: { profile?: ProviderProfile; signal?: AbortSignal }
+    options?: {
+      profile?: ProviderProfile;
+      signal?: AbortSignal;
+      toolActivity?: boolean;
+    }
   ): Promise<GoalVerificationResult>;
   /** 当前目标的逐轮验证记录（按轮次正序）；无目标为空数组 */
   goalVerifications(taskId: string): GoalVerificationRecord[];
@@ -372,11 +382,12 @@ export function createTaskManager(
       .filter((record) => record.goalId === goal.id);
   }
 
-  /** 把一次判定结论落为下一轮验证记录（轮次 = 该目标已有记录数 + 1） */
+  /** 把一次判定的结局落为下一轮验证记录（轮次 = 该目标已有记录数 + 1） */
   function recordVerification(
     taskId: string,
     goal: GoalRecord,
-    verdict: GoalVerdict
+    verdict: GoalVerdict,
+    round: Pick<GoalVerificationRecord, "outcome" | "toolActivity">
   ): GoalVerificationRecord {
     const verification: GoalVerificationRecord = {
       id: generateId(),
@@ -384,8 +395,10 @@ export function createTaskManager(
       goalId: goal.id,
       round: currentGoalVerifications(taskId).length + 1,
       passed: verdict.passed,
+      outcome: round.outcome,
       reason: verdict.reason,
       nextAction: verdict.nextAction,
+      toolActivity: round.toolActivity,
       createdAt: now(),
     };
     persistence.insertGoalVerification(verification);
@@ -697,6 +710,8 @@ export function createTaskManager(
         activeSince: timestamp,
         createdAt: timestamp,
         updatedAt: timestamp,
+        idleStreak: 0,
+        failureStreak: 0,
       };
       persistence.insertGoal(goal);
       return { ...goal };
@@ -716,6 +731,8 @@ export function createTaskManager(
         status: next.status,
         activeMs: next.activeMs,
         activeSince: next.activeSince,
+        idleStreak: next.idleStreak,
+        failureStreak: next.failureStreak,
         updatedAt: next.updatedAt,
       });
       return next;
@@ -732,62 +749,96 @@ export function createTaskManager(
       persistence.deleteGoal(goal.id);
     },
 
-    async verifyGoal(taskId, { profile, signal }) {
+    async verifyGoal(taskId, { profile, signal, toolActivity = true } = {}) {
       const goal = persistence.listGoals(taskId).at(-1);
       if (goal === undefined || goal.status !== "active")
         return { kind: "skipped" };
       // 中断先于请求：不发请求（Stop / 应用退出时不留判定在途）
       if (signal?.aborted) return { kind: "aborted" };
       // 任务当前模型不可用（宿主解析不到任务上次所用 Provider Profile，
-      // 如已被删除）：没有可用的判定模型，同样按 fail-open 落未通过记录
-      if (profile === undefined)
-        return {
-          kind: "verified",
-          verification: recordVerification(
-            taskId,
-            goal,
-            failOpenGoalVerdict(
-              "任务的 Provider Profile 不存在，请重新选择模型"
-            )
-          ),
-        };
-      const { system, prompt } = buildGoalVerificationPrompt(goal, {
-        messages: persistence.listMessages(taskId),
-        toolCalls: persistence.listToolCalls(taskId),
-      });
-      // 模型请求重试次数逐次读取（GLOSSARY「执行设置」：与 compact 辅助调用同口径）
-      const modelMaxRetries =
-        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
-      const record = persistence.listTasks().find((task) => task.id === taskId);
-      const { outcome, usage } = await requestGoalVerdict({
-        // 任务当前模型（上一回合落库的具体模型；未发过消息回退 Profile 列表第一项）
-        languageModel: languageModelFor(profile, {
-          model: resolveModelOf(profile, record?.model ?? undefined),
-        }),
-        system,
-        prompt,
-        signal,
-        maxRetries: modelMaxRetries,
-      });
-      // 任务用量（GLOSSARY「任务用量」，ADR 0029）：判定是任务内模型调用，
-      // usage 入主任务列（已花的 token 照记；未结算不记，入账失败不影响判定）
-      if (usage !== undefined) {
-        await settleTaskUsage(
-          usage,
-          (delta) => persistence.addTaskUsage(taskId, delta),
-          "main"
-        );
-      }
-      if (outcome === null) return { kind: "aborted" };
-      // fail-open（ADR 0035）：判定自身故障按未通过落记录，不设独立用户态
+      // 如已被删除）：没有可用的判定模型，与请求故障同样记为判定不可用
+      const settled: GoalVerdictResult | null =
+        profile === undefined
+          ? {
+              kind: "unavailable",
+              cause: "任务的 Provider Profile 不存在，请重新选择模型",
+            }
+          : await requestVerification(taskId, goal, profile, signal);
+      if (settled === null) return { kind: "aborted" };
+      // 结论种类与逐轮记账（票 03）：
+      // - passed：通过；连续计数清零
+      // - unpassed：判定正常给出未过；无实质工具活动则空转计数 +1，有则清零；
+      //   连续故障计数清零
+      // - unavailable：判定自身故障——没有结论，既不算通过也不算未达成；
+      //   空转计数保持原值（故障轮不参与空转判定），连续故障计数 +1
+      const outcome: GoalVerificationOutcome =
+        settled.kind === "unavailable"
+          ? "unavailable"
+          : settled.verdict.passed
+            ? "passed"
+            : "unpassed";
+      const idleStreak =
+        outcome === "unavailable"
+          ? goal.idleStreak
+          : outcome === "unpassed" && !toolActivity
+            ? goal.idleStreak + 1
+            : 0;
+      const failureStreak =
+        outcome === "unavailable" ? goal.failureStreak + 1 : 0;
+      // 连续计数是逐轮记账而非状态推进：不动 updatedAt（目标记录的更新时间
+      // 只随状态机转换变化）
+      persistence.updateGoal(goal.id, { idleStreak, failureStreak });
       const verdict =
-        outcome.kind === "verdict"
-          ? outcome.verdict
-          : failOpenGoalVerdict(outcome.cause);
+        settled.kind === "unavailable"
+          ? unavailableGoalVerdict(settled.cause)
+          : settled.verdict;
       return {
         kind: "verified",
-        verification: recordVerification(taskId, goal, verdict),
+        verification: recordVerification(taskId, goal, verdict, {
+          outcome,
+          toolActivity,
+        }),
       };
     },
   };
+
+  /**
+   * 发起一次判定请求并取回结局（不落库、不改目标状态）。返回 null 表示请求
+   * 被中断（没有结论，也不落验证记录）。
+   */
+  async function requestVerification(
+    taskId: string,
+    goal: GoalRecord,
+    profile: ProviderProfile,
+    signal: AbortSignal | undefined
+  ): Promise<GoalVerdictResult | null> {
+    const { system, prompt } = buildGoalVerificationPrompt(goal, {
+      messages: persistence.listMessages(taskId),
+      toolCalls: persistence.listToolCalls(taskId),
+    });
+    // 模型请求重试次数逐次读取（GLOSSARY「执行设置」：与 compact 辅助调用同口径）
+    const modelMaxRetries =
+      options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
+    const record = persistence.listTasks().find((task) => task.id === taskId);
+    const { outcome, usage } = await requestGoalVerdict({
+      // 任务当前模型（上一回合落库的具体模型；未发过消息回退 Profile 列表第一项）
+      languageModel: languageModelFor(profile, {
+        model: resolveModelOf(profile, record?.model ?? undefined),
+      }),
+      system,
+      prompt,
+      signal,
+      maxRetries: modelMaxRetries,
+    });
+    // 任务用量（GLOSSARY「任务用量」，ADR 0029）：判定是任务内模型调用，
+    // usage 入主任务列（已花的 token 照记；未结算不记，入账失败不影响判定）
+    if (usage !== undefined) {
+      await settleTaskUsage(
+        usage,
+        (delta) => persistence.addTaskUsage(taskId, delta),
+        "main"
+      );
+    }
+    return outcome;
+  }
 }

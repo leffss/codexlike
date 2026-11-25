@@ -70,12 +70,15 @@ export type {
   GoalRecord,
   GoalStatus,
   GoalVerdict,
+  GoalVerificationOutcome,
   GoalVerificationRecord,
 } from "./goal/types";
 export {
+  GOAL_MAX_VERIFICATION_FAILURES,
   GOAL_STATUSES,
   GOAL_STATUS_NAMES,
   GOAL_TEXT_MAX_LENGTH,
+  GOAL_VERIFICATION_OUTCOMES,
 } from "./goal/types";
 export type { GoalTransition } from "./goal/state-machine";
 export { advanceGoal, isGoalOpen } from "./goal/state-machine";

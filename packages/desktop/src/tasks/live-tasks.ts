@@ -42,12 +42,17 @@ const TERMINAL_EVENT_TYPES = [
 ];
 
 /**
- * 目标模式事件类型（ADR 0035）：goal-changed（目标状态快照）与 goal-verification
- * （完成判定结论）。完成判定在回合结束后的 idle 边界发出——晚于终态事件；
- * Stop = 暂停的目标状态变化也紧随用户停止。两者都是任务级状态快照，不是
- * 执行现场的新正文/工具：终态后与停止后一律放行（与终端生命周期同口径）。
+ * 目标模式事件类型（ADR 0035）：goal-changed（目标状态快照）、goal-verifying
+ * （完成判定开始，「验证中」）与 goal-verification（完成判定结论）。完成判定在
+ * 回合结束后的 idle 边界发出——晚于终态事件；Stop = 暂停的目标状态变化也紧随
+ * 用户停止。三者都是任务级状态快照，不是执行现场的新正文/工具：终态后与停止后
+ * 一律放行（与终端生命周期同口径）。
  */
-const GOAL_EVENT_TYPES = ["goal-changed", "goal-verification"];
+const GOAL_EVENT_TYPES = [
+  "goal-changed",
+  "goal-verifying",
+  "goal-verification",
+];
 
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();

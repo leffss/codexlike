@@ -23,6 +23,7 @@ import type {
   QueuedMessage,
   QueueOperationResult,
   QueueSnapshot,
+  TaskActivity,
   TaskEventEnvelope,
   TaskListItem,
   ProjectRemoval,
@@ -53,6 +54,7 @@ import type { SubagentFocus } from "../components/SubagentRailPanel";
 import type { TerminalFocus } from "../components/TerminalRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { GoalProgressRow } from "../components/GoalProgressRow";
+import { goalPauseReason } from "../lib/goal-view";
 import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -119,6 +121,14 @@ function deriveRunStartedAt(items: MessageSegment[]): number {
     if (item?.kind === "user" && item.at !== undefined) return item.at;
   }
   return Date.now();
+}
+
+/**
+ * 完成判定是否在途（ADR 0035「验证中」副状态）：宿主活动态带 goalPhase =
+ * verifying 且任务仍在执行。快照恢复与事件接续两条路径共用同一判定。
+ */
+function isVerifying(activity: TaskActivity): boolean {
+  return activity.running && activity.goalPhase === "verifying";
 }
 
 /**
@@ -203,6 +213,11 @@ export function WorkspacePage(props: {
    * 进度行不占布局行。
    */
   const [goal, setGoal] = useState<GoalRecord | null>(null);
+  /**
+   * 完成判定在途（ADR 0035「验证中」副状态）：随宿主活动态的 goalPhase 接续，
+   * 进度行据此显示「验证中」而非「进行中」。
+   */
+  const [goalVerifying, setGoalVerifying] = useState(false);
   const [streaming, setStreaming] = useState(false);
   /**
    * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
@@ -611,6 +626,7 @@ export function WorkspacePage(props: {
       setQueuedStart(null);
       // 目标（ADR 0035）：加载期间先清空，随快照恢复
       setGoal(null);
+      setGoalVerifying(false);
       // 终端恢复快照（票 08）：加载期间先清空防上个任务的已退出组闪现
       setRestoredTerminals([]);
       setWorkspaceFiles([]);
@@ -655,6 +671,7 @@ export function WorkspacePage(props: {
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
         setGoal(live.goal);
+        setGoalVerifying(isVerifying(live.activity));
         // 终端恢复快照（票 08）：view 并行字段随任务打开一次刷新
         setRestoredTerminals(view.terminals);
         setStreaming(live.activity.running);
@@ -798,6 +815,7 @@ export function WorkspacePage(props: {
           setQueuedStart(live.queuedStart);
           // 目标状态（ADR 0035）：随 goal-changed 接续（判定后的状态推进、Stop = 暂停）
           setGoal(live.goal);
+          setGoalVerifying(isVerifying(live.activity));
           setStreaming(live.activity.running);
           // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
           // 连续计时；本地未记账的运行中接续（prev 为空）才从消息段重推
@@ -856,6 +874,13 @@ export function WorkspacePage(props: {
         event.type === "error" ||
         event.type === "interaction-request" ||
         event.type === "interaction-resolved" ||
+        // 目标模式（ADR 0035）：目标循环的开始与结束都改变任务的运行口径——后台
+        // 目标任务的循环结束时没有本地消息段变化，侧栏徽章与「N 个执行中」
+        // 统计要靠这些事件刷新（否则循环结束后侧栏停在「运行中」）
+        event.type === "goal-changed" ||
+        event.type === "goal-verifying" ||
+        event.type === "goal-verification" ||
+        event.type === "goal-continuation" ||
         // 任务排队变更（任务并发上限票 03）：排队态进出（入队/开跑出队/中断
         // 出队）驱动侧栏徽章与「N 个执行中」统计刷新——后台任务的排队变化
         // 不进消息流，仅刷新列表
@@ -922,6 +947,7 @@ export function WorkspacePage(props: {
     setQueuedStart(null);
     // 新建草稿没有任务，也就没有目标
     setGoal(null);
+    setGoalVerifying(false);
     setWorkspaceFiles([]);
     setResources(null);
     setLoading(false);
@@ -1315,6 +1341,7 @@ export function WorkspacePage(props: {
       setMessages([]);
       setQueuedStart(null);
       setGoal(null);
+      setGoalVerifying(false);
       setWorkspaceFiles([]);
       setResources(null);
       setStreaming(false);
@@ -2046,7 +2073,13 @@ export function WorkspacePage(props: {
                 {currentId !== null && (
                   <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
                     <div className={contentWidthClass}>
-                      <GoalProgressRow goal={goal} />
+                      <GoalProgressRow
+                        goal={goal}
+                        verifying={goalVerifying}
+                        pauseReason={
+                          goal === null ? null : goalPauseReason(goal)
+                        }
+                      />
                     </div>
                   </div>
                 )}

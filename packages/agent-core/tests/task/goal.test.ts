@@ -138,6 +138,8 @@ function goalOf(
     activeSince: status === "active" ? "2026-11-25T08:00:00.000Z" : null,
     createdAt: "2026-11-25T08:00:00.000Z",
     updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
     ...overrides,
   };
 }
@@ -215,6 +217,26 @@ describe("目标六态状态机（ADR 0035）", () => {
     expect(advanceGoal(goalOf("completed"), "clear", AT).status).toBe(
       "cleared"
     );
+  });
+
+  it("连续计数只在本段进行中内累计：离开进行中原样保留，恢复（从已暂停 / 预算受限 / 未达成任一处）即清零", () => {
+    const counting = goalOf("active", { idleStreak: 2, failureStreak: 1 });
+    // 暂停：计数定格保留（回看用）
+    const paused = advanceGoal(counting, "pause", AT);
+    expect(paused).toMatchObject({ idleStreak: 2, failureStreak: 1 });
+    // 恢复：新的进行中区段从 0 起算
+    expect(advanceGoal(paused, "resume", AT)).toMatchObject({
+      idleStreak: 0,
+      failureStreak: 0,
+    });
+    for (const halt of ["budget-limit", "unmet"] as const) {
+      const halted = advanceGoal(counting, halt, AT);
+      expect(halted).toMatchObject({ idleStreak: 2, failureStreak: 1 });
+      expect(advanceGoal(halted, "resume", AT)).toMatchObject({
+        idleStreak: 0,
+        failureStreak: 0,
+      });
+    }
   });
 
   it("累计时长只计进行中的区段：离开进行中闭合当前段，恢复另起一段，其余状态不变", () => {
@@ -526,7 +548,7 @@ describe("TaskManager.verifyGoal（完成判定）", () => {
     expect(manager.goalVerifications(task.id)).toEqual([]);
   });
 
-  it("fail-open：模型请求失败时不抛错，落一条按未通过的验证记录并注明判定不可用；目标状态留给编排器处置", async () => {
+  it("fail-open（票 03 定案）：模型请求失败时不抛错，落一条「判定不可用」的验证记录并注明原因——不算通过、也不是正常的未通过", async () => {
     // 401（不可自动重试类）：SDK 对 5xx 会先自动重试，测试要观察「失败 → fail-open」
     const { manager } = setup(
       "（判定不会返回）",
@@ -546,19 +568,24 @@ describe("TaskManager.verifyGoal（完成判定）", () => {
 
     expect(result).toMatchObject({
       kind: "verified",
-      verification: { round: 1, passed: false },
+      verification: { round: 1, passed: false, outcome: "unavailable" },
     });
     if (result.kind !== "verified") throw new Error("应落验证记录");
-    // 理由如实注明判定不可用及原因；下一步方向仍给出（未通过不是终态）
+    // 理由如实注明判定不可用及原因；没有结论，不编造下一步方向
     expect(result.verification.reason).toContain("完成判定不可用");
     expect(result.verification.reason).toContain("HTTP 401");
-    expect(result.verification.nextAction).not.toBe("");
+    expect(result.verification.nextAction).toBe("");
     expect(manager.goalVerifications(task.id)).toHaveLength(1);
     // 判定不误报完成，也不把目标卡在判定里：状态原样，交编排器决定续跑或暂停
     expect(manager.goal(task.id)?.status).toBe("active");
+    // 连续故障计数从这一轮起算
+    expect(manager.goal(task.id)).toMatchObject({
+      failureStreak: 1,
+      idleStreak: 0,
+    });
   });
 
-  it("fail-open：模型输出不是判定结论（坏输出）同样按未通过落记录，不抛错", async () => {
+  it("fail-open：模型输出不是判定结论（坏输出）同样落「判定不可用」记录，不抛错", async () => {
     const { manager } = setup("我觉得已经做完了，不用再改了。");
     const task = manager.create({ workspacePath: "C:/work/demo" });
     manager.setGoal(task.id, "让示例测试全部通过");
@@ -568,13 +595,13 @@ describe("TaskManager.verifyGoal（完成判定）", () => {
 
     expect(result).toMatchObject({
       kind: "verified",
-      verification: { round: 1, passed: false },
+      verification: { round: 1, passed: false, outcome: "unavailable" },
     });
     if (result.kind !== "verified") throw new Error("应落验证记录");
     expect(result.verification.reason).toContain("完成判定不可用");
   });
 
-  it("任务当前模型不可用（宿主解析不到 Provider Profile）：不发请求，按 fail-open 落未通过记录", async () => {
+  it("任务当前模型不可用（宿主解析不到 Provider Profile）：不发请求，落「判定不可用」记录", async () => {
     const { model, manager } = setup("（不会有请求）");
     const task = manager.create({ workspacePath: "C:/work/demo" });
     manager.setGoal(task.id, "让示例测试全部通过");

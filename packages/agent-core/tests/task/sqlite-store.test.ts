@@ -1079,7 +1079,7 @@ describe("TaskPersistence 子代理过程表（ADR 0021，票 02）", () => {
 });
 
 describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
-  /** 最小合法目标记录（设定即写的形状：进行中、累计时长 0） */
+  /** 最小合法目标记录（设定即写的形状：进行中、累计时长 0、连续计数 0） */
   function goalRow(overrides: Partial<GoalRecord> = {}): GoalRecord {
     return {
       id: "goal-1",
@@ -1090,6 +1090,8 @@ describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
       activeSince: "2026-11-10T08:00:01.000Z",
       createdAt: "2026-11-10T08:00:01.000Z",
       updatedAt: "2026-11-10T08:00:01.000Z",
+      idleStreak: 0,
+      failureStreak: 0,
       ...overrides,
     };
   }
@@ -1104,12 +1106,50 @@ describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
       goalId: "goal-1",
       round: 1,
       passed: false,
+      outcome: "unpassed",
       reason: "尚有步骤未完成",
       nextAction: "继续实现剩余步骤",
+      toolActivity: false,
       createdAt: "2026-11-10T08:00:02.000Z",
       ...overrides,
     };
   }
+
+  it("连续计数随目标记录读写（票 03 记账）：updateGoal 的计数补丁生效并随库保留", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    store.insertGoal(goalRow());
+    store.insertGoalVerification(verificationRow());
+    store.insertGoalVerification(
+      verificationRow({
+        id: "gv-2",
+        round: 2,
+        passed: false,
+        outcome: "unavailable",
+        reason: "完成判定不可用（HTTP 401），本轮没有判定结论",
+        nextAction: "",
+        createdAt: "2026-11-10T08:04:00.000Z",
+      })
+    );
+    store.updateGoal("goal-1", { idleStreak: 1, failureStreak: 1 });
+    store.close();
+
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(reopened.listGoals("task-1")[0]).toMatchObject({
+      idleStreak: 1,
+      failureStreak: 1,
+    });
+    expect(
+      reopened
+        .listGoalVerifications("task-1")
+        .map((row) => [row.outcome, row.toolActivity])
+    ).toEqual([
+      ["unpassed", false],
+      ["unavailable", false],
+    ]);
+    reopened.close();
+  });
 
   it("目标记录插入读回往返：updateGoal 状态补丁生效；验证记录按时间正序；未知任务空数组", () => {
     const store = createSqliteTaskStore(":memory:");
@@ -1220,6 +1260,83 @@ describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
     expect(names.has("goals")).toBe(true);
     expect(names.has("goal_verifications")).toBe(true);
     verify.close();
+  });
+
+  it("旧库迁移（goal-mode 票 03）：票 02 时代的目标两表没有连续计数与结论种类列——打开即补列，旧行按保守口径读回，重开幂等", () => {
+    const dbPath = tempDbPath();
+    // 票 02 时代的表形状：goals 无连续计数列，goal_verifications 无结论种类与工具活动列
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE goals (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        text TEXT NOT NULL, status TEXT NOT NULL,
+        active_ms INTEGER NOT NULL DEFAULT 0, active_since TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE goal_verifications (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        goal_id TEXT NOT NULL, round INTEGER NOT NULL, passed INTEGER NOT NULL,
+        reason TEXT NOT NULL, next_action TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO tasks VALUES ('legacy-goal', '旧目标任务', 'C:\\work\\old', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO goals VALUES ('goal-old', 'legacy-goal', '让示例测试全部通过', 'active', 0, '2026-11-10T08:00:01.000Z', '2026-11-10T08:00:01.000Z', '2026-11-10T08:00:01.000Z');
+      INSERT INTO goal_verifications VALUES ('gv-unpassed', 'legacy-goal', 'goal-old', 1, 0, '尚有步骤未完成', '继续实现剩余步骤', '2026-11-10T08:00:02.000Z');
+      INSERT INTO goal_verifications VALUES ('gv-unavailable', 'legacy-goal', 'goal-old', 2, 0, '完成判定不可用（HTTP 401），按未通过处理', '继续推进目标', '2026-11-10T08:04:00.000Z');
+      INSERT INTO goal_verifications VALUES ('gv-passed', 'legacy-goal', 'goal-old', 3, 1, '示例测试已全部通过', '', '2026-11-10T08:06:00.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteTaskStore(dbPath);
+    // 目标：旧行连续计数为 0
+    expect(store.listGoals("legacy-goal")[0]).toMatchObject({
+      id: "goal-old",
+      status: "active",
+      idleStreak: 0,
+      failureStreak: 0,
+    });
+    // 验证记录：结论种类按 passed 与理由回推；是否有工具活动未知时按「有」计
+    // （不把历史轮次误判为空转）
+    expect(
+      store
+        .listGoalVerifications("legacy-goal")
+        .map((row) => [row.id, row.outcome, row.passed, row.toolActivity])
+    ).toEqual([
+      ["gv-unpassed", "unpassed", false, true],
+      ["gv-unavailable", "unavailable", false, true],
+      ["gv-passed", "passed", true, true],
+    ]);
+    // 补列后按新 schema 写入正常
+    store.insertGoalVerification(
+      verificationRow({
+        id: "gv-new",
+        taskId: "legacy-goal",
+        goalId: "goal-old",
+        round: 4,
+        createdAt: "2026-11-10T08:08:00.000Z",
+      })
+    );
+    store.close();
+
+    // 重开幂等：列已存在不再补，数据原样
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(reopened.listGoalVerifications("legacy-goal")).toHaveLength(4);
+    expect(reopened.listGoalVerifications("legacy-goal").at(-1)).toEqual(
+      verificationRow({
+        id: "gv-new",
+        taskId: "legacy-goal",
+        goalId: "goal-old",
+        round: 4,
+        createdAt: "2026-11-10T08:08:00.000Z",
+      })
+    );
+    reopened.close();
   });
 
   it("读侧容忍：未知状态值（如降级打开新版本库）恢复为已暂停，不自动续跑的保守口径", () => {

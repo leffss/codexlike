@@ -22,6 +22,8 @@ function goalOf(
     activeSince: status === "active" ? "2026-11-25T08:00:00.000Z" : null,
     createdAt: "2026-11-25T08:00:00.000Z",
     updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
     ...overrides,
   };
 }
@@ -89,11 +91,11 @@ describe("goalSummary（进度行摘要）", () => {
 });
 
 describe("goalVerificationText（判定标记行文案）", () => {
-  it("「第 N 次迭代 · 结论」：通过为已完成，未通过为未完成", () => {
-    expect(goalVerificationText({ round: 1, passed: true })).toBe(
+  it("「第 N 次迭代 · 结论」：通过为已完成，未通过为未完成（三态的完整口径见 goal-continuation-view）", () => {
+    expect(goalVerificationText({ round: 1, outcome: "passed" })).toBe(
       "第 1 次迭代 · 已完成"
     );
-    expect(goalVerificationText({ round: 3, passed: false })).toBe(
+    expect(goalVerificationText({ round: 3, outcome: "unpassed" })).toBe(
       "第 3 次迭代 · 未完成"
     );
   });

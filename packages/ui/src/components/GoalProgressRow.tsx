@@ -1,12 +1,9 @@
-import {
-  GOAL_STATUS_NAMES,
-  type GoalRecord,
-  type GoalStatus,
-} from "@codexlike/agent-core";
+import type { GoalRecord, GoalStatus } from "@codexlike/agent-core";
 
 import {
   formatGoalElapsed,
   goalElapsedMs,
+  goalStatusText,
   goalSummary,
 } from "../lib/goal-view";
 import { useTickingNow } from "../lib/use-ticking-now";
@@ -40,12 +37,20 @@ function GoalIcon() {
 
 /**
  * 目标进度行（ADR 0035，GLOSSARY「目标」）：输入框上方常驻的一行——目标
- * 摘要、状态（六态称谓）、累计时长。进行中时长达实时跳动，离开进行中
- * （已暂停 / 已完成等）即定格。没有目标时不占布局行（空态）。
+ * 摘要、状态（六态称谓；完成判定在途时显示副状态「验证中」）、累计时长、
+ * 暂停原因（如因完成判定连续不可用而暂停时写明）。进行中时长达实时跳动，
+ * 离开进行中（已暂停 / 已完成等）即定格。没有目标时不占布局行（空态）。
  * 暂停 / 恢复 / 编辑 / 清除按钮组在票 04 接入本行。
  */
-export function GoalProgressRow(props: { goal: GoalRecord | null }) {
+export function GoalProgressRow(props: {
+  goal: GoalRecord | null;
+  /** 完成判定在途（宿主活动态的 goalPhase = verifying）：状态显示「验证中」 */
+  verifying?: boolean;
+  /** 暂停原因说明（goalPauseReason 给出；没有可说明的原因时不渲染） */
+  pauseReason?: string | null;
+}) {
   const { goal } = props;
+  const verifying = props.verifying === true;
   // Hook 不受早退影响：是否计时由「目标进行中」决定，空态不起计时器
   const now = useTickingNow(goal?.status === "active");
   if (goal === null) return null;
@@ -53,6 +58,7 @@ export function GoalProgressRow(props: { goal: GoalRecord | null }) {
     <div
       data-testid="goal-progress-row"
       data-goal-status={goal.status}
+      data-goal-phase={verifying ? "verifying" : undefined}
       role="status"
       aria-label="目标进度"
       // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言折叠摘要行基准）
@@ -67,11 +73,19 @@ export function GoalProgressRow(props: { goal: GoalRecord | null }) {
       >
         {goalSummary(goal.text)}
       </span>
+      {props.pauseReason !== null && props.pauseReason !== undefined && (
+        <span
+          data-testid="goal-progress-reason"
+          className="shrink-0 text-warn-fg"
+        >
+          {props.pauseReason}
+        </span>
+      )}
       <span
         data-testid="goal-progress-status"
         className={`shrink-0 font-medium ${STATUS_CLASSES[goal.status]}`}
       >
-        {GOAL_STATUS_NAMES[goal.status]}
+        {goalStatusText(goal, verifying)}
       </span>
       <span
         data-testid="goal-progress-elapsed"

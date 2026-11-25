@@ -25,6 +25,8 @@ function goalOf(
     activeSince: status === "active" ? "2026-11-25T07:59:50.000Z" : null,
     createdAt: "2026-11-25T07:59:50.000Z",
     updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
     ...overrides,
   };
 }
@@ -102,5 +104,39 @@ describe("GoalProgressRow（目标进度行）", () => {
     });
     expect(elapsed()).toBe("15 秒");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("验证中（完成判定在途）：进行中的目标状态显示「验证中」，时长继续累加；判定结束回到「进行中」", () => {
+    const { rerender } = render(
+      <GoalProgressRow goal={goalOf("active")} verifying />
+    );
+    expect(statusText()).toBe("验证中");
+    expect(screen.getByTestId("goal-progress-row").dataset.goalStatus).toBe(
+      "active"
+    );
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(elapsed()).toBe("15 秒");
+
+    rerender(<GoalProgressRow goal={goalOf("active")} verifying={false} />);
+    expect(statusText()).toBe("进行中");
+  });
+
+  it("暂停原因：因完成判定连续不可用而暂停时写明原因；普通暂停只显示「已暂停」", () => {
+    const { rerender } = render(
+      <GoalProgressRow
+        goal={goalOf("paused", { failureStreak: 3 })}
+        pauseReason="完成判定连续 3 次不可用"
+      />
+    );
+    expect(statusText()).toBe("已暂停");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "完成判定连续 3 次不可用"
+    );
+
+    rerender(<GoalProgressRow goal={goalOf("paused")} pauseReason={null} />);
+    expect(statusText()).toBe("已暂停");
+    expect(screen.queryByTestId("goal-progress-reason")).toBeNull();
   });
 });

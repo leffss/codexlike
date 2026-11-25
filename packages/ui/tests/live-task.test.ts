@@ -1079,6 +1079,8 @@ it("目标状态与判定结论按任务水位接续（ADR 0035）：goal-change
     activeSince: "2026-11-25T08:00:00.000Z",
     createdAt: "2026-11-25T08:00:00.000Z",
     updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
   };
   const verification: GoalVerificationRecord = {
     id: "gv-1",
@@ -1086,8 +1088,10 @@ it("目标状态与判定结论按任务水位接续（ADR 0035）：goal-change
     goalId: "goal-1",
     round: 1,
     passed: true,
+    outcome: "passed",
     reason: "示例测试已全部通过",
     nextAction: "",
+    toolActivity: true,
     createdAt: "2026-11-25T08:00:09.000Z",
   };
 

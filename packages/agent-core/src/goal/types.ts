@@ -58,6 +58,18 @@ export interface GoalRecord {
   createdAt: string;
   /** ISO 8601 */
   updatedAt: string;
+  /**
+   * 空转计数（票 03 记账，票 05 据此阻断）：本段进行中内连续「判定未过且无
+   * 实质工具活动」的轮数。出现通过、或出现带实质工具活动的未过轮即清零；
+   * 判定自身故障的轮次不计（保持原值）；暂停后恢复从 0 起算（状态机给出）。
+   */
+  idleStreak: number;
+  /**
+   * 连续故障计数：本段进行中内连续「完成判定自身不可用」的轮数。出现一次
+   * 正常结论（通过或未过）即清零；暂停后恢复从 0 起算。宿主在计数达到
+   * GOAL_MAX_VERIFICATION_FAILURES 时把目标转为已暂停。
+   */
+  failureStreak: number;
 }
 
 /** 目标文本长度上限（字符；超出以「目标文本过长」拒绝） */
@@ -74,6 +86,30 @@ export interface GoalVerdict {
 }
 
 /**
+ * 判定结论的种类（票 03，编排者裁决「fail-open 定案」）：验证记录必须能
+ * 区分「判定正常给出未通过」与「判定自身故障」——前者的下一步方向是模型的
+ * 判断，后者只是没有拿到结论，宿主的处置与界面的呈现都不同。
+ * - `passed`：判定通过
+ * - `unpassed`：判定正常给出未通过（reason / nextAction 是判定模型给出的）
+ * - `unavailable`：判定自身故障（请求失败 / 坏输出 / 任务当前模型不可用），
+ *   没有结论；passed 为 false 只为兼容，不代表目标未达成
+ */
+export type GoalVerificationOutcome = "passed" | "unpassed" | "unavailable";
+
+/** 全部结论种类（固定顺序；持久化读侧校验与界面枚举共用） */
+export const GOAL_VERIFICATION_OUTCOMES: readonly GoalVerificationOutcome[] = [
+  "passed",
+  "unpassed",
+  "unavailable",
+];
+
+/**
+ * 连续多少轮完成判定不可用后暂停目标（ADR 0035 fail-open「不把目标永久
+ * 卡死」：单次故障照常续跑，判定持续不可用才停下等人处理）。
+ */
+export const GOAL_MAX_VERIFICATION_FAILURES = 3;
+
+/**
  * 逐轮验证记录（goal_verifications 表一行）：目标模式下每轮判定落一条，
  * 随任务留痕——消息流标记行的数据源，重启后可回看每轮结论与理由。
  */
@@ -84,11 +120,19 @@ export interface GoalVerificationRecord {
   goalId: string;
   /** 第几次迭代（轮次，1 起） */
   round: number;
+  /** 结论是否为通过（兼容字段：unavailable 与 unpassed 同为 false，种类看 outcome） */
   passed: boolean;
-  /** 判定理由 */
+  /** 结论种类：通过 / 正常未过 / 判定自身不可用 */
+  outcome: GoalVerificationOutcome;
+  /** 判定理由（unavailable 时为故障说明） */
   reason: string;
   /** 下一步方向（未通过时的一句话；通过时为空串） */
   nextAction: string;
+  /**
+   * 本轮工作是否有实质工具活动（宿主按本轮事件统计；定义见
+   * isGoalToolActivity）：空转计数只对「未过且无活动」的轮次累加。
+   */
+  toolActivity: boolean;
   /** ISO 8601 */
   createdAt: string;
 }

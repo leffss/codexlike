@@ -12,6 +12,7 @@ import {
 import {
   APPROVAL_MODES,
   DEFAULT_TASK_CONCURRENCY_LIMIT,
+  isGoalToolActivity,
   parseThinkingEffort,
   workbenchKey,
   type AgentResourceSnapshot,
@@ -30,7 +31,10 @@ import type { TaskExitRuntime } from "../lifecycle/application-exit";
 import { normalizeModelInput } from "../shared/model-value";
 import { closeTaskSessions } from "../terminal/terminal-lifecycle";
 import { createInterruptRegistry } from "./interrupt-registry";
-import { createGoalOrchestrator } from "./goal-orchestrator";
+import {
+  createGoalOrchestrator,
+  type GoalBoundaryResult,
+} from "./goal-orchestrator";
 import {
   createMemoryInputQueueStore,
   createTaskInputQueues,
@@ -119,19 +123,35 @@ export function registerTaskHandlers(options: {
     taskQueueStore = createMemoryTaskQueueStore(),
     terminalSessions,
   } = options;
+  let exiting = false;
+  let stopping = false;
+  const deferredStarts = new Set<() => void>();
   // 每条运行中的消息流登记一个 AbortController：停止按钮（tasks:interrupt）→
   // abort 贯穿流式输出与工具执行（长命令子进程树终止）
   const interrupts = createInterruptRegistry();
   const executions = new Map<string, string>();
-  const management = createTaskManagement(manager, executions);
+  // goal 编排器（ADR 0035）：回合结束的 idle 边界衔接续跑循环（落位先例 = 输入
+  // 队列——跨回合编排住 desktop）。「目标循环在进行」是宿主执行态的来源之一
+  // （判定在途与两轮之间没有执行登记，任务仍视为持续执行），故先于管理规则创建。
+  const goals = createGoalOrchestrator({
+    manager,
+    // apiKey 只在主进程解密：按任务上次发送所用的 Provider Profile 解析判定模型
+    profileFor: async (profileId) =>
+      (await profiles.list()).find((item) => item.id === profileId),
+    emit: pushTaskEvent,
+    isStopping: () => stopping,
+    // 续跑轮走发送主路径的内部入口（不产生用户气泡，见 deliverMessage 的 goal 来源）
+    startTurn: (taskId, text) =>
+      deliverMessage({ source: "goal", taskId, text }),
+  });
+  const management = createTaskManagement(manager, executions, {
+    isGoalRunning: goals.isRunning,
+  });
   const membership = createTaskMembership(manager, management);
   const starts = new Map<string, Promise<TaskRecord>>();
   const workbench = registerWorkbenchHandlers(manager, profiles);
   const liveTasks = createLiveTasks(manager);
   const tasks = new Set<Promise<unknown>>();
-  let exiting = false;
-  let stopping = false;
-  const deferredStarts = new Set<() => void>();
   function assertOpen() {
     if (exiting) throw new Error("应用正在退出，请取消退出后再操作");
   }
@@ -203,11 +223,25 @@ export function registerTaskHandlers(options: {
     },
   });
 
-  /** 活动态单点取数（票 02）：执行/查看状态叠加应用级排队标志。 */
+  /**
+   * 活动态单点取数（票 02）：执行/查看状态叠加应用级排队标志。
+   * 目标模式（ADR 0035，规格故事 19「目标任务与普通执行中任务一致的运行口径」）：
+   * 目标循环在进行时任务一律呈现为执行中——完成判定在途时回合已经收尾
+   * （终态事件已把 running 置假）、两轮之间没有执行登记，若照搬执行现场的
+   * 活动态，侧栏会在这两个窗口里显示空闲。判定在途另带「验证中」副状态
+   * （goalPhase），进度行据此显示「验证中」而非「进行中」。
+   */
   function activityOf(taskId: string) {
+    const verifying = goals.phase(taskId) === "verifying";
     return {
       ...liveTasks.activity(taskId),
       queued: taskQueue.isQueued(taskId),
+      ...(goals.isRunning(taskId)
+        ? {
+            running: true,
+            ...(verifying ? { goalPhase: "verifying" as const } : {}),
+          }
+        : {}),
     };
   }
 
@@ -239,10 +273,15 @@ export function registerTaskHandlers(options: {
     // 排队任务视同忙（票 04 / ADR 0022）：排队期间入队的消息不消费——
     // 否则名额释放的瞬间（end 先重泵输入队列后推进任务排队）输入队列
     // 消息会抢在 FIFO 开跑之前执行；开跑（出队且 running）后自然放行。
+    // 目标循环在进行（ADR 0035「暂停阀门」）：互锁点在这里写成显式条件——
+    // 判定在途与两轮之间没有执行登记，任务仍是目标的地盘，排队消息不自动
+    // 消费；目标转为已暂停或离开进行中后恢复。上面的「真实执行」故意不含
+    // 目标循环（管理规则的执行态另把它算作执行中）：互锁不依赖登记持有。
     isBusy: (taskId) =>
       exiting ||
-      (management.execution(taskId)?.running ?? false) ||
-      taskQueue.isQueued(taskId),
+      (management.execution(taskId, true)?.running ?? false) ||
+      taskQueue.isQueued(taskId) ||
+      goals.isRunning(taskId),
     // 队首还在读取凭据/准备发送时也算在途工作，退出需等它复查闸门后排空。
     dispatch: (taskId, entry, onSettled) =>
       track(dispatchQueued(taskId, entry, onSettled)),
@@ -289,10 +328,20 @@ export function registerTaskHandlers(options: {
     }
   }
 
-  // 消息与Compact共用占位、现场起点及中断清理，避免两套运行状态分叉。
-  function beginExecution(taskId: string) {
-    management.assertCanExecute(taskId);
-    if (taskQueue.isFull()) throw new Error("任务并发已满，请等待空位后重试");
+  /**
+   * 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
+   * forGoalLoop：目标循环自己发起的续跑轮——「目标循环在进行」正是它要接续
+   * 的状态，不构成阻碍；且不占新席（任务本就占着一席，满员判定会把它自己
+   * 算进去），否则续跑轮永远发不出去。
+   */
+  function beginExecution(
+    taskId: string,
+    options: { forGoalLoop?: boolean } = {}
+  ) {
+    const forGoalLoop = options.forGoalLoop === true;
+    management.assertCanExecute(taskId, { forGoalLoop });
+    if (!forGoalLoop && taskQueue.isFull())
+      throw new Error("任务并发已满，请等待空位后重试");
     const executionId = randomUUID();
     executions.set(taskId, executionId);
     const rollbackLive = liveTasks.begin(taskId, executionId);
@@ -318,40 +367,74 @@ export function registerTaskHandlers(options: {
     };
   }
 
-  // goal 编排器（ADR 0035）：回合结束的 idle 边界衔接完成判定（落位先例 =
-  // 输入队列——跨回合编排住 desktop）。目标进行中期间任务视为持续执行：
-  // 判定在执行登记注销之前进行，判定全程仍占执行席（见 deliverMessage 收尾）。
-  const goals = createGoalOrchestrator({
-    manager,
-    // apiKey 只在主进程解密：按任务上次发送所用的 Provider Profile 解析判定模型
-    profileFor: async (profileId) =>
-      (await profiles.list()).find((item) => item.id === profileId),
-    emit: pushTaskEvent,
-    isStopping: () => stopping,
-  });
-
   /**
    * 消息流结束后的收尾（完成 / 出错 / 用户中断）：先过目标模式的 idle 边界
    * ——进行中的目标在此完成判定，再注销执行登记。判定期间执行登记仍在，
    * 任务继续占任务并发一席、输入队列不消费（GLOSSARY「目标模式」）。
+   * 判定未过 / 判定不可用时，注销上一轮的执行登记后由 goal 编排器发起续跑轮
+   * （两次独立的宿主执行；两轮之间目标循环仍在进行，输入队列的显式守卫接管
+   * 互锁）。toolActivity：本轮是否出现过实质工具调用（空转计数的输入）。
    */
   async function settleAfterStream(
     taskId: string,
     signal: AbortSignal,
-    end: () => void
+    end: () => void,
+    toolActivity: boolean
   ): Promise<void> {
+    let result: GoalBoundaryResult = { action: "none" };
     try {
       // 终态事件已全部下发（流已排空）：宿主活动态的 outcome 即本轮结局
-      await goals.afterTurn(taskId, {
+      result = await goals.afterTurn(taskId, {
         signal,
         outcome: liveTasks.activity(taskId).outcome,
+        toolActivity,
       });
     } catch (error) {
-      // 编排异常不得让执行登记泄漏：记录后照常收尾
+      // 编排异常不得让执行登记泄漏：记录后照常收尾（目标侧兜底见 abandonGoal）
       console.error("[tasks] 目标 idle 边界编排异常", error);
+      abandonGoal(taskId);
     } finally {
       end();
     }
+    if (result.action === "continue") {
+      // 返回的 Promise 挂在本轮的收尾上：退出屏障的排空会等到续跑轮发起落定
+      // （续跑轮自己的事件流另行跟踪）。续跑轮启动失败在编排器内处置，不抛出。
+      try {
+        await goals.continueTurn(taskId, {
+          kind: "verification",
+          verification: result.verification,
+        });
+      } catch (error) {
+        console.error("[tasks] 目标续跑轮编排异常", error);
+        abandonGoal(taskId);
+      }
+      // 续跑轮没能发起（启动失败转已暂停 / 轮间窗口里被停止）：循环是在执行
+      // 收尾之后才结束的，补一次唤醒——输入队列恢复消费、并发名额让出
+      if (!goals.isRunning(taskId)) wakeAfterLoopEnd(taskId);
+    }
+  }
+
+  /**
+   * 编排异常的目标侧兜底：结束循环，进行中的目标转已暂停——不得把目标留在
+   * 「进行中却没有循环在推进」的状态（任务会一直显示运行中、输入队列不消费）。
+   */
+  function abandonGoal(taskId: string) {
+    try {
+      goals.abandon(taskId);
+    } catch (nested) {
+      console.error("[tasks] 目标编排异常兜底失败", nested);
+    }
+  }
+
+  /**
+   * 目标循环在不经执行收尾（end）的路径上结束时补的唤醒：与 end() 的收尾
+   * 同一组动作（输入队列、各任务输入队列重泵、任务排队推进）。
+   */
+  function wakeAfterLoopEnd(taskId: string) {
+    if (stopping) return;
+    queues.onIdle(taskId);
+    continueInputQueues();
+    runQueuePump();
   }
 
   ipcMain.handle(IPC.projects.list, () => manager.projects());
@@ -688,9 +771,12 @@ export function registerTaskHandlers(options: {
    * - queue：内部消费发送（输入队列消费与任务排队开跑共用，票 02）。不再
    *   入队（避免自我吞掉），也不算插话；参数取入队时的快照。竞态以启动
    *   失败保留条目（含撞满员闸门）。
+   * - goal：目标模式的续跑轮（ADR 0035，由 goal 编排器在 idle 边界发起）。text
+   *   是续跑指令而非用户发言——不入队、不算插话、不占新席，以内部输入进入任务
+   *   （消息流不产生用户气泡）；发送参数取任务当前的发送偏好。
    */
   async function deliverMessage(input: {
-    source: "user" | "queue";
+    source: "user" | "queue" | "goal";
     taskId: unknown;
     text: unknown;
     profileId?: unknown;
@@ -703,7 +789,15 @@ export function registerTaskHandlers(options: {
   }) {
     const { source, taskId, text } = input;
     const fromUser = source === "user";
-    assertOpen();
+    const fromGoalLoop = source === "goal";
+    if (fromGoalLoop) {
+      // 续跑轮是已被接受的意图：退出确认期间（冻结）暂停等待、取消退出后继续，
+      // 不像用户直发那样直接拒绝；确认退出时在 resumeAcceptedStart 落定，
+      // 由 goal 编排器按「应用退出」处置（目标状态原样）
+      await resumeAcceptedStart();
+    } else {
+      assertOpen();
+    }
     if (typeof taskId !== "string" || typeof text !== "string") {
       throw new Error("send：参数不合法");
     }
@@ -792,13 +886,17 @@ export function registerTaskHandlers(options: {
     assertOpen();
     // 准备期间的停止/归档/移除已经撤销这次意图；必须与占位在同一同步段复查。
     input.preparationSignal?.throwIfAborted();
-    // 全局任务并发闸门（任务并发上限票 02，ADR 0022）：任何执行开始前判定，
-    // 与下方 beginExecution 占坑在同一同步段（无交错窗口，判定后立即占坑）。
-    // 用户直发满员：连同参数快照入任务排队静默返回（排队而非拒绝），
-    // 名额空出后由协调器按 FIFO 以内部消费路径重放；内部消费（输入队列
-    // 消费/排队开跑）撞满员：抛错使条目保留（输入队列条目或排队条目不丢），
-    // 名额释放点（end）会重泵。
-    if (fromUser) {
+    if (fromGoalLoop) {
+      // 轮间窗口里目标可能已被停止 / 暂停 / 清除：循环不在进行就不再发起续跑轮
+      // （目标已离开进行中，队列与并发名额由调用方在循环结束后唤醒）
+      if (!goals.isRunning(taskId)) return;
+    } else if (fromUser) {
+      // 全局任务并发闸门（任务并发上限票 02，ADR 0022）：任何执行开始前判定，
+      // 与下方 beginExecution 占坑在同一同步段（无交错窗口，判定后立即占坑）。
+      // 用户直发满员：连同参数快照入任务排队静默返回（排队而非拒绝），
+      // 名额空出后由协调器按 FIFO 以内部消费路径重放；内部消费（输入队列
+      // 消费/排队开跑）撞满员：抛错使条目保留（输入队列条目或排队条目不丢），
+      // 名额释放点（end）会重泵。
       const gated = taskQueue.gate(taskId, {
         text,
         mentionPaths: mentionPaths ?? [],
@@ -818,16 +916,21 @@ export function registerTaskHandlers(options: {
       throw new Error("任务并发已满，等待空位后自动重试");
     }
     // 宿主原子占位，第二次 send 不得覆盖第一轮的中断通道。
-    const { executionId, controller, rollbackLive, end } =
-      beginExecution(taskId);
+    const { executionId, controller, rollbackLive, end } = beginExecution(
+      taskId,
+      { forGoalLoop: fromGoalLoop }
+    );
     // 插话（票 02）：暂停期间的直发消息已开始执行——回复结束（完成/出错/
     // 中断）时自动清除暂停标志并恢复队列消费（协调器 onIdle 兑现）。
     if (fromUser && queues.isPaused(taskId)) {
       queues.beginInterjection(taskId);
     }
+    // 本轮是否出现过实质工具调用：目标模式空转计数的输入（idle 边界带给编排器；
+    // 只改计划不算，见 isGoalToolActivity）
+    let toolActivity = false;
     try {
-      // 先 await 第一个事件（user-message）：任务并发拒绝等启动错误
-      // 在这里以异常抛回渲染进程；之后的事件异步推送。
+      // 先 await 第一个事件（user-message / goal-continuation）：任务并发拒绝等
+      // 启动错误在这里以异常抛回渲染进程；之后的事件异步推送。
       // 先落中间变量再取 [Symbol.asyncIterator]()：对象字面量后直接
       // 换行接 [ 会被读成索引访问（ASI 陷阱），也触发 no-unexpected-multiline。
       const execution = task.sendMessage({
@@ -837,12 +940,16 @@ export function registerTaskHandlers(options: {
         mentions,
         thinkingEffort: effortSnapshot,
         approvalMode: approvalSnapshot as ApprovalMode,
+        // 续跑轮是内部输入：不发 user-message（不产生用户气泡）
+        goalContinuation: fromGoalLoop ? true : undefined,
         signal: controller.signal,
       });
       const iterator = execution[Symbol.asyncIterator]();
       const first = await iterator.next();
       if (first.done !== true) {
         manager.markUsed(taskId);
+        // 目标进行中：循环自此在本进程存活——终态事件下发时任务不会呈现为空闲
+        goals.turnStarted(taskId);
         emit({ taskId, executionId, event: first.value });
       }
       track(
@@ -852,6 +959,12 @@ export function registerTaskHandlers(options: {
             !head.done;
             head = await iterator.next()
           ) {
+            if (
+              head.value.type === "tool-call" &&
+              isGoalToolActivity(head.value.call.toolName)
+            ) {
+              toolActivity = true;
+            }
             emit({ taskId, executionId, event: head.value });
           }
         })()
@@ -863,7 +976,12 @@ export function registerTaskHandlers(options: {
             // 流结束（完成 / 出错 / 用户中断）：目标模式的 idle 边界先行
             // （完成判定），编排收尾后注销登记——停止按钮回到无效态。
             // 返回收尾 Promise：退出屏障的排空会等在途判定落定。
-            return settleAfterStream(taskId, controller.signal, end);
+            return settleAfterStream(
+              taskId,
+              controller.signal,
+              end,
+              toolActivity
+            );
           })
       );
     } catch (error) {
@@ -987,6 +1105,9 @@ export function registerTaskHandlers(options: {
       // 此时中断必须一并出队，否则下一次 pump 会把刚被中断的任务重跑。
       const entry = taskQueue.snapshot().find((item) => item.taskId === taskId);
       const removed = taskQueue.remove(taskId);
+      // 目标模式的两轮之间（ADR 0035）：上一轮已收尾、续跑轮尚未发起，此刻
+      // 没有在途回合可中断——停止 = 暂停直接落位，待发起的续跑轮据此作废
+      const goalPaused = !interrupted && goals.pause(taskId) !== null;
       if (removed) {
         // 首条补落只补「从未真正发出」的（无活跃流 = user message 未落库）；
         // 活跃流中断（含开跑窗口的复查出队）首条已随 sendMessage 落库，不补
@@ -995,14 +1116,18 @@ export function registerTaskHandlers(options: {
         }
         runQueuePump();
       }
-      if (interrupted || removed) {
+      if (interrupted || removed || goalPaused) {
         // 停止路径（票 02）：排队消息存在时置队列暂停——队列原样保留、
         // 中断落定后的空闲不消费，等待恢复/清空/插话三个出口。中断排队
         // 任务同理：排队期间追加的输入队列消息不因其他任务释放名额而
         // 自动发出，由用户重新发消息（插话语义）或手动恢复触发。
         queues.pause(taskId);
       }
-      return interrupted || removed;
+      // 目标在两轮之间被停止：循环是在执行收尾之外结束的，补一次唤醒（并发
+      // 名额让出、各任务输入队列重泵）。放在上面的停止规则之后——排队消息
+      // 已进入「队列暂停」，这次唤醒不会取走队首，与在途回合被停止时一致。
+      if (goalPaused) wakeAfterLoopEnd(taskId);
+      return interrupted || removed || goalPaused;
     }
   );
 

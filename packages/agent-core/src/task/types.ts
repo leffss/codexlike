@@ -120,9 +120,14 @@ export interface ApprovalDecisionRecord {
   createdAt: string;
 }
 
-/** 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
- * 压缩摘要（/compact 生成，进入对话上下文时按 user 角色注入；消息流渲染为可展开的摘要卡片） */
-export type MessageRole = "user" | "assistant" | "error" | "compact-summary";
+/**
+ * 消息角色：用户消息 / 助手回复 / 错误提示（模型 API 出错的中文提示，不进入对话上下文）/
+ * 压缩摘要（/compact 生成，进入对话上下文时按 user 角色注入；消息流渲染为可展开的摘要卡片）/
+ * 目标续跑指令（目标模式的内部输入，ADR 0035：进入对话上下文时按 user 角色注入并随任务
+ * 落库——重启恢复与压缩都保留；但它不是用户发言，消息流不产生用户气泡）
+ */
+export type MessageRole =
+  "user" | "assistant" | "error" | "compact-summary" | "goal-continuation";
 
 /** 消息记录（messages 表一行） */
 export interface StoredMessage {
@@ -289,6 +294,13 @@ export type TaskEvent =
   | { type: "interaction-request"; interaction: InteractionRecord }
   | { type: "interaction-resolved"; interaction: InteractionRecord }
   | { type: "user-message"; message: StoredMessage }
+  /**
+   * 目标续跑轮的内部输入（ADR 0035「续跑轮是内部输入，不产生用户气泡」）：
+   * 目标模式下判定未过（或判定不可用）后由宿主发起的续跑回合，以本事件开头
+   * 取代 user-message——指令已进入任务（落库为 goal-continuation 角色、进模型
+   * 上下文），但消息流不呈现为用户消息。轮内的其余事件与普通回合相同。
+   */
+  | { type: "goal-continuation"; message: StoredMessage }
   | { type: "assistant-start"; messageId: string }
   | { type: "assistant-delta"; messageId: string; delta: string }
   /**

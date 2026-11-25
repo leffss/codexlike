@@ -77,11 +77,17 @@ export function buildTaskStatus(input: {
   const sources =
     resources?.catalog.agents.sources.map((source) => source.path) ??
     agentsMd.sections.map((section) => section.path);
+  /**
+   * 进入上下文估算的消息：user / assistant / compact-summary，以及目标模式的
+   * 续跑指令（goal-continuation 以 user 角色进入模型上下文，ADR 0035）；
+   * error 提示不进模型上下文，也不计入。
+   */
   const contextMessages = messages.filter(
     (message) =>
       message.role === "user" ||
       message.role === "assistant" ||
-      message.role === "compact-summary"
+      message.role === "compact-summary" ||
+      message.role === "goal-continuation"
   );
   const estimated =
     (resources?.estimatedTokens ?? estimateTokens(agentsMd.combined)) +

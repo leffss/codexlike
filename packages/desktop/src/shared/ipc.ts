@@ -336,8 +336,16 @@ export interface TaskEventEnvelope {
      */
     | { type: "goal-changed"; goal: GoalRecord | null }
     /**
+     * 一次完成判定开始（ADR 0035，GLOSSARY「完成判定」）：回合结束后的 idle
+     * 边界发起判定时下发——消息流标记行的「第 N 次迭代 · 验证中」占位与进度行
+     * 「验证中」副状态的实时信号。结论到达后以 goal-verification 原位升级为同一
+     * 行；判定在途被中断则不留结论，占位随目标离开进行中撤下。
+     */
+    | { type: "goal-verifying"; goalId: string; round: number }
+    /**
      * 一次完成判定的结论（ADR 0035，GLOSSARY「完成判定」）：消息流标记行
-     * 「第 N 次迭代 · 已完成/未完成」的实时数据源；重启后由任务时间线恢复。
+     * 「第 N 次迭代 · 已完成/未完成/判定不可用」的实时数据源；重启后由任务
+     * 时间线恢复。
      */
     | { type: "goal-verification"; verification: GoalVerificationRecord };
   activity: TaskActivity;
@@ -347,6 +355,12 @@ export interface TaskEventEnvelope {
 export interface TaskActivity {
   /** 仅活动期间用于恢复正确入口；省略表示普通消息执行或空闲。 */
   operation?: "compact";
+  /**
+   * 目标模式（ADR 0035）的副状态：`verifying` = 完成判定在途（回合已收尾、
+   * 结论未到）。只在任务呈现为执行中时出现；续跑轮进行中与两轮之间省略。
+   * 进度行据此显示「验证中」而非「进行中」。
+   */
+  goalPhase?: "verifying";
   /**
    * 任务排队中（任务并发上限票 02 / ADR 0022）：空闲任务的发送因全局满员
    * 进入应用级任务排队、尚未开跑；开跑或出队后撤销。排队不是执行

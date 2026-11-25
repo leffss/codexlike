@@ -5,7 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 import type { ToolCallRecord } from "../tools/types";
 import {
   GOAL_STATUSES,
+  GOAL_VERIFICATION_OUTCOMES,
   type GoalRecord,
+  type GoalVerificationOutcome,
   type GoalVerificationRecord,
 } from "../goal/types";
 import type {
@@ -181,22 +183,29 @@ export interface TaskPersistence {
   /** 删除目标记录（撤销尚未执行的目标）；不存在静默忽略 */
   deleteGoal(id: string): void;
   /**
-   * 只更新状态机推进触碰的列（status / activeMs / activeSince / updatedAt）
-   * 与编辑目标触碰的 text；归属与设定时间（taskId / createdAt）建行后不变。
-   * 目标不存在时静默忽略（与 updateTask 同语义）。
+   * 只更新状态机推进触碰的列（status / activeMs / activeSince / 两个连续计数 /
+   * updatedAt）与编辑目标触碰的 text；归属与设定时间（taskId / createdAt）
+   * 建行后不变。目标不存在时静默忽略（与 updateTask 同语义）。
    */
   updateGoal(
     id: string,
     patch: Partial<
       Pick<
         GoalRecord,
-        "status" | "text" | "activeMs" | "activeSince" | "updatedAt"
+        | "status"
+        | "text"
+        | "activeMs"
+        | "activeSince"
+        | "idleStreak"
+        | "failureStreak"
+        | "updatedAt"
       >
     >
   ): void;
   /**
    * 逐轮验证记录（ADR 0035 票 02，GLOSSARY「完成判定」）：每轮判定结束即写一行
-   * （轮次、结论、理由、下一步方向、时间戳）；按任务列出见 listGoalVerifications。
+   * （轮次、结论种类、理由、下一步方向、本轮是否有实质工具活动、时间戳）；
+   * 按任务列出见 listGoalVerifications。
    */
   insertGoalVerification(record: GoalVerificationRecord): void;
   /**
@@ -343,7 +352,9 @@ CREATE TABLE IF NOT EXISTS goals (
   active_ms INTEGER NOT NULL DEFAULT 0,
   active_since TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  idle_streak INTEGER NOT NULL DEFAULT 0,
+  failure_streak INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_goals_task_created
   ON goals(task_id, created_at);
@@ -355,7 +366,9 @@ CREATE TABLE IF NOT EXISTS goal_verifications (
   passed INTEGER NOT NULL,
   reason TEXT NOT NULL,
   next_action TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  outcome TEXT NOT NULL DEFAULT '',
+  tool_activity INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_goal_verifications_task
   ON goal_verifications(task_id, created_at);
@@ -471,6 +484,8 @@ interface GoalRow {
   active_since: string | null;
   created_at: string;
   updated_at: string;
+  idle_streak: number;
+  failure_streak: number;
 }
 
 interface GoalVerificationRow {
@@ -482,6 +497,22 @@ interface GoalVerificationRow {
   reason: string;
   next_action: string;
   created_at: string;
+  outcome: string;
+  tool_activity: number;
+}
+
+/**
+ * 验证记录的结论种类（读侧）：票 02 时代的旧行没有 outcome 列（取列默认值
+ * 空串）——按 passed 与理由回推：通过即 passed；理由注明「完成判定不可用」
+ * 为 unavailable；其余为 unpassed。非法值同样回推，不把未知种类漏到界面。
+ */
+function verificationOutcomeOf(
+  row: GoalVerificationRow
+): GoalVerificationOutcome {
+  if ((GOAL_VERIFICATION_OUTCOMES as readonly string[]).includes(row.outcome))
+    return row.outcome as GoalVerificationOutcome;
+  if (row.passed === 1) return "passed";
+  return row.reason.includes("完成判定不可用") ? "unavailable" : "unpassed";
 }
 
 /**
@@ -601,6 +632,29 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     db.exec("ALTER TABLE terminal_sessions ADD COLUMN title TEXT");
   if (!terminalColumns.some((column) => column.name === "title_source"))
     db.exec("ALTER TABLE terminal_sessions ADD COLUMN title_source TEXT");
+  // 旧库迁移（goal-mode 票 03）：票 02 时代的两张目标表没有连续计数与结论
+  // 种类列——旧行取列默认值（计数 0；结论种类读侧按 passed / 理由回推，
+  // 是否有工具活动未知时按「有」计，不把历史轮次误判为空转）
+  const goalColumns = db.prepare("PRAGMA table_info(goals)").all();
+  for (const column of ["idle_streak", "failure_streak"]) {
+    if (!goalColumns.some((existing) => existing.name === column))
+      db.exec(
+        `ALTER TABLE goals ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`
+      );
+  }
+  const goalVerificationColumns = db
+    .prepare("PRAGMA table_info(goal_verifications)")
+    .all();
+  if (!goalVerificationColumns.some((column) => column.name === "outcome"))
+    db.exec(
+      "ALTER TABLE goal_verifications ADD COLUMN outcome TEXT NOT NULL DEFAULT ''"
+    );
+  if (
+    !goalVerificationColumns.some((column) => column.name === "tool_activity")
+  )
+    db.exec(
+      "ALTER TABLE goal_verifications ADD COLUMN tool_activity INTEGER NOT NULL DEFAULT 1"
+    );
   const insertTask = db.prepare(
     "INSERT INTO tasks (id, title, workspace_path, provider_profile_id, model, status, approval_mode, workspace_mode, workspace_origin_path, archived_at, created_at, updated_at, project_id, creation_request_id, pinned, last_used_at, auto_approve, main_input_tokens, main_output_tokens, subagent_input_tokens, subagent_output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
@@ -665,13 +719,13 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
     "SELECT * FROM terminal_sessions WHERE task_id = ? ORDER BY created_at, rowid"
   );
   const insertGoalStmt = db.prepare(
-    "INSERT INTO goals (id, task_id, text, status, active_ms, active_since, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO goals (id, task_id, text, status, active_ms, active_since, created_at, updated_at, idle_streak, failure_streak) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listGoalsStmt = db.prepare(
     "SELECT * FROM goals WHERE task_id = ? ORDER BY created_at, rowid"
   );
   const insertGoalVerificationStmt = db.prepare(
-    "INSERT INTO goal_verifications (id, task_id, goal_id, round, passed, reason, next_action, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO goal_verifications (id, task_id, goal_id, round, passed, reason, next_action, created_at, outcome, tool_activity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   const listGoalVerificationsStmt = db.prepare(
     "SELECT * FROM goal_verifications WHERE task_id = ? ORDER BY created_at, rowid"
@@ -1394,7 +1448,9 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         record.activeMs,
         record.activeSince,
         record.createdAt,
-        record.updatedAt
+        record.updatedAt,
+        record.idleStreak,
+        record.failureStreak
       );
     },
 
@@ -1411,6 +1467,8 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         activeSince: row.active_since ?? null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        idleStreak: row.idle_streak ?? 0,
+        failureStreak: row.failure_streak ?? 0,
       }));
     },
 
@@ -1433,6 +1491,14 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       if (patch.activeSince !== undefined) {
         columns.push("active_since = ?");
         values.push(patch.activeSince);
+      }
+      if (patch.idleStreak !== undefined) {
+        columns.push("idle_streak = ?");
+        values.push(patch.idleStreak);
+      }
+      if (patch.failureStreak !== undefined) {
+        columns.push("failure_streak = ?");
+        values.push(patch.failureStreak);
       }
       if (patch.updatedAt !== undefined) {
         columns.push("updated_at = ?");
@@ -1460,7 +1526,9 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         record.passed ? 1 : 0,
         record.reason,
         record.nextAction,
-        record.createdAt
+        record.createdAt,
+        record.outcome,
+        record.toolActivity ? 1 : 0
       );
     },
 
@@ -1478,6 +1546,8 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
         reason: row.reason,
         nextAction: row.next_action,
         createdAt: row.created_at,
+        outcome: verificationOutcomeOf(row),
+        toolActivity: row.tool_activity === 1,
       }));
     },
 

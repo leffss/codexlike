@@ -619,8 +619,9 @@ function SegmentView(props: {
     );
   }
   if (segment.kind === "goal-verification") {
-    // 完成判定结论（ADR 0035）：流内单行标记「第 N 次迭代 · 已完成/未完成」
-    return <GoalVerificationMarker verification={segment.verification} />;
+    // 完成判定标记行（ADR 0035）：流内单行标记「第 N 次迭代 · 验证中 / 已完成 /
+    // 未完成 / 判定不可用」——验证中的占位与结论是同一行
+    return <GoalVerificationMarker segment={segment} />;
   }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;

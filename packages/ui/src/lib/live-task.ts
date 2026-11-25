@@ -8,6 +8,8 @@ import type {
 import {
   appendGoalVerification,
   applyTaskEvent,
+  beginGoalVerification,
+  dropPendingGoalVerifications,
   initialTranscript,
   mergeInteractions,
   mergeSubagentsAfterCompact,
@@ -61,10 +63,22 @@ function applyLiveEvent(
   if (event.type === "queue-changed") return items;
   // 任务排队变更（任务并发上限票 02）同为任务状态而非消息增量，不进消息流
   if (event.type === "task-queue-changed") return items;
-  // 目标状态变化（ADR 0035）不进消息流；判定结论追加为标记行段（幂等）
-  if (event.type === "goal-changed") return items;
+  // 目标状态变化（ADR 0035）不进消息流；目标离开进行中时，还没出结论的
+  // 「验证中」占位行撤下（判定在途被中断不留结论）
+  if (event.type === "goal-changed")
+    return event.goal !== null && event.goal.status === "active"
+      ? items
+      : dropPendingGoalVerifications(items);
+  // 完成判定开始：原位出现「第 N 次迭代 · 验证中」占位行
+  if (event.type === "goal-verifying")
+    return beginGoalVerification(items, {
+      goalId: event.goalId,
+      round: event.round,
+    });
   if (event.type === "goal-verification")
     return appendGoalVerification(items, event.verification);
+  // 续跑轮的内部输入（ADR 0035）：不产生用户气泡，回复照常入流
+  if (event.type === "goal-continuation") return items;
   return applyTaskEvent(items, event);
 }
 
@@ -103,7 +117,11 @@ export function receiveLiveEvent(
     // 的状态变化紧随用户停止——到达时宿主已不处于运行态，同为任务级状态
     // 快照，按水位接续（否则进度行与标记行在空闲期收不到）
     envelope.event.type === "goal-changed" ||
-    envelope.event.type === "goal-verification";
+    envelope.event.type === "goal-verifying" ||
+    envelope.event.type === "goal-verification" ||
+    // 续跑轮是新的宿主执行（上一轮已收尾）：goal-continuation 是它的起点
+    // 信号，续跑轮后续的正文 / 工具事件按新执行接续
+    envelope.event.type === "goal-continuation";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [

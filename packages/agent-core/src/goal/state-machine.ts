@@ -71,8 +71,10 @@ function activeSegmentMs(activeSince: string | null, at: string): number {
 
 /**
  * 推进目标状态（不落库，返回新记录；原记录不变）。
- * 累计时长只计进行中的区段：离开进行中时闭合当前段计入 activeMs，
+ * 累计时长只计进行中的区段：离开进行中闭合当前段计入 activeMs，
  * 进入进行中时以 at 另起一段（activeSince），其余状态时长原样保留。
+ * 连续计数（空转 / 判定故障）同理只在本段进行中内累计：进入进行中
+ * （恢复）即清零，离开进行中原样保留供回看。
  * 越界转换抛中文错误（目标<当前状态>，不能<转换>）。
  */
 export function advanceGoal(
@@ -94,6 +96,8 @@ export function advanceGoal(
       ? goal.activeMs + activeSegmentMs(goal.activeSince, at)
       : goal.activeMs,
     activeSince: status === "active" ? at : wasActive ? null : goal.activeSince,
+    idleStreak: status === "active" ? 0 : goal.idleStreak,
+    failureStreak: status === "active" ? 0 : goal.failureStreak,
     updatedAt: at,
   };
 }

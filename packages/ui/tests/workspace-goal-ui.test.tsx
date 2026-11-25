@@ -57,6 +57,8 @@ function goalOf(
     activeSince: null,
     createdAt: "2026-11-25T08:00:00.000Z",
     updatedAt: "2026-11-25T08:00:00.000Z",
+    idleStreak: 0,
+    failureStreak: 0,
     ...overrides,
   };
 }
@@ -67,8 +69,10 @@ const verification: GoalVerificationRecord = {
   goalId: "goal-1",
   round: 1,
   passed: true,
+  outcome: "passed",
   reason: "示例测试已全部通过",
   nextAction: "",
+  toolActivity: false,
   createdAt: "2026-11-25T08:00:09.000Z",
 };
 
@@ -350,5 +354,183 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
 
     await emit({ type: "goal-changed", goal: goalOf("completed") });
     expect(statusText()).toBe("已完成");
+  });
+
+  /** 带活动态与执行现场的事件下发（续跑循环的接线用例：宿主活动态在循环期间保持运行中） */
+  function emitter(listeners: Set<(event: TaskEventEnvelope) => void>) {
+    let sequence = 1;
+    const running = { ...activity, running: true };
+    return async (
+      event: TaskEventEnvelope["event"],
+      options: {
+        activity?: TaskEventEnvelope["activity"];
+        executionId?: string;
+      } = {}
+    ) => {
+      sequence += 1;
+      await act(async () => {
+        for (const listener of listeners)
+          listener({
+            taskId: "A",
+            executionId: options.executionId ?? "execution",
+            sequence,
+            activity: options.activity ?? running,
+            event,
+          });
+      });
+    };
+  }
+
+  it("验证中：判定在途时进度行显示「验证中」、消息流原位出现占位行；结论到达后同一行变成结论行，状态回到「进行中」", async () => {
+    const { listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    const verifying = {
+      ...activity,
+      running: true,
+      goalPhase: "verifying" as const,
+    };
+
+    await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
+    expect(statusText()).toBe("进行中");
+    expect(screen.queryByTestId("goal-verifying-marker")).toBeNull();
+
+    await emit(
+      { type: "goal-verifying", goalId: "goal-1", round: 1 },
+      { activity: verifying }
+    );
+    expect(statusText()).toBe("验证中");
+    expect(screen.getByTestId("goal-verifying-marker").textContent).toBe(
+      "第 1 次迭代 · 验证中"
+    );
+
+    await emit({
+      type: "goal-verification",
+      verification: {
+        ...verification,
+        passed: false,
+        outcome: "unpassed",
+        reason: "尚有步骤未完成",
+        nextAction: "继续实现剩余步骤",
+      },
+    });
+    // 同一行原位升级：没有残留的「验证中」
+    expect(screen.queryByTestId("goal-verifying-marker")).toBeNull();
+    expect(screen.getByTestId("goal-verification-marker").textContent).toBe(
+      "第 1 次迭代 · 未完成 · 下一步：继续实现剩余步骤"
+    );
+    expect(statusText()).toBe("进行中");
+  });
+
+  it("续跑轮不产生用户气泡：goal-continuation 不呈现为用户消息，回复照常入流", async () => {
+    const { listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    const goalText = "让示例测试全部通过";
+    const userBubbleTexts = () =>
+      screen.getAllByTestId("message-user").map((node) => node.textContent);
+
+    await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
+    await emit({
+      type: "user-message",
+      message: {
+        id: "goal-user",
+        taskId: "A",
+        role: "user",
+        content: goalText,
+        createdAt: "2026-11-25T08:00:00.000Z",
+      },
+    });
+    await emit({
+      type: "assistant-done",
+      message: {
+        id: "a1",
+        taskId: "A",
+        role: "assistant",
+        content: "第一轮回复",
+        createdAt: "2026-11-25T08:00:01.000Z",
+      },
+    });
+    await emit({ type: "goal-verifying", goalId: "goal-1", round: 1 });
+    await emit({
+      type: "goal-verification",
+      verification: {
+        ...verification,
+        passed: false,
+        outcome: "unpassed",
+        reason: "尚有步骤未完成",
+        nextAction: "继续实现剩余步骤",
+      },
+    });
+
+    // 续跑轮：新的执行现场，以 goal-continuation 开始
+    await emit(
+      {
+        type: "goal-continuation",
+        message: {
+          id: "gc-1",
+          taskId: "A",
+          role: "goal-continuation",
+          content: "【目标续跑】请继续推进目标",
+          createdAt: "2026-11-25T08:00:02.000Z",
+        },
+      },
+      { executionId: "execution-2" }
+    );
+    await emit(
+      { type: "assistant-delta", messageId: "a2", delta: "续跑轮的回复" },
+      { executionId: "execution-2" }
+    );
+
+    expect(userBubbleTexts()).toEqual([goalText]);
+    expect(screen.getByText("续跑轮的回复")).toBeTruthy();
+    expect(statusText()).toBe("进行中");
+  });
+
+  it("判定在途时目标转已暂停：「验证中」占位行撤下；因完成判定连续不可用暂停时进度行写明原因", async () => {
+    const { listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+
+    await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
+    await emit({ type: "goal-verifying", goalId: "goal-1", round: 1 });
+    expect(screen.getByTestId("goal-verifying-marker")).toBeTruthy();
+
+    await emit(
+      { type: "goal-changed", goal: goalOf("paused", { failureStreak: 3 }) },
+      { activity }
+    );
+    expect(screen.queryByTestId("goal-verifying-marker")).toBeNull();
+    expect(statusText()).toBe("已暂停");
+    expect(screen.getByTestId("goal-progress-reason").textContent).toBe(
+      "完成判定连续 3 次不可用"
+    );
+
+    // 手动暂停（没有记录到原因）：只显示「已暂停」
+    await emit({ type: "goal-changed", goal: goalOf("paused") }, { activity });
+    expect(screen.queryByTestId("goal-progress-reason")).toBeNull();
+  });
+
+  it("目标循环的开始与收束都刷新侧栏任务列表（后台目标任务的徽章与「N 个执行中」统计依赖它）", async () => {
+    const { api, listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    const listCalls = () => vi.mocked(api.tasks.list).mock.calls.length;
+    const before = listCalls();
+
+    await emit({
+      type: "goal-continuation",
+      message: {
+        id: "gc",
+        taskId: "A",
+        role: "goal-continuation",
+        content: "续跑",
+        createdAt: "2026-11-25T08:00:02.000Z",
+      },
+    });
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(before));
+
+    const afterStart = listCalls();
+    await emit(
+      { type: "goal-changed", goal: goalOf("completed") },
+      { activity }
+    );
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(afterStart));
   });
 });

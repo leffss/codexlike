@@ -97,6 +97,13 @@ export interface SendMessageOptions {
   thinkingEffort?: ThinkingEffort;
   /** 宿主在接收发送时固定；缺省取任务的下次发送偏好。 */
   approvalMode?: ApprovalMode;
+  /**
+   * 内部输入（目标模式的续跑轮，ADR 0035）：text 是宿主构造的续跑指令而非
+   * 用户发言——进入模型上下文（user 角色）并随任务落库为 goal-continuation
+   * 角色，但不发 user-message 事件（消息流不产生用户气泡），改发
+   * goal-continuation 事件。轮内的工具、审批、中断与普通回合完全相同。
+   */
+  goalContinuation?: true;
   /** 中断信号：中断后已生成的部分文本保留为助手消息 */
   signal?: AbortSignal;
 }
@@ -537,6 +544,7 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
       mentions,
       thinkingEffort,
       approvalMode: requestedApprovalMode,
+      goalContinuation = false,
       signal,
     }) {
       if (busy) {
@@ -619,10 +627,13 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
           updatedAt: now(),
         });
 
+        // 续跑轮是内部输入（ADR 0035）：落库为独立的 goal-continuation 角色、以 user
+        // 角色进入上下文（重启恢复与压缩同构），但不发 user-message——消息流里
+        // 没有用户气泡，「谁在说话」得以诚实呈现
         const userMessage: StoredMessage = {
           id: generateId(),
           taskId: record.id,
-          role: "user",
+          role: goalContinuation ? "goal-continuation" : "user",
           content: text,
           // @引用 随消息持久化：重启恢复后重组进模型上下文（快照等价性）
           mentions:
@@ -635,7 +646,9 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         activeUserContext = toModelMessage(userMessage);
         context.push(activeUserContext);
         persistence.insertMessage(userMessage);
-        yield { type: "user-message", message: userMessage };
+        yield goalContinuation
+          ? { type: "goal-continuation", message: userMessage }
+          : { type: "user-message", message: userMessage };
 
         const assistantMessageId = generateId();
         yield { type: "assistant-start", messageId: assistantMessageId };
@@ -1081,9 +1094,14 @@ export function createAgentTask(options: CreateAgentTaskOptions): AgentTask {
         const storedHistory = persistence
           .listMessages(record.id)
           .filter((message) => message.role !== "error");
+        // 保留轮次内的续跑指令（goal-continuation，ADR 0035）与用户消息、助手回复
+        // 同样保留：它在内存上下文里占一条，存储侧若漏掉会让条数错位、指令被删
         const storedContext = storedHistory
           .filter(
-            (message) => message.role === "user" || message.role === "assistant"
+            (message) =>
+              message.role === "user" ||
+              message.role === "assistant" ||
+              message.role === "goal-continuation"
           )
           .slice(-keptContext.length);
         // 被压缩轮次的工具调用记录随历史一起清理：边界 = 保留轮次最老一条消息的旧时间戳

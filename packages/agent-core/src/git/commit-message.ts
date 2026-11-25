@@ -19,9 +19,14 @@ export function buildCommitMessagePrompt(
   messages: Pick<StoredMessage, "role" | "content">[],
   changedFiles: string[]
 ): string {
-  // error 是给用户看的中文提示，不属于任务内容；只取最近 20 条、每条截 400 字符
+  // error 是给用户看的中文提示，不属于任务内容；只取最近 20 条、每条截 400 字符。
+  // 目标续跑指令（goal-continuation，ADR 0035）是宿主发给模型的内部输入，既不是
+  // 用户的要求也不是助手的回复——不进提交消息的任务记录
   const recent = messages
-    .filter((message) => message.role !== "error")
+    .filter(
+      (message) =>
+        message.role !== "error" && message.role !== "goal-continuation"
+    )
     .slice(-MAX_MESSAGES)
     .map(
       (message) =>

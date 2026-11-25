@@ -15,7 +15,7 @@ import type { GoalRecord, GoalVerdict, GoalVerificationRecord } from "./types";
  * 完成判定（GLOSSARY「完成判定」，ADR 0035 完成判定契约）：
  * 一次独立模型请求——任务当前模型、不带工具，输入 = 目标文本 + 完整消息
  * 历史，输出 {passed, reason, nextAction}。解析容忍代码围栏等包裹；判定
- * 自身故障 fail-open（见 failOpenGoalVerdict），不设独立用户态。
+ * 自身故障 fail-open（见 unavailableGoalVerdict），不设独立用户态。
  */
 
 /**
@@ -29,7 +29,7 @@ export const GOAL_TOOL_OUTPUT_MAX_CHARS = 4000;
 
 /** 判定指令：引导「对话型非任务目标直接 pass」「证据不足不通过」 */
 export const GOAL_VERIFICATION_SYSTEM_PROMPT = [
-  `${GOAL_VERIFICATION_MARKER} 你是任务的完成判定评估器。用户为下述任务设定了一个目标，agent 已经工作了一轮。`,
+  `${GOAL_VERIFICATION_MARKER} 你是任务的完成判定评估器。用户为下述任务设定了一个目标，agent 已经进行了若干轮工作。`,
   "请依据目标文本与完整消息历史，判断目标现在是否已经达成。",
   "",
   "判定规则：",
@@ -159,28 +159,34 @@ export function parseGoalVerdict(text: string): GoalVerdict | null {
 }
 
 /**
- * fail-open（ADR 0035「判定自身故障 fail-open，不设独立用户态」，票 02 定案）：
- * 判定请求自身故障（网络错误 / 坏输出）按「未通过」处理——不阻断目标、
- * 不误报完成（网络抖动不至于把未验证的目标标成已完成）、不误报未达成。
- * 宿主编排器据此照「未通过」走后续处置（续跑或暂停）。
+ * 判定自身故障的验证记录（ADR 0035「判定自身故障 fail-open，不设独立用户
+ * 态」；票 03 编排者裁决）：请求失败 / 坏输出 / 模型不可用时没有结论——记录
+ * 如实注明不可用及原因，outcome 为 unavailable，不编造判定理由与下一步方向。
+ * passed 为 false 只为兼容：故障既不是通过，也不代表目标未达成。
  */
-export function failOpenGoalVerdict(cause: string): GoalVerdict {
+export function unavailableGoalVerdict(cause: string): GoalVerdict & {
+  passed: false;
+  nextAction: "";
+} {
   return {
     passed: false,
-    reason: `完成判定不可用（${cause}），按未通过处理`,
-    nextAction: "继续推进目标；下一轮回合结束后重新进行完成判定",
+    reason: `完成判定不可用（${cause}），本轮没有判定结论`,
+    nextAction: "",
   };
 }
 
-/** 判定请求的结局：有效结论 / 判定自身故障（调用方走 fail-open） */
-export type GoalVerificationOutcome =
+/**
+ * 判定请求的结局：拿到有效结论，或判定自身故障（调用方记为 unavailable，
+ * 目标照常续跑——ADR 0035 fail-open）。
+ */
+export type GoalVerdictResult =
   | { kind: "verdict"; verdict: GoalVerdict }
   | { kind: "unavailable"; cause: string };
 
 /**
  * 发起一次完成判定请求（不落库、不改目标状态）。
  * outcome 为 null 表示请求被中断（signal 已 abort：Stop / 应用退出），不产生
- * 结论；请求失败与坏输出不抛出，以 unavailable 交调用方 fail-open。
+ * 结论；请求失败与坏输出不抛出，以 unavailable 交调用方按 fail-open 记账。
  * usage 原样带回供调用方入任务用量账（ADR 0029）。
  */
 export async function requestGoalVerdict(deps: {
@@ -191,7 +197,7 @@ export async function requestGoalVerdict(deps: {
   /** 模型请求重试次数（GLOSSARY「执行设置」，与 compact 辅助调用同口径） */
   maxRetries: number;
 }): Promise<{
-  outcome: GoalVerificationOutcome | null;
+  outcome: GoalVerdictResult | null;
   usage: LanguageModelUsage | undefined;
 }> {
   try {
