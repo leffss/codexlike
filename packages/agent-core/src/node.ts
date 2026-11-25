@@ -139,6 +139,9 @@ export type {
   GoalVerificationResult,
 } from "./goal/verifier";
 export { GOAL_TRANSITION_NAMES } from "./goal/state-machine";
+// 控制面按钮可用性的判据（票 04）：查询转换表 / 可编辑状态，不抛错——
+// 见根出口的 canTransitionGoal / isGoalEditable
+export { canTransitionGoal, isGoalEditable } from "./goal/state-machine";
 // 目标模式续跑（ADR 0035 票 03）：续跑指令构造与「实质工具活动」判据——宿主
 // 编排器在 idle 边界取用（依赖任务消息类型，仅 Node 宿主）
 export {

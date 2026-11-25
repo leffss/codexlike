@@ -178,7 +178,17 @@ export const IPC = {
      */
     goalSet: "tasks:goal-set",
     /**
-     * 目标模式（ADR 0035「护栏」）：设定 / 调整当前目标的 token 预算——
+     * 目标模式控制面（ADR 0035，票 04）：恢复——已暂停 / 预算受限 / 未达成的目标
+     * 转回进行中，从暂停点续跑。暂停与停止按钮同一通道（tasks:interrupt，Stop =
+     * 暂停），不另设。
+     */
+    goalResume: "tasks:goal-resume",
+    /** 目标模式控制面（ADR 0035，票 04）：编辑——修改目标文本（已暂停 / 预算受限 / 未达成时可编辑） */
+    goalEdit: "tasks:goal-edit",
+    /** 目标模式控制面（ADR 0035，票 04）：清除——目标转「已清除」，任务回到普通对话 */
+    goalClear: "tasks:goal-clear",
+    /**
+     * 目标模式（ADR 0035「护栏」，票 05）：设定 / 调整当前目标的 token 预算——
      * 进度行上预算显示与设置的入口（预算是目标级参数，不进执行设置）。
      */
     goalSetBudget: "tasks:goal-set-budget",
@@ -339,7 +349,16 @@ export interface TaskEventEnvelope {
      * 目标状态变化（ADR 0035）：goal 为变更后的当前目标完整快照（设定 / 状态机
      * 每次推进都下发）；null 表示当前已无目标（清除）。
      */
-    | { type: "goal-changed"; goal: GoalRecord | null }
+    | {
+        type: "goal-changed";
+        goal: GoalRecord | null;
+        /**
+         * 本次转已暂停的原因（票 04）：只在原因不由目标记录本身推得时携带——
+         * 目前是目标循环的下一轮没能发起（如任务所用模型已被删除）。手动暂停、
+         * 回合被中断等没有对应的持久化原因，不携带。随事件下发、不落库。
+         */
+        pauseReason?: string;
+      }
     /**
      * 一次完成判定开始（ADR 0035，GLOSSARY「完成判定」）：回合结束后的 idle
      * 边界发起判定时下发——消息流标记行的「第 N 次迭代 · 验证中」占位与进度行
@@ -790,11 +809,36 @@ export interface TaskApi {
     options?: GoalSendOptions
   ): Promise<GoalRecord>;
   /**
-   * 设定 / 调整当前目标的 token 预算（ADR 0035「护栏」）：返回更新后的目标记录，
-   * 同时下发 goal-changed 快照。只对未结束的目标生效（进行中 / 已暂停 /
+   * 恢复目标（ADR 0035 控制面，GLOSSARY「目标」）：已暂停 / 预算受限 / 未达成的
+   * 目标转回「进行中」，宿主随即以内部输入从暂停点发起下一轮（不产生用户气泡），
+   * 累计时长与逐轮验证记录延续。返回恢复后的目标记录（进行中）。
+   * 任务有在途回合 / 等待用户交互 / 任务排队中、任务已归档、目标不在可恢复的
+   * 状态（越界转换由状态机以中文错误拒绝）均抛错且不改目标状态；下一轮没能
+   * 发起时目标回到已暂停，原因随状态快照下发（进度行的暂停原因）并抛回。
+   */
+  goalResume(taskId: string): Promise<GoalRecord>;
+  /**
+   * 编辑目标文本（ADR 0035 控制面，GLOSSARY「目标」）：原地更新当前目标的文本
+   * （首尾去空白；非空且不超过长度上限），返回更新后的目标记录。目标状态、累计
+   * 时长与逐轮验证记录都不动；下一次完成判定按新文本发起。
+   * 只在可编辑的状态下允许（已暂停 / 预算受限 / 未达成）——进行中、已完成、
+   * 已清除、无目标、任务已归档、空文本、超长均以中文异常抛回且原文不变。
+   */
+  goalEdit(taskId: string, text: string): Promise<GoalRecord>;
+  /**
+   * 清除目标（ADR 0035 控制面，GLOSSARY「目标」）：目标转「已清除」并下发完整
+   * 快照，任务回到普通对话形态——输入队列恢复自动消费、并发名额让出；逐轮
+   * 验证记录仍随任务留痕。返回已清除的目标记录。
+   * 进行中清除时循环立即收场：在途回合或完成判定一并中断，不判定、不续跑。
+   * 无目标、任务已归档、目标已清除（重复清除）以中文异常抛回且无副作用。
+   */
+  goalClear(taskId: string): Promise<GoalRecord>;
+  /**
+   * 设定 / 调整当前目标的 token 预算（ADR 0035「护栏」，票 05）：返回更新后的目标
+   * 记录，同时下发 goal-changed 快照。只对未结束的目标生效（进行中 / 已暂停 /
    * 预算受限 / 未达成）；预算须为正整数（tokens），任务不存在 / 无目标 /
    * 目标已结束以中文异常抛回。预算受限的目标加预算后不自动恢复——恢复经
-   * 控制面。
+   * 控制面（goalResume）。
    */
   goalSetBudget(taskId: string, tokens: number): Promise<GoalRecord>;
 }

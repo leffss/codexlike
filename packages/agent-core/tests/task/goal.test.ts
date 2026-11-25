@@ -12,7 +12,9 @@ import {
 } from "../../src/goal/types";
 import {
   advanceGoal,
+  canTransitionGoal,
   GOAL_TRANSITION_NAMES,
+  isGoalEditable,
   type GoalTransition,
 } from "../../src/goal/state-machine";
 import {
@@ -774,6 +776,181 @@ describe("TaskManager.verifyGoal（完成判定）", () => {
     const messages = body.messages as { role: string; content: unknown }[];
     expect(messages[0]?.role).toBe("system");
     expect(textOf(messages[0]?.content)).toMatch(/^\[goal-verification\]/);
+  });
+});
+
+describe("TaskManager.editGoal（编辑目标文本，票 04 控制面）", () => {
+  it("已暂停的目标可编辑：原地更新同一条记录的文本（首尾去空白），状态、累计时长与设定时间不变", () => {
+    const manager = createTaskManager({
+      persistence: memoryStore(),
+      now: fakeClock(),
+    });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    manager.setGoal(task.id, "让示例测试全部通过");
+    const paused = manager.transitionGoal(task.id, "pause");
+
+    const edited = manager.editGoal(
+      task.id,
+      "  让示例测试与集成测试全部通过，不改公共接口  "
+    );
+
+    // 同一条目标记录：归属、状态、时长、设定时间都原样，只有文本变了
+    expect(edited).toEqual({
+      ...paused,
+      text: "让示例测试与集成测试全部通过，不改公共接口",
+    });
+    expect(manager.goal(task.id)).toEqual(edited);
+  });
+
+  it.each(["budget-limited", "unmet"] as const)(
+    "%s 的目标同样可编辑（改目标后可恢复）",
+    (status) => {
+      const manager = createTaskManager({
+        persistence: memoryStore(),
+        now: fakeClock(),
+      });
+      const task = manager.create({ workspacePath: "C:/work/demo" });
+      goalIn(manager, task.id, status);
+
+      expect(manager.editGoal(task.id, "修订后的目标").text).toBe(
+        "修订后的目标"
+      );
+      expect(manager.goal(task.id)).toMatchObject({
+        status,
+        text: "修订后的目标",
+      });
+    }
+  );
+
+  it("进行中的目标不能编辑：完成判定以目标文本为判据，不与在途判定竞态——先暂停再改", () => {
+    const manager = createTaskManager({
+      persistence: memoryStore(),
+      now: fakeClock(),
+    });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    const goal = manager.setGoal(task.id, "让示例测试全部通过");
+
+    expect(() => manager.editGoal(task.id, "改过的目标")).toThrow(
+      "目标进行中，不能编辑：请先暂停目标"
+    );
+    expect(manager.goal(task.id)).toEqual(goal);
+  });
+
+  it.each(["completed", "cleared"] as const)(
+    "%s 的目标是定稿的历史，不能编辑",
+    (status) => {
+      const manager = createTaskManager({
+        persistence: memoryStore(),
+        now: fakeClock(),
+      });
+      const task = manager.create({ workspacePath: "C:/work/demo" });
+      goalIn(manager, task.id, status);
+      const before = manager.goal(task.id);
+
+      expect(() => manager.editGoal(task.id, "改过的目标")).toThrow(
+        `目标${GOAL_STATUS_NAMES[status]}，不能编辑`
+      );
+      expect(manager.goal(task.id)).toEqual(before);
+    }
+  );
+
+  it("任务不存在、无目标、空文本与超长文本以中文原因拒绝，原文不变", () => {
+    const manager = createTaskManager({
+      persistence: memoryStore(),
+      now: fakeClock(),
+    });
+    expect(() => manager.editGoal("missing-task", "改过的目标")).toThrow(
+      "任务不存在"
+    );
+    const plain = manager.create({ workspacePath: "C:/work/demo" });
+    expect(() => manager.editGoal(plain.id, "改过的目标")).toThrow(
+      "任务尚未设定目标"
+    );
+
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    manager.setGoal(task.id, "让示例测试全部通过");
+    manager.transitionGoal(task.id, "pause");
+    const before = manager.goal(task.id);
+    expect(() => manager.editGoal(task.id, " \n\t ")).toThrow("目标不能为空");
+    expect(() =>
+      manager.editGoal(task.id, "长".repeat(GOAL_TEXT_MAX_LENGTH + 1))
+    ).toThrow("目标文本过长");
+    expect(manager.goal(task.id)).toEqual(before);
+  });
+
+  it("编辑前的逐轮验证记录原样保留（仍归属同一目标）；编辑后的下一次完成判定按新文本发起", async () => {
+    const { model, manager } = setup(JSON.stringify(PASSED_VERDICT));
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    const goal = manager.setGoal(task.id, "让示例测试全部通过");
+    await talk(task, "让示例测试全部通过");
+    const first = await manager.verifyGoal(task.id, { profile });
+    if (first.kind !== "verified") throw new Error("应落验证记录");
+    manager.transitionGoal(task.id, "pause");
+
+    manager.editGoal(task.id, "让示例测试与集成测试全部通过");
+
+    // 编辑前那一轮的验证记录不受影响，仍归属同一条目标
+    expect(manager.goalVerifications(task.id)).toEqual([first.verification]);
+    expect(manager.goalVerifications(task.id)[0]?.goalId).toBe(goal.id);
+
+    // 恢复后再次判定：判定的输入以新文本为目标（第一轮判定用的是原文）
+    manager.transitionGoal(task.id, "resume");
+    await manager.verifyGoal(task.id, { profile });
+    expect(textOf(model.doGenerateCalls[0]!.prompt[1]!.content)).toContain(
+      "【目标】\n\n让示例测试全部通过"
+    );
+    expect(textOf(model.doGenerateCalls[1]!.prompt[1]!.content)).toContain(
+      "【目标】\n\n让示例测试与集成测试全部通过"
+    );
+    expect(
+      manager.goalVerifications(task.id).map((record) => record.round)
+    ).toEqual([1, 2]);
+  });
+
+  it("编辑随任务落库：同一持久层重建管理器（等价应用重启）后读回新文本", () => {
+    const persistence = memoryStore();
+    const manager = createTaskManager({ persistence, now: fakeClock() });
+    const task = manager.create({ workspacePath: "C:/work/demo" });
+    manager.setGoal(task.id, "让示例测试全部通过");
+    manager.transitionGoal(task.id, "pause");
+    const edited = manager.editGoal(task.id, "修订后的目标");
+
+    const restarted = createTaskManager({ persistence, now: fakeClock(50) });
+    expect(restarted.goal(task.id)).toEqual(edited);
+  });
+});
+
+describe("canTransitionGoal / isGoalEditable（控制面按钮可用性的判据）", () => {
+  const transitions: GoalTransition[] = [
+    "pause",
+    "resume",
+    "complete",
+    "unmet",
+    "budget-limit",
+    "clear",
+  ];
+
+  it("canTransitionGoal 与转换表一致：判定可行的转换推进时不抛错，判定不可行的恰好被拒", () => {
+    for (const status of GOAL_STATUSES) {
+      for (const transition of transitions) {
+        expect(canTransitionGoal(status, transition)).toBe(
+          (() => {
+            try {
+              advanceGoal(goalOf(status), transition, AT);
+              return true;
+            } catch {
+              return false;
+            }
+          })()
+        );
+      }
+    }
+  });
+
+  it("可编辑的状态是已暂停 / 预算受限 / 未达成：进行中要先暂停，已完成与已清除不可编辑", () => {
+    expect(
+      GOAL_STATUSES.filter((status) => isGoalEditable(status)).sort()
+    ).toEqual(["budget-limited", "paused", "unmet"]);
   });
 });
 

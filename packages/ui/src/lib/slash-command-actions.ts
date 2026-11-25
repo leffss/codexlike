@@ -56,6 +56,27 @@ export function planSlashCommand(
 }
 
 /**
+ * 忙时（回复进行中）斜杠命令的本地命令反馈（GLOSSARY「本地命令反馈」）。
+ * 既定规则：忙时命令不入队不执行，提示后保留输入，回复结束后原样重发。
+ * 目标进行中（ADR 0035）时任务恒为执行中，同一条规则照常生效——不给其他命令
+ * 开后门，也不额外加限制；只把两处说准：
+ * - /compact（规格故事 18）：压缩会改写完成判定所依赖的完整历史，提示先暂停目标；
+ * - 其余命令：可用时机是目标暂停或结束后——目标的每一轮回复都会结束，但循环
+ *   继续，「回复结束后可用」在目标进行中并不成立。
+ */
+export function busyCommandFeedback(
+  name: SlashCommandName,
+  context: { goalRunning: boolean }
+): string {
+  if (context.goalRunning) {
+    return name === "compact"
+      ? "目标进行中不能压缩历史：请先暂停目标（完成判定依赖完整历史）（输入已保留）"
+      : `命令 /${name} 不入队：目标暂停或结束后可用（输入已保留）`;
+  }
+  return `命令 /${name} 不入队：回复结束后可用（输入已保留）`;
+}
+
+/**
  * /model 关键词匹配（票 02 模型级）：在「Profile 名 模型名」上模糊匹配。
  * 候选形状复用 agent-core 的 ResolvedModel 二元组（review 修复 3 收敛，
  * 与 SubagentsConfig.resolveModel 等消费点同一形状，不再本地自定义）。

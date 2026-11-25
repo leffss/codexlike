@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { GoalRecord, GoalStatus } from "@codexlike/agent-core";
+import {
+  GOAL_STATUSES,
+  type GoalRecord,
+  type GoalStatus,
+} from "@codexlike/agent-core";
 import {
   formatGoalElapsed,
+  goalControls,
   goalElapsedMs,
   goalSummary,
   goalVerificationText,
@@ -89,6 +94,24 @@ describe("goalSummary（进度行摘要）", () => {
   it("超长首行截断并以省略号收尾", () => {
     const summary = goalSummary("长".repeat(80));
     expect(summary).toBe(`${"长".repeat(60)}…`);
+  });
+});
+
+describe("goalControls（进度行按钮组的六态可用性矩阵，票 04）", () => {
+  // 期望取自票面与规格的状态机转换表：暂停只在进行中；恢复在已暂停 / 预算受限 /
+  // 未达成（三种可恢复态一致）；编辑同恢复（进行中需先暂停，避免与在途判定竞态；
+  // 已完成是定稿的历史）；清除在未清除的任一状态；已清除全退场。
+  const expected = {
+    active: { pause: true, resume: false, edit: false, clear: true },
+    paused: { pause: false, resume: true, edit: true, clear: true },
+    "budget-limited": { pause: false, resume: true, edit: true, clear: true },
+    unmet: { pause: false, resume: true, edit: true, clear: true },
+    completed: { pause: false, resume: false, edit: false, clear: true },
+    cleared: { pause: false, resume: false, edit: false, clear: false },
+  } satisfies Record<GoalStatus, unknown>;
+
+  it.each(GOAL_STATUSES)("%s", (status) => {
+    expect(goalControls(goalOf(status))).toEqual(expected[status]);
   });
 });
 

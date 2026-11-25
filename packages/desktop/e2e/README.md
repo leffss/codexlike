@@ -54,8 +54,9 @@
 | 35  | goal-stub           | `goal-stub-probe.mjs`      | stub 双线探针（goal-mode 票 01）：工作轮 / 判定线各自按脚本应答、互不串线                                                                                                    |
 | 36  | goal                | `goal-mode.mjs`            | 目标模式最小闭环（ADR 0035）：/goal 设定 → 首轮 → 判定通过 → 已完成；队列互锁、Stop = 暂停、重启可读                                                                         |
 | 37  | goal-continuation   | `goal-continuation.mjs`    | 目标模式续跑循环（ADR 0035 票 03）：两轮判定未过自动续跑（验证中占位、无用户气泡、队列持续互锁）→ 第三轮通过 → 已完成，三行标记留痕、重启可回看                              |
-| 38  | goal-budget         | `goal-budget.mjs`          | 目标模式 token 预算（ADR 0035 票 05）：进度行设定预算 → 第 2 轮越线 → 预算受限（回合与判定照常完成）→ 队列恢复、一键加预算、重启保持                                         |
-| 39  | goal-idle           | `goal-idle.mjs`            | 目标模式空转阻断（ADR 0035 票 05）：三轮只回文字、判定未过 → 未达成（原因与三行标记可见）→ 不再续跑、队列恢复、重启保持                                                      |
+| 38  | goal-controls       | `goal-controls.mjs`        | 目标模式控制面（ADR 0035 票 04）：六态按钮矩阵、/compact 提示先暂停、Stop 带排队消息自动发出、恢复续跑、编辑后按新文本判定、清除退场                                         |
+| 39  | goal-budget         | `goal-budget.mjs`          | 目标模式 token 预算（ADR 0035 票 05）：进度行设定预算 → 第 2 轮越线 → 预算受限（回合与判定照常完成）→ 队列恢复、一键加预算、重启保持                                         |
+| 40  | goal-idle           | `goal-idle.mjs`            | 目标模式空转阻断（ADR 0035 票 05）：三轮只回文字、判定未过 → 未达成（原因与三行标记可见）→ 不再续跑、队列恢复、重启保持                                                      |
 
 链外（不进 test:e2e:all）：
 

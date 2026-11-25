@@ -5,8 +5,8 @@ import { GOAL_STATUS_NAMES, type GoalRecord, type GoalStatus } from "./types";
  * 纯函数、浏览器安全：状态词汇与转换表是单一事实来源，宿主（desktop
  * goal 编排器 / 控制面 IPC）与界面枚举都从这里取，不各自维护副本。
  *
- * 本票（02）只走到「进行中 → 已完成 / 已暂停」两条路径；续跑（票 03）、
- * 控制面（票 04：resume / clear）与两道护栏（票 05：unmet / budget-limit）
+ * 票 02 走通「进行中 → 已完成 / 已暂停」两条路径；票 03 接上续跑；控制面
+ * （票 04：resume / clear / 编辑）与两道护栏（票 05：unmet / budget-limit）
  * 在同一张转换表上接线，不新增状态。
  */
 
@@ -51,6 +51,35 @@ const GOAL_NEXT_STATUS: Record<GoalTransition, GoalStatus> = {
   "budget-limit": "budget-limited",
   clear: "cleared",
 };
+
+/**
+ * 某状态下某转换是否可行（不抛错地查询转换表）：控制面的按钮可用性据此
+ * 给出（能暂停 ⟺ 进行中；能恢复 ⟺ 已暂停 / 预算受限 / 未达成；能清除 ⟺
+ * 未清除的任一状态），界面与状态机不会各存一份表而漂移。
+ */
+export function canTransitionGoal(
+  status: GoalStatus,
+  transition: GoalTransition
+): boolean {
+  return GOAL_TRANSITIONS[status].includes(transition);
+}
+
+/**
+ * 可编辑目标文本的状态（票 04 控制面的「编辑」）：已暂停 / 预算受限 / 未达成
+ * ——都是可以先改目标再恢复的状态。进行中不可编辑：完成判定以目标文本为
+ * 判据，改文本不能与在途的判定竞态，先暂停再改；已完成与已清除是定稿的
+ * 历史，逐轮验证记录是按当时的目标文本判出来的，不再修改。
+ */
+const GOAL_EDITABLE_STATUSES: readonly GoalStatus[] = [
+  "paused",
+  "budget-limited",
+  "unmet",
+];
+
+/** 目标文本在该状态下是否可编辑（见 GOAL_EDITABLE_STATUSES） */
+export function isGoalEditable(status: GoalStatus): boolean {
+  return GOAL_EDITABLE_STATUSES.includes(status);
+}
 
 /**
  * 未结束的目标：仍占用「一任务同时至多一个目标」的名额（进行中 / 已暂停 /

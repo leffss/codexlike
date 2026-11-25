@@ -32,6 +32,7 @@
     "test:e2e:goal-stub": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-stub",
     "test:e2e:goal": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal",
     "test:e2e:goal-continuation": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-continuation",
+    "test:e2e:goal-controls": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-controls",
     "test:e2e:goal-budget": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-budget",
     "test:e2e:goal-idle": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-idle",
     "test:e2e:input-queue": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue",

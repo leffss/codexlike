@@ -19,6 +19,7 @@ import {
 } from "../goal/types";
 import {
   advanceGoal,
+  isGoalEditable,
   isGoalOpen,
   type GoalTransition,
 } from "../goal/state-machine";
@@ -234,6 +235,15 @@ export interface TaskManager {
    * 预算须为正整数（tokens）；任务不存在、无目标以中文错误拒绝。
    */
   setGoalBudget(taskId: string, tokens: number): GoalRecord;
+  /**
+   * 编辑当前目标的文本（控制面的「编辑」，GLOSSARY「目标」）：原地更新同一条
+   * 目标记录，状态、累计时长与连续计数都不动。校验同 setGoal（原文 trim 后
+   * 非空、不超过 GOAL_TEXT_MAX_LENGTH）。只在可编辑的状态下允许（见
+   * isGoalEditable：已暂停 / 预算受限 / 未达成）——进行中、已完成、已清除、
+   * 无目标、任务不存在都以中文错误拒绝、原文不变。逐轮验证记录按目标归属、
+   * 不存目标文本：编辑前的历史原样保留，下一次完成判定按新文本发起。
+   */
+  editGoal(taskId: string, text: string): GoalRecord;
   /**
    * 撤销尚未执行的目标（宿主在首轮启动失败时的回滚：设定与首轮是一个意图，
    * 首轮没起来就不留「进行中却没有回合」的半成品）。当前目标已有验证记录
@@ -766,6 +776,26 @@ export function createTaskManager(
         throw new Error(`目标${GOAL_STATUS_NAMES[goal.status]}，不能修改预算`);
       persistence.updateGoal(goal.id, { budgetTokens: tokens });
       return { ...goal, budgetTokens: tokens };
+    },
+
+    editGoal(taskId, text) {
+      if (!persistence.listTasks().some((task) => task.id === taskId))
+        throw new Error(`任务不存在：${taskId}`);
+      const goal = persistence.listGoals(taskId).at(-1);
+      if (goal === undefined) throw new Error("任务尚未设定目标");
+      if (!isGoalEditable(goal.status))
+        throw new Error(
+          goal.status === "active"
+            ? "目标进行中，不能编辑：请先暂停目标"
+            : `目标${GOAL_STATUS_NAMES[goal.status]}，不能编辑`
+        );
+      const trimmed = text.trim();
+      if (trimmed === "") throw new Error("目标不能为空");
+      if (trimmed.length > GOAL_TEXT_MAX_LENGTH)
+        throw new Error(`目标文本过长（最多 ${GOAL_TEXT_MAX_LENGTH} 字符）`);
+      // 只改文本：目标记录的更新时间只随状态机转换变化（与连续计数记账同口径）
+      persistence.updateGoal(goal.id, { text: trimmed });
+      return { ...goal, text: trimmed };
     },
 
     /** 当前目标的验证记录（goalVerifications 与 verifyGoal 的轮次计数共用） */

@@ -82,7 +82,12 @@ export {
   GOAL_VERIFICATION_OUTCOMES,
 } from "./goal/types";
 export type { GoalTransition } from "./goal/state-machine";
-export { advanceGoal, isGoalOpen } from "./goal/state-machine";
+export {
+  advanceGoal,
+  canTransitionGoal,
+  isGoalEditable,
+  isGoalOpen,
+} from "./goal/state-machine";
 // 目标模式护栏（ADR 0035，票 05）：token 预算的对账口径——目标是任务上的实体，
 // 消耗 = 任务用量账目（GLOSSARY「任务用量」四列之和）− 目标设定时拍下的基线。
 // 纯函数、浏览器安全：宿主编排器（判定后对账）与界面（进度行的用量显示）共用

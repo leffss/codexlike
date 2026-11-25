@@ -111,6 +111,11 @@ export interface PendingRound {
    * args 为字符串时原样作为工具入参的 JSON（可构造非法入参：SDK 解析失败的调用）
    */
   toolCall(name: string, args: Record<string, unknown> | string): void;
+  /**
+   * 以 chat completion JSON 应答（非流式请求：/compact 的摘要生成等，
+   * body.stream 不为 true）。判定请求请走 nextVerdict。
+   */
+  json(content: string): void;
 }
 
 /** 以 HTTP 401 拒绝一次模型请求 */
@@ -319,6 +324,30 @@ export async function setupGoalApp(
             done();
           },
           fail: () => unauthorized(res),
+          // 非流式请求（/compact 摘要等 generateText 路径）的 JSON 应答
+          json: (content) => {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(
+              JSON.stringify({
+                id: "mock",
+                object: "chat.completion",
+                created: 0,
+                model: "mock",
+                choices: [
+                  {
+                    index: 0,
+                    message: { role: "assistant", content },
+                    finish_reason: "stop",
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 1,
+                  completion_tokens: 1,
+                  total_tokens: 2,
+                },
+              })
+            );
+          },
           toolCall: (name, args) => {
             frame({
               delta: {

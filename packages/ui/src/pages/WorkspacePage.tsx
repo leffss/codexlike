@@ -84,6 +84,7 @@ import {
   type UserSegment,
 } from "../lib/task-view";
 import {
+  busyCommandFeedback,
   formatTaskStatus,
   matchModelsForModelSwitch,
   planSlashCommand,
@@ -220,6 +221,13 @@ export function WorkspacePage(props: {
    * 进度行据此显示「验证中」而非「进行中」。
    */
   const [goalVerifying, setGoalVerifying] = useState(false);
+  /**
+   * 目标的暂停说明（票 04）：宿主在 goal-changed 上附带的暂停原因（不由目标
+   * 记录本身推得的场合，如目标循环的下一轮没能发起），随快照恢复与事件接续。
+   */
+  const [goalPauseNote, setGoalPauseNote] = useState<string | null>(null);
+  /** 目标控制操作（暂停 / 恢复 / 清除）进行中：进度行按钮组整体禁用，防止重复提交 */
+  const [goalBusy, setGoalBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
   /**
    * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
@@ -629,6 +637,8 @@ export function WorkspacePage(props: {
       // 目标（ADR 0035）：加载期间先清空，随快照恢复
       setGoal(null);
       setGoalVerifying(false);
+      setGoalPauseNote(null);
+      setGoalBusy(false);
       // 终端恢复快照（票 08）：加载期间先清空防上个任务的已退出组闪现
       setRestoredTerminals([]);
       setWorkspaceFiles([]);
@@ -673,6 +683,7 @@ export function WorkspacePage(props: {
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
         setGoal(live.goal);
+        setGoalPauseNote(live.goalPauseNote);
         setGoalVerifying(isVerifying(live.activity));
         // 终端恢复快照（票 08）：view 并行字段随任务打开一次刷新
         setRestoredTerminals(view.terminals);
@@ -817,6 +828,7 @@ export function WorkspacePage(props: {
           setQueuedStart(live.queuedStart);
           // 目标状态（ADR 0035）：随 goal-changed 接续（判定后的状态推进、Stop = 暂停）
           setGoal(live.goal);
+          setGoalPauseNote(live.goalPauseNote);
           setGoalVerifying(isVerifying(live.activity));
           setStreaming(live.activity.running);
           // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
@@ -950,6 +962,8 @@ export function WorkspacePage(props: {
     // 新建草稿没有任务，也就没有目标
     setGoal(null);
     setGoalVerifying(false);
+    setGoalPauseNote(null);
+    setGoalBusy(false);
     setWorkspaceFiles([]);
     setResources(null);
     setLoading(false);
@@ -1071,7 +1085,9 @@ export function WorkspacePage(props: {
 
   /** 停止按钮：打断当前任务运行中的本轮（流式输出中断 / 工具子进程终止）。
    *  中断结果经事件流（assistant-aborted / tool-result）回流，streaming 状态随之复位。
-   *  排队消息存在时队列进入暂停（票 02），队列条显示恢复/清空操作。 */
+   *  排队消息存在时队列进入暂停（票 02），队列条显示恢复/清空操作。
+   *  目标进行中时 Stop = 暂停（ADR 0035）：目标转已暂停，队列不置暂停、排队消息
+   *  随即自动逐条发出（规格故事 12，票 04）。 */
   async function stop() {
     if (currentId === null) {
       return;
@@ -1344,6 +1360,8 @@ export function WorkspacePage(props: {
       setQueuedStart(null);
       setGoal(null);
       setGoalVerifying(false);
+      setGoalPauseNote(null);
+      setGoalBusy(false);
       setWorkspaceFiles([]);
       setResources(null);
       setStreaming(false);
@@ -1392,6 +1410,7 @@ export function WorkspacePage(props: {
       });
       if (!isCurrent()) return;
       setGoal(record);
+      setGoalPauseNote(null);
       pushCommandFeedback(
         "info",
         "已设定目标，进入目标模式：每轮回复结束后自动进行完成判定"
@@ -1404,6 +1423,121 @@ export function WorkspacePage(props: {
         "error",
         `设定目标失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
       );
+    }
+  }
+
+  /** 控制操作失败的统一文案：<操作>失败：<原因> */
+  function goalFailure(action: string, error: unknown, suffix = ""): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `${action}失败：${reason}${suffix}`;
+  }
+
+  /**
+   * 暂停目标（ADR 0035「Stop = 暂停」，GLOSSARY「目标」）：与停止按钮同一通道
+   * ——宿主中断在途回合（或判定）并在 idle 边界把目标转已暂停，两轮之间则直接
+   * 暂停；排队消息随即自动逐条发出。成功与失败都走本地命令反馈。
+   */
+  async function pauseGoal() {
+    const taskId = currentIdRef.current;
+    if (taskId === null) return;
+    setGoalBusy(true);
+    try {
+      const stopped = await window.codexlike.tasks.interrupt(taskId);
+      // 停止落定的那一刻目标已不在进行中：没有可暂停的东西，不报成功
+      if (stopped)
+        pushCommandFeedback(
+          "info",
+          "目标已暂停：可随时恢复，累计时长与逐轮验证记录保留"
+        );
+    } catch (error) {
+      pushCommandFeedback("error", goalFailure("暂停目标", error));
+    } finally {
+      setGoalBusy(false);
+    }
+  }
+
+  /**
+   * 恢复目标（票 04）：宿主把已暂停 / 预算受限 / 未达成的目标转回进行中，并以
+   * 内部输入从暂停点发起下一轮（不产生用户气泡）。下一轮没能发起时宿主抛回
+   * 原因（目标已回已暂停，进度行另有暂停说明）。
+   */
+  async function resumeGoal() {
+    const taskId = currentIdRef.current;
+    if (taskId === null || loadingRef.current !== null) return;
+    const generation = taskRequestRef.current;
+    setGoalBusy(true);
+    try {
+      const record = await window.codexlike.tasks.goalResume(taskId);
+      if (
+        currentIdRef.current === taskId &&
+        taskRequestRef.current === generation &&
+        record.status === "active"
+      ) {
+        setGoal(record);
+        setGoalPauseNote(null);
+        pushCommandFeedback("info", "目标已恢复：从暂停点继续推进");
+      }
+      // 未抛错而已不在进行中：恢复途中目标被停止 / 清除，状态以事件快照为准
+    } catch (error) {
+      pushCommandFeedback("error", goalFailure("恢复目标", error));
+    } finally {
+      setGoalBusy(false);
+    }
+  }
+
+  /**
+   * 保存目标文本的编辑（票 04）：宿主原地更新目标记录并下发快照，逐轮验证
+   * 记录保留；下一次完成判定按新文本进行。失败原因走本地命令反馈，异常原样
+   * 抛回进度行（编辑态保持、内容不丢）。
+   */
+  async function saveGoalEdit(text: string) {
+    const taskId = currentIdRef.current;
+    if (taskId === null) throw new Error("当前没有打开的任务");
+    const generation = taskRequestRef.current;
+    try {
+      const record = await window.codexlike.tasks.goalEdit(taskId, text);
+      if (
+        currentIdRef.current === taskId &&
+        taskRequestRef.current === generation
+      ) {
+        setGoal(record);
+        pushCommandFeedback(
+          "info",
+          "目标已更新：下一次完成判定按新文本进行，逐轮验证记录保留"
+        );
+      }
+    } catch (error) {
+      pushCommandFeedback(
+        "error",
+        goalFailure("编辑目标", error, "（编辑内容已保留）")
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * 清除目标（票 04）：目标转「已清除」、进度行退场，任务回到普通对话形态
+   * （宿主让输入队列恢复自动消费、占用的并发名额让出）；逐轮验证记录仍随
+   * 任务留痕。目标进行中时宿主一并中断在途回合或判定，不判定、不续跑。
+   */
+  async function clearGoal() {
+    const taskId = currentIdRef.current;
+    if (taskId === null) return;
+    setGoalBusy(true);
+    try {
+      const record = await window.codexlike.tasks.goalClear(taskId);
+      if (currentIdRef.current === taskId) {
+        setGoal(record);
+        setGoalPauseNote(null);
+      }
+      pushCommandFeedback(
+        "info",
+        "目标已清除：任务回到普通对话，逐轮验证记录仍可回看"
+      );
+    } catch (error) {
+      pushCommandFeedback("error", goalFailure("清除目标", error));
+    } finally {
+      setGoalBusy(false);
     }
   }
 
@@ -1569,10 +1703,14 @@ export function WorkspacePage(props: {
     if (submission.kind === "slash-command") {
       // 忙时命令不入队不执行（spec 用户故事 16，票 05）：命令在错误的时机被
       // 延迟执行没有意义；提示后保留输入，回复结束后原样重发即可执行。
+      // 目标进行中（ADR 0035）时任务恒为执行中，同一条规则照常生效——文案按
+      // 目标状态说准（/compact 提示先暂停目标，见 busyCommandFeedback）。
       if (streaming) {
         pushCommandFeedback(
           "info",
-          `命令 /${submission.name} 不入队：回复结束后可用（输入已保留）`
+          busyCommandFeedback(submission.name, {
+            goalRunning: goal?.status === "active",
+          })
         );
         return;
       }
@@ -2069,17 +2207,33 @@ export function WorkspacePage(props: {
                   </div>
                 )}
                 {/* 目标进度行（ADR 0035，GLOSSARY「目标」）：过程胶囊条与输入区之间
-                    常驻——目标摘要、状态（六态称谓）、累计时长；没有目标不占布局行。
-                    暂停 / 恢复 / 编辑 / 清除按钮组在票 04 接入本行。宽度对齐正文列
-                    （与上方胶囊条同一 contentWidthClass 居中基准）。 */}
+                    常驻——目标摘要、状态（六态称谓）、累计时长，以及控制面按钮组
+                    （暂停 / 恢复 / 编辑 / 清除，票 04；按六态给出可用性）与编辑入口；
+                    没有目标或目标已清除时不占布局行。宽度对齐正文列（与上方胶囊条
+                    同一 contentWidthClass 居中基准）。已归档的任务只读（不提供操作）；
+                    以目标记录为 key：换了一条目标（清除后重新设定）编辑态随之重置。 */}
                 {currentId !== null && (
                   <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
                     <div className={contentWidthClass}>
                       <GoalProgressRow
+                        key={goal?.id ?? currentId}
                         goal={goal}
                         verifying={goalVerifying}
                         pauseReason={
-                          goal === null ? null : goalPauseReason(goal)
+                          goal === null
+                            ? null
+                            : (goalPauseReason(goal) ?? goalPauseNote)
+                        }
+                        controls={
+                          current?.archivedAt == null
+                            ? {
+                                onPause: () => void pauseGoal(),
+                                onResume: () => void resumeGoal(),
+                                onSaveEdit: saveGoalEdit,
+                                onClear: () => void clearGoal(),
+                                busy: goalBusy,
+                              }
+                            : undefined
                         }
                         // 目标用量 = 任务用量账目 − 目标基线：取任务列表的最新账目
                         // （目标事件驱动列表刷新，预算显示随每轮判定之后更新）
