@@ -60,8 +60,8 @@
 
 - **agent-core**：`src/goal/budget.ts`（新）——`taskUsageTokens`（任务用量四列之和）、`goalSpentTokens`（账目 − 基线）、`isGoalBudgetExceeded`；`src/goal/types.ts`——`GoalRecord.budgetTokens / baselineTokens`、阈值常量 `GOAL_MAX_IDLE_ROUNDS = 3`；`src/goal/continuation.ts`——`isGoalToolActivity(toolName, executed)`；`src/task/types.ts`——`tool-result` 事件新增可选字段 `executed`；`src/task/agent-task.ts`——发出 `executed` 标注；`src/task/manager.ts`——`setGoal` 拍基线、新 API `setGoalBudget`；`src/task/persistence.ts`——两列与旧库迁移；`src/index.ts`——根出口。
 - **desktop**：`src/tasks/goal-orchestrator.ts`（`afterTurn` 内两道护栏与处置结果 `blocked`）、`src/tasks/task-ipc.ts`（事件泵按 `tool-result` 判别实质工具活动、`tasks:goal-set-budget` handler）、`src/shared/ipc.ts` 与 `src/preload.ts`（`goalSetBudget`）。
-- **ui**：`src/components/GoalBudgetControl.tsx`（新，独立组件）、`GoalProgressRow.tsx`（一个 prop + 一行挂载点）、`src/lib/goal-view.ts`（`goalPauseReason` 扩展、`formatGoalTokens`、`parseGoalBudgetInput`）、`pages/WorkspacePage.tsx`（两处导入 + 一个 prop）、`dev/browser-stub.ts`。
-- **e2e**：`e2e/goal-budget.mjs`（`pnpm test:e2e:goal-budget`）、`e2e/goal-idle.mjs`（`pnpm test:e2e:goal-idle`），已追加到 `test:e2e:all` 链尾（README 索引第 38、39 行）；`e2e/helpers.mjs` 与 `e2e/goal-stub.mjs` 的 usage 能力（见下）。
+- **ui**：`src/components/GoalBudgetControl.tsx`（新，独立组件）、`GoalProgressRow.tsx`（一个 prop 与预算控件的挂载点；并入票 04 后位于只读播报区之后、按钮组之前，编辑态同样保留）、`src/lib/goal-view.ts`（`goalPauseReason` 扩展、`formatGoalTokens`、`parseGoalBudgetInput`）、`pages/WorkspacePage.tsx`（两处导入 + 一个 prop）、`dev/browser-stub.ts`。
+- **e2e**：`e2e/goal-budget.mjs`（`pnpm test:e2e:goal-budget`；含恢复腿——加预算 → 显式恢复 → 按新预算不再受限 → 续跑到已完成）、`e2e/goal-idle.mjs`（`pnpm test:e2e:goal-idle`），已追加到 `test:e2e:all` 链尾；并入票 04 后链尾顺序为 `goal-controls` → `goal-budget` → `goal-idle`（e2e README 索引第 39、40 行，第 38 行是票 04 的 `goal-controls`）；`e2e/helpers.mjs` 与 `e2e/goal-stub.mjs` 的 usage 能力（见下）。
 - **单测**：agent-core `tests/task/goal-guardrails.test.ts`（8 条），另在 `goal-continuation.test.ts` / `goal.test.ts` / `sqlite-store.test.ts` 增补；desktop `tests/tasks/goal-guardrails-ipc.test.ts`（13 条）、`goal-orchestrator.test.ts`（+7）、`tests/e2e-stub/goal-stub.test.ts`（+5），`goal-harness.ts` 扩展；ui `goal-guardrails-view.test.ts`（6 条）、`goal-budget-control-ui.test.tsx`（10 条）、`goal-progress-row-ui`（+2）、`workspace-goal-ui`（+3）。
 
 ### 决定 1：配置入口——预算是 goal 级参数，入口在进度行；`/goal` 不附带预算参数
@@ -105,25 +105,38 @@
 
 ### 界面对接面
 
-- 进度行：`GoalProgressRow` 新增 prop `spentTokens`（目标用量 = `goalSpentTokens(goal, taskUsageTokens(current))`，`WorkspacePage` 从任务列表取）；行内只有一个挂载点 `<GoalBudgetControl>`（在累计时长之后）。`pauseReason` 的语义扩为「停留原因」：`goalPauseReason` 对未达成返回「连续 N 轮判定未过且无实质工具活动」、对预算受限返回「目标用量已达到 token 预算」。
+- 进度行：`GoalProgressRow` 新增 prop `spentTokens`（目标用量 = `goalSpentTokens(goal, taskUsageTokens(current))`，`WorkspacePage` 从任务列表取）；行内只有一个挂载点 `<GoalBudgetControl>`——在只读的状态播报区（`role="status"`）之外、按钮组 `goal-controls` 之前（live region 不含可聚焦控件），编辑态（`goal-edit-form`）下同样保留。`pauseReason` 的语义扩为「停留原因」：`goalPauseReason` 对未达成返回「连续 N 轮判定未过且无实质工具活动」、对预算受限返回「目标用量已达到 token 预算」；并入票 04 后 `WorkspacePage` 传的是 `goalPauseReason(goal) ?? goalPauseNote`（按状态推导的原因优先，其次才是宿主随快照下发的暂停说明）。
 - testid：`goal-budget-trigger`（带 `data-over`）、`goal-budget-spent`、`goal-budget-limit`、`goal-budget-add`、`goal-budget-editor`、`goal-budget-input`、`goal-budget-save`、`goal-budget-cancel`、`goal-budget-quick-add`、`goal-budget-error`。
 - 标记行不变：阻断轮仍显示「第 N 次迭代 · 未完成 · 下一步」，阻断原因由进度行承载（票 03 的口径）。
 - 用量显示取任务列表的最新账目，靠既有的目标事件 → `refreshTasks` 触发链刷新（每轮判定之后更新一次）。
 
-### 写给票 04（控制面）——边界与衔接点
+### 并入票 04：合并决定
 
-- **本票没有实现任何按钮组**（暂停 / 恢复 / 编辑 / 清除都归你）。进度行只多了一个 prop 与一行挂载点（在累计时长之后），`WorkspacePage` 只多了两处导入与一个 prop。
-- 恢复按钮须对「预算受限」「未达成」可用：恢复 = `goals.transition(taskId, "resume")` → `goals.continueTurn(taskId, { kind: "resume" })`，接缝已有用例锁定（`goal-orchestrator.test.ts`「预算受限后加预算并恢复」：加预算后恢复续跑、下一轮不再受限；对照：不加预算就恢复会立刻再次受限）。
-- **「预算受限 → 加预算 → 恢复 → 续跑」的 e2e 整条腿没有走**：你合入时我这边还没有恢复入口。现状覆盖：e2e 走到「预算受限 → 一键加预算 → 停留状态不变 → 重启保持」；恢复后的续跑由编排器接缝用例与宿主 IPC 用例覆盖。**请票 07 回归时补走这条腿**。
-- 「改目标后恢复」同理：编辑入口在你那边；状态机的 `resume` 不关心目标文本是否改过。
-- `goalPauseReason(goal)` 现在对未达成 / 预算受限也返回原因——如果你的按钮布局读 `pauseReason`，注意它不再只属于「已暂停」。
-- 加预算后不发本地命令反馈（预算显示本身就是即时反馈）；如果你想配 toast，`GoalBudgetControl` 的 `setBudget` prop 是可注入的变更入口。
+两票同基线并行开发，票 04 先合入集成分支（`555bc4c` / `53b718a`），本票后合入：先把本票的实现单独提交（`64accb1`，保护工作），再 `git merge feat/goal-mode`，14 个冲突文件由本票解决，合并提交 `a1ca6f3`。原则是**两边的实现与用例全部保留**，逐项决定如下：
+
+- **编排器**（`goal-orchestrator.ts`）：只有类型区冲突——票 04 的 `GoalContinueResult` 与本票的 `GoalBlockReason` 并列保留。`afterTurn` 判定之后的逻辑票 04 没碰，两道护栏原样在其位；票 04 提为工厂内局部函数的 `continueTurn`（返回发起结局）、`resume` / `edit` 接缝、带说明的暂停（`applyTransition` / `pauseIfActive` 的 `pauseReason`）原样保留，公开接缝 `transition(taskId, change)` 的签名不变。
+- **进度行**（`GoalProgressRow.tsx`）：以票 04 的版本为底，只叠本票的增量——`spentTokens` prop 与 `<GoalBudgetControl>` 的挂载点。位置按票 04 票面的提示：只读状态播报区（`role="status"`）之外、按钮组之前；编辑态同样保留（预算受限时改目标文本与加预算是并行的两件事）。票 04 的按钮组、行内编辑、已清除不渲染都原样保留。
+- **工作台**（`WorkspacePage.tsx`，git 自动合并）：进度行同时带票 04 的 `controls` 与本票的 `spentTokens`；**停留原因保持「按状态推导」**（票 04 给的两条路里的 (a)）：`pauseReason={goalPauseReason(goal) ?? goalPauseNote}`，没有改用快照携带，两种原因同时存在时按状态推导的优先。
+- **IPC 表 / preload / 主进程 handler**：取并集，顺序 `goalSet` → `goalResume` / `goalEdit` / `goalClear` → `goalSetBudget`。
+- **e2e 登记**：`test:e2e:all` 链尾 `goal-controls` → `goal-budget` → `goal-idle`；e2e README 索引第 38 行 `goal-controls`、第 39 行 `goal-budget`、第 40 行 `goal-idle`（本票此前写的「第 38、39 行」随之更正）。
+- **测试**：编排器接缝测试的替身取并集（`setGoalBudget` / `editGoal` / `verifyGoal` / `goalVerifications`，`list` 带用量账目），两票新增的用例组都完整保留；测试装配同时支持 usage（本票）与 `json`（票 04）；dev 替身的目标记录统一经票 04 的 `devGoal` 生成并补全 `budgetTokens / baselineTokens`；票 04 新增用例里的 `GoalRecord` 字面量在合并时补了这两个必填字段（单测运行时不报，typecheck 才报）。
+- agent-core（`index.ts` 根出口、`manager.ts` 的 `setGoalBudget` 与 `editGoal`）是「两边各加」的冲突，全部保留。
+
+### 写给票 04（控制面）——边界与衔接结果
+
+- **本票没有实现任何按钮组**（暂停 / 恢复 / 编辑 / 清除都归票 04）。进度行只多了预算控件这一个挂载点，`WorkspacePage` 只多了两处导入与一个 prop。
+- **恢复腿已在真实应用里走通**（此前写的「恢复腿留票 07」作废）：`goal-budget` 场景在「预算受限 → 一键加预算（停留状态不变）→ 重启后预算受限原样保持」之后接着走——点进度行的恢复按钮（`goal-resume`，走 `tasks:goal-resume`，本地命令反馈「目标已恢复」）→ 从暂停点续跑（不产生用户气泡）→ 该轮判定未过，但目标用量按新预算对账、不再受限 → 续跑一轮 → 判定通过 → 已完成。合并后预算受限态的按钮矩阵（恢复可用、可编辑、可清除、无暂停）也在该场景里断言。
+- **加预算不自动恢复**：预算受限的目标加预算后仍是「预算受限」，恢复由用户显式发起——与票 04 的恢复入口是两个动作，接缝上没有耦合。
+- 「改目标后恢复」：编辑入口在票 04（预算受限 / 未达成可编辑）；状态机的 `resume` 不关心目标文本是否改过，走的是同一条恢复路径（`goal-controls` 场景覆盖「编辑后恢复」）。
+- 接缝层证据仍在：`goal-orchestrator.test.ts`「预算受限后加预算并恢复」（加预算后恢复续跑、下一轮不再受限；对照：不加预算就恢复会立刻再次受限）。
+- 加预算后不发本地命令反馈（预算显示本身就是即时反馈）；`GoalBudgetControl` 的 `setBudget` prop 是可注入的变更入口。
 
 ### 写给票 06（重启恢复）
 
 - **重启时「预算受限」「未达成」必须原样保持，不得被恢复链路改成已暂停**：启动收尾只把 `active` 转 `paused`。这两个是护栏给出的停留态，原因（`idleStreak = 3` / 预算）要留着给用户看；改成已暂停会把「为什么停了」抹掉。
 - 随目标落库、重启不需要动的：`budgetTokens`、`baselineTokens`、两个连续计数、逐轮验证记录。重启后目标用量显示 = 任务用量账目（已落库）− 基线，无需重算（e2e 的重启段已验证：「预算受限」与「未达成」原样保持、预算与用量可读）。
-- 本票 e2e 两个场景的重启段是在你的恢复链路落地**之前**验证的（当前重启后非进行中的目标本就不变），你改恢复链路后请把这两个场景重跑一遍。
+- **恢复入口在重启后与会话内是同一条**：`goal-budget` 场景的重启段之后接着点恢复按钮续跑到已完成（并入票 04 后补的恢复腿）。你把启动收尾改成「进行中 → 已暂停」时不要碰到「预算受限」「未达成」这两态的恢复路径。
+- 本票 e2e 两个场景的重启段是在你的恢复链路落地**之前**验证的（当前重启后非进行中的目标本就不变），你改恢复链路后请重跑：链尾现在有三个新场景 `goal-controls`（票 04）/ `goal-budget` / `goal-idle`（e2e README 索引第 38–40 行），单跑分别是 `pnpm test:e2e:goal-controls`、`test:e2e:goal-budget`、`test:e2e:goal-idle`。
 
 ### 写给票 07（收口）——需同步进 GLOSSARY / ADR / README 的护栏措辞
 
@@ -133,7 +146,9 @@
 - 空转阈值 3 是规格定值、不做成配置项（常量 `GOAL_MAX_IDLE_ROUNDS`，与 `GOAL_MAX_VERIFICATION_FAILURES` 并列）。
 - 「用量达到预算即超」（`≥`）与「完成优先于预算」是本票的细化，ADR 里没有，核对时请注明。
 - README 功能清单的护栏一句话（随你的收口票）。
-- 全量链尾新增两个场景：`goal-budget.mjs`、`goal-idle.mjs`（README 索引第 38、39 行）。
+- **全量链尾新增三个场景**（并入票 04 后的顺序）：`goal-controls.mjs`（票 04）、`goal-budget.mjs`（本票，含恢复腿）、`goal-idle.mjs`（本票）；e2e README 索引第 38、39、40 行。本票此前写的「第 38、39 行」已更正。
+- **`goal-budget` 的恢复腿已在本票走通**（加预算 → 显式恢复 → 按新预算不再受限 → 续跑到已完成），不需要再补走；此前「恢复腿留票 07」的说法作废。
+- 两票合并后的一处呈现口径可一并核对：进度行的停留原因（`goal-progress-reason`）现在统一承载四种来源——完成判定连续不可用而暂停、护栏阻断为未达成 / 预算受限（按状态推导，`goalPauseReason`）、下一轮没能发起而暂停（宿主随快照下发的 `goalPauseNote`，票 04 追加 C）；前三种优先于最后一种。
 
 ### 验收自证
 
@@ -141,22 +156,28 @@
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 预算超限 → 预算受限；进度行与标记行口径正确，不误伤正常轮 | desktop `goal-guardrails-ipc`「目标用量达到预算 → 「预算受限」…」（越线轮的回复与判定完整留痕、原因事件序、不再续跑）「达到预算的那一轮判定通过 → 已完成」「对账基线：目标设定之前任务的用量不计入」；编排器接缝「token 预算」「完成优先于预算」；ui `goal-progress-row-ui`「护栏阻断的停留原因」、`workspace-goal-ui`「预算受限：…」；e2e `goal-budget` |
 | 子代理与压缩计入对账（口径 = 任务用量，含跨轮累计）       | agent-core `goal-guardrails`「主任务各轮、子代理、压缩与完成判定自身的用量都计入目标消耗」（四轮对话 + 真实 `task.compact` + 真实 `verifyGoal` + 子代理列入账，账目手算 3510）；desktop「对账口径 = 任务用量账目（主任务列 + 子代理列），跨轮累计」                                                                                                      |
-| 加预算或改目标后可恢复续跑                                | desktop「预算受限态直接加预算：…恢复后续跑按新预算对账」、`goal-set-budget` 两条；编排器接缝「加预算 → 状态机恢复 → continueTurn…」及对照用例；e2e `goal-budget`（加预算与重启保持；恢复腿留票 07）                                                                                                                                                      |
+| 加预算或改目标后可恢复续跑                                | desktop「预算受限态直接加预算：…恢复后续跑按新预算对账」、`goal-set-budget` 两条；编排器接缝「加预算 → 状态机恢复 → continueTurn…」及对照用例；e2e `goal-budget`（加预算 → 重启保持预算受限 → 显式恢复 → 按新预算不再受限 → 续跑到已完成）；票 04 的 `goal-controls-ipc`「恢复」组经真实 IPC 覆盖预算受限 / 未达成的恢复                                 |
 | 连续 3 空轮 → 未达成并呈现原因；有活动的未过轮清零        | desktop「第 3 轮空转 → 「未达成」…」「有实质工具活动的未过轮清零空转计数，不误触」「判定不可用的轮次不参与空转判定」「被用户拒绝…」「参数无效与不存在…」；编排器接缝「空转阻断」；ui `goal-guardrails-view`；e2e `goal-idle`                                                                                                                             |
 | 未设预算不受影响                                          | desktop「未设预算 = 不限」；编排器接缝「未设预算 = 不限」；agent-core `isGoalBudgetExceeded` 用例                                                                                                                                                                                                                                                        |
-| desktop 单测绿                                            | `goal-guardrails-ipc`（13）、`goal-orchestrator`（16，含新增 7）                                                                                                                                                                                                                                                                                         |
-| e2e 两场景                                                | `goal-budget.mjs`、`goal-idle.mjs`（各 3 跑 3 绿）                                                                                                                                                                                                                                                                                                       |
+| desktop 单测绿                                            | `goal-guardrails-ipc`（13）、`goal-orchestrator`（19，含本票新增 7）                                                                                                                                                                                                                                                                                     |
+| e2e 两场景                                                | `goal-budget.mjs`（含恢复腿）、`goal-idle.mjs`（各 3 跑 3 绿）                                                                                                                                                                                                                                                                                           |
 
 ### 验证记录
 
-- 单测：agent-core 753（基线 744）、desktop 651 + 1 skipped（基线 626 + 1）、ui 803（基线 782），全绿；`pnpm -r run typecheck` 0 错；`pnpm lint` 0 error（9 条既有 warning，均在未触碰的文件）；`check:adr`、`check:e2e-locators`（55 个场景文件）通过。
-- e2e（2026-11-26，**桌面处于锁屏**，`LogonUI` 存在）：
-  - 新场景 `goal-budget` 3 跑 3 绿、`goal-idle` 3 跑 3 绿；
-  - 回归绿：`goal-stub-probe`、`goal-mode`、`goal-continuation`；动了 `helpers.mjs` 的 provider 公共路径，按票 01 口径加跑 `compact`、`mcp`、`acceptance` 绿；最靠近改动面（`tool-result` 事件、循环经 `end()` 收尾）的 `smoke`、`work-plan`、`interrupt`、`live-tasks`、`input-queue` 绿。
-  - **没有跑全量链 `test:e2e:all`**，也不声称全量链绿；锁屏下基线即红的六个场景（`sidebar-archive` / `task-search` / `message-order` / `process-segments` / `persistent-workbench` / `window-controls`）未追。
+- 单测与静态检查（2026-11-26，**并入票 04 之后从头重跑**；被中断那一轮与合并之前的检查结果按编排者要求全部作废、不沿用）：先重建 agent-core dist，再逐包跑——agent-core 764（基线 744；本票 +9、票 04 +11）、desktop 681 + 1 skipped（基线 626 + 1；本票 +25、票 04 +30）、ui 847（基线 782；本票 +21、票 04 +44），退出码全 0；每包都等于「基线加两票新增之和」，两边的用例一条未丢。`pnpm -r run typecheck` 0 错；`pnpm lint` 0 error（9 条既有 warning，均在未触碰的文件）；相对票 04 尖端的 42 个改动文件 `prettier --check` 通过；`check:e2e-locators`（56 个场景文件）与 `check:adr`（35 篇）通过；全仓 `pnpm build` 通过。
+- e2e（2026-11-26，全仓 build 之后逐个实跑，每个场景是独立进程）：**24 次执行、退出码全 0**。
+  - 桌面锁屏状态如实记录：实跑前查询 `LogonUI` 存在（锁屏），全部跑完后再查已不存在（解锁）——锁屏状态在这批实跑期间发生了切换，无法逐场景断定各自运行时是否锁屏。
+  - 本票场景：`goal-budget`（扩展后含恢复腿）3 跑 3 绿（另有首跑 1 次绿）；`goal-idle` 3 跑 3 绿。
+  - 票 04 的 `goal-controls`（合并后必须仍绿）绿。
+  - 既有 goal：`goal-mode`、`goal-continuation`、`goal-stub-probe` 绿。
+  - 动了 `helpers.mjs` 的 provider 公共路径，按票 01 口径加跑：`compact`、`mcp`、`acceptance` 绿。
+  - 最靠近改动面（`tool-result` 事件、循环经 `end()` 收尾、停止按钮）：`interrupt`、`live-tasks`、`smoke`、`work-plan` 绿。
+  - 链外：输入队列族五个（`input-queue` / `-items` / `-pause` / `-composer` / `-restart`）、`task-queue-restart`、`exit-recovery` 绿。
+  - **没有跑全量链 `test:e2e:all`**，也不声称全量链绿；锁屏下基线即红的六个场景（`sidebar-archive` / `task-search` / `message-order` / `process-segments` / `persistent-workbench` / `window-controls`）未跑。
 - 先红后绿：每条护栏规则都先有会红的测试——基线与预算字段、`setGoalBudget`、对账纯函数、旧库迁移、`isGoalToolActivity` 新定义、`tool-result` 的 `executed`、空转阻断、被拒 / 无效调用不算活动、预算阻断、`goal-set-budget` IPC、ui 停留原因 / 文案 / 解析 / 预算控件三步 / 进度行挂载 / 工作台接线、stub 的 usage 能力。
 - 实现之后才补的守护用例逐组做了变异核查，确认撤掉对应实现时恰好对应用例变红：空转阈值改成 2 → 空转三条全红；撤掉空转阻断分支 → 接缝与 IPC 用例红；撤掉预算对账分支 → 接缝两条与 IPC 用例红；预算检查抢在「判定通过」之前 / 对账只读主任务列 / 未设预算当成 0 / 对账不看基线 → 各自对应用例红。空转阻断的主用例在实现后调整过结构（见踩坑点），同样以变异核查确认了最终版本敏感。
 - 变异核查用的一次性脚本与取证探针均已删除，不进提交。
+- 并入票 04 之后补的 e2e 恢复腿是在实现已存在之后加的，同样做了变异核查：让主进程拒绝预算受限目标的恢复 → 场景前六段照常通过、在恢复腿精确变红（「目标已恢复」的反馈不出现，请求时序里没有恢复后的续跑轮）；撤掉变异（源码与提交版本逐字一致、全仓重建）后 3 跑 3 绿。
 - 用例初版有几处错在测试自身（非实现），都已修正：预算边界用例里一行多余的断言；工具活动用例把另一个工具的副作用也计入了期望；e2e 两处观察点有时序竞争、一处期望值笔误、一处依赖会被折叠的中间回复。
 
 ### 踩坑点
@@ -167,13 +188,16 @@
 - **同一轮次分组里较早的助手回复会被折叠**：e2e 的观察点用标记行与「验证中」占位，等文本只等最新一条回复。
 - **`text-accent-fg` / `bg-accent-soft` 不是存在的 Tailwind 类**（仓里 `QueueBar` 留过同坑注释）：主按钮是 `bg-accent text-on-accent hover:bg-accent-hover`。
 - **非空断言留给局部常量**：一键加预算里 `goal.budgetTokens!` 在闭包中收窄不了，先取 `const limit` 再用。
+- **长行冲突替换时别丢行首的公共部分**：`packages/desktop/package.json` 的 `test:e2e:all` 是一整行长命令，解决冲突时替换文本只写了链尾、把行首的 `"test:e2e:all": "node … &&` 弄丢了，直到 `pnpm` 报 manifest 解析失败才发现。解决完冲突先让 `node -e "JSON.parse(...)"` 过一遍，并与自己提交里的那一行逐字对比（只应差出对方新增的那一段）。
+- **以对方版本为底叠自己的增量时，用 `git diff <对方尖端> -- <文件>` 反查**：被删掉的行应当只有有意改写的几处——靠这一步发现替换时带掉了对方写在 `goalSet` 上方的两行注释。
+- **新增必填字段要让并行分支的夹具补上**：并入后 typecheck 报对方新增用例里的 `GoalRecord` 字面量缺 `budgetTokens / baselineTokens`——单测在运行时不报，typecheck 才报。
 
 ### 遗留与已知限制
 
 - **越线的那一轮不会被中途打断**（编排者裁决 4 的对账时点）：越线后最多再多花「一轮工作 + 一次判定」的用量。
 - **判定请求失败时的用量不入账**（ADR 0029 尽力而为：usage 未结算记 0），这部分消耗不计入预算。
 - **目标停留期间的普通对话也计入目标用量**：用量 = 任务账目 − 基线是字面口径，预算受限 / 未达成 / 已暂停时用户在同一任务里的普通消息同样入账——进度行的「用量」会继续涨，恢复后的对账也把它算进去。常见预算量级（十万级）与一键加预算的档位下不构成问题，如实记录。
-- **宿主层没有跑真实的子代理 / 压缩流程**：目标进行中 `/compact` 被主进程执行检查拒绝（规格项，归票 04），宿主用例的子代理列经 `manager.addUsage`（子代理运行时的同一入账入口）入账；压缩走真实路径的证据在 agent-core 层（`task.compact` 的 usage 入主任务列并计入目标用量）。
+- **宿主层没有跑真实的子代理 / 压缩流程**：目标进行中 `/compact` 被拒绝（规格项，票 04 已落地：提示先暂停目标），宿主用例的子代理列经 `manager.addUsage`（子代理运行时的同一入账入口）入账；压缩走真实路径的证据在 agent-core 层（`task.compact` 的 usage 入主任务列并计入目标用量）。
 - **e2e 没有覆盖「被拒绝的调用不算活动」的真实界面路径**（需要审批卡片的拒绝交互）；该规则由 agent-core（真实事件流）与 desktop（真实 HTTP mock）两层单测覆盖。
 - **回合出错仍是直接已暂停、不重试**（票 03 转来的待定项）：不在本票七个验收项内，没有扩展。无人值守长跑里一次网络抖动会停下，若要续跑需配连续失败计数防死循环——建议票 07 或后续安排。
 - 旧库里升级前设定的目标基线读回 0：给这类目标设预算时，目标之前的任务用量会被算进来（只影响开发期数据）。
