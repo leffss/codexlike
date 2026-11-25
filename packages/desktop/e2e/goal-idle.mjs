@@ -110,17 +110,19 @@ async function main() {
       work(ctx, { body, index }) {
         if (index === 1) return ctx.textRound("任务已建立");
         if (index === 2)
+          // 每段自成一段（段间空行）：流式期间各段先后拼进同一条回复，不分段的话
+          // 对首段的 exact 文本匹配只在一个间隔内成立
           return ctx.textChunksRound(
-            Array.from({ length: 60 }, (_, i) => `首轮第${i}段。`),
+            Array.from({ length: 60 }, (_, i) => `首轮第${i}段。\n\n`),
             250
           );
         const isContinuation = (lastUserText(body) ?? "").includes(
           CONTINUATION_ANCHOR
         );
         if (isContinuation && index === 3)
-          return ctx.textRound(IDLE_REPLIES[1]);
+          return ctx.textRound(IDLE_REPLIES[0]);
         if (isContinuation && index === 4)
-          return ctx.textRound(IDLE_REPLIES[2]);
+          return ctx.textRound(IDLE_REPLIES[1]);
         if (index === 5) return ctx.textRound("甲的处理结果");
         return ctx.textRound(WORK_SENTINEL);
       },

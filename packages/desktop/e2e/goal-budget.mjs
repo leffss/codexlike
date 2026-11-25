@@ -14,6 +14,8 @@
 // 5) 重启后「预算受限」原样保持，预算与用量可读；
 // 6) 用户显式点「恢复」→ 从暂停点续跑（不产生用户气泡）→ 那一轮判定未过，
 //    但目标用量按新预算对账、未再受限 → 照常续跑 → 判定通过 → 已完成。
+// 观察点的纪律：循环走得快，「恢复后进行中」只在恢复那一轮的慢速流期间成立；
+// 慢速流的各段自成一段（见 segments），状态观察之前不排任何别的等待。
 // 运行：pnpm test:e2e:goal-budget（先 pnpm build）。
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,6 +79,14 @@ function classify(body) {
   if (text.includes(CONTINUATION_ANCHOR)) return "续跑轮";
   return `工作轮:${text.slice(0, 3)}`;
 }
+
+/**
+ * 慢速流的分段文本：每段自成一段（段间空行）。流式期间各段先后拼进同一条
+ * 回复——不分段的话 `getByText(…, { exact: true })` 只在「本段已到、下一段
+ * 未到」的一个间隔内成立，等待的起点稍晚就永远等不到（解锁态补跑时红过一次）。
+ */
+const segments = (label, count) =>
+  Array.from({ length: count }, (_, i) => `${label}第${i}段。\n\n`);
 
 const markerTexts = (window) =>
   window.getByTestId("goal-verification-marker").allTextContents();
@@ -193,18 +203,12 @@ async function main() {
         if (text === "建立任务") return ctx.textRound("任务已建立");
         if (text === GOAL_TEXT)
           // 首轮慢速流（15 秒）：期间经进度行的预算控件设定预算
-          return ctx.textChunksRound(
-            Array.from({ length: 60 }, (_, i) => `首轮第${i}段。`),
-            250
-          );
+          return ctx.textChunksRound(segments("首轮", 60), 250);
         if (text.includes(CONTINUATION_ANCHOR)) {
           continuationsSeen += 1;
-          // 恢复后的那一轮用慢速流：留出「恢复后目标进行中」的观察窗口
+          // 恢复后的那一轮用慢速流（约 6 秒）：留出「恢复后目标进行中」的观察窗口
           if (text.includes(RESUME_ANCHOR))
-            return ctx.textChunksRound(
-              Array.from({ length: 8 }, (_, i) => `恢复后续跑第${i}段。`),
-              300
-            );
+            return ctx.textChunksRound(segments("恢复后续跑", 20), 300);
           return ctx.textRound(`续跑轮的回复 ${continuationsSeen}`);
         }
         if (text === "补充甲")
@@ -475,16 +479,11 @@ async function main() {
     // ---- 8) 加预算后由用户显式恢复：从暂停点续跑 → 按新预算不再受限 → 已完成 ----
     const requestsBeforeResume = requestCount();
     await window.getByTestId("goal-resume").click();
-    // 恢复走本地命令反馈；续跑轮的慢速流进行中：目标已回到「进行中」
-    await window
-      .getByTestId("command-feedback")
-      .filter({ hasText: "目标已恢复" })
-      .waitFor({ timeout: 10_000 });
-    await waitAssistantText(window, "恢复后续跑第0段。");
-    assert(
-      (await restartedRow.getAttribute("data-goal-status")) === "active",
-      "恢复后目标应回到「进行中」"
-    );
+    // 恢复即回到「进行中」并以内部输入发起续跑轮（慢速流进行中，约 6 秒的观察
+    // 窗口）。观察点先看状态、再看文本与反馈：不把任何等待排在状态观察之前。
+    await restartedRow
+      .and(window.locator('[data-goal-status="active"]'))
+      .waitFor({ timeout: 15_000 });
     assert(
       (await progressStatus(window)) === "进行中",
       `恢复后进度行状态应为「进行中」（实际 ${await progressStatus(window)}）`
@@ -501,6 +500,13 @@ async function main() {
           .getAttribute("data-over")) === null,
       `恢复进行中预算显示应为「用量 750 / 100,500」且不标警示（实际 ${await budgetText(window)}）`
     );
+    // 续跑轮的回复正在流入（首段自成一段，不依赖流式拼接的瞬时文本）
+    await waitAssistantText(window, "恢复后续跑第0段。");
+    // 恢复走本地命令反馈（info 类反馈停留约 6 秒）
+    await window
+      .getByTestId("command-feedback")
+      .filter({ hasText: "目标已恢复" })
+      .waitFor({ timeout: 5_000 });
     await restartedRow
       .and(window.locator('[data-goal-status="completed"]'))
       .waitFor({ timeout: 30_000 });
@@ -574,6 +580,15 @@ async function main() {
     assert(
       requestCount() - requestsBeforeResume === 4,
       `恢复之后应恰好 4 个请求（恢复的续跑轮、判定、续跑轮、判定；实际 ${requestCount() - requestsBeforeResume}）`
+    );
+    // 三个续跑轮请求里只有第二次是「恢复」的内部输入（按各自最后一条 user 消息
+    // 判别：更早的续跑指令会留在后续请求的历史里，不能按整个请求体判）
+    const resumedInputs = seenBodies
+      .filter((body) => classify(body) === "续跑轮")
+      .map((body) => (lastUserText(body) ?? "").includes(RESUME_ANCHOR));
+    assert(
+      same(resumedInputs, [false, true, false]),
+      `续跑轮请求里应只有恢复后的首轮带恢复指令（实际 ${JSON.stringify(resumedInputs)}）`
     );
     // 恢复后的续跑轮是内部输入：用户只说过建任务、目标原文与排队消息
     assert(
