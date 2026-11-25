@@ -59,6 +59,7 @@ import { terminalNameIndex } from "../lib/terminal-read-view";
 import { useTickingNow } from "../lib/use-ticking-now";
 import { AssistantActions } from "./AssistantActions";
 import { BackToLatestButton } from "./BackToLatestButton";
+import { GoalVerificationMarker } from "./GoalVerificationMarker";
 import { TerminalReadMarker } from "./TerminalReadMarker";
 import { DisclosureArrow } from "./DisclosureArrow";
 import { InteractionHistory } from "./InteractionHistory";
@@ -616,6 +617,10 @@ function SegmentView(props: {
     return (
       <TerminalStreamMarker session={segment} onOpen={props.onOpenTerminal} />
     );
+  }
+  if (segment.kind === "goal-verification") {
+    // 完成判定结论（ADR 0035）：流内单行标记「第 N 次迭代 · 已完成/未完成」
+    return <GoalVerificationMarker verification={segment.verification} />;
   }
   if (segment.kind === "thinking") {
     return <ThinkingBlock segment={segment} />;

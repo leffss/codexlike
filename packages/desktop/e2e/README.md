@@ -51,6 +51,8 @@
 | 32  | window              | `window-controls.mjs`      | 自绘标题栏：菜单移除、原生最小化/最大化/还原、状态同步、设置/窄窗/主题及关闭保存                                                                                             |
 | 33  | external-links      | `external-links.mjs`       | assistant Markdown HTTP 链接真实点击：系统打开一次、主窗口 URL/标题栏/消息/草稿保留、无额外窗口及正常退出                                                                    |
 | 34  | workspace-opener    | `workspace-opener.mjs`     | 工作区打开器（GLOSSARY）：标题栏分裂按钮草稿态可用、候选列表（E2E 钩子全量）、点选即打开并记默认、主按钮用默认、重启后默认保留                                               |
+| 35  | goal-stub           | `goal-stub-probe.mjs`      | stub 双线探针（goal-mode 票 01）：工作轮 / 判定线各自按脚本应答、互不串线                                                                                                    |
+| 36  | goal                | `goal-mode.mjs`            | 目标模式最小闭环（ADR 0035）：/goal 设定 → 首轮 → 判定通过 → 已完成；队列互锁、Stop = 暂停、重启可读                                                                         |
 
 链外（不进 test:e2e:all）：
 

@@ -93,6 +93,9 @@ function taskApi(channels: { [K in keyof typeof IPC.tasks]: string }): TaskApi {
         requestId,
         response
       ),
+    // 目标模式（ADR 0035）：/goal 设定目标（原文作为首轮用户消息发出）
+    goalSet: (taskId, text, options) =>
+      ipcRenderer.invoke(channels.goalSet, taskId, text, options),
   };
 }
 

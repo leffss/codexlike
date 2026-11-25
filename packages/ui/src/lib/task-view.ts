@@ -1,4 +1,5 @@
 import type {
+  GoalVerificationRecord,
   InteractionRecord,
   SubagentSnapshot,
   TaskEvent,
@@ -208,6 +209,17 @@ export interface TerminalSegment extends SegmentBase {
   signal?: number;
 }
 
+/**
+ * 完成判定标记行段（ADR 0035，GLOSSARY「完成判定」）：目标模式每轮判定在
+ * 消息流原位留一行「第 N 次迭代 · 已完成/未完成」。结论本身随任务落库
+ * （任务时间线的 goal-verification 条目），重启后由时间线重建；运行期由
+ * goal-verification 事件追加。先例 PlanMarkerRow（流内极简标记行）。
+ */
+export interface GoalVerificationSegment extends SegmentBase {
+  kind: "goal-verification";
+  verification: GoalVerificationRecord;
+}
+
 /** 消息段：消息流时序序列的最小呈现单元 */
 export type MessageSegment =
   | UserSegment
@@ -219,7 +231,8 @@ export type MessageSegment =
   | ToolCallSegment
   | SubagentSegment
   | TerminalSegment
-  | InteractionSegment;
+  | InteractionSegment
+  | GoalVerificationSegment;
 
 /** 下一个稳定序号：基于现有最大序号递增 */
 function nextSeq(items: MessageSegment[]): number {
@@ -300,6 +313,39 @@ function append(
   segment: MessageSegment
 ): MessageSegment[] {
   return [...items, segment];
+}
+
+/** 验证记录 → 标记行段（恢复与运行期同一映射：段建立时刻 = 判定时刻，归当前轮） */
+function goalVerificationSegmentOf(
+  verification: GoalVerificationRecord,
+  segments: MessageSegment[]
+): GoalVerificationSegment {
+  return {
+    kind: "goal-verification",
+    id: verification.id,
+    seq: nextSeq(segments),
+    turnId: deriveTurnId(segments, verification.id),
+    responseId: null,
+    at: parseIso(verification.createdAt),
+    verification,
+  };
+}
+
+/**
+ * 完成判定结论入流（goal-verification 事件）：尾部追加标记行段；同一记录
+ * 重复到达（重放 / 迟到）幂等不重复。
+ */
+export function appendGoalVerification(
+  items: MessageSegment[],
+  verification: GoalVerificationRecord
+): MessageSegment[] {
+  if (
+    items.some(
+      (item) => item.kind === "goal-verification" && item.id === verification.id
+    )
+  )
+    return items;
+  return append(items, goalVerificationSegmentOf(verification, items));
 }
 
 /** 按 id 整段替换（封闭集操作二）：保持段 id 与序号不变 */
@@ -389,6 +435,11 @@ export function initialTranscript(
         // 恢复的记录只有单一时刻：无执行耗时（呈现层省略），at 即发生时刻
         startedAt: parseIso(call.createdAt),
       });
+      continue;
+    }
+    // 完成判定结论（ADR 0035）：按判定时刻并入时间线，重建为标记行段
+    if (item.kind === "goal-verification") {
+      segments.push(goalVerificationSegmentOf(item.verification, segments));
       continue;
     }
     const message = item.message;

@@ -25,13 +25,12 @@ import {
   type WorktreeService,
 } from "@codexlike/agent-core/node";
 
-import type { TaskEvent } from "@codexlike/agent-core";
-
 import type { ProfileStore } from "../profiles/profile-store";
 import type { TaskExitRuntime } from "../lifecycle/application-exit";
 import { normalizeModelInput } from "../shared/model-value";
 import { closeTaskSessions } from "../terminal/terminal-lifecycle";
 import { createInterruptRegistry } from "./interrupt-registry";
+import { createGoalOrchestrator } from "./goal-orchestrator";
 import {
   createMemoryInputQueueStore,
   createTaskInputQueues,
@@ -55,6 +54,7 @@ import { prepareTaskWorkspace } from "./worktree-flow";
 import { canonicalWorkspacePath, workspaceSharing } from "./workspace-sharing";
 import {
   IPC,
+  type GoalSendOptions,
   type QueueOperationResult,
   type QueueSnapshot,
   type TaskEventEnvelope,
@@ -99,8 +99,8 @@ export function registerTaskHandlers(options: {
 }): TaskExitRuntime & {
   startInputQueues(): void;
   pumpTaskQueue(): void;
-  /** 终端生命周期事件下发（ADR 0033 票03）：main.ts 装配桥接 manager.onEvent。 */
-  pushTaskEvent(taskId: string, event: TaskEvent): void;
+  /** 任务级事件下发（终端生命周期 / 目标状态）：main.ts 装配桥接与 goal 控制面共用。 */
+  pushTaskEvent(taskId: string, event: TaskEventEnvelope["event"]): void;
 } {
   const {
     manager,
@@ -316,6 +316,42 @@ export function registerTaskHandlers(options: {
         }
       },
     };
+  }
+
+  // goal 编排器（ADR 0035）：回合结束的 idle 边界衔接完成判定（落位先例 =
+  // 输入队列——跨回合编排住 desktop）。目标进行中期间任务视为持续执行：
+  // 判定在执行登记注销之前进行，判定全程仍占执行席（见 deliverMessage 收尾）。
+  const goals = createGoalOrchestrator({
+    manager,
+    // apiKey 只在主进程解密：按任务上次发送所用的 Provider Profile 解析判定模型
+    profileFor: async (profileId) =>
+      (await profiles.list()).find((item) => item.id === profileId),
+    emit: pushTaskEvent,
+    isStopping: () => stopping,
+  });
+
+  /**
+   * 消息流结束后的收尾（完成 / 出错 / 用户中断）：先过目标模式的 idle 边界
+   * ——进行中的目标在此完成判定，再注销执行登记。判定期间执行登记仍在，
+   * 任务继续占任务并发一席、输入队列不消费（GLOSSARY「目标模式」）。
+   */
+  async function settleAfterStream(
+    taskId: string,
+    signal: AbortSignal,
+    end: () => void
+  ): Promise<void> {
+    try {
+      // 终态事件已全部下发（流已排空）：宿主活动态的 outcome 即本轮结局
+      await goals.afterTurn(taskId, {
+        signal,
+        outcome: liveTasks.activity(taskId).outcome,
+      });
+    } catch (error) {
+      // 编排异常不得让执行登记泄漏：记录后照常收尾
+      console.error("[tasks] 目标 idle 边界编排异常", error);
+    } finally {
+      end();
+    }
   }
 
   ipcMain.handle(IPC.projects.list, () => manager.projects());
@@ -824,8 +860,10 @@ export function registerTaskHandlers(options: {
             console.error("[tasks] 事件流意外终止", error);
           })
           .finally(() => {
-            // 流结束（完成 / 出错 / 用户中断）后注销登记，停止按钮回到无效态
-            end();
+            // 流结束（完成 / 出错 / 用户中断）：目标模式的 idle 边界先行
+            // （完成判定），编排收尾后注销登记——停止按钮回到无效态。
+            // 返回收尾 Promise：退出屏障的排空会等在途判定落定。
+            return settleAfterStream(taskId, controller.signal, end);
           })
       );
     } catch (error) {
@@ -1406,6 +1444,74 @@ export function registerTaskHandlers(options: {
     }
   );
 
+  /**
+   * 目标可设定的任务侧前置（GLOSSARY「目标」，ADR 0035）：与下方的设定落库
+   * 之间不得 await——检查通过到目标落库必须是同一同步段。
+   */
+  function assertGoalSettable(taskId: string): void {
+    assertOpen();
+    const record = manager.list().find((item) => item.id === taskId);
+    if (!record) throw new Error("任务不存在或已移除");
+    if (record.archivedAt !== null)
+      throw new Error("任务已归档，请先恢复再设定目标");
+    const executionState = management.execution(taskId);
+    if (executionState?.waitingForUser)
+      throw new Error("任务正在等待审批或问答，请先回应后再设定目标");
+    if (executionState?.running)
+      throw new Error("任务正在执行，请等回复结束后再设定目标");
+    if (taskQueue.isQueued(taskId))
+      throw new Error("任务排队中，请等待开跑后再设定目标");
+  }
+
+  /**
+   * /goal 设定目标（ADR 0035）：设定与首轮是同一个意图——目标先落库为
+   * 「进行中」（回合结束的 idle 边界才会进入完成判定），随即以目标原文作为
+   * 首条用户消息发出首轮（走用户发送主路径：满员照旧进任务排队）。
+   * 首轮启动失败即回滚目标，不留「进行中却没有回合」的半成品。
+   * 一任务同时至多一个未结束的目标（重复设定由 agent-core 拒绝）。
+   */
+  ipcMain.handle(
+    IPC.tasks.goalSet,
+    (
+      _e: IpcMainInvokeEvent,
+      taskId: unknown,
+      text: unknown,
+      options: unknown
+    ) =>
+      track(
+        (async () => {
+          if (typeof taskId !== "string" || typeof text !== "string")
+            throw new Error("设定目标：参数不合法");
+          if (
+            options !== undefined &&
+            (options === null || typeof options !== "object")
+          )
+            throw new Error("设定目标：发送参数不合法");
+          const sendOptions = options as GoalSendOptions | undefined;
+          // 首个 await 之前是同一同步段：检查通过到目标落库之间无交错窗口
+          assertGoalSettable(taskId);
+          const goal = manager.setGoal(taskId, text);
+          pushTaskEvent(taskId, { type: "goal-changed", goal });
+          try {
+            await send(
+              taskId,
+              text,
+              sendOptions?.providerProfileId,
+              undefined,
+              sendOptions?.thinkingEffort,
+              sendOptions?.approvalMode,
+              sendOptions?.model
+            );
+          } catch (error) {
+            manager.discardGoal(taskId);
+            pushTaskEvent(taskId, { type: "goal-changed", goal: null });
+            throw error;
+          }
+          return manager.goal(taskId)!;
+        })()
+      )
+  );
+
   function continueInputQueues() {
     for (const record of manager.list()) {
       // 跳过执行中的任务：此时 onIdle 会把在途插话误判为已完成而提前
@@ -1419,13 +1525,16 @@ export function registerTaskHandlers(options: {
   }
 
   /**
-   * 执行现场之外的任务级事件下发（终端生命周期，ADR 0033 票03）：终端
-   * 会话宿主级常驻、在消息循环之外启停，经 ensureExecution 延续任务水位
-   * （与 acceptQueue 同构，空闲/终态任务的信封照常可挂），全部工作台
-   * 窗口收到同一权威信封。任务已移除（无现场可建）时静默丢弃——
+   * 执行现场之外的任务级事件下发（终端生命周期，ADR 0033 票03；目标状态与
+   * 完成判定，ADR 0035）：宿主级常驻、在消息循环之外启停，经 ensureExecution
+   * 延续任务水位（与 acceptQueue 同构，空闲/终态任务的信封照常可挂），全部
+   * 工作台窗口收到同一权威信封。任务已移除（无现场可建）时静默丢弃——
    * 视图已随任务撤下，无消费方。
    */
-  function pushTaskEvent(taskId: string, event: TaskEvent): void {
+  function pushTaskEvent(
+    taskId: string,
+    event: TaskEventEnvelope["event"]
+  ): void {
     const executionId = liveTasks.ensureExecution(taskId);
     if (executionId === null) return;
     const envelope = liveTasks.accept(taskId, executionId, event);

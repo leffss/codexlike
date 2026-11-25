@@ -41,6 +41,14 @@ const TERMINAL_EVENT_TYPES = [
   "terminal-title-changed",
 ];
 
+/**
+ * 目标模式事件类型（ADR 0035）：goal-changed（目标状态快照）与 goal-verification
+ * （完成判定结论）。完成判定在回合结束后的 idle 边界发出——晚于终态事件；
+ * Stop = 暂停的目标状态变化也紧随用户停止。两者都是任务级状态快照，不是
+ * 执行现场的新正文/工具：终态后与停止后一律放行（与终端生命周期同口径）。
+ */
+const GOAL_EVENT_TYPES = ["goal-changed", "goal-verification"];
+
 export function createLiveTasks(manager: TaskManager) {
   const tasks = new Map<string, LiveExecution>();
   // 恢复态中断任务的「本会话已查看」记账：无执行现场的任务没有 viewed
@@ -100,7 +108,9 @@ export function createLiveTasks(manager: TaskManager) {
         event.type !== "task-queue-changed" &&
         // 终端生命周期（ADR 0033）：任务终态后终端仍会启停（宿主级常驻），
         // 与 queue-changed 同口径延续任务水位
-        !TERMINAL_EVENT_TYPES.includes(event.type))
+        !TERMINAL_EVENT_TYPES.includes(event.type) &&
+        // 目标模式（ADR 0035）：完成判定在回合终态之后的 idle 边界发出
+        !GOAL_EVENT_TYPES.includes(event.type))
     )
       return null;
     // 停止后仅接收清理终态，不能再显示新的正文、工具开始或等待请求。
@@ -125,6 +135,9 @@ export function createLiveTasks(manager: TaskManager) {
         "task-queue-changed",
         // 终端生命周期（ADR 0033）：停止后终端照常启停
         ...TERMINAL_EVENT_TYPES,
+        // 目标模式（ADR 0035）：停止后的目标状态变化（Stop = 暂停）与已在途
+        // 判定的结论照常下发，否则界面停在停止前的目标状态
+        ...GOAL_EVENT_TYPES,
       ].includes(event.type)
     )
       return null;
@@ -237,6 +250,8 @@ export function createLiveTasks(manager: TaskManager) {
       events: live ? [...live.events] : [],
       pendingInteractions: manager.get(id)?.pendingInteractions ?? [],
       activity: activity(id),
+      // 当前目标（ADR 0035）：读库——目标状态随任务落库，不依赖执行现场
+      goal: manager.goal(id),
     };
   }
   function markViewed(id: string, sequence: number) {

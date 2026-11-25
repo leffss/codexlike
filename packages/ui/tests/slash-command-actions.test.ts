@@ -84,6 +84,18 @@ describe("planSlashCommand", () => {
       type: "new-task",
     });
   });
+
+  it("/goal 带目标文本 → set-goal；无参数 → 用法提示；没有任务时不可用（ADR 0035）", () => {
+    expect(
+      planSlashCommand({ name: "goal", argument: "让示例测试全部通过" }, true)
+    ).toEqual({ type: "set-goal", text: "让示例测试全部通过" });
+    expect(planSlashCommand({ name: "goal", argument: "" }, true)).toEqual({
+      type: "goal-missing-argument",
+    });
+    expect(
+      planSlashCommand({ name: "goal", argument: "让示例测试全部通过" }, false)
+    ).toEqual({ type: "needs-task" });
+  });
 });
 
 describe("matchModelsForModelSwitch（/model 关键词匹配，票 02 模型级平铺）", () => {

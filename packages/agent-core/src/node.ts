@@ -122,6 +122,23 @@ export type {
 export { generateCommitMessage } from "./git/commit-message";
 // 任务用量尽力而为入账（ADR 0029）：宿主为任务域辅助调用补记真实 usage
 export { settleTaskUsage } from "./task/usage";
+// 目标模式（ADR 0035）：完成判定的 prompt 构造与模型调用（依赖 ai 的 generateText，
+// 仅 Node 宿主）；目标实体类型、六态状态机见根出口，目标 API 在 TaskManager。
+// TaskManager.verifyGoal 已封装一次完整判定（含 fail-open 与验证记录落库），
+// 这些出口供宿主诊断与测试直接取用。
+export {
+  GOAL_VERIFICATION_MARKER,
+  GOAL_VERIFICATION_SYSTEM_PROMPT,
+  buildGoalVerificationPrompt,
+  failOpenGoalVerdict,
+  parseGoalVerdict,
+  requestGoalVerdict,
+} from "./goal/verifier";
+export type {
+  GoalVerificationOutcome,
+  GoalVerificationResult,
+} from "./goal/verifier";
+export { GOAL_TRANSITION_NAMES } from "./goal/state-machine";
 // 终端会话（ADR 0033）：管理器核心 + PtyPort 端口接口——node-pty 适配器
 // （02 票）在 desktop 实现该端口后注入；agent-core 不引入任何原生依赖
 export { createTerminalSessionManager } from "./terminal/manager";

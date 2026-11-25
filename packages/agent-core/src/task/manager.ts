@@ -9,17 +9,39 @@ import type {
   TaskResourceState,
 } from "../context/resource-types";
 import {
+  GOAL_TEXT_MAX_LENGTH,
+  type GoalRecord,
+  type GoalVerdict,
+  type GoalVerificationRecord,
+} from "../goal/types";
+import {
+  advanceGoal,
+  isGoalOpen,
+  type GoalTransition,
+} from "../goal/state-machine";
+import {
+  buildGoalVerificationPrompt,
+  failOpenGoalVerdict,
+  requestGoalVerdict,
+  type GoalVerificationResult,
+} from "../goal/verifier";
+import {
   createLanguageModelFromProfile,
   type ThinkingEffort,
 } from "../provider/language-model";
-import type { ProviderProfile } from "../provider/provider-profile";
+import {
+  resolveModelOf,
+  type ProviderProfile,
+} from "../provider/provider-profile";
 import type { TerminalSessionRecord } from "../terminal/types";
 import type { ToolDefinition } from "../tools/types";
 
 import { createAgentTask, type AgentTask } from "./agent-task";
 import type { ApprovalMode } from "./approval";
+import { DEFAULT_MODEL_MAX_RETRIES } from "./execution-settings";
 import type { TaskPersistence } from "./persistence";
 import type { TaskSearchResult } from "./search";
+import { settleTaskUsage } from "./usage";
 import { workbenchKey } from "./workbench-state";
 import type { SubagentsConfig } from "./subagent";
 import type {
@@ -185,6 +207,42 @@ export interface TaskManager {
   /** 最近一次 compact 记录（/status「已压缩」标记）；从未压缩为 null */
   latestCompact(taskId: string): CompactRecord | null;
   cancelInteractions(reason: string): void;
+  /**
+   * 设定目标（GLOSSARY「目标」，ADR 0035）：目标原文同时充当首条指令与完成
+   * 判定标准，设定即为「进行中」。一任务同时至多一个未结束的目标——上一目标
+   * 仍在进行中/已暂停/预算受限时抛错。返回落库后的目标记录。
+   */
+  setGoal(taskId: string, text: string): GoalRecord;
+  /** 当前目标（最近一次设定；从未设定为 null） */
+  goal(taskId: string): GoalRecord | null;
+  /**
+   * 推进当前目标的状态机（六态转换表见 goal/state-machine）：落库并返回
+   * 新记录。越界转换、无目标、任务不存在以中文错误拒绝。
+   * 累计时长随转换记账：离开进行中闭合当前段，进入进行中另起一段。
+   */
+  transitionGoal(taskId: string, transition: GoalTransition): GoalRecord;
+  /**
+   * 撤销尚未执行的目标（宿主在首轮启动失败时的回滚：设定与首轮是一个意图，
+   * 首轮没起来就不留「进行中却没有回合」的半成品）。当前目标已有验证记录
+   * （首轮已执行）时拒绝——验证历史随任务留痕，不产生悬空记录。无目标时幂等。
+   */
+  discardGoal(taskId: string): void;
+  /**
+   * 完成判定（GLOSSARY「完成判定」，ADR 0035）：对「进行中」的目标发起一次
+   * 独立模型请求（任务当前模型、不带工具、输入 = 目标文本 + 完整消息历史），
+   * 结论落为下一轮验证记录。只落记录、不改目标状态——通过/未通过的后续
+   * 处置由宿主编排器决定（通过 → 完成；未通过 → 续跑或暂停）。
+   * 必须在回合空闲边界调用（与 sendMessage / compact 不并发）。
+   * 目标已不在进行中（如等待期间被暂停）时返回 skipped，不发请求。
+   * profile 为任务上次发送所用的 Provider Profile（宿主在主进程解密后传入）；
+   * 缺省表示任务当前模型不可用，按 fail-open 落未通过记录。
+   */
+  verifyGoal(
+    taskId: string,
+    options: { profile?: ProviderProfile; signal?: AbortSignal }
+  ): Promise<GoalVerificationResult>;
+  /** 当前目标的逐轮验证记录（按轮次正序）；无目标为空数组 */
+  goalVerifications(taskId: string): GoalVerificationRecord[];
 }
 
 export function createTaskManager(
@@ -240,11 +298,10 @@ export function createTaskManager(
   }
 
   function createdAtOf(item: TranscriptItem): string {
-    return item.kind === "message"
-      ? item.message.createdAt
-      : item.kind === "interaction"
-        ? item.interaction.request.createdAt
-        : item.call.createdAt;
+    if (item.kind === "message") return item.message.createdAt;
+    if (item.kind === "interaction") return item.interaction.request.createdAt;
+    if (item.kind === "goal-verification") return item.verification.createdAt;
+    return item.call.createdAt;
   }
 
   function restore(record: TaskRecord): AgentTask {
@@ -304,6 +361,35 @@ export function createTaskManager(
       Object.assign(cached.record, next);
     }
     return next;
+  }
+
+  /** 当前目标（最近一次设定）的逐轮验证记录，按轮次正序；无目标为空数组 */
+  function currentGoalVerifications(taskId: string): GoalVerificationRecord[] {
+    const goal = persistence.listGoals(taskId).at(-1);
+    if (goal === undefined) return [];
+    return persistence
+      .listGoalVerifications(taskId)
+      .filter((record) => record.goalId === goal.id);
+  }
+
+  /** 把一次判定结论落为下一轮验证记录（轮次 = 该目标已有记录数 + 1） */
+  function recordVerification(
+    taskId: string,
+    goal: GoalRecord,
+    verdict: GoalVerdict
+  ): GoalVerificationRecord {
+    const verification: GoalVerificationRecord = {
+      id: generateId(),
+      taskId,
+      goalId: goal.id,
+      round: currentGoalVerifications(taskId).length + 1,
+      passed: verdict.passed,
+      reason: verdict.reason,
+      nextAction: verdict.nextAction,
+      createdAt: now(),
+    };
+    persistence.insertGoalVerification(verification);
+    return verification;
   }
 
   return {
@@ -474,6 +560,14 @@ export function createTaskManager(
             kind: "interaction",
             interaction,
           })),
+        // 目标模式的逐轮完成判定（ADR 0035）：按判定时刻并入时间线——
+        // 历次目标的记录都留痕（已清除/已完成目标的标记行仍可回看）
+        ...persistence
+          .listGoalVerifications(taskId)
+          .map((verification): TranscriptItem => ({
+            kind: "goal-verification",
+            verification,
+          })),
       ];
       // stable sort：同 createdAt 保持 messages 在前的插入顺序
       items.sort((a, b) =>
@@ -581,6 +675,119 @@ export function createTaskManager(
     latestCompact(taskId) {
       const compacts = persistence.listCompacts(taskId);
       return compacts.length === 0 ? null : compacts[compacts.length - 1]!;
+    },
+
+    setGoal(taskId, text) {
+      if (!persistence.listTasks().some((task) => task.id === taskId))
+        throw new Error(`任务不存在：${taskId}`);
+      const trimmed = text.trim();
+      if (trimmed === "") throw new Error("目标不能为空");
+      if (trimmed.length > GOAL_TEXT_MAX_LENGTH)
+        throw new Error(`目标文本过长（最多 ${GOAL_TEXT_MAX_LENGTH} 字符）`);
+      const current = persistence.listGoals(taskId).at(-1);
+      if (current !== undefined && isGoalOpen(current.status))
+        throw new Error("任务已有未结束的目标，请先清除当前目标");
+      const timestamp = now();
+      const goal: GoalRecord = {
+        id: generateId(),
+        taskId,
+        text: trimmed,
+        status: "active",
+        activeMs: 0,
+        activeSince: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      persistence.insertGoal(goal);
+      return { ...goal };
+    },
+
+    goal(taskId) {
+      return persistence.listGoals(taskId).at(-1) ?? null;
+    },
+
+    transitionGoal(taskId, transition) {
+      if (!persistence.listTasks().some((task) => task.id === taskId))
+        throw new Error(`任务不存在：${taskId}`);
+      const goal = persistence.listGoals(taskId).at(-1);
+      if (goal === undefined) throw new Error("任务尚未设定目标");
+      const next = advanceGoal(goal, transition, now());
+      persistence.updateGoal(goal.id, {
+        status: next.status,
+        activeMs: next.activeMs,
+        activeSince: next.activeSince,
+        updatedAt: next.updatedAt,
+      });
+      return next;
+    },
+
+    /** 当前目标的验证记录（goalVerifications 与 verifyGoal 的轮次计数共用） */
+    goalVerifications: currentGoalVerifications,
+
+    discardGoal(taskId) {
+      const goal = persistence.listGoals(taskId).at(-1);
+      if (goal === undefined) return;
+      if (currentGoalVerifications(taskId).length > 0)
+        throw new Error("目标已开始执行，不能撤销");
+      persistence.deleteGoal(goal.id);
+    },
+
+    async verifyGoal(taskId, { profile, signal }) {
+      const goal = persistence.listGoals(taskId).at(-1);
+      if (goal === undefined || goal.status !== "active")
+        return { kind: "skipped" };
+      // 中断先于请求：不发请求（Stop / 应用退出时不留判定在途）
+      if (signal?.aborted) return { kind: "aborted" };
+      // 任务当前模型不可用（宿主解析不到任务上次所用 Provider Profile，
+      // 如已被删除）：没有可用的判定模型，同样按 fail-open 落未通过记录
+      if (profile === undefined)
+        return {
+          kind: "verified",
+          verification: recordVerification(
+            taskId,
+            goal,
+            failOpenGoalVerdict(
+              "任务的 Provider Profile 不存在，请重新选择模型"
+            )
+          ),
+        };
+      const { system, prompt } = buildGoalVerificationPrompt(goal, {
+        messages: persistence.listMessages(taskId),
+        toolCalls: persistence.listToolCalls(taskId),
+      });
+      // 模型请求重试次数逐次读取（GLOSSARY「执行设置」：与 compact 辅助调用同口径）
+      const modelMaxRetries =
+        options.modelMaxRetries?.() ?? DEFAULT_MODEL_MAX_RETRIES;
+      const record = persistence.listTasks().find((task) => task.id === taskId);
+      const { outcome, usage } = await requestGoalVerdict({
+        // 任务当前模型（上一回合落库的具体模型；未发过消息回退 Profile 列表第一项）
+        languageModel: languageModelFor(profile, {
+          model: resolveModelOf(profile, record?.model ?? undefined),
+        }),
+        system,
+        prompt,
+        signal,
+        maxRetries: modelMaxRetries,
+      });
+      // 任务用量（GLOSSARY「任务用量」，ADR 0029）：判定是任务内模型调用，
+      // usage 入主任务列（已花的 token 照记；未结算不记，入账失败不影响判定）
+      if (usage !== undefined) {
+        await settleTaskUsage(
+          usage,
+          (delta) => persistence.addTaskUsage(taskId, delta),
+          "main"
+        );
+      }
+      if (outcome === null) return { kind: "aborted" };
+      // fail-open（ADR 0035）：判定自身故障按未通过落记录，不设独立用户态
+      const verdict =
+        outcome.kind === "verdict"
+          ? outcome.verdict
+          : failOpenGoalVerdict(outcome.cause);
+      return {
+        kind: "verified",
+        verification: recordVerification(taskId, goal, verdict),
+      };
     },
   };
 }

@@ -107,6 +107,21 @@ function installBrowserStub(): void {
       pendingApprovals: async () => [],
       pendingInteractions: async () => [],
       respondInteraction: async () => false,
+      // 目标模式（ADR 0035）：/goal 设定——dev 预览不跑宿主编排，只回一个
+      // 「进行中」的目标记录供进度行呈现（契约形状见 GoalRecord）
+      goalSet: async (taskId: string, text: string) => {
+        const now = new Date().toISOString();
+        return {
+          id: `goal-${Date.now()}`,
+          taskId,
+          text: text.trim(),
+          status: "active" as const,
+          activeMs: 0,
+          activeSince: now,
+          createdAt: now,
+          updatedAt: now,
+        };
+      },
     },
     searchSettings: {
       get: async () => ({ apiKey: "" }),

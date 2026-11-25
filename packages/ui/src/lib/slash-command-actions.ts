@@ -21,6 +21,9 @@ export type SlashCommandAction =
   | { type: "archive" }
   | { type: "select-model"; query: string }
   | { type: "status" }
+  /** /goal 目标文本（GLOSSARY「目标」，ADR 0035）：为当前任务设定目标 */
+  | { type: "set-goal"; text: string }
+  | { type: "goal-missing-argument" }
   | { type: "needs-task" };
 
 /** /new 可在草稿页使用；其余命令需要正式任务。归属由入口上下文决定。 */
@@ -45,6 +48,10 @@ export function planSlashCommand(
       return { type: "select-model", query: command.argument };
     case "status":
       return { type: "status" };
+    case "goal":
+      return command.argument === ""
+        ? { type: "goal-missing-argument" }
+        : { type: "set-goal", text: command.argument };
   }
 }
 

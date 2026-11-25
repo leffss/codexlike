@@ -29,6 +29,8 @@
     "test:e2e:subagent-thinking": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:subagent-thinking",
     "test:e2e:message-order": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:message-order",
     "test:e2e:work-plan": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:work-plan",
+    "test:e2e:goal-stub": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-stub",
+    "test:e2e:goal": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal",
     "test:e2e:input-queue": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue",
     "test:e2e:input-queue-items": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-items",
     "test:e2e:input-queue-restart": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-restart",

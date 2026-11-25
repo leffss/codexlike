@@ -3,6 +3,11 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ToolCallRecord } from "../tools/types";
+import {
+  GOAL_STATUSES,
+  type GoalRecord,
+  type GoalVerificationRecord,
+} from "../goal/types";
 import type {
   InteractionRecord,
   QuestionAnswerSnapshot,
@@ -166,6 +171,39 @@ export interface TaskPersistence {
    * 与 01 票 killAll 兜底 record 同款）；已终态行不改写（重开幂等）。
    */
   settleRunningTerminalSessions(settledAt: string): void;
+  /**
+   * 目标记录（ADR 0035 票 02，GLOSSARY「目标」）：设定即写一行（status=active）；
+   * 状态推进见 updateGoal，按任务列出见 listGoals。
+   */
+  insertGoal(record: GoalRecord): void;
+  /** 指定任务的目标记录，按设定时间正序（最后一条为当前目标）；未知任务返回空数组 */
+  listGoals(taskId: string): GoalRecord[];
+  /** 删除目标记录（撤销尚未执行的目标）；不存在静默忽略 */
+  deleteGoal(id: string): void;
+  /**
+   * 只更新状态机推进触碰的列（status / activeMs / activeSince / updatedAt）
+   * 与编辑目标触碰的 text；归属与设定时间（taskId / createdAt）建行后不变。
+   * 目标不存在时静默忽略（与 updateTask 同语义）。
+   */
+  updateGoal(
+    id: string,
+    patch: Partial<
+      Pick<
+        GoalRecord,
+        "status" | "text" | "activeMs" | "activeSince" | "updatedAt"
+      >
+    >
+  ): void;
+  /**
+   * 逐轮验证记录（ADR 0035 票 02，GLOSSARY「完成判定」）：每轮判定结束即写一行
+   * （轮次、结论、理由、下一步方向、时间戳）；按任务列出见 listGoalVerifications。
+   */
+  insertGoalVerification(record: GoalVerificationRecord): void;
+  /**
+   * 指定任务的全部验证记录（含已清除/已完成目标的历次记录，随任务留痕），
+   * 按判定时间正序；未知任务返回空数组。
+   */
+  listGoalVerifications(taskId: string): GoalVerificationRecord[];
   /** 释放数据库句柄（宿主退出前调用；Windows 上未关闭会锁住库文件） */
   close(): void;
 }
@@ -297,6 +335,30 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task
   ON terminal_sessions(task_id, created_at);
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  status TEXT NOT NULL,
+  active_ms INTEGER NOT NULL DEFAULT 0,
+  active_since TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goals_task_created
+  ON goals(task_id, created_at);
+CREATE TABLE IF NOT EXISTS goal_verifications (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  goal_id TEXT NOT NULL,
+  round INTEGER NOT NULL,
+  passed INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  next_action TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_verifications_task
+  ON goal_verifications(task_id, created_at);
 `;
 
 interface TaskRow {
@@ -398,6 +460,28 @@ interface TerminalSessionRow {
   title: string | null;
   title_source: string | null;
   snapshot: string | null;
+}
+
+interface GoalRow {
+  id: string;
+  task_id: string;
+  text: string;
+  status: string;
+  active_ms: number;
+  active_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface GoalVerificationRow {
+  id: string;
+  task_id: string;
+  goal_id: string;
+  round: number;
+  passed: number;
+  reason: string;
+  next_action: string;
+  created_at: string;
 }
 
 /**
@@ -580,6 +664,18 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
   const listTerminalSessionsStmt = db.prepare(
     "SELECT * FROM terminal_sessions WHERE task_id = ? ORDER BY created_at, rowid"
   );
+  const insertGoalStmt = db.prepare(
+    "INSERT INTO goals (id, task_id, text, status, active_ms, active_since, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listGoalsStmt = db.prepare(
+    "SELECT * FROM goals WHERE task_id = ? ORDER BY created_at, rowid"
+  );
+  const insertGoalVerificationStmt = db.prepare(
+    "INSERT INTO goal_verifications (id, task_id, goal_id, round, passed, reason, next_action, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const listGoalVerificationsStmt = db.prepare(
+    "SELECT * FROM goal_verifications WHERE task_id = ? ORDER BY created_at, rowid"
+  );
 
   function toRecord(row: TaskRow): TaskRecord {
     return {
@@ -727,7 +823,8 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           "INSERT OR IGNORE INTO removed_creation_requests SELECT creation_request_id FROM tasks WHERE project_id = ? AND creation_request_id IS NOT NULL"
         ).run(projectId);
         // 显式关联清理，不依赖各运行时 foreign_keys 默认值，不按目录推导集合。
-        // 子代理三表随任务数据同步清理（ADR 0021：生命周期跟随任务数据）。
+        // 子代理三表随任务数据同步清理（ADR 0021：生命周期跟随任务数据）；
+        // 目标两表同理（ADR 0035：目标与逐轮验证记录随任务留痕、随任务清理）。
         for (const table of [
           "messages",
           "compact_records",
@@ -738,6 +835,8 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
           "subagent_messages",
           "subagent_tool_calls",
           "terminal_sessions",
+          "goals",
+          "goal_verifications",
         ]) {
           db.prepare(
             `DELETE FROM ${table} WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`
@@ -1284,6 +1383,102 @@ export function createSqliteTaskStore(dbPath: string): TaskPersistence {
       db.prepare(
         "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE status = 'running'"
       ).run(settledAt);
+    },
+
+    insertGoal(record) {
+      insertGoalStmt.run(
+        record.id,
+        record.taskId,
+        record.text,
+        record.status,
+        record.activeMs,
+        record.activeSince,
+        record.createdAt,
+        record.updatedAt
+      );
+    },
+
+    listGoals(taskId) {
+      return (listGoalsStmt.all(taskId) as unknown as GoalRow[]).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        text: row.text,
+        // 读侧容忍：非法/缺失值（如降级打开新版本库）恢复为已暂停——不自动续跑的保守口径
+        status: (GOAL_STATUSES as readonly string[]).includes(row.status)
+          ? (row.status as GoalRecord["status"])
+          : "paused",
+        activeMs: row.active_ms ?? 0,
+        activeSince: row.active_since ?? null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
+    },
+
+    updateGoal(id, patch) {
+      // 只更新状态机推进与编辑触碰的列，目标不存在静默忽略（与 updateSubagent 同语义）
+      const columns: string[] = [];
+      const values: (string | number | null)[] = [];
+      if (patch.status !== undefined) {
+        columns.push("status = ?");
+        values.push(patch.status);
+      }
+      if (patch.text !== undefined) {
+        columns.push("text = ?");
+        values.push(patch.text);
+      }
+      if (patch.activeMs !== undefined) {
+        columns.push("active_ms = ?");
+        values.push(patch.activeMs);
+      }
+      if (patch.activeSince !== undefined) {
+        columns.push("active_since = ?");
+        values.push(patch.activeSince);
+      }
+      if (patch.updatedAt !== undefined) {
+        columns.push("updated_at = ?");
+        values.push(patch.updatedAt);
+      }
+      if (columns.length === 0) {
+        return;
+      }
+      db.prepare(`UPDATE goals SET ${columns.join(", ")} WHERE id = ?`).run(
+        ...values,
+        id
+      );
+    },
+
+    deleteGoal(id) {
+      db.prepare("DELETE FROM goals WHERE id = ?").run(id);
+    },
+
+    insertGoalVerification(record) {
+      insertGoalVerificationStmt.run(
+        record.id,
+        record.taskId,
+        record.goalId,
+        record.round,
+        record.passed ? 1 : 0,
+        record.reason,
+        record.nextAction,
+        record.createdAt
+      );
+    },
+
+    listGoalVerifications(taskId) {
+      return (
+        listGoalVerificationsStmt.all(
+          taskId
+        ) as unknown as GoalVerificationRow[]
+      ).map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        goalId: row.goal_id,
+        round: Number(row.round),
+        passed: row.passed === 1,
+        reason: row.reason,
+        nextAction: row.next_action,
+        createdAt: row.created_at,
+      }));
     },
 
     close() {

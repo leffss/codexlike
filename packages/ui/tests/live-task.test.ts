@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import type { GoalRecord, GoalVerificationRecord } from "@codexlike/agent-core";
 import type { TaskEventEnvelope, TaskView } from "@codexlike/desktop/ipc";
 import { applyTaskEvent } from "../src/lib/task-view";
 import { hydrateLiveTask, receiveLiveEvent } from "../src/lib/live-task";
@@ -1052,4 +1053,125 @@ it("终端生命周期随空闲任务水位接续（09 票 e2e 缺口回归）�
   expect(
     receiveLiveEvent(exitedLive, { ...started, sequence: 5 }).items.at(-1)
   ).toMatchObject({ kind: "terminal", status: "exited" });
+});
+
+it("目标状态与判定结论按任务水位接续（ADR 0035）：goal-changed 更新目标、goal-verification 入消息流标记行；view 快照恢复", () => {
+  // 完成判定在回合终态之后发出：事件到达时宿主已不处于运行态
+  const idle = { ...activity, running: false, outcome: "completed" as const };
+  const userMessage = {
+    id: "u1",
+    taskId: "a",
+    role: "user" as const,
+    content: "让示例测试全部通过",
+    createdAt: "2026-11-25T08:00:00.000Z",
+  };
+  const view: TaskView = {
+    ...snapshot,
+    activity: idle,
+    history: [{ kind: "message" as const, message: userMessage }],
+  };
+  const goal: GoalRecord = {
+    id: "goal-1",
+    taskId: "a",
+    text: "让示例测试全部通过",
+    status: "active",
+    activeMs: 0,
+    activeSince: "2026-11-25T08:00:00.000Z",
+    createdAt: "2026-11-25T08:00:00.000Z",
+    updatedAt: "2026-11-25T08:00:00.000Z",
+  };
+  const verification: GoalVerificationRecord = {
+    id: "gv-1",
+    taskId: "a",
+    goalId: "goal-1",
+    round: 1,
+    passed: true,
+    reason: "示例测试已全部通过",
+    nextAction: "",
+    createdAt: "2026-11-25T08:00:09.000Z",
+  };
+
+  let state = hydrateLiveTask(view);
+  expect(state.goal).toBeNull();
+
+  // 设定目标：任务状态而非消息增量，不进消息流
+  const before = state.items;
+  state = receiveLiveEvent(state, {
+    ...delta(3, ""),
+    activity: idle,
+    event: { type: "goal-changed", goal },
+  });
+  expect(state.goal).toEqual(goal);
+  expect(state.items).toBe(before);
+
+  // 判定结论：尾部追加标记行段（归当前轮），目标状态不变
+  state = receiveLiveEvent(state, {
+    ...delta(4, ""),
+    activity: idle,
+    event: { type: "goal-verification", verification },
+  });
+  expect(state.items.at(-1)).toEqual({
+    kind: "goal-verification",
+    id: "gv-1",
+    seq: expect.any(Number),
+    turnId: "u1",
+    responseId: null,
+    at: Date.UTC(2026, 10, 25, 8, 0, 9),
+    verification,
+  });
+  expect(state.goal).toEqual(goal);
+
+  // 状态推进（判定通过 → 已完成）
+  const completed = { ...goal, status: "completed" as const };
+  state = receiveLiveEvent(state, {
+    ...delta(5, ""),
+    activity: idle,
+    event: { type: "goal-changed", goal: completed },
+  });
+  expect(state.goal).toEqual(completed);
+  expect(
+    state.items.filter((item) => item.kind === "goal-verification")
+  ).toHaveLength(1);
+  // 重复与乱序不回退
+  expect(
+    receiveLiveEvent(state, {
+      ...delta(4, ""),
+      activity: idle,
+      event: { type: "goal-verification", verification },
+    })
+  ).toBe(state);
+
+  // 清除目标（票 04）：goal 置 null
+  const cleared = receiveLiveEvent(state, {
+    ...delta(6, ""),
+    activity: idle,
+    event: { type: "goal-changed", goal: null },
+  });
+  expect(cleared.goal).toBeNull();
+
+  // 切换 / 重启恢复：view.goal 恢复目标，时间线里的验证记录重建标记行段
+  const restored = hydrateLiveTask({
+    ...snapshot,
+    executionId: null,
+    sequence: 0,
+    events: [],
+    history: [
+      { kind: "message", message: userMessage },
+      { kind: "goal-verification", verification },
+    ],
+    goal: completed,
+    activity: idle,
+  });
+  expect(restored.goal).toEqual(completed);
+  expect(restored.items.map((item) => item.kind)).toEqual([
+    "user",
+    "goal-verification",
+  ]);
+  expect(restored.items[1]).toMatchObject({
+    kind: "goal-verification",
+    id: "gv-1",
+    turnId: "u1",
+  });
+  // 标记行归入当轮（轮次分组不因它另起一轮）
+  expect(groupTurns(restored.items).map((turn) => turn.turnId)).toEqual(["u1"]);
 });

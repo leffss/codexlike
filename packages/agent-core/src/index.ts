@@ -63,6 +63,23 @@ export type {
 
 export type { TaskSearchResult } from "./task/search";
 
+// 目标模式（ADR 0035，GLOSSARY「目标」「目标模式」「完成判定」）：目标实体类型、
+// 六态状态机与判定结论形状均浏览器安全——ui 进度行 / 标记行与 desktop 编排器
+// 共用同一词汇（状态称谓单一来源）。判定模型调用在 ./node 出口。
+export type {
+  GoalRecord,
+  GoalStatus,
+  GoalVerdict,
+  GoalVerificationRecord,
+} from "./goal/types";
+export {
+  GOAL_STATUSES,
+  GOAL_STATUS_NAMES,
+  GOAL_TEXT_MAX_LENGTH,
+} from "./goal/types";
+export type { GoalTransition } from "./goal/state-machine";
+export { advanceGoal, isGoalOpen } from "./goal/state-machine";
+
 // 执行设置常量（ADR 0017，GLOSSARY「执行设置」「工具轮次」）：纯常量浏览器安全，
 // desktop 存储校验与 ui 表单回退共用同一默认值/范围来源
 export {

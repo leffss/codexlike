@@ -2,6 +2,8 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   ApprovalRequest,
+  GoalRecord,
+  GoalVerificationRecord,
   InteractionRecord,
   InteractionResponse,
   ProviderProfile,
@@ -170,6 +172,11 @@ export const IPC = {
     pendingInteractions: "tasks:pending-interactions",
     /** 响应一个待处理交互；类型与内容由 Core 对照请求校验。 */
     respondInteraction: "tasks:respond-interaction",
+    /**
+     * 目标模式（ADR 0035，GLOSSARY「目标」）：/goal 设定目标——目标原文作为首条
+     * 用户消息发出（首轮），任务进入目标模式。
+     */
+    goalSet: "tasks:goal-set",
   },
   /** 搜索源设置（工单 10）：key 经 safeStorage 加密落盘 */
   searchSettings: {
@@ -322,7 +329,17 @@ export interface TaskEventEnvelope {
         type: "task-queue-changed";
         reason: TaskQueueChangeReason;
         queue: QueuedTaskStart[];
-      };
+      }
+    /**
+     * 目标状态变化（ADR 0035）：goal 为变更后的当前目标完整快照（设定 / 状态机
+     * 每次推进都下发）；null 表示当前已无目标（清除）。
+     */
+    | { type: "goal-changed"; goal: GoalRecord | null }
+    /**
+     * 一次完成判定的结论（ADR 0035，GLOSSARY「完成判定」）：消息流标记行
+     * 「第 N 次迭代 · 已完成/未完成」的实时数据源；重启后由任务时间线恢复。
+     */
+    | { type: "goal-verification"; verification: GoalVerificationRecord };
   activity: TaskActivity;
 }
 
@@ -379,6 +396,23 @@ export interface TaskView {
    * 状态条；同进程会话以 events 里的信封重放为准（晚于快照）。
    */
   queuedStart?: string | null;
+  /**
+   * 当前目标（ADR 0035）：view 快照时刻的目标记录（进度行恢复数据源）；
+   * 从未设定为 null。同进程会话以 events 里的 goal-changed 信封接续。
+   */
+  goal?: GoalRecord | null;
+}
+
+/**
+ * /goal 设定目标的首轮发送参数（ADR 0035）：与 tasks.send 同一组发送快照——
+ * 目标原文作为首条用户消息按它发出；缺省字段回退任务保存的发送偏好。
+ */
+export interface GoalSendOptions {
+  providerProfileId?: string;
+  /** 本条消息使用的具体模型（票 02 二元组）；缺省回退 Profile 列表第一项 */
+  model?: string;
+  thinkingEffort?: ThinkingEffort;
+  approvalMode?: ApprovalMode;
 }
 
 /**
@@ -725,6 +759,17 @@ export interface TaskApi {
     requestId: string,
     response: InteractionResponse
   ): Promise<boolean>;
+  /**
+   * /goal 设定目标（ADR 0035，GLOSSARY「目标」）：目标落库为「进行中」，原文
+   * 作为首条用户消息发出（首轮，事件经 onTaskEvent 推送），返回目标记录。
+   * 一任务同时至多一个未结束的目标；空目标 / 超长 / 任务已归档 / 任务正在
+   * 执行 / 已有未结束的目标以中文异常抛回。首轮启动失败时目标回滚（不落库）。
+   */
+  goalSet(
+    taskId: string,
+    text: string,
+    options?: GoalSendOptions
+  ): Promise<GoalRecord>;
 }
 
 /** `window.codexlike` 的完整 API 形状（续：任务域之外的设置与事件面） */

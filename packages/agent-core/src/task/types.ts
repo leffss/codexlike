@@ -14,6 +14,7 @@ import type {
   QuestionAnswerSnapshot,
 } from "../interaction/types";
 import type { TerminalSessionRecord } from "../terminal/types";
+import type { GoalVerificationRecord } from "../goal/types";
 
 /**
  * 任务运行状态：`idle` 空闲可发消息；`streaming` 模型回复流式进行中；
@@ -151,11 +152,17 @@ export interface StoredMessage {
   createdAt: string;
 }
 
-/** 任务时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用） */
+/**
+ * 任务时间线条目：消息与工具调用按发生顺序合并（UI 消息流渲染与重启恢复用）。
+ * goal-verification（ADR 0035）：目标模式每轮完成判定的结论，按判定时刻并入
+ * 时间线——消息流标记行「第 N 次迭代 · 已完成/未完成」的恢复数据源；
+ * 读自 goal_verifications 表，不进模型上下文（上下文组装只读 messages）。
+ */
 export type TranscriptItem =
   | { kind: "message"; message: StoredMessage }
   | { kind: "tool-call"; call: ToolCallRecord }
-  | { kind: "interaction"; interaction: InteractionRecord };
+  | { kind: "interaction"; interaction: InteractionRecord }
+  | { kind: "goal-verification"; verification: GoalVerificationRecord };
 
 /**
  * @文件引用（GLOSSARY「@ Mention」）：随消息附加的工作区文件。

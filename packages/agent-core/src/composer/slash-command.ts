@@ -3,9 +3,9 @@
  * 输入框以 `/` 开头的一行输入构成命令，与等效 UI 操作走同一 IPC 通道（工单 07）。
  */
 
-/** 内置命令名（spec：/new /compact /rename /archive /model /status） */
+/** 内置命令名（spec：/new /compact /rename /archive /model /status；ADR 0035：/goal） */
 export type SlashCommandName =
-  "new" | "compact" | "rename" | "archive" | "model" | "status";
+  "new" | "compact" | "rename" | "archive" | "model" | "status" | "goal";
 
 export interface SlashCommandDef {
   readonly name: SlashCommandName;
@@ -45,5 +45,10 @@ export const SLASH_COMMANDS: readonly SlashCommandDef[] = [
     name: "status",
     description: "查看上下文用量与任务状态",
     argumentHint: null,
+  },
+  {
+    name: "goal",
+    description: "为当前任务设定目标，进入目标模式",
+    argumentHint: "目标描述",
   },
 ];

@@ -1,3 +1,4 @@
+import type { GoalRecord } from "@codexlike/agent-core";
 import type {
   QueueSnapshot,
   TaskActivity,
@@ -5,6 +6,7 @@ import type {
   TaskView,
 } from "@codexlike/desktop/ipc";
 import {
+  appendGoalVerification,
   applyTaskEvent,
   initialTranscript,
   mergeInteractions,
@@ -40,6 +42,11 @@ export interface LiveTask {
    * 快照。不在排队为 null。
    */
   queuedStart: string | null;
+  /**
+   * 当前目标（ADR 0035，GLOSSARY「目标」）：输入框上方进度行的数据源。
+   * 随 view.goal 恢复、随 goal-changed 事件接续；null = 当前无目标（进度行不占位）。
+   */
+  goal: GoalRecord | null;
 }
 
 function applyLiveEvent(
@@ -54,6 +61,10 @@ function applyLiveEvent(
   if (event.type === "queue-changed") return items;
   // 任务排队变更（任务并发上限票 02）同为任务状态而非消息增量，不进消息流
   if (event.type === "task-queue-changed") return items;
+  // 目标状态变化（ADR 0035）不进消息流；判定结论追加为标记行段（幂等）
+  if (event.type === "goal-changed") return items;
+  if (event.type === "goal-verification")
+    return appendGoalVerification(items, event.verification);
   return applyTaskEvent(items, event);
 }
 
@@ -87,7 +98,12 @@ export function receiveLiveEvent(
     // 标记行不出现、空闲期 kill 后标记行停留 running 与 rail 状态分裂。
     // 与 queue-changed 同口径按水位接续（09 票补 ui 单测锁定）。
     envelope.event.type === "terminal-started" ||
-    envelope.event.type === "terminal-exited";
+    envelope.event.type === "terminal-exited" ||
+    // 目标模式（ADR 0035）：判定在回合终态之后的 idle 边界发出、Stop = 暂停
+    // 的状态变化紧随用户停止——到达时宿主已不处于运行态，同为任务级状态
+    // 快照，按水位接续（否则进度行与标记行在空闲期收不到）
+    envelope.event.type === "goal-changed" ||
+    envelope.event.type === "goal-verification";
   const cleanup =
     state.activity.outcome === "interrupted" &&
     [
@@ -128,6 +144,8 @@ export function receiveLiveEvent(
       envelope.event.type === "task-queue-changed"
         ? queuedStartOf(state.taskId, envelope.event)
         : state.queuedStart,
+    goal:
+      envelope.event.type === "goal-changed" ? envelope.event.goal : state.goal,
   };
 }
 
@@ -156,6 +174,7 @@ export function hydrateLiveTask(
     items: mergeInteractions(items, view.pendingInteractions),
     queueState: view.queueState ?? EMPTY_QUEUE_STATE,
     queuedStart,
+    goal: view.goal ?? null,
   };
   for (const envelope of buffered) state = receiveLiveEvent(state, envelope);
   return state;

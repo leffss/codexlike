@@ -7,9 +7,9 @@ import {
   SLASH_COMMANDS,
 } from "../../src/composer/parse";
 
-/** 斜杠命令词汇表：六个内置命令，全部有中文描述（工单 07 + 08 /compact） */
+/** 斜杠命令词汇表：七个内置命令，全部有中文描述（工单 07 + 08 /compact + ADR 0035 /goal） */
 describe("SLASH_COMMANDS 命令表", () => {
-  it("包含 /new /compact /rename /archive /model /status 六个命令", () => {
+  it("包含 /new /compact /rename /archive /model /status /goal 七个命令", () => {
     expect(SLASH_COMMANDS.map((command) => command.name)).toEqual([
       "new",
       "compact",
@@ -17,7 +17,23 @@ describe("SLASH_COMMANDS 命令表", () => {
       "archive",
       "model",
       "status",
+      "goal",
     ]);
+  });
+
+  it("/goal 接受目标文本参数（GLOSSARY「目标」）：命令名与参数分离", () => {
+    expect(resolveComposerSubmission("/goal 让示例测试全部通过")).toEqual({
+      kind: "slash-command",
+      name: "goal",
+      argument: "让示例测试全部通过",
+      raw: "/goal 让示例测试全部通过",
+    });
+    // 只输入命令名：参数为空串（由分发层给出用法提示）
+    expect(resolveComposerSubmission("/goal")).toMatchObject({
+      kind: "slash-command",
+      name: "goal",
+      argument: "",
+    });
   });
 
   it("每个命令都有非空中文描述", () => {

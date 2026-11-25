@@ -37,6 +37,7 @@ import {
 import {
   resolveComposerSubmission,
   type ApprovalMode,
+  type GoalRecord,
   type ProviderProfile,
   type ProjectRecord,
   type TaskResourcesView,
@@ -51,6 +52,7 @@ import { RailPanel } from "../components/RailPanel";
 import type { SubagentFocus } from "../components/SubagentRailPanel";
 import type { TerminalFocus } from "../components/TerminalRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
+import { GoalProgressRow } from "../components/GoalProgressRow";
 import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -195,6 +197,12 @@ export function WorkspacePage(props: {
    * 开跑后 user-message 接管首条、dequeue 快照清空字段。
    */
   const [queuedStart, setQueuedStart] = useState<string | null>(null);
+  /**
+   * 当前任务的目标（ADR 0035，GLOSSARY「目标」）：输入框上方进度行的数据源。
+   * 随任务快照（view.goal）恢复、随 goal-changed 事件接续；null = 无目标，
+   * 进度行不占布局行。
+   */
+  const [goal, setGoal] = useState<GoalRecord | null>(null);
   const [streaming, setStreaming] = useState(false);
   /**
    * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
@@ -601,6 +609,8 @@ export function WorkspacePage(props: {
       setQueueState(EMPTY_QUEUE_STATE);
       // 排队首条（票 03）：随快照恢复，加载期间先清空防上个任务的值闪现
       setQueuedStart(null);
+      // 目标（ADR 0035）：加载期间先清空，随快照恢复
+      setGoal(null);
       // 终端恢复快照（票 08）：加载期间先清空防上个任务的已退出组闪现
       setRestoredTerminals([]);
       setWorkspaceFiles([]);
@@ -644,6 +654,7 @@ export function WorkspacePage(props: {
         queueSequenceRef.current = live.sequence;
         setQueueState(live.queueState);
         setQueuedStart(live.queuedStart);
+        setGoal(live.goal);
         // 终端恢复快照（票 08）：view 并行字段随任务打开一次刷新
         setRestoredTerminals(view.terminals);
         setStreaming(live.activity.running);
@@ -785,6 +796,8 @@ export function WorkspacePage(props: {
             setQueueState(live.queueState);
           }
           setQueuedStart(live.queuedStart);
+          // 目标状态（ADR 0035）：随 goal-changed 接续（判定后的状态推进、Stop = 暂停）
+          setGoal(live.goal);
           setStreaming(live.activity.running);
           // 连续运行（排队续发、工具间隙事件）保留先记账的起点——整段运行
           // 连续计时；本地未记账的运行中接续（prev 为空）才从消息段重推
@@ -907,6 +920,8 @@ export function WorkspacePage(props: {
     setRailOpen(false);
     setMessages([]);
     setQueuedStart(null);
+    // 新建草稿没有任务，也就没有目标
+    setGoal(null);
     setWorkspaceFiles([]);
     setResources(null);
     setLoading(false);
@@ -1299,6 +1314,7 @@ export function WorkspacePage(props: {
       liveRef.current = null;
       setMessages([]);
       setQueuedStart(null);
+      setGoal(null);
       setWorkspaceFiles([]);
       setResources(null);
       setStreaming(false);
@@ -1325,6 +1341,43 @@ export function WorkspacePage(props: {
     }
   }
 
+  /**
+   * /goal <目标>（ADR 0035，GLOSSARY「目标」）：为当前任务设定目标并进入目标
+   * 模式——宿主把目标原文作为首条用户消息发出（首轮），目标落库为「进行中」，
+   * 回合结束后自动进行完成判定。发送参数与直发消息同一组快照（首轮按它发出）。
+   * 成功 / 失败走本地命令反馈；失败时命令输入保留，修正后可直接重发。
+   */
+  async function setGoalForTask(text: string) {
+    if (currentId === null) return;
+    const taskId = currentId;
+    const generation = taskRequestRef.current;
+    const isCurrent = () =>
+      currentIdRef.current === taskId && taskRequestRef.current === generation;
+    try {
+      await workspaceState.flush();
+      const record = await window.codexlike.tasks.goalSet(taskId, text, {
+        providerProfileId: selectedProfileId,
+        model: selectedModel || undefined,
+        thinkingEffort,
+        approvalMode: preferences?.approvalMode,
+      });
+      if (!isCurrent()) return;
+      setGoal(record);
+      pushCommandFeedback(
+        "info",
+        "已设定目标，进入目标模式：每轮回复结束后自动进行完成判定"
+      );
+    } catch (error) {
+      if (!isCurrent()) return;
+      // 设定失败（任务正在执行 / 已有未结束的目标 / 首轮启动失败等）：输入保留
+      workspaceState.setComposer(taskId, `/goal ${text}`);
+      pushCommandFeedback(
+        "error",
+        `设定目标失败：${error instanceof Error ? error.message : String(error)}（输入已保留）`
+      );
+    }
+  }
+
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
   async function runCommand(name: string, argument: string) {
     const action = planSlashCommand(
@@ -1334,6 +1387,16 @@ export function WorkspacePage(props: {
     switch (action.type) {
       case "needs-task":
         pushCommandFeedback("info", "该命令需要先选择一个任务");
+        return;
+      case "goal-missing-argument":
+        // 三要素引导以轻提示为限（规格 Out of Scope：不做 setup 访谈）
+        pushCommandFeedback(
+          "info",
+          "用法：/goal 目标描述（建议写明期望结果、约束与验证方式）"
+        );
+        return;
+      case "set-goal":
+        await setGoalForTask(action.text);
         return;
       case "new-task": {
         // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
@@ -1973,6 +2036,17 @@ export function WorkspacePage(props: {
                           {autoApproveBusy ? "取消中…" : "取消自动批准"}
                         </button>
                       </div>
+                    </div>
+                  </div>
+                )}
+                {/* 目标进度行（ADR 0035，GLOSSARY「目标」）：过程胶囊条与输入区之间
+                    常驻——目标摘要、状态（六态称谓）、累计时长；没有目标不占布局行。
+                    暂停 / 恢复 / 编辑 / 清除按钮组在票 04 接入本行。宽度对齐正文列
+                    （与上方胶囊条同一 contentWidthClass 居中基准）。 */}
+                {currentId !== null && (
+                  <div className="shrink-0 pb-1 pl-4" style={contentPadding}>
+                    <div className={contentWidthClass}>
+                      <GoalProgressRow goal={goal} />
                     </div>
                   </div>
                 )}

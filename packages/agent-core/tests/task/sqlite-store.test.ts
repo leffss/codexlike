@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createSqliteTaskStore } from "../../src/task/persistence";
+import type { GoalRecord, GoalVerificationRecord } from "../../src/goal/types";
 import type {
   SubagentMessageRecord,
   SubagentRecord,
@@ -1074,5 +1075,223 @@ describe("TaskPersistence 子代理过程表（ADR 0021，票 02）", () => {
       )
     ).toEqual(new Set(["sub-1", "sub-2"]));
     reopened.close();
+  });
+});
+
+describe("TaskPersistence 目标表（ADR 0035，票 02）", () => {
+  /** 最小合法目标记录（设定即写的形状：进行中、累计时长 0） */
+  function goalRow(overrides: Partial<GoalRecord> = {}): GoalRecord {
+    return {
+      id: "goal-1",
+      taskId: "task-1",
+      text: "让示例测试全部通过",
+      status: "active",
+      activeMs: 0,
+      activeSince: "2026-11-10T08:00:01.000Z",
+      createdAt: "2026-11-10T08:00:01.000Z",
+      updatedAt: "2026-11-10T08:00:01.000Z",
+      ...overrides,
+    };
+  }
+
+  /** 最小合法验证记录（一轮判定结束写入的形状） */
+  function verificationRow(
+    overrides: Partial<GoalVerificationRecord> = {}
+  ): GoalVerificationRecord {
+    return {
+      id: "gv-1",
+      taskId: "task-1",
+      goalId: "goal-1",
+      round: 1,
+      passed: false,
+      reason: "尚有步骤未完成",
+      nextAction: "继续实现剩余步骤",
+      createdAt: "2026-11-10T08:00:02.000Z",
+      ...overrides,
+    };
+  }
+
+  it("目标记录插入读回往返：updateGoal 状态补丁生效；验证记录按时间正序；未知任务空数组", () => {
+    const store = createSqliteTaskStore(":memory:");
+    store.insertTask(taskRecord());
+    store.insertGoal(goalRow());
+    store.insertGoalVerification(verificationRow());
+    expect(store.listGoals("task-1")).toEqual([goalRow()]);
+    expect(store.listGoalVerifications("task-1")).toEqual([verificationRow()]);
+    expect(store.listGoals("nope")).toEqual([]);
+    expect(store.listGoalVerifications("nope")).toEqual([]);
+
+    // 状态机推进（编排器写点）：只更新给定字段，归属与设定时间不变
+    store.updateGoal("goal-1", {
+      status: "completed",
+      activeMs: 30_000,
+      activeSince: null,
+      updatedAt: "2026-11-10T08:00:31.000Z",
+    });
+    expect(store.listGoals("task-1")).toEqual([
+      goalRow({
+        status: "completed",
+        activeMs: 30_000,
+        activeSince: null,
+        updatedAt: "2026-11-10T08:00:31.000Z",
+      }),
+    ]);
+    store.close();
+  });
+
+  it("文件库关-重开完整恢复（等价应用重启）：目标状态、累计时长与逐轮验证记录不丢", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    store.insertGoal(goalRow());
+    store.insertGoalVerification(verificationRow());
+    store.insertGoalVerification(
+      verificationRow({
+        id: "gv-2",
+        round: 2,
+        passed: true,
+        reason: "示例测试已全部通过",
+        nextAction: "",
+        createdAt: "2026-11-10T08:05:00.000Z",
+      })
+    );
+    store.updateGoal("goal-1", {
+      status: "completed",
+      activeMs: 300_000,
+      activeSince: null,
+    });
+    store.close();
+
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(reopened.listGoals("task-1")).toEqual([
+      goalRow({ status: "completed", activeMs: 300_000, activeSince: null }),
+    ]);
+    // 同一目标内按判定时间正序
+    expect(
+      reopened
+        .listGoalVerifications("task-1")
+        .map((row) => [row.round, row.passed])
+    ).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+    reopened.close();
+  });
+
+  it("旧库（无 goals / goal_verifications 表）打开时幂等补建，旧行可读且新写入正常", () => {
+    const dbPath = tempDbPath();
+    // ADR 0035 之前的生产库形状：只有 tasks / messages
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL,
+        provider_profile_id TEXT, model TEXT, status TEXT NOT NULL, archived_at TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO tasks VALUES ('legacy-1', '旧任务', 'C:\work\old', NULL, NULL, 'idle', NULL, '2026-11-10T08:00:00.000Z', '2026-11-10T08:00:00.000Z');
+      INSERT INTO messages VALUES ('m1', 'legacy-1', 'user', '旧消息', '2026-11-10T08:00:01.000Z');
+    `);
+    raw.close();
+
+    const store = createSqliteTaskStore(dbPath);
+    // 旧行可读；旧任务没有目标，读回空
+    expect(store.listMessages("legacy-1").map((m) => m.content)).toEqual([
+      "旧消息",
+    ]);
+    expect(store.listGoals("legacy-1")).toEqual([]);
+    // 补建后可按新 schema 写入
+    store.insertGoal(goalRow({ id: "goal-legacy", taskId: "legacy-1" }));
+    expect(store.listGoals("legacy-1")[0]?.id).toBe("goal-legacy");
+    store.close();
+
+    const verify = new DatabaseSync(dbPath);
+    const names = new Set(
+      (
+        verify
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all() as { name: string }[]
+      ).map((row) => row.name)
+    );
+    expect(names.has("goals")).toBe(true);
+    expect(names.has("goal_verifications")).toBe(true);
+    verify.close();
+  });
+
+  it("读侧容忍：未知状态值（如降级打开新版本库）恢复为已暂停，不自动续跑的保守口径", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertTask(taskRecord());
+    store.insertGoal(goalRow());
+    store.close();
+
+    const raw = new DatabaseSync(dbPath);
+    raw.exec("UPDATE goals SET status = 'some-future-state'");
+    raw.close();
+
+    const reopened = createSqliteTaskStore(dbPath);
+    expect(reopened.listGoals("task-1")[0]?.status).toBe("paused");
+    reopened.close();
+  });
+
+  it("removeProject 清理任务数据时目标两表行同步清理，无孤儿行", () => {
+    const dbPath = tempDbPath();
+    const store = createSqliteTaskStore(dbPath);
+    store.insertProject({
+      id: "proj-1",
+      name: "项目",
+      workspacePath: "C:\work\proj",
+      createdAt: "2026-11-10T08:00:00.000Z",
+    });
+    store.insertTask(
+      taskRecord({
+        id: "task-proj",
+        projectId: "proj-1",
+        workspacePath: "C:\work\proj",
+      })
+    );
+    store.insertTask(
+      taskRecord({ id: "task-free", workspacePath: "C:\work\free" })
+    );
+    store.insertGoal(goalRow({ id: "goal-proj", taskId: "task-proj" }));
+    store.insertGoal(goalRow({ id: "goal-free", taskId: "task-free" }));
+    store.insertGoalVerification(
+      verificationRow({
+        id: "gv-proj",
+        taskId: "task-proj",
+        goalId: "goal-proj",
+      })
+    );
+    store.insertGoalVerification(
+      verificationRow({
+        id: "gv-free",
+        taskId: "task-free",
+        goalId: "goal-free",
+      })
+    );
+
+    store.removeProject("proj-1");
+    expect(store.listGoals("task-proj")).toEqual([]);
+    expect(store.listGoalVerifications("task-proj")).toEqual([]);
+    // 独立任务的目标与验证记录不受影响
+    expect(store.listGoals("task-free").map((row) => row.id)).toEqual([
+      "goal-free",
+    ]);
+    expect(
+      store.listGoalVerifications("task-free").map((row) => row.id)
+    ).toEqual(["gv-free"]);
+    const verify = new DatabaseSync(dbPath);
+    const orphans = verify
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM goals WHERE task_id = 'task-proj') AS goals, (SELECT COUNT(*) FROM goal_verifications WHERE task_id = 'task-proj') AS verifications"
+      )
+      .all() as { goals: number; verifications: number }[];
+    expect(orphans[0]).toEqual({ goals: 0, verifications: 0 });
+    verify.close();
+    store.close();
   });
 });
