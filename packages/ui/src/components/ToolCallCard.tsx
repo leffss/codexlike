@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 
+import {
+  COLLAPSE_BODY_CLASS,
+  COLLAPSE_ROW_PADDING,
+} from "../lib/collapse-card";
 import { useCollapseState } from "../lib/collapse-memory";
 import type { ToolCallSegment } from "../lib/task-view";
 import { summarizeToolCall } from "../lib/tool-summary";
@@ -128,12 +132,15 @@ export function ToolCallCard(props: { call: ToolCallCardData }) {
       <button
         type="button"
         data-testid="tool-call-toggle"
-        className="flex w-full items-center gap-2 px-3.5 py-[9px] text-left hover:bg-hover"
+        className={`flex w-full items-center gap-2 ${COLLAPSE_ROW_PADDING} text-left hover:bg-hover`}
         onClick={toggle}
         aria-expanded={expanded}
       >
         <DisclosureArrow open={expanded} />
-        <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent">
+        <span
+          data-testid="tool-call-name"
+          className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent"
+        >
           {call.toolName}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">
@@ -163,7 +170,7 @@ export function ToolCallCard(props: { call: ToolCallCardData }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-line py-2 pl-7 pr-3">
+        <div data-testid="tool-call-body" className={COLLAPSE_BODY_CLASS}>
           <ToolDetailsBody
             arguments={call.arguments}
             output={call.output}

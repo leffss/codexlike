@@ -241,6 +241,54 @@ export async function closeRailPanel(window) {
   await window.getByTestId("rail-panel").waitFor({ state: "hidden" });
 }
 
+/**
+ * 折叠卡内距契约（2026-11-26 用户反馈：已回答/已思考卡片的标题与展开体
+ * 缩进和 write_file 等工具卡不一致）。工具卡基准：卡壳不挂水平内距，
+ * 摘要标题块左缘 = 卡壳 + 26px（px-3.5 箭头 + gap-2），展开体正文左缘 =
+ * 卡壳 + 28px（pl-7），分隔线通栏。卡壳挂 px 会让展开体叠加成 42px，
+ * 漏掉 pl-7 则停在 14px——两种历史错位都由本断言锁住。
+ *
+ * title / body 传 Locator（由调用方用 getByTestId 在 card 上取）：
+ * 与 e2e 定位收口一致，不在这里拼选择器字符串。
+ */
+export async function assertCollapseInsets(card, label, { title, body }) {
+  const cardBox = await card.boundingBox();
+  const titleBox = await title.boundingBox();
+  const bodyBox = await body.evaluate((node) => {
+    // 展开体的正文区 = 边框盒减去左右内距（卡壳内距已下沉到展开体）
+    const rect = node.getBoundingClientRect();
+    const style = window.getComputedStyle(node);
+    return {
+      left: rect.left + parseFloat(style.paddingLeft),
+      right: rect.right - parseFloat(style.paddingRight),
+      width: rect.width,
+    };
+  });
+  assert(
+    cardBox !== null && titleBox !== null,
+    `${label}：卡壳或摘要标题不可见`
+  );
+  const titleInset = titleBox.x - cardBox.x;
+  const bodyLeftInset = bodyBox.left - cardBox.x;
+  const bodyRightInset = cardBox.x + cardBox.width - bodyBox.right;
+  assert(
+    Math.abs(titleInset - 26) <= 1,
+    `${label}：摘要标题块左缘应为卡壳 + 26px，实际 ${titleInset.toFixed(2)}px`
+  );
+  assert(
+    Math.abs(bodyLeftInset - 28) <= 1,
+    `${label}：展开体正文左缘应为卡壳 + 28px，实际 ${bodyLeftInset.toFixed(2)}px`
+  );
+  assert(
+    Math.abs(bodyRightInset - 12) <= 1,
+    `${label}：展开体右缘应为卡壳 - 12px，实际 ${bodyRightInset.toFixed(2)}px`
+  );
+  assert(
+    Math.abs(bodyBox.width - cardBox.width) <= 1,
+    `${label}：展开体分隔线应通栏（展开体宽 ${bodyBox.width.toFixed(2)}，卡壳宽 ${cardBox.width.toFixed(2)}）`
+  );
+}
+
 /** 真实渲染遮罩应采用主题定义的overlay颜色，而不是组件硬编码色阶。 */
 export async function assertSemanticOverlay(dialog) {
   const colors = await dialog.evaluate((element) => {

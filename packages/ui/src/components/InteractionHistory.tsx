@@ -3,6 +3,14 @@ import type {
   SavedQuestionDraft,
 } from "@codexlike/agent-core";
 
+import {
+  COLLAPSE_BODY_CLASS,
+  COLLAPSE_CARD_CLASS,
+  COLLAPSE_SUMMARY_CLASS,
+} from "../lib/collapse-card";
+
+import { DisclosureArrow } from "./DisclosureArrow";
+
 /** 只读历史摘要：请求、响应与取消均可展开，永远没有执行按钮。 */
 export function InteractionHistory({
   record,
@@ -35,24 +43,40 @@ export function InteractionHistory({
       data-interaction-id={request.id}
       data-interaction-kind={request.kind}
       data-interaction-status={record.status}
-      // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言基准）
-      className="min-w-0 rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
+      // 折叠卡外形/内距契约见 lib/collapse-card；卡片背景挂在 li 上：
+      // 取消态的「已保存草稿」尾注也属于同一张卡
+      className={`${COLLAPSE_CARD_CLASS} min-w-0`}
     >
-      <details>
-        <summary className="cursor-pointer break-words [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-accent">
+      {/* 非受控开合（历史卡无需随流式状态自动收起）：箭头角度交给
+          group-open 由原生 [open] 驱动，保持零状态 */}
+      <details className="group">
+        <summary
+          className={`${COLLAPSE_SUMMARY_CLASS} focus-visible:outline-2 focus-visible:outline-accent`}
+        >
+          <DisclosureArrow className="group-open:rotate-90" />
           <span
-            className={record.status === "pending" ? "text-warn-fg" : "text-fg"}
+            data-testid="interaction-history-summary"
+            className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]"
           >
-            {status}
+            <span
+              className={
+                record.status === "pending" ? "text-warn-fg" : "text-fg"
+              }
+            >
+              {status}
+            </span>
+            {" · "}
+            {request.kind === "approval" ? "执行审批" : "交互问答"}
+            {" · "}
+            {request.source.kind === "main"
+              ? "主代理"
+              : `子代理 · ${request.source.task}`}
           </span>
-          {" · "}
-          {request.kind === "approval" ? "执行审批" : "交互问答"}
-          {" · "}
-          {request.source.kind === "main"
-            ? "主代理"
-            : `子代理 · ${request.source.task}`}
         </summary>
-        <div className="mt-2 max-h-80 space-y-2 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        <div
+          data-testid="interaction-history-content"
+          className={`${COLLAPSE_BODY_CLASS} max-h-80 space-y-2 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
+        >
           {request.kind === "approval" ? (
             /* 命令 pre 白卡呈现（bg-surface），避免与暖灰块同底色灰上加灰 */
             <pre className="whitespace-pre-wrap break-all rounded-lg bg-surface p-2 text-code-fg">
@@ -100,7 +124,8 @@ export function InteractionHistory({
         draft && (
           <div
             data-testid="saved-question-draft"
-            className="mt-2 whitespace-pre-wrap break-words"
+            // 尾注与展开体同列（28px 左缘、12px 右缘），避免卡内出现第三档左缘
+            className="mt-2 whitespace-pre-wrap break-words pb-2 pl-7 pr-3"
           >
             <p>已保存的未提交草稿（原请求已失效，仅供查看，不会继续执行）</p>
             {request.questions.map((question) => {

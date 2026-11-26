@@ -19,6 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   selectComposerOption,
   assert,
+  assertCollapseInsets,
   closeApp,
   launchApp,
   NARROW_WIDTH,
@@ -540,6 +541,18 @@ async function questionsScenario() {
         "问答响应不应伪装成额外用户消息"
       );
       await assertReadOnlyHistory(window);
+      // 折叠卡内距契约（2026-11-26）：已回答卡与工具卡同基准——
+      // 摘要标题块左缘 26px、展开体正文左缘 28px（历史卡默认收起，展开后测量）
+      const answered = window
+        .getByTestId("interaction-history")
+        .filter({ hasText: "已回答" })
+        .first();
+      await answered.locator("summary").click();
+      await answered.getByTestId("interaction-history-content").waitFor();
+      await assertCollapseInsets(answered, "已回答卡", {
+        title: answered.getByTestId("interaction-history-summary"),
+        body: answered.getByTestId("interaction-history-content"),
+      });
       await window.getByTestId("new-task").click();
       assert(
         (await window.getByTestId("composer-input").inputValue()) === draftB,

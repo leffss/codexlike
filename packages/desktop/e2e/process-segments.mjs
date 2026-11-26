@@ -14,6 +14,7 @@ import process from "node:process";
 
 import {
   assert,
+  assertCollapseInsets,
   closeApp,
   launchApp,
   prepareDraft,
@@ -237,6 +238,26 @@ async function main() {
       (await firstCard.getByTestId("tool-call-duration").count()) === 1,
       "工具卡摘要行应显示耗时"
     );
+    // 折叠卡内距契约（2026-11-26 用户反馈）：已思考/过程段与工具卡同基准——
+    // 摘要标题块左缘 26px、展开体正文左缘 28px。工具卡即基准卡。
+    const thinkingCard = window.getByTestId("thinking-block").first();
+    await thinkingCard.getByTestId("thinking-toggle").click();
+    await thinkingCard.getByTestId("thinking-content").waitFor();
+    const processCard = window.getByTestId("process-text-block");
+    await processCard.getByTestId("process-text-toggle").click();
+    await processCard.getByTestId("process-text-content").waitFor();
+    await assertCollapseInsets(thinkingCard, "已思考卡", {
+      title: thinkingCard.getByTestId("thinking-summary"),
+      body: thinkingCard.getByTestId("thinking-content"),
+    });
+    await assertCollapseInsets(processCard, "过程段卡", {
+      title: processCard.getByTestId("process-text-summary"),
+      body: processCard.getByTestId("process-text-content"),
+    });
+    await assertCollapseInsets(firstCard, "工具卡", {
+      title: firstCard.getByTestId("tool-call-name"),
+      body: firstCard.getByTestId("tool-call-body"),
+    });
     const failedCard = window
       .locator('[data-testid="tool-call-card"]')
       .filter({ hasText: "missing.txt" });

@@ -57,6 +57,11 @@ import {
 } from "../lib/turn-view";
 import { terminalNameIndex } from "../lib/terminal-read-view";
 import { useTickingNow } from "../lib/use-ticking-now";
+import {
+  COLLAPSE_BODY_CLASS,
+  COLLAPSE_CARD_CLASS,
+  COLLAPSE_SUMMARY_CLASS,
+} from "../lib/collapse-card";
 import { AssistantActions } from "./AssistantActions";
 import { BackToLatestButton } from "./BackToLatestButton";
 import { GoalVerificationMarker } from "./GoalVerificationMarker";
@@ -683,13 +688,12 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言
-        // 折叠摘要行基准），相邻卡片文字起点一致
-        className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
+        // 折叠卡外形/内距契约见 lib/collapse-card
+        className={COLLAPSE_CARD_CLASS}
       >
         <summary
           data-testid="thinking-toggle"
-          className="flex cursor-pointer select-none items-center gap-2"
+          className={COLLAPSE_SUMMARY_CLASS}
         >
           <DisclosureArrow open={open} />
           {/* 运行提示统一收敛到消息流底部运行行：正文（含思考卡）不再内联转圈，
@@ -713,8 +717,7 @@ function ThinkingBlock(props: { segment: ThinkingSegment }) {
         {open && (
           <div
             data-testid="thinking-content"
-            // 展开体缩进与工具卡展开区对齐（pl-7 ≈ 摘要行文字起点）
-            className="mt-2 whitespace-pre-wrap border-t border-line pt-2 pb-2 pl-7 pr-3 text-fg"
+            className={`${COLLAPSE_BODY_CLASS} whitespace-pre-wrap text-fg`}
           >
             {segment.content}
           </div>
@@ -751,12 +754,12 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
             setOpen(event.currentTarget.open);
           }
         }}
-        // 卡片内距与工具卡统一（同 ThinkingBlock）
-        className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
+        // 折叠卡外形/内距契约见 lib/collapse-card（同 ThinkingBlock）
+        className={COLLAPSE_CARD_CLASS}
       >
         <summary
           data-testid="process-text-toggle"
-          className="flex cursor-pointer select-none items-center gap-2"
+          className={COLLAPSE_SUMMARY_CLASS}
         >
           <DisclosureArrow open={open} />
           <span
@@ -777,7 +780,7 @@ function ProcessTextBlock(props: { segment: AssistantSegment }) {
         {open && (
           <div
             data-testid="process-text-content"
-            className="markdown mt-2 border-t border-line pt-2 pb-2 pl-7 pr-3 text-sm text-fg"
+            className={`markdown ${COLLAPSE_BODY_CLASS} text-sm text-fg`}
           >
             <MarkdownContent content={segment.content} />
           </div>

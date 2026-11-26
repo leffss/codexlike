@@ -1,3 +1,7 @@
+import {
+  COLLAPSE_BODY_CLASS,
+  COLLAPSE_ROW_PADDING,
+} from "../lib/collapse-card";
 import { useCollapseState } from "../lib/collapse-memory";
 import { isNoOutputRead } from "../lib/terminal-read-view";
 import type { TerminalReadItem } from "../lib/turn-view";
@@ -65,7 +69,7 @@ export function TerminalReadMarker(props: {
         <button
           type="button"
           data-testid="terminal-read-toggle"
-          className="flex min-w-0 flex-1 items-center gap-2 px-3.5 py-[9px] text-left hover:bg-hover"
+          className={`flex min-w-0 flex-1 items-center gap-2 ${COLLAPSE_ROW_PADDING} text-left hover:bg-hover`}
           onClick={toggle}
           aria-expanded={expanded}
         >
@@ -96,7 +100,7 @@ export function TerminalReadMarker(props: {
       </div>
 
       {expanded && (
-        <div className="border-t border-line py-2 pl-7 pr-3">
+        <div className={COLLAPSE_BODY_CLASS}>
           <ol className="flex flex-col gap-2">
             {[...item.calls].reverse().map((call, idx) => {
               // 最新置顶，序号仍为时序序号（第 1 次…第 N 次）

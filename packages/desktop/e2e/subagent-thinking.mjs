@@ -15,6 +15,7 @@ import process from "node:process";
 import {
   selectComposerOption,
   assert,
+  assertCollapseInsets,
   closeApp,
   launchApp,
   openSubagentDetail,
@@ -220,6 +221,12 @@ async function main() {
     // focus 直跳详情页（拆页导航 ADR 0032），思考块可直接交互
     await thinkingBlock.getByTestId("subagent-thinking-toggle").click();
     await thinkingContent.waitFor({ timeout: 10_000 });
+    // 折叠卡内距契约（2026-11-26）：子代理思考块与工具卡同基准——
+    // 摘要标题块左缘 26px、展开体正文左缘 28px（卡壳不挂水平内距）
+    await assertCollapseInsets(thinkingBlock, "子代理思考块", {
+      title: thinkingBlock.getByTestId("subagent-thinking-summary"),
+      body: thinkingBlock.getByTestId("subagent-thinking-content"),
+    });
     const thinkingText = await thinkingContent.textContent();
     assert(
       thinkingText !== null &&

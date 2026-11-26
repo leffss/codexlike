@@ -14,6 +14,11 @@ import { WorkPlanCardFromSubagentTools } from "./WorkPlanCard";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolGroupView } from "./ToolSequence";
 import { formatCompletedTime } from "../lib/completed-time";
+import {
+  COLLAPSE_BODY_CLASS,
+  COLLAPSE_CARD_CLASS,
+  COLLAPSE_SUMMARY_CLASS,
+} from "../lib/collapse-card";
 import { useCollapseState } from "../lib/collapse-memory";
 import { MarkdownContent } from "../lib/markdown";
 import { PLAN_TOOL_NAME } from "../lib/plan-view";
@@ -737,13 +742,12 @@ function SubagentRoundsDisclosure(props: {
           setOpen(event.currentTarget.open);
         }
       }}
-      // 卡片内距与工具卡（ToolCallCard）统一：px-3.5 py-[9px]（D 语言
-      // 折叠摘要行基准，2026-11-19 起与主代理思考/过程段卡同口径）
-      className="rounded-lg bg-surface-muted px-3.5 py-[9px] text-xs text-fg-muted"
+      // 折叠卡外形/内距契约见 lib/collapse-card
+      className={COLLAPSE_CARD_CLASS}
     >
       <summary
         data-testid={`subagent-${variant}-toggle`}
-        className="flex cursor-pointer select-none items-center gap-2"
+        className={COLLAPSE_SUMMARY_CLASS}
       >
         <DisclosureArrow open={open} />
         <span
@@ -758,8 +762,8 @@ function SubagentRoundsDisclosure(props: {
       {open && (
         <div
           data-testid={`subagent-${variant}-content`}
-          // 展开体缩进与工具卡展开区对齐（pl-7 ≈ 摘要行文字起点）
-          className={`mt-2 overflow-y-auto whitespace-pre-wrap border-t border-line pt-2 pb-2 pl-7 pr-3 text-sm leading-6 text-fg ${
+          // 展开体内距与工具卡同基（见 lib/collapse-card）
+          className={`${COLLAPSE_BODY_CLASS} overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-fg ${
             variant === "thinking" ? "max-h-48" : "max-h-64"
           }`}
         >
