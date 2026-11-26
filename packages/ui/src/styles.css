@@ -68,7 +68,8 @@
   --code-bg: #f7f6f3;
   --code-fg: #37352f;
   --code-inline-bg: rgba(135, 131, 125, 0.17);
-  --code-inline-fg: #c4554d; /* Notion 内联码红棕 */
+  /* 与正文同色：内联码靠灰底区分，不再用红棕抢注意力（2026-11-27 反馈） */
+  --code-inline-fg: var(--fg);
 
   /* 状态：Notion 柔和色调（前景 + 淡底） */
   --ok-fg: #448361;
@@ -143,7 +144,8 @@
   --code-bg: #2a2827;
   --code-fg: #e6e4df;
   --code-inline-bg: rgba(135, 131, 125, 0.22);
-  --code-inline-fg: #e8a29c;
+  /* 与正文同色（深色套同口径，2026-11-27 反馈） */
+  --code-inline-fg: var(--fg);
 
   --ok-fg: #6fb38c;
   --ok-bg: rgba(68, 131, 97, 0.22);

@@ -244,16 +244,37 @@ export async function closeRailPanel(window) {
 /**
  * 折叠卡内距契约（2026-11-26 用户反馈：已回答/已思考卡片的标题与展开体
  * 缩进和 write_file 等工具卡不一致）。工具卡基准：卡壳不挂水平内距，
- * 摘要标题块左缘 = 卡壳 + 26px（px-3.5 箭头 + gap-2），展开体正文左缘 =
+ * 摘要标题文字左缘 = 卡壳 + 26px（px-3.5 箭头 + gap-2），展开体正文左缘 =
  * 卡壳 + 28px（pl-7），分隔线通栏。卡壳挂 px 会让展开体叠加成 42px，
  * 漏掉 pl-7 则停在 14px——两种历史错位都由本断言锁住。
  *
+ * 标题按「文字」左缘而非元素盒测：工具卡标题是带内距的 name 徽章，
+ * 盒左缘 26px 时文字被 px 推到 32px——2026-11-27 用户反馈 apply_patch
+ * 卡片标题文字比「已思考」多缩进 6px 即此（盒对齐、字未对齐）。
+ * 徽章用 -ml 抵消自身左内距后，文字与纯文本标题同落 26px。
+ *
  * title / body 传 Locator（由调用方用 getByTestId 在 card 上取）：
  * 与 e2e 定位收口一致，不在这里拼选择器字符串。
+ * body 省略时只校验标题（工具组组头等单行行族共用 26px 标题契约）。
  */
 export async function assertCollapseInsets(card, label, { title, body }) {
   const cardBox = await card.boundingBox();
-  const titleBox = await title.boundingBox();
+  const titleTextLeft = await title.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    // 与原来的 titleBox 守卫同口径：不可见标题不参与几何断言
+    if (rect.width === 0 && rect.height === 0) return null;
+    return rect.left + parseFloat(window.getComputedStyle(node).paddingLeft);
+  });
+  assert(
+    cardBox !== null && titleTextLeft !== null,
+    `${label}：卡壳或摘要标题不可见`
+  );
+  const titleInset = titleTextLeft - cardBox.x;
+  assert(
+    Math.abs(titleInset - 26) <= 1,
+    `${label}：摘要标题文字左缘应为卡壳 + 26px，实际 ${titleInset.toFixed(2)}px`
+  );
+  if (body === undefined) return;
   const bodyBox = await body.evaluate((node) => {
     // 展开体的正文区 = 边框盒减去左右内距（卡壳内距已下沉到展开体）
     const rect = node.getBoundingClientRect();
@@ -264,17 +285,8 @@ export async function assertCollapseInsets(card, label, { title, body }) {
       width: rect.width,
     };
   });
-  assert(
-    cardBox !== null && titleBox !== null,
-    `${label}：卡壳或摘要标题不可见`
-  );
-  const titleInset = titleBox.x - cardBox.x;
   const bodyLeftInset = bodyBox.left - cardBox.x;
   const bodyRightInset = cardBox.x + cardBox.width - bodyBox.right;
-  assert(
-    Math.abs(titleInset - 26) <= 1,
-    `${label}：摘要标题块左缘应为卡壳 + 26px，实际 ${titleInset.toFixed(2)}px`
-  );
   assert(
     Math.abs(bodyLeftInset - 28) <= 1,
     `${label}：展开体正文左缘应为卡壳 + 28px，实际 ${bodyLeftInset.toFixed(2)}px`

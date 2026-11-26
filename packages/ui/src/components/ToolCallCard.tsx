@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   COLLAPSE_BODY_CLASS,
   COLLAPSE_ROW_PADDING,
+  COLLAPSE_TITLE_BADGE_CLASS,
 } from "../lib/collapse-card";
 import { useCollapseState } from "../lib/collapse-memory";
 import type { ToolCallSegment } from "../lib/task-view";
@@ -139,7 +140,7 @@ export function ToolCallCard(props: { call: ToolCallCardData }) {
         <DisclosureArrow open={expanded} />
         <span
           data-testid="tool-call-name"
-          className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-xs text-accent"
+          className={COLLAPSE_TITLE_BADGE_CLASS}
         >
           {call.toolName}
         </span>

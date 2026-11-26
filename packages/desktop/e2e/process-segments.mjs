@@ -225,6 +225,13 @@ async function main() {
       (await window.getByTestId("tool-call-card").count()) === 1,
       "组收起时除组外单卡外不应渲染组内原卡片"
     );
+    // 组头是单行行族、无展开体：只校验标题文字左缘（与工具卡徽章同口径，
+    // 避免「apply_patch × N」组头比相邻已思考标题多缩进）
+    await assertCollapseInsets(
+      group.getByTestId("tool-call-group-toggle"),
+      "工具组组头",
+      { title: group.getByTestId("tool-call-group-name") }
+    );
 
     // 展开组：3 张原卡，可展开看输出；失败卡状态位悬停可查错误详情
     await group.getByTestId("tool-call-group-toggle").click();
@@ -239,7 +246,7 @@ async function main() {
       "工具卡摘要行应显示耗时"
     );
     // 折叠卡内距契约（2026-11-26 用户反馈）：已思考/过程段与工具卡同基准——
-    // 摘要标题块左缘 26px、展开体正文左缘 28px。工具卡即基准卡。
+    // 摘要标题文字左缘 26px、展开体正文左缘 28px。工具卡即基准卡。
     const thinkingCard = window.getByTestId("thinking-block").first();
     await thinkingCard.getByTestId("thinking-toggle").click();
     await thinkingCard.getByTestId("thinking-content").waitFor();

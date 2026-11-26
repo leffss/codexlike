@@ -98,7 +98,7 @@ async function assertCopyState(window, name) {
 
 async function main() {
   const finalMarkdown =
-    "**结论：内容正确**\n\n保留 Markdown\n\n```ts\nconst ok = true;\n```";
+    "**结论：内容正确**\n\n保留 Markdown，行内 `code` 与正文同色\n\n```ts\nconst ok = true;\n```";
   let finishFinal;
   const { server, port, seenBodies } = await startMockProvider(
     (ctx, { index }) => {
@@ -328,8 +328,21 @@ async function main() {
             const themed =
               getComputedStyle(element).color === getComputedStyle(probe).color;
             probe.remove();
+            // 行内代码与其所在正文段落同色（靠灰底区分）：2026-11-27 用户
+            // 反馈红色内联码太显眼；直接比段落计算色，正文改色时断言仍跟随。
+            const inlineCode = element.parentElement.querySelector(
+              '[data-testid="assistant-content"] p code'
+            );
+            const inlineCodeColor =
+              inlineCode === null ? null : getComputedStyle(inlineCode).color;
+            const inlineBodyColor =
+              inlineCode?.parentElement == null
+                ? null
+                : getComputedStyle(inlineCode.parentElement).color;
             return {
               themed,
+              inlineCodeColor,
+              inlineBodyColor,
               iconSize: copy.width === 28 && copy.height === 28,
               below: actions.top >= content.bottom,
               contained: [copy, time].every(
@@ -352,6 +365,11 @@ async function main() {
             };
           });
         assert(layout.themed, `${theme} 操作栏应使用主题弱化前景色`);
+        assert(
+          layout.inlineCodeColor !== null &&
+            layout.inlineCodeColor === layout.inlineBodyColor,
+          `${theme} 行内代码应与所在正文段落同色（靠灰底区分，不再红色抢注意力）：${JSON.stringify(layout)}`
+        );
         assert(
           layout.iconSize &&
             layout.below &&
@@ -418,6 +436,14 @@ async function main() {
       if (!(await block.evaluate((node) => node.open)))
         await block.getByTestId("thinking-toggle").click();
     }
+    // 受控 <details> 点击后内容随 React 提交挂载，click promise 不保证提交
+    // 已完成；不等待会偶发只读到第一段（既有 thinking-block 开合时序 flake，
+    // 2026-11-27 连续复现后补显式等待）。
+    await window.waitForFunction(
+      () =>
+        document.querySelectorAll('[data-testid="thinking-content"]').length ===
+        2
+    );
     const thinkingTexts = await window.evaluate(() =>
       [...document.querySelectorAll('[data-testid="thinking-content"]')].map(
         (node) => node.textContent ?? ""

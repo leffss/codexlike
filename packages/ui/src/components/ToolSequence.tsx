@@ -1,3 +1,4 @@
+import { COLLAPSE_TITLE_BADGE_CLASS } from "../lib/collapse-card";
 import { useCollapseState } from "../lib/collapse-memory";
 import type { ToolSequenceItem } from "../lib/turn-view";
 import { formatDurationCn } from "../lib/turn-view";
@@ -43,7 +44,10 @@ export function ToolGroupView(props: {
         className="flex w-full items-center gap-2 rounded-lg bg-surface-muted px-3.5 py-[9px] text-left text-xs hover:bg-hover"
       >
         <DisclosureArrow open={open} />
-        <span className="rounded bg-code-bg px-1.5 py-0.5 font-mono text-accent">
+        <span
+          data-testid="tool-call-group-name"
+          className={COLLAPSE_TITLE_BADGE_CLASS}
+        >
           {item.toolName}
         </span>
         <span className="text-fg-muted">× {item.segments.length}</span>
