@@ -65,7 +65,8 @@ async function workbenchSnapshot(window) {
     const visible = (el) => !!el && el.getClientRects().length > 0;
     const composer = node("composer-input");
     return {
-      titlebarVisible: visible(node("window-titlebar")),
+      // 桌面双卡布局：工作台以消息卡首行（任务标题/目录行）作为应用入口可见性
+      topbarVisible: visible(node("workspace-topbar")),
       closeVisible: visible(node("window-close")),
       assistantVisible: visible(node("message-assistant")),
       userVisible: visible(node("message-user")),
@@ -250,7 +251,7 @@ async function checkHostBoundaries({
       `${scenario.name}: 不得创建 Electron 子窗口`
     );
     check(
-      ui.titlebarVisible &&
+      ui.topbarVisible &&
         ui.closeVisible &&
         ui.assistantVisible &&
         ui.composerEditable &&
@@ -378,7 +379,7 @@ async function main() {
     });
     assert(before.windows.length === 1, "点击前只有主窗口");
     assert(
-      beforeUI.titlebarVisible &&
+      beforeUI.topbarVisible &&
         beforeUI.closeVisible &&
         beforeUI.assistantVisible &&
         beforeUI.userVisible &&
@@ -423,7 +424,7 @@ async function main() {
       "主 frame 不得曾导航到外部文档"
     );
     check(
-      afterUI.titlebarVisible && afterUI.closeVisible,
+      afterUI.topbarVisible && afterUI.closeVisible,
       "点击外链后自绘标题栏及关闭按钮必须保留"
     );
     check(
@@ -447,7 +448,7 @@ async function main() {
       "系统打开被替换时 Electron 不应请求外部目标文档"
     );
 
-    if (afterUI.composerEditable && afterUI.titlebarVisible) {
+    if (afterUI.composerEditable && afterUI.topbarVisible) {
       try {
         await window.getByTestId("composer-input").fill(`${DRAFT}（继续编辑）`);
         await window.getByTestId("settings-open").click();

@@ -4,8 +4,8 @@ export function WindowControls(props: {
   api: CodexLikeApi["windowControls"] | undefined;
   state: WindowState;
   /**
-   * 【原型设施，prototype/card-shell A 修订版】紧凑档：窗口按钮落进
-   * 消息卡首行 / 右栏首行（行高更矮），与 26px 图标按钮对齐。
+   * 紧凑档：窗口按钮落进消息卡首行 / 右栏首行（行高更矮），与 26px 图标
+   * 按钮对齐；设置顶栏用默认档。
    */
   compact?: boolean;
 }) {

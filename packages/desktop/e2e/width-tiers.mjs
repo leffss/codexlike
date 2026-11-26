@@ -39,6 +39,9 @@ import {
 /** 档位换算依据：侧栏固定 w-80（320px），窗口内容区宽 - 320 = 任务容器宽 */
 const SIDEBAR_WIDTH = 320;
 const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
+/** 桌面双卡（A）外壳附加的横向留白：页根 p-1(8px) + 左栏 gap-2(8px) +
+ *  中列卡描边(2px)——内容列比无壳布局窄 18px。 */
+const SHELL_INSET = 18;
 /** 输入卡左右各比正文列外扩的宽度（-mx-3，2026-11-19 呈现对齐轮定案） */
 const COMPOSER_BREAKOUT = 12;
 
@@ -121,7 +124,7 @@ async function assertViewportLayout(window, label) {
       clientHeight: root.clientHeight,
       scrollWidth: root.scrollWidth,
       clientWidth: root.clientWidth,
-      titlebar: rect('[data-testid="window-titlebar"]'),
+      titlebar: rect('[data-testid="workspace-topbar"]'),
       stream: rect('[data-testid="message-stream"]'),
       composer: rect('[data-testid="composer-card"]'),
     };
@@ -304,7 +307,7 @@ async function main() {
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
     const expectedWide = Math.min(
-      1616 - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
+      1616 - SHELL_INSET - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
       1280
     );
     const tier7xl = await assertContentWidth(window, {
@@ -376,7 +379,8 @@ async function main() {
     const gutter = await window
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
-    const expectedFull = 1060 - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
+    const expectedFull =
+      1060 - SHELL_INSET - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
       max: 1023,
@@ -506,7 +510,7 @@ async function main() {
         `${width} 右栏打开时标题不能被压成零宽：${title.width}`
       );
       const viewportWidth = await window.evaluate(() => window.innerWidth);
-      for (const testId of ["workspace-badge", "resources-toggle"]) {
+      for (const testId of ["workspace-opener-main", "resources-toggle"]) {
         const button = await window.getByTestId(testId).boundingBox();
         assert(
           button !== null &&
@@ -547,9 +551,12 @@ async function main() {
           panel.x + panel.width <= railBox.x + railBox.width + 1,
         `${width} 改动面板应在右栏边界内且可用`
       );
+      // 桌面双卡（A）：窄右栏下 tab 行横向滚动（被遮挡 tab 由行首下拉菜单
+      // 直达），tab 按钮会被滚动容器裁切——边界断言只覆盖非滚动控件
+      // （行首菜单、刷新、提交等），排除 role="tab" 的滚动按钮。
       for (const button of await window
         .getByTestId("rail-panel")
-        .locator("button")
+        .locator("button:not([role='tab'])")
         .all()) {
         const box = await button.boundingBox();
         assert(

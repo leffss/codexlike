@@ -18,7 +18,7 @@ import {
   launchApp,
   projectAction,
   startMockProvider,
-  workspaceBadgeInfo,
+  workspacePathInfo,
 } from "./helpers.mjs";
 
 function git(cwd, ...args) {
@@ -175,15 +175,15 @@ async function main() {
         `feature/${ids[0]}`,
       "独立分支"
     );
-    // 正式任务的路径/模式收进标题栏徽章（票01）：弹层读完整工作区
-    const badge = await workspaceBadgeInfo(window);
+    // 正式任务的路径/模式收进消息卡首行（桌面双卡 A）：首行读完整工作区
+    const badge = await workspacePathInfo(window);
     assert(badge.path.includes(worktreePath), "显示实际工作区");
     const fixedMode = window
-      .getByTestId("workspace-badge")
+      .getByTestId("workspace-topbar")
       .getByTestId("workspace-mode");
     assert(
       (await fixedMode.textContent()).includes("Worktree"),
-      "正式任务模式标签位于标题栏徽章内"
+      "正式任务模式标签位于消息卡首行"
     );
     const modeTitle = (await fixedMode.getAttribute("title")) ?? "";
     assert(
@@ -326,7 +326,7 @@ async function main() {
       .getByTestId("task-item")
       .filter({ hasText: "隔离写入" })
       .click();
-    const reopened = await workspaceBadgeInfo(window);
+    const reopened = await workspacePathInfo(window);
     assert(reopened.path.includes(worktreePath), "重开仍使用原副本");
     await window.getByTestId("add-project").click();
     await projectAction(

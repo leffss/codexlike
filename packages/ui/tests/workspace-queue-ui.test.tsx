@@ -186,6 +186,14 @@ function setup() {
     } satisfies Partial<CodexLikeApi["tasks"]>,
     providerProfiles: { list: vi.fn(async () => [profile]) },
     projects: { list: vi.fn(async () => []) },
+    // 消息卡首行「打开目录」挂载即拉取候选（本文件聚焦队列编辑，openers 恒 explorer）
+    openers: {
+      list: vi.fn(async () => ({
+        openers: [{ id: "explorer", label: "资源管理器" }],
+        defaultId: "explorer",
+      })),
+      open: vi.fn(async () => ({ defaultId: "explorer" })),
+    },
     launchState: { setWorkbenchTarget: vi.fn(async () => {}) },
     git: {
       status: vi.fn(async () => ({
@@ -256,7 +264,11 @@ function queueItem(id: string) {
 async function openWorkspace() {
   const fixture = setup();
   const view = render(
-    <WorkspacePage state={fixture.state} onOpenSettings={() => {}} />
+    <WorkspacePage
+      state={fixture.state}
+      onOpenSettings={() => {}}
+      chrome={{ settingsButton: null, themeToggle: null, windowControls: null }}
+    />
   );
   await waitFor(() => expect(composer().value).toBe("A 原草稿"));
   await screen.findByTestId("queue-bar");
@@ -551,7 +563,15 @@ describe("WorkspacePage 队列编辑与工作台草稿", () => {
     const { state, api, workbench, exitListeners } = setup();
     render(
       <ApplicationExit state={state}>
-        <WorkspacePage state={state} onOpenSettings={() => {}} />
+        <WorkspacePage
+          state={state}
+          onOpenSettings={() => {}}
+          chrome={{
+            settingsButton: null,
+            themeToggle: null,
+            windowControls: null,
+          }}
+        />
       </ApplicationExit>
     );
     await waitFor(() => expect(composer().value).toBe("A 原草稿"));

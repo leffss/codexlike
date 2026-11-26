@@ -94,11 +94,6 @@ export function MessageComposer(props: {
   onQueueReorder?: (orderedIds: string[]) => void;
   /** 取消编辑（票 03）：条目原样保留，输入框还原先前草稿；按钮与 Esc 共用 */
   onQueueCancelEdit?: () => void;
-  /**
-   * 【原型设施，prototype/card-shell】外壳附加类（透传 ComposerRegion）：
-   * 整页卡片变体用它加顶部发丝线或把输入区做成舱内悬浮托盘。
-   */
-  regionClassName?: string;
 }) {
   const [localValue, setLocalValue] = useState("");
   const value = props.draftValue ?? localValue;
@@ -203,7 +198,6 @@ export function MessageComposer(props: {
     <ComposerRegion
       testId="composer-region"
       contentWidthClass={props.contentWidthClass}
-      className={props.regionClassName}
     >
       {/* 输入队列条（票 01/02）：输入框上方只读预览，回复结束后自动逐条发出；
             暂停态（停止保留队列）显示「恢复」「清空」操作 */}

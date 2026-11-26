@@ -21,25 +21,15 @@ export function ComposerRegion(props: {
   testId: string;
   /** 内容列宽度类：与消息流、头部共用同一基准列（WorkspacePage 单点下发） */
   contentWidthClass?: string;
-  /**
-   * 【原型设施，prototype/card-shell】外壳附加类：整页卡片变体用它给输入区
-   * 加顶部发丝线、或做成舱内悬浮托盘；缺省不改变任何现状样式。
-   */
-  className?: string;
   children: ReactNode;
 }) {
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
-  // 无附加类时保持与既有 DOM 完全一致的 class 串（测试按此断言）
-  const surfaceClass =
-    props.className === undefined
-      ? "bg-canvas px-4 pt-2.5 pb-4"
-      : `bg-canvas px-4 pt-2.5 pb-4 ${props.className}`;
   return (
     // 补偿消息流原生滚动条占宽，基准列对齐（2026-11-19 起输入卡本体在
     // 列内再左右各外扩 12px，比正文列宽一点；见 MessageComposer 输入卡）。
     <div
       data-testid={props.testId}
-      className={surfaceClass}
+      className="bg-canvas px-4 pt-2.5 pb-4"
       style={{
         paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
       }}

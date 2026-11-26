@@ -38,20 +38,14 @@ export function modelOptionValue(profileId, model) {
 }
 
 /**
- * 标题栏工作区徽章弹层三连（审查修复 3 抽取，票01）：点开徽章，读取弹层
- * 内的完整工作区路径与来源目录（无来源目录行时 origin 为 null），Escape
- * 关闭。文本断言（includes / === / 真实存在）由调用方按各自场景完成。
+ * 工作区路径（桌面双卡 A）：消息卡首行直接显示当前任务的完整工作区路径，
+ * 原标题栏工作区徽章弹层已退役。来源目录（Worktree 来源）不再单列展示，
+ * 由首行的 Worktree 徽章表达「本工作区是托管副本」。
  */
-export async function workspaceBadgeInfo(window) {
-  await window.getByTestId("workspace-badge").click();
-  const popover = window.getByTestId("workspace-popover");
-  const path = await popover.getByTestId("workspace-path").textContent();
-  const originNode = popover.getByTestId("workspace-origin");
-  const origin = (await originNode.count())
-    ? await originNode.textContent()
-    : null;
-  await window.keyboard.press("Escape");
-  return { path, origin };
+export async function workspacePathInfo(window) {
+  return {
+    path: await window.getByTestId("workspace-topbar-path").textContent(),
+  };
 }
 
 /** 逻辑字段沿用旧调用名；真实模型/思考控件只暴露统一 trigger，不保留隐藏旧 DOM。 */

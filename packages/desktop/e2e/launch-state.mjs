@@ -119,7 +119,8 @@ async function launchWith(homeDir, fileContent) {
   }
   const { app } = await launchApp({ homeDir });
   const window = app.windows()[0];
-  await window.getByTestId("window-titlebar").waitFor();
+  // 桌面双卡布局下工作台无独立标题栏：以消息卡首行作为「已加载」信号
+  await window.getByTestId("workspace-topbar").waitFor();
   return { app, window };
 }
 

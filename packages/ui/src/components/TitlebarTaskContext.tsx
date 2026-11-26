@@ -321,11 +321,9 @@ function openerIcon(id: string) {
  * 下拉列出本机探测到的候选（展开时重拉，✓ 标当前默认）；点选即以该程序
  * 打开并记为默认（行为即设置）。无路径时整组禁用；失败经 notifyError 提示。
  *
- * 导出给原型 A 修订版复用：按钮从标题栏迁到消息卡首行右侧（打开目录）。
- *
- * compact（原型 A 首行专用，2026-11-26 用户反馈）：收起主图标与下拉箭头
- * 之间的间隔（16px → 8px）——那里只有一组紧凑图标，留白不必像标题栏
- * 那样宽。默认路径不传，保持原样。
+ * compact（消息卡首行「打开目录」，2026-11-26 用户反馈）：整组加一圈发丝线
+ * 读作「一个」分裂按钮，收起主图标与下拉箭头的间隔（16px → 8px）——那里
+ * 只有一组紧凑图标。不传 compact 时保持标题栏同款观感。
  */
 export function WorkspaceOpenerButton(props: {
   opener: TitlebarOpener;
@@ -401,8 +399,8 @@ export function WorkspaceOpenerButton(props: {
 
   return (
     /* 免拖作用域（同徽章）：交互控件整体挂 window-no-drag。
-       compact（原型 A 首行）：整组外加一圈发丝线，读作「一个」分裂按钮，
-       而不是两个散落的图标——默认路径不加框，保持原样。 */
+       compact（消息卡首行）：整组外加一圈发丝线，读作「一个」分裂按钮，
+       而不是两个散落的图标。 */
     <div
       className={`window-no-drag relative flex shrink-0 items-stretch${
         compact ? " rounded-md border border-line" : ""

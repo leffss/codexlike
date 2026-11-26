@@ -14,8 +14,8 @@ import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { TaskActivityBadge } from "./TaskActivityBadge";
 import { TaskContextMenu, type TaskMenuAnchor } from "./TaskContextMenu";
 import { TaskSearch } from "./TaskSearch";
-// 【原型设施，prototype/card-shell A 修订版】应用图标：复用桌面端打包图标
-// （Vite 资产管线内联 URL；浏览器预览与 Electron 构建同源）。
+// 应用图标：复用桌面端打包图标（Vite 资产管线内联 URL；浏览器预览与
+// Electron 构建同源）。
 import appIconUrl from "../../../desktop/build/icon.png";
 
 import { groupTasksByProject } from "../lib/project-groups";
@@ -168,12 +168,6 @@ export function TaskSidebar(props: {
   onRemoveProject?: (id: string) => void;
   /** 任务搜索结果的失效信号（任务列表变更时递增；头部搜索消费） */
   searchRecordsRevision: number;
-  /**
-   * 【原型设施，prototype/card-shell】左栏表面附加类：整页大卡片变体用它
-   * 把左栏融进大卡（bg-transparent!）或做成独立白卡（圆角 + 描边 + 阴影）。
-   * 追加在 aside 自身 bg-canvas 之后；缺省不改变现状样式。
-   */
-  frameClassName?: string;
 }) {
   const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
@@ -738,7 +732,7 @@ export function TaskSidebar(props: {
       ref={layoutRef}
       aria-label="任务列表"
       style={{ width: sidebarWidth }}
-      className={`relative flex shrink-0 flex-col bg-canvas${props.frameClassName ? ` ${props.frameClassName}` : ""}`}
+      className="relative flex shrink-0 flex-col"
     >
       {menu && menuTask && (
         <TaskContextMenu

@@ -204,6 +204,14 @@ function setup(options: SetupOptions = {}) {
     } satisfies Partial<CodexLikeApi["tasks"]>,
     providerProfiles: { list: vi.fn(async () => [profile]) },
     projects: { list: vi.fn(async () => []) },
+    // 消息卡首行「打开目录」挂载即拉取候选（本文件聚焦目标模式，openers 恒 explorer）
+    openers: {
+      list: vi.fn(async () => ({
+        openers: [{ id: "explorer", label: "资源管理器" }],
+        defaultId: "explorer",
+      })),
+      open: vi.fn(async () => ({ defaultId: "explorer" })),
+    },
     launchState: { setWorkbenchTarget: vi.fn(async () => {}) },
     git: {
       status: vi.fn(async () => ({
@@ -262,7 +270,13 @@ function roundText(): string {
 
 async function openWorkspace(options: SetupOptions = {}) {
   const fixture = setup(options);
-  render(<WorkspacePage state={fixture.state} onOpenSettings={() => {}} />);
+  render(
+    <WorkspacePage
+      state={fixture.state}
+      onOpenSettings={() => {}}
+      chrome={{ settingsButton: null, themeToggle: null, windowControls: null }}
+    />
+  );
   await waitFor(() => expect(composer().value).toBe("A 原草稿"));
   return fixture;
 }

@@ -94,10 +94,6 @@ import {
   planSlashCommand,
   type SlashCommandAction,
 } from "../lib/slash-command-actions";
-// 【原型设施，prototype/card-shell 分支】整页卡片壳变体（?variant=）；
-// cardShellSpec(null) = 现状布局。验证后连同 dev/card-shell.ts 一起留在
-// 原型分支，不进 main。
-import { cardShellSpec } from "../dev/card-shell";
 
 /**
  * 提示状态同步一元（审查修复 5 抽取）：五类原常驻横条（票02）的
@@ -153,20 +149,13 @@ export function WorkspacePage(props: {
   state?: WorkspaceState;
   /** 启动现场的工作台目标（票03）：冷启动恢复的第一优先级；缺省走现有回退链 */
   initialTarget?: WorkbenchTarget | null;
-  /** 标题栏任务上下文上报（票01）：任务/搜索/面板开关交由 App 的 Header 装配 */
-  onTitlebarContext?: (context: TitlebarContext) => void;
   /**
-   * 【原型设施，prototype/card-shell 分支】整页卡片壳变体（A/B/C/D）；
-   * 缺省 null = 现状布局（左栏 / 中列 / 右栏同层排列）。
+   * 消息卡首行右侧的动作组（App 装配）：settingsButton / themeToggle 分开成
+   * 槽（右栏开关夹在两者之间——用户指定「设置 ↔ 右栏开关」对调）；
+   * windowControls = 最小化 / 最大化 / 关闭（按右栏开合落在消息卡首行或
+   * 右栏首行）。
    */
-  prototypeVariant?: string | null;
-  /**
-   * 【原型设施，prototype/card-shell A 修订版】标题栏退役后由 App 装配的
-   * 动作：settingsButton / themeToggle 分开成槽（右栏开关夹在两者之间——
-   * 用户指定「设置 ↔ 右栏开关」对调）；windowControls = 最小化 / 最大化 /
-   * 关闭（按右栏开合落在消息卡首行或右栏首行）。
-   */
-  prototypeChrome?: {
+  chrome: {
     settingsButton: ReactNode;
     themeToggle: ReactNode;
     windowControls: ReactNode;
@@ -178,10 +167,6 @@ export function WorkspacePage(props: {
     )
   );
   const workspaceState = props.state ?? localState;
-  /** 【原型设施，prototype/card-shell】整页卡片壳配置；null = 现状布局 */
-  const shell = cardShellSpec(props.prototypeVariant ?? null);
-  /** 标题栏上下文上报（票01）：解构以稳定 effect 依赖 */
-  const { onTitlebarContext } = props;
   useSyncExternalStore(
     workspaceState.subscribe,
     workspaceState.version,
@@ -333,11 +318,9 @@ export function WorkspacePage(props: {
    * 入口：标题栏「规范与技能」图标开关（resources tab）与消息区右上角的
    * 改动摘要胶囊（changes tab），各自经 aria-expanded 与抽屉状态同步。
    */
-  // 检视右栏（ADR 0018）：默认关闭；开合由标题栏「右栏开关」驱动，
-  // 未提交变更数由右栏上报（标题栏角标消费）。
-  // 【原型设施，prototype/card-shell】变体模式默认展开——一眼看到
-  // 「中列卡 + 右栏卡并排」的完整形态；现状路径 shell === null 保持关闭。
-  const [railOpen, setRailOpen] = useState(shell !== null);
+  // 检视右栏（ADR 0018）：默认关闭（与桌面双卡前的开合语义一致）；开合由
+  // 消息卡首行「右栏开关」驱动，未提交变更数由右栏上报（角标消费）。
+  const [railOpen, setRailOpen] = useState(false);
   const [changesCount, setChangesCount] = useState<number | null>(null);
   const [resources, setResources] = useState<TaskResourcesView | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
@@ -1933,9 +1916,6 @@ export function WorkspacePage(props: {
       toastState,
     ]
   );
-  useEffect(() => {
-    onTitlebarContext?.(titlebarContext);
-  }, [titlebarContext, onTitlebarContext]);
 
   /** 工作区共享检查（票02）：展示目标为当前草稿或当前任务，toast 同步见下 */
   const sharingTarget = draft
@@ -2021,7 +2001,7 @@ export function WorkspacePage(props: {
   ).length;
 
   return (
-    <div className={shell === null ? "flex h-full" : shell.workspace}>
+    <div className="flex h-full gap-2">
       {fullAccessPending && (
         <FullAccessConfirmDialog
           onConfirm={() => {
@@ -2112,8 +2092,6 @@ export function WorkspacePage(props: {
               pushCommandFeedback("error", `折叠失败：${String(error)}`)
             );
         }}
-        // 【原型设施，prototype/card-shell】左栏表面：融进大卡 / 独立白卡
-        frameClassName={shell?.sidebar}
       />
       {/* 任务容器（票 05）：内容列宽度分档（@min-[864px]/task 等）以本栏为
           断点基准而非视口——侧栏开合改变本栏宽度时按档位分档响应。
@@ -2150,91 +2128,66 @@ export function WorkspacePage(props: {
               消息列基准左右各外扩 12px（2026-11-19 起取代「同宽」口径，
               见 MessageComposer）；关闭时右栏整体卸载、主列
               恢复全宽。右栏自带拖拽分隔条与双端最小宽；开合唯一入口在
-              标题栏「右栏开关」（改动计数角标）。@container/task 容器宽度
+              消息卡首行「右栏开关」（改动计数角标）。@container/task 容器宽度
               不受右栏开合影响（三档分档行为保持稳定）。票02：原消息流上方
               的五类常驻横条已迁为右下角 toast，不再占行。 */}
-          <div
-            className={
-              shell === null
-                ? "flex min-h-0 flex-1"
-                : shell.header === "none"
-                  ? // A 修订版：右栏拖拽条改为绝对定位骑缝、不占布局宽，
-                    // 卡片间距只由本行 gap 决定——4px，比默认 8px 再收一档。
-                    "flex min-h-0 flex-1 gap-1"
-                  : "flex min-h-0 flex-1 gap-2"
-            }
-          >
-            {/* 【原型设施，prototype/card-shell】中列卡片：消息流 + 输入区
-                同一张卡（右栏打开时与右栏卡并排）。无变体时用 contents
-                包裹——不产生盒子，默认路径布局与现状完全一致。 */}
-            <div className={shell === null ? "contents" : shell.center}>
-              {/* 【原型 A 修订版】消息卡首行：任务标题 + 目录（左），
-                  打开目录 / 右栏开关 / 主题 / 设置 / 窗口按钮（右）。
-                  标题栏退役后这一行兼任窗口拖动区；交互控件各自免拖。 */}
-              {shell?.header === "none" && (
-                <div
-                  data-testid="workspace-topbar"
-                  className="window-titlebar-drag flex h-10 shrink-0 items-center gap-2 border-b border-line px-3"
-                >
-                  {/* 任务标题（14px）与目录（12px mono）按基线对齐：
+          {/* 桌面双卡：右栏拖拽条改为绝对定位骑缝、不占布局宽，
+              卡片间距只由本行 gap 决定（4px） */}
+          <div className="flex min-h-0 flex-1 gap-1">
+            {/* 中列卡片：消息流 + 输入区同一张卡（右栏打开时与右栏卡并排） */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-canvas shadow-floating">
+              {/* 消息卡首行：任务标题 + 目录（左），打开目录 / 右栏开关 /
+                  主题 / 设置 / 窗口按钮（右）。标题栏退役后这一行兼任窗口
+                  拖动区；交互控件各自免拖。 */}
+              <div
+                data-testid="workspace-topbar"
+                className="window-titlebar-drag flex h-10 shrink-0 items-center gap-2 border-b border-line px-3"
+              >
+                {/* 任务标题（14px）与目录（12px mono）按基线对齐：
                       盒居中（items-center）会让 mono 小字抬眼 1.5px，
                       两段文字看起来不在一条线上（2026-11-26 用户反馈） */}
-                  <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span
+                    data-testid="task-title"
+                    title={titlebarTask?.title ?? "新建任务"}
+                    className="min-w-0 shrink truncate text-sm font-semibold text-fg"
+                  >
+                    {titlebarTask?.title ?? (draft ? "新建任务" : "CodexLike")}
+                  </span>
+                  <span aria-hidden="true" className="shrink-0 text-fg-subtle">
+                    ·
+                  </span>
+                  <span
+                    data-testid="workspace-topbar-path"
+                    title={openerWorkspacePath ?? undefined}
+                    className="min-w-0 truncate font-mono text-xs text-fg-muted"
+                  >
+                    {openerWorkspacePath ?? "未选择工作区"}
+                  </span>
+                  {titlebarTask?.workspaceMode === "worktree" && (
                     <span
-                      data-testid="task-title"
-                      title={titlebarTask?.title ?? "新建任务"}
-                      className="min-w-0 shrink truncate text-sm font-semibold text-fg"
+                      data-testid="workspace-mode"
+                      title="首次执行后工作区固定，调整项目归属不会改变目录、分支和历史；不代表文件只读或权限受限。"
+                      className="shrink-0 rounded bg-worktree-bg px-1.5 py-0.5 text-[10px] text-worktree-fg"
                     >
-                      {titlebarTask?.title ??
-                        (draft ? "新建任务" : "CodexLike")}
+                      Worktree
                     </span>
-                    <span
-                      aria-hidden="true"
-                      className="shrink-0 text-fg-subtle"
-                    >
-                      ·
-                    </span>
-                    <span
-                      data-testid="workspace-path"
-                      title={openerWorkspacePath ?? undefined}
-                      className="min-w-0 truncate font-mono text-xs text-fg-muted"
-                    >
-                      {openerWorkspacePath ?? "未选择工作区"}
-                    </span>
-                    {titlebarTask?.workspaceMode === "worktree" && (
-                      <span className="shrink-0 rounded bg-worktree-bg px-1.5 py-0.5 text-[10px] text-worktree-fg">
-                        Worktree
-                      </span>
-                    )}
-                  </div>
-                  <div className="window-no-drag flex shrink-0 items-center gap-1">
-                    {/* 首行图标密集：打开目录用紧凑版（图标与下拉箭头贴紧） */}
-                    <WorkspaceOpenerButton
-                      opener={titlebarContext.opener}
-                      compact
-                    />
-                    {/* 右侧动作从左到右：主题、设置、右栏开关、窗口按钮
+                  )}
+                </div>
+                <div className="window-no-drag flex shrink-0 items-center gap-1">
+                  {/* 首行图标密集：打开目录用紧凑版（图标与下拉箭头贴紧） */}
+                  <WorkspaceOpenerButton
+                    opener={titlebarContext.opener}
+                    compact
+                  />
+                  {/* 右侧动作从左到右：主题、设置、右栏开关、窗口按钮
                         （2026-11-26 用户对调设置与主题后的顺序） */}
-                    {props.prototypeChrome?.themeToggle}
-                    {props.prototypeChrome?.settingsButton}
-                    <TitlebarResourceToggle panels={titlebarContext.panels} />
-                    {railOpen ? null : props.prototypeChrome?.windowControls}
-                  </div>
+                  {props.chrome.themeToggle}
+                  {props.chrome.settingsButton}
+                  <TitlebarResourceToggle panels={titlebarContext.panels} />
+                  {railOpen ? null : props.chrome.windowControls}
                 </div>
-              )}
-              {shell?.centerHeader === true && (
-                <div
-                  data-testid="prototype-center-header"
-                  className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2 text-xs"
-                >
-                  <span className="min-w-0 truncate font-medium text-fg">
-                    {current?.title ?? "新建任务"}
-                  </span>
-                  <span className="ml-auto shrink-0 text-fg-subtle">
-                    {streaming ? "运行中" : "空闲"}
-                  </span>
-                </div>
-              )}
+              </div>
               {draft ? (
                 <NewTaskStart
                   draft={draft}
@@ -2418,7 +2371,6 @@ export function WorkspacePage(props: {
                       record={interaction}
                       count={pending.length}
                       contentWidthClass={contentWidthClass}
-                      regionClassName={shell?.composerRegion}
                       draft={workspaceState.draft(
                         interaction.request.taskId,
                         interaction.request.id
@@ -2474,7 +2426,6 @@ export function WorkspacePage(props: {
                       }
                       onSend={handleSubmit}
                       contentWidthClass={contentWidthClass}
-                      regionClassName={shell?.composerRegion}
                       workspaceFiles={workspaceFiles}
                       skills={resources?.preview.catalog.skills}
                       onOpenSkills={refreshResourcesForView}
@@ -2540,18 +2491,10 @@ export function WorkspacePage(props: {
               restoredTerminals={restoredTerminals}
               terminalNames={terminalNames}
               onOpenTerminal={openTerminalFromStream}
-              // 【原型设施，prototype/card-shell】右栏作为并排卡片：
-              // 外框内缩 + 表面圆角描边阴影；拖拽测量父级仍是本分栏行
-              frameClassName={shell?.railFrame}
-              surfaceClassName={shell?.railSurface}
-              // A 修订版：右栏打开时窗口按钮落到右栏首行右侧
+              // 右栏打开时窗口按钮落到右栏首行右侧
               headerTrailing={
-                shell?.header === "none" && railOpen
-                  ? props.prototypeChrome?.windowControls
-                  : undefined
+                railOpen ? props.chrome.windowControls : undefined
               }
-              // A 修订版：拖拽条不占布局宽（骑缝绝对定位），间距由行 gap 决定
-              separatorOverlay={shell?.header === "none"}
             />
           </div>
         </div>

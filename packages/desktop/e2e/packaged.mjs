@@ -48,27 +48,22 @@ try {
     "无 Profile 冷启动不得渲染残缺表单（应整体为引导卡）"
   );
 
-  // 票01 标题栏任务上下文：草稿无任务回退品牌展示（任务名/徽章不渲染），
-  // 任务搜索随票01 迁入标题栏（冷启动即可用）。
-  const titlebar = window.getByTestId("window-titlebar");
-  await titlebar
-    .getByText("本地 AI coding agent 工作台", { exact: true })
-    .waitFor();
+  // 桌面双卡（A）：工作台无独立标题栏，消息卡首行常驻任务标题（草稿态为
+  // 「新建任务」）+ 目录；任务搜索迁入任务列表头部（冷启动即可用）。
+  const topbar = window.getByTestId("workspace-topbar");
+  await topbar.getByText("新建任务", { exact: true }).waitFor();
   assert(
-    (await window.getByTestId("task-title").count()) === 0,
-    "草稿态标题栏不得渲染任务名（应回退品牌展示）"
-  );
-  assert(
-    (await window.getByTestId("workspace-badge").count()) === 0,
-    "草稿态标题栏不得渲染工作区徽章"
+    (await topbar.getByTestId("task-title").count()) === 1 &&
+      (await topbar.getByTestId("task-title").textContent()) === "新建任务",
+    "草稿态消息卡首行应显示「新建任务」（标题栏退役后由首行承载任务标题）"
   );
   assert(
     (await window.getByTestId("task-search-toggle").count()) === 1,
     "任务搜索应在任务列表头部（ADR 0018 自标题栏迁位）"
   );
   assert(
-    (await titlebar.getByTestId("task-search-toggle").count()) === 0,
-    "任务搜索不得留在标题栏（ADR 0018 已迁任务列表头部）"
+    (await topbar.getByTestId("task-search-toggle").count()) === 0,
+    "任务搜索不得留在消息卡首行（ADR 0018 已迁任务列表头部）"
   );
 
   // 票02 提示条 toast 化：toast 为渲染层内存态，冷启动无任何提示残留；
@@ -134,7 +129,7 @@ try {
     "产物新任务默认必须为 ask"
   );
   console.log(
-    "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏、无 Profile 引导卡与建后表单态/权限默认正常；票05 新布局断言（标题栏上下文回退/无常驻 workspace-info/toast 内存态/抽屉关闭态）全过"
+    "[packaged] 冷启动冒烟通过：父目录自建、新库落盘、真实侧栏、无 Profile 引导卡与建后表单态/权限默认正常；桌面双卡布局断言（消息卡首行任务标题位/无常驻 workspace-info/toast 内存态/右栏默认关闭）全过"
   );
 } finally {
   await closeApp(app);

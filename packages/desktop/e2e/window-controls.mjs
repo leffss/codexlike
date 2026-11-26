@@ -130,12 +130,15 @@ async function checkTitlebar(window) {
       `${id} 不得被拖动区吞掉`
     );
   }
+  // 拖动区：工作台 = 消息卡首行（workspace-topbar）；设置页 = window-titlebar。
+  const dragBar =
+    (await window.getByTestId("workspace-topbar").count()) > 0
+      ? window.getByTestId("workspace-topbar")
+      : window.getByTestId("window-titlebar");
   assert(
-    (await window
-      .getByTestId("window-titlebar")
-      .evaluate((el) =>
-        getComputedStyle(el).getPropertyValue("-webkit-app-region")
-      )) === "drag",
+    (await dragBar.evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("-webkit-app-region")
+    )) === "drag",
     "公共顶栏应提供拖动区"
   );
 }
@@ -239,12 +242,10 @@ async function main() {
         win.setPosition(workArea.x + 16, workArea.y + 16);
         return win.getContentBounds();
       });
-      // ① 拖动区：冷启动无任务，标题栏为品牌回退态（纯文本，可拖）
+      // ① 拖动区：冷启动无任务，消息卡首行为「新建任务」回退文本（纯文本，可拖）
       const dragFrom = await elementScreenPoint(
         app,
-        window
-          .getByTestId("window-titlebar")
-          .getByText("CodexLike", { exact: true })
+        window.getByTestId("workspace-topbar").getByTestId("task-title")
       );
       const dragPx = { x: 150, y: 70 };
       await nativeDrag(

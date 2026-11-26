@@ -135,27 +135,10 @@ export function RailPanel(props: {
    */
   restoredTerminals: TerminalSessionRecord[];
   /**
-   * 【原型设施，prototype/card-shell】外框附加类（挂根节点）：整页卡片
-   * 变体用它把右栏纵向内缩，看起来像浮在大卡上的卡；不影响拖拽测量
-   * （父级仍是工作台分栏行）。
-   */
-  frameClassName?: string;
-  /**
-   * 【原型设施，prototype/card-shell】表面附加类（挂 aside）：圆角 + 描边
-   * + 阴影 = 与中列并排的独立卡片；缺省不改变现状样式。
-   */
-  surfaceClassName?: string;
-  /**
-   * 【原型设施，prototype/card-shell A 修订版】tab 行行尾插槽：右栏打开时
-   * 最小化/最大化/关闭按钮落在这里（右栏第一行右侧）；无变体时不渲染。
+   * tab 行行尾插槽：右栏打开时最小化/最大化/关闭按钮落在这里（右栏第一行
+   * 右侧）；缺省为空。
    */
   headerTrailing?: ReactNode;
-  /**
-   * 【原型设施，prototype/card-shell A 修订版】拖拽分隔条改为绝对定位骑缝：
-   * 不占布局宽度，卡片间距只由外层 gap 决定（默认 6px 占位会把
-   * 「中列卡 ↔ 右栏卡」再撑宽一截）。命中区 10px（跨缝 + 右栏左内距）。
-   */
-  separatorOverlay?: boolean;
 }) {
   const taskId = props.taskId;
   const hasTask = taskId !== null;
@@ -429,15 +412,9 @@ export function RailPanel(props: {
   );
 
   return (
-    <div
-      ref={layoutRef}
-      className={`flex min-h-0 min-w-0${
-        props.separatorOverlay ? " relative" : ""
-      }${props.frameClassName ? ` ${props.frameClassName}` : ""}`}
-    >
-      {/* 拖拽分隔条：双端最小宽夹取；双击复位；←/→ 微调。
-          与右栏同生共死（关闭即卸载）——分隔条占位会让正文列的居中基准
-          比输入框/审批框（以消息区容器为基准）窄 6px，错位。 */}
+    <div ref={layoutRef} className="relative flex min-h-0 min-w-0">
+      {/* 拖拽分隔条：双端最小宽夹取；双击复位；←/→ 微调。绝对定位骑缝、
+          不占布局宽——卡片间距由外层 gap 决定（命中区 10px 跨缝 + 右栏左内距）。 */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -451,12 +428,7 @@ export function RailPanel(props: {
         onPointerCancel={endDrag}
         onDoubleClick={() => setRailWidth(RAIL_DEFAULT_WIDTH)}
         onKeyDown={onSeparatorKeyDown}
-        className={`${
-          props.separatorOverlay
-            ? // A 修订版：绝对定位骑缝，不占布局宽（命中区 10px 跨缝）
-              "absolute inset-y-0 -left-1 z-10 w-2.5"
-            : "w-1.5 shrink-0"
-        } cursor-col-resize select-none transition-colors ${
+        className={`absolute inset-y-0 -left-1 z-10 w-2.5 cursor-col-resize select-none transition-colors ${
           // D 语言：平时隐形融入画布，hover/拖动现形为 fg 淡色条
           //（= 原型 rgba(55,53,47,0.14)，随主题 fg 自动换向）
           dragging ? "bg-fg/15" : "hover:bg-fg/15"
@@ -466,106 +438,93 @@ export function RailPanel(props: {
         aria-label="检视右栏"
         data-testid="rail-panel"
         style={{ width: railWidth }}
-        className={`flex shrink-0 flex-col bg-canvas text-sm${props.surfaceClassName ? ` ${props.surfaceClassName}` : ""}`}
+        className="flex shrink-0 flex-col rounded-xl border border-line bg-canvas text-sm shadow-floating"
       >
         {/* tab 行：去描边按钮，激活 = 暖灰底 + 字重 600（D 语言，非描边
-            胶囊）。默认 flex-wrap 兜底：窄窗口下右栏会被夹到低于
-            RAIL_MIN_WIDTH（正文 STREAM_MIN_WIDTH 优先，max 先于 min 生效），
-            200px 宽放不下三个 tab 时换行而不是溢出右栏。
-            A 修订版（带行尾窗口按钮）：行内不换行——tab 区自己横向滚动，
-            窗口按钮 shrink-0 钉在最右，右栏再窄也留在第一行。 */}
-        {props.headerTrailing === undefined ? (
+            胶囊）。与消息卡首行同高（h-10）同内距（px-3）：右栏开合时窗口
+            按钮在两行之间平移，垂直中心与左右内距完全一致，不发生跳动。
+            行内不换行——tab 区自己横向滚动，窗口按钮 shrink-0 钉在最右，
+            右栏再窄也留在第一行。 */}
+        <div className="relative flex h-10 shrink-0 items-center border-b border-line px-3">
+          {/* 「改动」之前的 tab 下拉入口：窄右栏下 tab 行横向滚动，
+              从这里可直接切到被遮挡的 tab。弹层锚在整行下方（top-full），
+              不覆盖 tab 行本身；切换后由下方 effect 把激活 tab 滚进可视区。 */}
+          <div ref={tabMenuRef} className="shrink-0">
+            <button
+              type="button"
+              data-testid="rail-tab-menu"
+              aria-haspopup="menu"
+              aria-expanded={tabMenuOpen}
+              title="切换右栏面板"
+              aria-label="切换右栏面板"
+              onClick={() => setTabMenuOpen((open) => !open)}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {/* 双箭头（chevrons-down）：与单箭头的普通下拉区分，强调
+                    「这里是被遮挡 tab 的更多入口」 */}
+                <path d="M4 3.8l4 3.6 4-3.6" />
+                <path d="M4 8.6l4 3.6 4-3.6" />
+              </svg>
+            </button>
+            {tabMenuOpen && (
+              <div
+                role="menu"
+                aria-label="右栏面板"
+                data-testid="rail-tab-menu-list"
+                // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover
+                className="absolute left-2.5 top-full z-30 mt-1 w-40 rounded-[10px] border border-line bg-surface p-1 shadow-popover"
+              >
+                {RAIL_TAB_ITEMS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={tab === item.key}
+                    data-testid={`rail-tab-menu-item-${item.key}`}
+                    onClick={() => {
+                      setTab(item.key);
+                      setTabMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs ${
+                      tab === item.key
+                        ? "bg-surface-muted font-semibold text-fg"
+                        : "text-fg-muted hover:bg-hover hover:text-fg"
+                    }`}
+                  >
+                    <span className="flex-1">{item.label}</span>
+                    {tab === item.key && (
+                      <span aria-hidden="true" className="text-accent">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div
+            ref={tablistRef}
             role="tablist"
             aria-label="右栏面板切换"
-            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2"
+            className="ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {tabButtons}
           </div>
-        ) : (
-          // 与消息卡首行同高（h-10）同内距（px-3）：右栏开合时窗口按钮
-          // 在两行之间平移，垂直中心与左右内距完全一致，不发生跳动。
-          <div className="relative flex h-10 shrink-0 items-center border-b border-line px-3">
-            {/* 「改动」之前的 tab 下拉入口：窄右栏下 tab 行横向滚动，
-                从这里可直接切到被遮挡的 tab。弹层锚在整行下方（top-full），
-                不覆盖 tab 行本身；切换后由下方 effect 把激活 tab 滚进可视区。 */}
-            <div ref={tabMenuRef} className="shrink-0">
-              <button
-                type="button"
-                data-testid="rail-tab-menu"
-                aria-haspopup="menu"
-                aria-expanded={tabMenuOpen}
-                title="切换右栏面板"
-                aria-label="切换右栏面板"
-                onClick={() => setTabMenuOpen((open) => !open)}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {/* 双箭头（chevrons-down）：与单箭头的普通下拉区分，强调
-                      「这里是被遮挡 tab 的更多入口」 */}
-                  <path d="M4 3.8l4 3.6 4-3.6" />
-                  <path d="M4 8.6l4 3.6 4-3.6" />
-                </svg>
-              </button>
-              {tabMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="右栏面板"
-                  data-testid="rail-tab-menu-list"
-                  // 弹层统一语汇（ADR 0028）：白卡 + line 发丝线 + shadow-popover
-                  className="absolute left-2.5 top-full z-30 mt-1 w-40 rounded-[10px] border border-line bg-surface p-1 shadow-popover"
-                >
-                  {RAIL_TAB_ITEMS.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={tab === item.key}
-                      data-testid={`rail-tab-menu-item-${item.key}`}
-                      onClick={() => {
-                        setTab(item.key);
-                        setTabMenuOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs ${
-                        tab === item.key
-                          ? "bg-surface-muted font-semibold text-fg"
-                          : "text-fg-muted hover:bg-hover hover:text-fg"
-                      }`}
-                    >
-                      <span className="flex-1">{item.label}</span>
-                      {tab === item.key && (
-                        <span aria-hidden="true" className="text-accent">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div
-              ref={tablistRef}
-              role="tablist"
-              aria-label="右栏面板切换"
-              className="ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {tabButtons}
-            </div>
-            <div className="window-no-drag ml-1 flex shrink-0 items-center">
-              {props.headerTrailing}
-            </div>
+          <div className="window-no-drag ml-1 flex shrink-0 items-center">
+            {props.headerTrailing}
           </div>
-        )}
+        </div>
         {tab === "changes" ? (
           <div
             data-testid="changes-panel"
