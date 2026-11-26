@@ -61,6 +61,28 @@ export function goalStatusText(goal: GoalRecord, verifying: boolean): string {
   return GOAL_STATUS_NAMES[goal.status];
 }
 
+/**
+ * 进度行「第 N 轮」的轮次（ADR 0035「控制面」、规格故事 3）：当前目标进行到
+ * 或最近完成的验证轮次。与标记行同源同口径（消息流 goal-verification 段的
+ * round），这里不另存计数：
+ * - 验证中（判定在途）：正在判定的轮次 = 已完成轮数 + 1（对应「第 N 次迭代 ·
+ *   验证中」占位的 pending.round）；
+ * - 其余：已完成的验证轮数；目标存在但还没完成任何一轮（首轮工作进行中）时
+ *   即为正在推进的第 1 轮——非验证中的轮次至少为 1。
+ */
+export function goalRoundNumber(
+  goalId: string,
+  verifications: ReadonlyArray<{ goalId: string; round: number }>,
+  verifying: boolean
+): number {
+  let completed = 0;
+  for (const record of verifications) {
+    if (record.goalId === goalId && record.round > completed)
+      completed = record.round;
+  }
+  return verifying ? completed + 1 : Math.max(1, completed);
+}
+
 /** 进度行控制面四个操作的可用性（票 04，ADR 0035「控制面」） */
 export interface GoalControls {
   /** 暂停：与停止按钮同一语义（Stop = 暂停） */

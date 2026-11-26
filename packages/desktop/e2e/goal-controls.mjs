@@ -319,6 +319,11 @@ async function main() {
       (await progressStatus(window)) === "已完成",
       "恢复后的那一轮判定通过，进度行应为「已完成」"
     );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "第一个目标完成后进度行应为「第 1 轮」"
+    );
     await waitIdle(window);
     assert(
       same(await markerTexts(window), [PASSED_MARKER]),
@@ -376,6 +381,11 @@ async function main() {
       .and(window.locator('[data-goal-status="completed"]'))
       .waitFor({ timeout: 30_000 });
     await waitIdle(window);
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "第二个目标完成后进度行应为「第 1 轮」（历次目标轮次互不串）"
+    );
     assert(
       same(await markerTexts(window), [PASSED_MARKER, PASSED_MARKER]),
       `两个目标各留一行判定标记（实际 ${JSON.stringify(await markerTexts(window))}）`

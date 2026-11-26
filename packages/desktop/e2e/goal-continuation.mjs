@@ -188,6 +188,11 @@ async function main() {
       `判定在途进度行状态应为「验证中」（实际 ${await progressStatus(window)}）`
     );
     assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "首轮判定在途进度行应为「第 1 轮」"
+    );
+    assert(
       (await sidebarShowsRunning(window)) === true,
       "判定在途侧栏应照常显示运行中（不得出现空闲空窗）"
     );
@@ -262,6 +267,11 @@ async function main() {
       (await verifyingRow.textContent()) === "第 2 次迭代 · 验证中",
       "第二轮判定在途应出现「第 2 次迭代 · 验证中」占位行"
     );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 2 轮",
+      "第二轮判定在途进度行应为「第 2 轮」"
+    );
     await waitAssistantText(window, "第三轮第0段。");
     assert(
       same(await markerTexts(window), [MARKER_1, MARKER_2]),
@@ -300,6 +310,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "已完成",
       "判定通过后进度行状态应为「已完成」"
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 3 轮",
+      "判定通过后进度行应为「第 3 轮」"
     );
     await waitAssistantText(window, "甲的处理结果");
     await waitAssistantText(window, "乙的处理结果");

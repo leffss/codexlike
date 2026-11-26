@@ -194,6 +194,11 @@ async function main() {
           "",
       "进度行应显示累计时长"
     );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "设定后进度行应为「第 1 轮」"
+    );
     // 任务侧口径照旧：首轮进行中，侧栏显示运行中（占任务并发一席）
     await window
       .getByTestId("message-assistant")
@@ -237,6 +242,11 @@ async function main() {
       (await window.getByTestId("goal-progress-status").textContent()) ===
         "已完成",
       "进度行状态应为「已完成」"
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "判定通过后进度行应为「第 1 轮」"
     );
     console.log(
       "[e2e] 首轮结束自动判定通过：标记行「第 1 次迭代 · 已完成」，目标「已完成」；判定在途队列未发出"
@@ -386,6 +396,11 @@ async function main() {
       (await window.getByTestId("goal-progress-summary").textContent()) ===
         SECOND_GOAL_TEXT,
       "重启后目标原文不丢失"
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "重启后进度行应恢复「第 1 轮」（第二个目标尚未完成判定）"
     );
     assert(
       (await window.getByTestId("goal-verification-marker").textContent()) ===

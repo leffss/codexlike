@@ -187,6 +187,11 @@ async function main() {
       `第 3 次判定在途时进度行应显示「验证中」（实际 ${await progressStatus(window)}）`
     );
     assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 3 轮",
+      "第 3 次判定在途进度行应为「第 3 轮」"
+    );
+    assert(
       same(await markerTexts(window), MARKERS.slice(0, 2)),
       `前两轮后应有两行「未完成」标记（实际 ${JSON.stringify(await markerTexts(window))}）`
     );
@@ -207,6 +212,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "未达成",
       `进度行状态应为「未达成」（实际 ${await progressStatus(window)}）`
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 3 轮",
+      "未达成时进度行应为「第 3 轮」"
     );
     assert(
       (await window.getByTestId("goal-progress-reason").textContent()) ===
@@ -308,6 +318,11 @@ async function main() {
         .getByTestId("goal-progress-row")
         .getAttribute("data-goal-status")) === "unmet",
       "重启后目标应保持「未达成」"
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 3 轮",
+      "重启后进度行应由落库验证记录恢复「第 3 轮」"
     );
     assert(
       (await window.getByTestId("goal-progress-reason").textContent()) ===

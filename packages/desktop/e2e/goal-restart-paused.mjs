@@ -262,6 +262,11 @@ async function main() {
       `续跑轮进行中进度行状态应为「进行中」（实际 ${await progressStatus(window)}）`
     );
     assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "判定未过一轮后进度行应为「第 1 轮」"
+    );
+    assert(
       ((await sidebarBadge(window)) ?? "").includes("运行中"),
       `续跑轮进行中侧栏应显示运行中（实际 ${await sidebarBadge(window)}）`
     );
@@ -327,6 +332,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "已暂停",
       `重启后进度行状态应为「已暂停」（实际 ${await progressStatus(window)}）`
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 1 轮",
+      "重启后进度行应由落库验证记录恢复「第 1 轮」"
     );
     assert(
       (await window.getByTestId("goal-progress-summary").textContent()) ===
@@ -491,6 +501,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "已完成",
       `恢复后的循环最终判定通过，进度行应为「已完成」（实际 ${await progressStatus(window)}）`
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 2 轮",
+      "恢复后判定通过，进度行应为「第 2 轮」"
     );
     assert(
       same(await markerTexts(window), [MARKER_1, MARKER_2]),

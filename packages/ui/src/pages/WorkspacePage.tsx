@@ -56,7 +56,7 @@ import type { SubagentFocus } from "../components/SubagentRailPanel";
 import type { TerminalFocus } from "../components/TerminalRailPanel";
 import { FullAccessConfirmDialog } from "../components/FullAccessConfirmDialog";
 import { GoalProgressRow } from "../components/GoalProgressRow";
-import { goalPauseReason } from "../lib/goal-view";
+import { goalPauseReason, goalRoundNumber } from "../lib/goal-view";
 import { NewTaskStart } from "../components/NewTaskStart";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageStream } from "../components/MessageStream";
@@ -228,6 +228,28 @@ export function WorkspacePage(props: {
   const [goalPauseNote, setGoalPauseNote] = useState<string | null>(null);
   /** 目标控制操作（暂停 / 恢复 / 清除）进行中：进度行按钮组整体禁用，防止重复提交 */
   const [goalBusy, setGoalBusy] = useState(false);
+  /**
+   * 进度行「第 N 轮」的轮次（ADR 0035「控制面」）：与标记行同源——从消息流
+   * goal-verification 段的 round 推导当前目标的已完成轮数，验证中再 +1 得到
+   * 正在判定的轮次。不另存一份计数。
+   */
+  const goalRound =
+    goal === null
+      ? 0
+      : goalRoundNumber(
+          goal.id,
+          messages.flatMap((item) =>
+            item.kind === "goal-verification" && item.verification !== undefined
+              ? [
+                  {
+                    goalId: item.verification.goalId,
+                    round: item.verification.round,
+                  },
+                ]
+              : []
+          ),
+          goalVerifying
+        );
   const [streaming, setStreaming] = useState(false);
   /**
    * 当前运行起始时刻（epoch ms）：与 streaming 成对记账——本地发送记当下；
@@ -2218,6 +2240,7 @@ export function WorkspacePage(props: {
                       <GoalProgressRow
                         key={goal?.id ?? currentId}
                         goal={goal}
+                        round={goalRound}
                         verifying={goalVerifying}
                         pauseReason={
                           goal === null

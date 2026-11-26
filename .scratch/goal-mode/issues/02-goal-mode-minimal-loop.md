@@ -120,3 +120,9 @@
 - **未做**：目标进行中禁用 `/compact`。规格里有这条，但票 02–07 的票面都没有明确认领，建议在票 04 或票 07 安排。
 - **未做**：侧栏的目标徽章（本票口径照旧——回合进行中显示运行中）。判定在途的短窗口里侧栏短暂显示为空闲，票 03 的「验证中」副状态可以一并处理。
 - `/goal` 在新建草稿里不可用（提示先选择任务）；目标文本里的 @引用 不解析附件，按纯文本发出。
+
+### code-review 修复轮（goal/fix-review，2026-11-26）
+
+- **规格故事 3 的「第 N 轮」在票 02 验收 checkbox 被遗漏**：规格（`.scratch/goal-mode/spec.md` 故事 3）与 ADR 0035「控制面」都要求进度行呈现「目标摘要、状态、第 N 轮、累计时长」，但本票验收 checkbox 只写了「摘要/状态/累计时长」——实现里轮次只出现在消息流标记行（故事 9，另一处），进度行缺「第 N 轮」。code-review Spec 轴据此判定为规格遗漏。
+- **本修复轮补齐**：进度行新增 `goal-progress-round`（「第 N 轮」），轮次与标记行同源——从消息流 `goal-verification` 段的 `round` 推导当前目标已完成验证轮数（验证中取已完成 + 1，即正在判定的轮次）。轮次是验证记录的属性，`GoalRecord` 上无此字段：宿主在 `WorkspacePage` 由 `messages` 推导后经 `round` prop 传入 `GoalProgressRow`（ui `lib/goal-view.ts` 新增 `goalRoundNumber`）。ui/desktop 单测与 e2e（goal-mode / continuation / controls / budget / idle / restart-paused）同步补轮次断言，轮次从「第 1 轮」随续跑递增、历次目标互不串。
+- **魔串耦合修复**：「完成判定不可用」原在 `goal/verifier.ts` 与 `task/persistence.ts` 两处各写一份中文串，改文案会静默把 unavailable 误判为 unpassed。提取为 `GOAL_UNAVAILABLE_REASON_PREFIX`（`goal/types.ts`），verifier 拼文案与 persistence 回推旧库 outcome 都引用它；字面值不变（旧库 reason 是历史文本）。只做符号化、无行为变更。

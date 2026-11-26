@@ -63,7 +63,8 @@ function GoalIcon() {
 
 /**
  * 目标进度行（ADR 0035，GLOSSARY「目标」）：输入框上方常驻的一行——目标
- * 摘要、状态（六态称谓；完成判定在途时显示副状态「验证中」）、累计时长、
+ * 摘要、状态（六态称谓；完成判定在途时显示副状态「验证中」）、第 N 轮、
+ * 累计时长、
  * 停留原因（因完成判定连续不可用而暂停、护栏阻断为未达成 / 预算受限时写明）、
  * token 预算控件（用量 / 预算的显示与设置，独立组件 GoalBudgetControl），以及
  * 控制面按钮组（暂停 / 恢复 / 编辑 / 清除，按六态给出可用性，见 goalControls）。
@@ -73,6 +74,13 @@ function GoalIcon() {
  */
 export function GoalProgressRow(props: {
   goal: GoalRecord | null;
+  /**
+   * 进度行的轮次「第 N 轮」（ADR 0035「控制面」、规格故事 3）：当前目标进行到
+   * 或最近完成的验证轮次。轮次是验证记录的属性（GoalRecord 上无此字段），由
+   * 宿主从消息流验证段推导后传入——与标记行的轮次同源，这里不另存计数。
+   * 缺省 1（目标存在即至少在进行第 1 轮）。
+   */
+  round?: number;
   /** 完成判定在途（宿主活动态的 goalPhase = verifying）：状态显示「验证中」 */
   verifying?: boolean;
   /** 停留原因说明（goalPauseReason 给出；没有可说明的原因时不渲染） */
@@ -88,7 +96,7 @@ export function GoalProgressRow(props: {
    */
   controls?: GoalControlsHandlers;
 }) {
-  const { goal } = props;
+  const { goal, round = 1 } = props;
   const verifying = props.verifying === true;
   // Hook 不受早退影响：是否计时由「目标进行中」决定，空态不起计时器
   const now = useTickingNow(goal?.status === "active");
@@ -130,6 +138,13 @@ export function GoalProgressRow(props: {
         className={`shrink-0 font-medium ${STATUS_CLASSES[goal.status]}`}
       >
         {goalStatusText(goal, verifying)}
+      </span>
+      <span
+        data-testid="goal-progress-round"
+        className="shrink-0 font-mono text-fg-subtle"
+        title="第 N 轮"
+      >
+        第 {round} 轮
       </span>
       <span
         data-testid="goal-progress-elapsed"

@@ -308,6 +308,11 @@ async function main() {
       `第 2 次判定在途时进度行应显示「验证中」（实际 ${await progressStatus(window)}）`
     );
     assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 2 轮",
+      "第 2 次判定在途进度行应为「第 2 轮」"
+    );
+    assert(
       same(await markerTexts(window), MARKERS.slice(0, 1)),
       `首行标记应为「${MARKERS[0]}」（实际 ${JSON.stringify(await markerTexts(window))}）`
     );
@@ -322,6 +327,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "预算受限",
       `进度行状态应为「预算受限」（实际 ${await progressStatus(window)}）`
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 2 轮",
+      "预算受限时进度行应为「第 2 轮」"
     );
     assert(
       (await window.getByTestId("goal-progress-reason").textContent()) ===
@@ -460,6 +470,11 @@ async function main() {
         "budget-limited",
       "重启后目标应保持「预算受限」"
     );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 2 轮",
+      "重启后进度行应由落库验证记录恢复「第 2 轮」"
+    );
     await waitBudgetText(window, "用量 750 / 100,500");
     assert(
       (await window.getByTestId("goal-progress-reason").textContent()) ===
@@ -513,6 +528,11 @@ async function main() {
     assert(
       (await progressStatus(window)) === "已完成",
       `恢复后的循环最终判定通过，进度行应为「已完成」（实际 ${await progressStatus(window)}）`
+    );
+    assert(
+      (await window.getByTestId("goal-progress-round").textContent()) ===
+        "第 4 轮",
+      "判定通过后进度行应为「第 4 轮」"
     );
     await waitIdle(window);
     assert(

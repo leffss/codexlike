@@ -54,6 +54,7 @@ afterEach(() => {
 
 const elapsed = () => screen.getByTestId("goal-progress-elapsed").textContent;
 const statusText = () => screen.getByTestId("goal-progress-status").textContent;
+const roundText = () => screen.getByTestId("goal-progress-round").textContent;
 const button = (id: string) => screen.queryByTestId(id);
 
 /** 控制面四个操作的回调（no-op 替身）；保存可按用例替换为失败 */
@@ -104,6 +105,14 @@ describe("GoalProgressRow（目标进度行）", () => {
     );
     expect(statusText()).toBe("已完成");
     expect(elapsed()).toBe("1 分 5 秒");
+  });
+
+  it("呈现轮次「第 N 轮」：缺省第 1 轮；宿主传入的轮次原样显示", () => {
+    const { rerender } = render(<GoalProgressRow goal={goalOf("active")} />);
+    expect(roundText()).toBe("第 1 轮");
+
+    rerender(<GoalProgressRow goal={goalOf("active")} round={3} />);
+    expect(roundText()).toBe("第 3 轮");
   });
 
   // 已清除是退场态（见下方「已清除」用例），其余五态各有称谓

@@ -8,6 +8,7 @@ import {
   formatGoalElapsed,
   goalControls,
   goalElapsedMs,
+  goalRoundNumber,
   goalSummary,
   goalVerificationText,
 } from "../src/lib/goal-view";
@@ -123,5 +124,29 @@ describe("goalVerificationText（判定标记行文案）", () => {
     expect(goalVerificationText({ round: 3, outcome: "unpassed" })).toBe(
       "第 3 次迭代 · 未完成"
     );
+  });
+});
+
+describe("goalRoundNumber（进度行「第 N 轮」的轮次）", () => {
+  const verifications = [
+    { goalId: "goal-1", round: 1 },
+    { goalId: "goal-1", round: 2 },
+    { goalId: "goal-2", round: 1 },
+  ];
+
+  it("取当前目标（goalId）已完成验证轮数的最大值，历次目标互不串", () => {
+    expect(goalRoundNumber("goal-1", verifications, false)).toBe(2);
+    expect(goalRoundNumber("goal-2", verifications, false)).toBe(1);
+    expect(goalRoundNumber("goal-3", verifications, false)).toBe(1);
+  });
+
+  it("验证中（判定在途）= 已完成轮数 + 1（与标记行「验证中」占位同口径）", () => {
+    expect(goalRoundNumber("goal-1", verifications, true)).toBe(3);
+    expect(goalRoundNumber("goal-2", verifications, true)).toBe(2);
+  });
+
+  it("没有完成任何一轮：非验证中与验证中都从第 1 轮起算", () => {
+    expect(goalRoundNumber("goal-1", [], false)).toBe(1);
+    expect(goalRoundNumber("goal-1", [], true)).toBe(1);
   });
 });

@@ -256,6 +256,10 @@ function statusText(): string {
   return screen.getByTestId("goal-progress-status").textContent ?? "";
 }
 
+function roundText(): string {
+  return screen.getByTestId("goal-progress-round").textContent ?? "";
+}
+
 async function openWorkspace(options: SetupOptions = {}) {
   const fixture = setup(options);
   render(<WorkspacePage state={fixture.state} onOpenSettings={() => {}} />);
@@ -421,6 +425,7 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
 
     await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
     expect(statusText()).toBe("进行中");
+    expect(roundText()).toBe("第 1 轮");
     expect(screen.queryByTestId("goal-verifying-marker")).toBeNull();
 
     await emit(
@@ -428,6 +433,7 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
       { activity: verifying }
     );
     expect(statusText()).toBe("验证中");
+    expect(roundText()).toBe("第 1 轮");
     expect(screen.getByTestId("goal-verifying-marker").textContent).toBe(
       "第 1 次迭代 · 验证中"
     );
@@ -448,6 +454,43 @@ describe("WorkspacePage 目标模式接线（ADR 0035）", () => {
       "第 1 次迭代 · 未完成 · 下一步：继续实现剩余步骤"
     );
     expect(statusText()).toBe("进行中");
+    expect(roundText()).toBe("第 1 轮");
+  });
+
+  it("进度行「第 N 轮」随续跑递增：首轮判定后第 1 轮，第 2 轮判定在途第 2 轮", async () => {
+    const { listeners } = await openWorkspace();
+    const emit = emitter(listeners);
+    const verifying = {
+      ...activity,
+      running: true,
+      goalPhase: "verifying" as const,
+    };
+    const unpassed = {
+      ...verification,
+      passed: false,
+      outcome: "unpassed" as const,
+      reason: "尚有步骤未完成",
+      nextAction: "继续实现剩余步骤",
+    };
+
+    await emit({ type: "goal-changed", goal: goalOf("active") }, { activity });
+    expect(roundText()).toBe("第 1 轮");
+
+    await emit(
+      { type: "goal-verifying", goalId: "goal-1", round: 1 },
+      { activity: verifying }
+    );
+    expect(roundText()).toBe("第 1 轮");
+
+    await emit({ type: "goal-verification", verification: unpassed });
+    expect(roundText()).toBe("第 1 轮");
+
+    // 第二轮判定在途：进度行轮次递增到第 2 轮
+    await emit(
+      { type: "goal-verifying", goalId: "goal-1", round: 2 },
+      { activity: verifying }
+    );
+    expect(roundText()).toBe("第 2 轮");
   });
 
   it("续跑轮不产生用户气泡：goal-continuation 不呈现为用户消息，回复照常入流", async () => {
