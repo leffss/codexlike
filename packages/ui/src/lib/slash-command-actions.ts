@@ -23,16 +23,30 @@ export type SlashCommandAction =
   | { type: "status" }
   /** /goal 目标文本（GLOSSARY「目标」，ADR 0035）：为当前任务设定目标 */
   | { type: "set-goal"; text: string }
+  /** /goal 在新建任务页：建任务、设目标、目标原文作首条用户消息（ADR 0035） */
+  | { type: "start-task-with-goal"; text: string }
   | { type: "goal-missing-argument" }
   | { type: "needs-task" };
 
-/** /new 可在草稿页使用；其余命令需要正式任务。归属由入口上下文决定。 */
+/**
+ * /new 可在新建任务页使用；/goal 在新建任务页建任务并设目标（目标原文作首条
+ * 用户消息，与任务态同一语义）；其余命令需要正式任务。归属由入口上下文决定。
+ */
 export function planSlashCommand(
   command: { name: SlashCommandName; argument: string },
-  hasTask: boolean
+  context: { hasTask: boolean; hasDraft: boolean }
 ): SlashCommandAction {
   if (command.name === "new") return { type: "new-task" };
-  if (!hasTask) {
+  if (command.name === "goal") {
+    // 既没有任务也没有新建任务页：与其余命令同一兜底（正常入口不会停在这个态）
+    if (!context.hasTask && !context.hasDraft) return { type: "needs-task" };
+    // 三要素引导优先于设定：用法提示在任务态与新建任务页都成立
+    if (command.argument === "") return { type: "goal-missing-argument" };
+    return context.hasTask
+      ? { type: "set-goal", text: command.argument }
+      : { type: "start-task-with-goal", text: command.argument };
+  }
+  if (!context.hasTask) {
     return { type: "needs-task" };
   }
   switch (command.name) {
@@ -48,11 +62,32 @@ export function planSlashCommand(
       return { type: "select-model", query: command.argument };
     case "status":
       return { type: "status" };
-    case "goal":
-      return command.argument === ""
-        ? { type: "goal-missing-argument" }
-        : { type: "set-goal", text: command.argument };
   }
+}
+
+/**
+ * 动作 → 提交入口是否清空输入（单一真源；Record 强制新增动作必须登记）：
+ * - 被拦命令（needs-task）与用法提示不清空：提示后输入原样保留、修正即可重发，
+ *   与忙时命令反馈的「（输入已保留）」同一口径（spec 用户故事 16）；
+ * - /goal 在新建任务页不清空：草稿文本随建任务由宿主消费（启动成功后宿主清空
+ *   文本并轮换请求标识），提交入口另写一笔会与轮换后的标识撞 CAS。
+ */
+const CLEARS_INPUT: Record<SlashCommandAction["type"], boolean> = {
+  "new-task": true,
+  compact: true,
+  rename: true,
+  "rename-missing-argument": false,
+  archive: true,
+  "select-model": true,
+  status: true,
+  "set-goal": true,
+  "start-task-with-goal": false,
+  "goal-missing-argument": false,
+  "needs-task": false,
+};
+
+export function clearsCommandInput(action: SlashCommandAction): boolean {
+  return CLEARS_INPUT[action.type];
 }
 
 /**

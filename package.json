@@ -36,6 +36,7 @@
     "test:e2e:goal-budget": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-budget",
     "test:e2e:goal-idle": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-idle",
     "test:e2e:goal-restart": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-restart",
+    "test:e2e:goal-new-task": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:goal-new-task",
     "test:e2e:input-queue": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue",
     "test:e2e:input-queue-items": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-items",
     "test:e2e:input-queue-restart": "pnpm build && pnpm --filter @codexlike/desktop run test:e2e:input-queue-restart",

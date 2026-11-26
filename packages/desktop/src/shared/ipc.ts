@@ -490,6 +490,12 @@ export interface StartTaskInput {
   thinkingEffort?: ThinkingEffort;
   approvalMode?: ApprovalMode;
   mentionPaths?: string[];
+  /**
+   * 首条消息同时作为目标（ADR 0035，GLOSSARY「目标」「目标模式」）：新建任务页
+   * 的 /goal 走这一条路径——建任务、目标落库、目标原文作首条用户消息开跑，
+   * 与任务态 /goal 同一语义。缺省 false（普通首条消息）。
+   */
+  goal?: boolean;
 }
 
 export type WorkspaceSharingTarget =

@@ -563,6 +563,8 @@ export function registerTaskHandlers(options: {
       !request.text.trim()
     )
       throw new Error("首次发送需要草稿标识、项目归属和消息内容");
+    if (request.goal !== undefined && typeof request.goal !== "boolean")
+      throw new Error("首次发送：goal 必须是布尔值");
     if (manager.isRemovedCreationRequest(request.requestId))
       return Promise.reject(new Error("原任务已移除，请新建任务后发送"));
     const pending = starts.get(request.requestId);
@@ -659,6 +661,8 @@ export function registerTaskHandlers(options: {
       }
       let rollbackWorkspace: (() => Promise<boolean>) | undefined;
       let preparedPath: string | undefined;
+      /** 目标是否确已落库（回滚只撤销已落库的目标，见下方 catch） */
+      let goalSet = false;
       try {
         const { rollback, ...workspace } = await prepareTaskWorkspace({
           id,
@@ -684,6 +688,13 @@ export function registerTaskHandlers(options: {
           title: request.text.trim().split(/\r?\n/)[0]!.slice(0, 60),
           approvalMode: approval,
         });
+        if (request.goal === true) {
+          // 新建任务页 /goal（ADR 0035）：建任务即设目标，目标原文作首条用户
+          // 消息（下方 send）——与 tasks:goal-set 的次序一致：目标先落库，
+          // 回合结束的 idle 边界才会进入完成判定。
+          setGoalAndNotify(task.id, request.text);
+          goalSet = true;
+        }
         await send(
           task.id,
           request.text,
@@ -716,6 +727,10 @@ export function registerTaskHandlers(options: {
           !manager.messages(id).length &&
           !taskQueue.isQueued(id)
         ) {
+          // 目标行与任务同滚：持久层不依赖外键级联（ADR 0035），回滚必须显式
+          // 清目标行，不留「目标进行中却没有任务」的孤儿记录。只在目标确已
+          // 落库时撤销与下发事件（设定本身被拒时没有可撤的目标）。
+          if (goalSet) discardGoalAndNotify(id);
           manager.removeUnstarted(id);
           if (rollbackWorkspace && !(await rollbackWorkspace())) {
             throw new Error(
@@ -1610,6 +1625,21 @@ export function registerTaskHandlers(options: {
   }
 
   /**
+   * 目标落库并下发 goal-changed（tasks:goal-set 与 tasks:start 带 goal 共用）：
+   * 事件形状单一来源——设定成功下发目标快照，撤销下发 null。
+   */
+  function setGoalAndNotify(taskId: string, text: string) {
+    const goal = manager.setGoal(taskId, text);
+    pushTaskEvent(taskId, { type: "goal-changed", goal });
+    return goal;
+  }
+  /** 撤销目标的落库并下发 goal-changed:null（首轮启动失败的回滚共用） */
+  function discardGoalAndNotify(taskId: string): void {
+    manager.discardGoal(taskId);
+    pushTaskEvent(taskId, { type: "goal-changed", goal: null });
+  }
+
+  /**
    * /goal 设定目标（ADR 0035）：设定与首轮是同一个意图——目标先落库为
    * 「进行中」（回合结束的 idle 边界才会进入完成判定），随即以目标原文作为
    * 首条用户消息发出首轮（走用户发送主路径：满员照旧进任务排队）。
@@ -1636,8 +1666,7 @@ export function registerTaskHandlers(options: {
           const sendOptions = options as GoalSendOptions | undefined;
           // 首个 await 之前是同一同步段：检查通过到目标落库之间无交错窗口
           assertGoalSettable(taskId);
-          const goal = manager.setGoal(taskId, text);
-          pushTaskEvent(taskId, { type: "goal-changed", goal });
+          setGoalAndNotify(taskId, text);
           try {
             await send(
               taskId,
@@ -1649,8 +1678,7 @@ export function registerTaskHandlers(options: {
               sendOptions?.model
             );
           } catch (error) {
-            manager.discardGoal(taskId);
-            pushTaskEvent(taskId, { type: "goal-changed", goal: null });
+            discardGoalAndNotify(taskId);
             throw error;
           }
           return manager.goal(taskId)!;

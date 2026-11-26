@@ -4,6 +4,7 @@ import type { ProviderProfile } from "@codexlike/agent-core";
 
 import {
   busyCommandFeedback,
+  clearsCommandInput,
   formatTaskStatus,
   matchModelsForModelSwitch,
   planSlashCommand,
@@ -42,60 +43,128 @@ const ZERO_USAGE: TaskStatusInfo["usage"] = {
   subagentOutputTokens: 0,
 };
 
+/** 斜杠命令的入口上下文：任务态 / 新建任务页 / 两者皆无 */
+const inTask = { hasTask: true, hasDraft: false };
+const inDraft = { hasTask: false, hasDraft: true };
+const inNeither = { hasTask: false, hasDraft: false };
+
 /** 斜杠命令 → UI 动作的纯函数分发（命令与等效 UI 操作走同一 IPC 通道，ui 只做编排） */
 describe("planSlashCommand", () => {
   it("/new：按管理归属打开新草稿，不依赖执行工作区", () => {
-    expect(planSlashCommand({ name: "new", argument: "" }, true)).toEqual({
+    expect(planSlashCommand({ name: "new", argument: "" }, inTask)).toEqual({
       type: "new-task",
     });
   });
 
   it("/rename 带参数 → rename；无参数 → 用法提示", () => {
     expect(
-      planSlashCommand({ name: "rename", argument: "修 bug" }, true)
+      planSlashCommand({ name: "rename", argument: "修 bug" }, inTask)
     ).toEqual({
       type: "rename",
       title: "修 bug",
     });
-    expect(planSlashCommand({ name: "rename", argument: "" }, true)).toEqual({
+    expect(planSlashCommand({ name: "rename", argument: "" }, inTask)).toEqual({
       type: "rename-missing-argument",
     });
   });
 
   it("/archive → archive；/status → status", () => {
-    expect(planSlashCommand({ name: "archive", argument: "" }, true)).toEqual({
-      type: "archive",
-    });
-    expect(planSlashCommand({ name: "status", argument: "" }, true)).toEqual({
+    expect(planSlashCommand({ name: "archive", argument: "" }, inTask)).toEqual(
+      {
+        type: "archive",
+      }
+    );
+    expect(planSlashCommand({ name: "status", argument: "" }, inTask)).toEqual({
       type: "status",
     });
   });
 
   it("除 /new 外的命令在没有任务时不可用", () => {
-    expect(planSlashCommand({ name: "status", argument: "" }, false)).toEqual({
+    expect(
+      planSlashCommand({ name: "status", argument: "" }, inNeither)
+    ).toEqual({
       type: "needs-task",
     });
-    expect(planSlashCommand({ name: "rename", argument: "x" }, false)).toEqual({
+    expect(
+      planSlashCommand({ name: "rename", argument: "x" }, inNeither)
+    ).toEqual({
       type: "needs-task",
     });
   });
 
-  it("新草稿中的 /new 与新建按钮一样可用，不要求先产生空任务", () => {
-    expect(planSlashCommand({ name: "new", argument: "" }, false)).toEqual({
+  it("新建任务页其余命令仍要求先有任务（/goal 见下一条）", () => {
+    expect(planSlashCommand({ name: "new", argument: "" }, inDraft)).toEqual({
       type: "new-task",
     });
+    expect(planSlashCommand({ name: "status", argument: "" }, inDraft)).toEqual(
+      {
+        type: "needs-task",
+      }
+    );
+    expect(
+      planSlashCommand({ name: "compact", argument: "" }, inDraft)
+    ).toEqual({
+      type: "needs-task",
+    });
   });
 
-  it("/goal 带目标文本 → set-goal；无参数 → 用法提示；没有任务时不可用（ADR 0035）", () => {
+  it("/goal 带目标文本 → set-goal；无参数 → 用法提示（ADR 0035）", () => {
     expect(
-      planSlashCommand({ name: "goal", argument: "让示例测试全部通过" }, true)
+      planSlashCommand({ name: "goal", argument: "让示例测试全部通过" }, inTask)
     ).toEqual({ type: "set-goal", text: "让示例测试全部通过" });
-    expect(planSlashCommand({ name: "goal", argument: "" }, true)).toEqual({
+    expect(planSlashCommand({ name: "goal", argument: "" }, inTask)).toEqual({
       type: "goal-missing-argument",
     });
+  });
+
+  it("/goal 在新建任务页：建任务并设目标，空参数只给用法提示", () => {
     expect(
-      planSlashCommand({ name: "goal", argument: "让示例测试全部通过" }, false)
+      planSlashCommand(
+        { name: "goal", argument: "写一个mysql备份脚本" },
+        inDraft
+      )
+    ).toEqual({ type: "start-task-with-goal", text: "写一个mysql备份脚本" });
+    expect(planSlashCommand({ name: "goal", argument: "" }, inDraft)).toEqual({
+      type: "goal-missing-argument",
+    });
+    // 既没有任务也没有新建任务页：与其余命令同一兜底（不因空参数变成用法提示）
+    expect(
+      planSlashCommand(
+        { name: "goal", argument: "写一个mysql备份脚本" },
+        inNeither
+      )
     ).toEqual({ type: "needs-task" });
+    expect(planSlashCommand({ name: "goal", argument: "" }, inNeither)).toEqual(
+      {
+        type: "needs-task",
+      }
+    );
+  });
+});
+
+/** 动作是否由提交入口清空输入：被拦命令、用法提示与新建任务页 /goal 保留输入（忙时命令「输入已保留」同口径） */
+describe("clearsCommandInput", () => {
+  it("执行型动作清空输入；needs-task、两种用法提示与新建任务页 /goal 保留输入", () => {
+    for (const action of [
+      { type: "new-task" },
+      { type: "compact" },
+      { type: "rename", title: "x" },
+      { type: "archive" },
+      { type: "select-model", query: "glm" },
+      { type: "status" },
+      { type: "set-goal", text: "目标" },
+    ] as const) {
+      expect(clearsCommandInput(action)).toBe(true);
+    }
+    for (const action of [
+      { type: "needs-task" },
+      { type: "rename-missing-argument" },
+      { type: "goal-missing-argument" },
+      // 新建任务页 /goal：草稿文本随建任务由宿主消费，提交入口另写会撞请求标识轮换
+      { type: "start-task-with-goal", text: "目标" },
+    ] as const) {
+      expect(clearsCommandInput(action)).toBe(false);
+    }
   });
 });
 
@@ -414,10 +483,14 @@ describe("busyCommandFeedback（忙时斜杠命令的本地命令反馈）", () 
 /** 工单 08：/compact 命令分发与 /status 已压缩文案 */
 describe("/compact（手动压缩）ui 分发", () => {
   it("/compact → compact 动作；无任务时 needs-task", () => {
-    expect(planSlashCommand({ name: "compact", argument: "" }, true)).toEqual({
-      type: "compact",
-    });
-    expect(planSlashCommand({ name: "compact", argument: "" }, false)).toEqual({
+    expect(planSlashCommand({ name: "compact", argument: "" }, inTask)).toEqual(
+      {
+        type: "compact",
+      }
+    );
+    expect(
+      planSlashCommand({ name: "compact", argument: "" }, inDraft)
+    ).toEqual({
       type: "needs-task",
     });
   });

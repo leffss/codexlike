@@ -85,9 +85,11 @@ import {
 } from "../lib/task-view";
 import {
   busyCommandFeedback,
+  clearsCommandInput,
   formatTaskStatus,
   matchModelsForModelSwitch,
   planSlashCommand,
+  type SlashCommandAction,
 } from "../lib/slash-command-actions";
 
 /**
@@ -1028,7 +1030,18 @@ export function WorkspacePage(props: {
       workspaceState.editNewDraft(null, { workspacePath: path });
   }
 
-  async function sendFirst(text: string, mentionPaths: string[]) {
+  /**
+   * 新建任务页的首个提交（普通消息 / /goal，ADR 0035）：建任务并发出首条消息。
+   * goal 为 true 时首条消息同时作为目标——宿主建任务即设目标、进入目标模式，
+   * 与任务态 /goal 同一语义。失败沿用首次发送的回滚（任务与目标都不留）；
+   * goal 命令失败时把 `/goal X` 原样回填输入框（与任务态命令失败「输入已
+   * 保留」同口径）。
+   */
+  async function sendFirst(
+    text: string,
+    mentionPaths: string[],
+    goal = false
+  ): Promise<void> {
     if (!draft || draft.busy) return;
     const projectId = draft.projectId;
     const request = {
@@ -1042,6 +1055,7 @@ export function WorkspacePage(props: {
       model: draft.model || undefined,
       thinkingEffort: draft.thinkingEffort,
       approvalMode: draft.approvalMode,
+      goal: goal || undefined,
     };
     workspaceState.editNewDraft(projectId, { busy: true, error: null });
     try {
@@ -1056,8 +1070,18 @@ export function WorkspacePage(props: {
       workspaceState.editNewDraft(projectId, {
         busy: false,
         error: `创建失败，可重试：${error instanceof Error ? error.message : String(error)}`,
+        ...(goal ? { text: `/goal ${text}` } : {}),
       });
     }
+  }
+
+  /**
+   * 新建任务页 /goal（ADR 0035）：建任务、设目标、目标原文作首条用户消息开跑
+   * ——与任务态 /goal 同一语义，只是任务此刻还不存在。失败沿用首次发送的
+   * 回滚（目标行随任务同滚），命令原样回填输入框。
+   */
+  async function startGoalTask(text: string): Promise<void> {
+    await sendFirst(text, [], true);
   }
 
   async function send(text: string, mentionPaths: string[]) {
@@ -1564,11 +1588,7 @@ export function WorkspacePage(props: {
   }
 
   /** 斜杠命令执行（与等效 UI 操作走同一 IPC 通道，见 slash-command-actions） */
-  async function runCommand(name: string, argument: string) {
-    const action = planSlashCommand(
-      { name: name as never, argument },
-      current !== null
-    );
+  async function runCommand(action: SlashCommandAction) {
     switch (action.type) {
       case "needs-task":
         pushCommandFeedback("info", "该命令需要先选择一个任务");
@@ -1582,6 +1602,9 @@ export function WorkspacePage(props: {
         return;
       case "set-goal":
         await setGoalForTask(action.text);
+        return;
+      case "start-task-with-goal":
+        await startGoalTask(action.text);
         return;
       case "new-task": {
         // 只沿用显式管理归属，不从执行目录或 Worktree 来源派生项目。
@@ -1736,10 +1759,20 @@ export function WorkspacePage(props: {
         );
         return;
       }
-      void runCommand(submission.name, submission.argument);
-      if (currentId !== null) workspaceState.setComposer(currentId, "");
-      else if (draft)
-        workspaceState.editNewDraft(draft.projectId, { text: "" });
+      const action = planSlashCommand(
+        { name: submission.name, argument: submission.argument },
+        // 判据是「视图里有任务」（current）：与 runCommand 各分支的 current! 同源，
+        // 列表刷新与视图短暂脱节时不能放行依赖任务的命令。
+        { hasTask: current !== null, hasDraft: draft !== null }
+      );
+      void runCommand(action);
+      // 只有真正执行的命令才由这里清空输入：被拦命令、用法提示与新建任务页
+      // /goal 保留输入（后者由宿主在建任务时消费草稿文本，见 clearsCommandInput）。
+      if (clearsCommandInput(action)) {
+        if (currentId !== null) workspaceState.setComposer(currentId, "");
+        else if (draft)
+          workspaceState.editNewDraft(draft.projectId, { text: "" });
+      }
       return;
     }
     // 发送新 prompt：强制回底并进入跟随（spec 用户故事 6，票 03）
