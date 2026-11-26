@@ -14,6 +14,9 @@ import type { TaskListItem } from "@codexlike/desktop/ipc";
 import { TaskActivityBadge } from "./TaskActivityBadge";
 import { TaskContextMenu, type TaskMenuAnchor } from "./TaskContextMenu";
 import { TaskSearch } from "./TaskSearch";
+// 【原型设施，prototype/card-shell A 修订版】应用图标：复用桌面端打包图标
+// （Vite 资产管线内联 URL；浏览器预览与 Electron 构建同源）。
+import appIconUrl from "../../../desktop/build/icon.png";
 
 import { groupTasksByProject } from "../lib/project-groups";
 import { formatRelativeTime } from "../lib/relative-time";
@@ -47,26 +50,30 @@ function toggleKey(set: ReadonlySet<string>, key: string): ReadonlySet<string> {
   return next;
 }
 
-/** 项目组头的文件夹图标（内联 SVG——UI 不引入图标库；开合两态） */
+/** 项目文件夹图标（内联 SVG——UI 不引入图标库；2026-11-26 用户定稿）：
+ * 行首下拉箭头由开合文件夹取代——展开 = 打开的文件夹（前盖斜出），
+ * 折叠 = 关闭的文件夹。24 网格缩放显示，strokeWidth 2 折合视觉约 1.3px，
+ * 与相邻 16 网格图标的线宽匹配；保持纯描边、不加填充（用户定稿：
+ * 开合靠轮廓本身表达，不需要底色）。 */
 function FolderIcon(props: { open: boolean }) {
   return (
     <svg
       width="16"
       height="16"
-      viewBox="0 0 16 16"
+      viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.4"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       className="shrink-0"
     >
-      <path
-        d={
-          props.open
-            ? "M1.75 4.25A1.25 1.25 0 0 1 3 3h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 6v6A1.25 1.25 0 0 1 13 13.25H3A1.25 1.25 0 0 1 1.75 12V4.25z"
-            : "M1.75 3.75A1.25 1.25 0 0 1 3 2.5h3l1.5 1.75H13A1.25 1.25 0 0 1 14.25 5.5v7A1.25 1.25 0 0 1 13 13.75H3a1.25 1.25 0 0 1-1.25-1.25v-8.75z"
-        }
-      />
+      {props.open ? (
+        <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+      ) : (
+        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+      )}
     </svg>
   );
 }
@@ -161,6 +168,12 @@ export function TaskSidebar(props: {
   onRemoveProject?: (id: string) => void;
   /** 任务搜索结果的失效信号（任务列表变更时递增；头部搜索消费） */
   searchRecordsRevision: number;
+  /**
+   * 【原型设施，prototype/card-shell】左栏表面附加类：整页大卡片变体用它
+   * 把左栏融进大卡（bg-transparent!）或做成独立白卡（圆角 + 描边 + 阴影）。
+   * 追加在 aside 自身 bg-canvas 之后；缺省不改变现状样式。
+   */
+  frameClassName?: string;
 }) {
   const [standaloneCollapsed, setStandaloneCollapsed] = useState(false);
   const [expandedArchived, setExpandedArchived] = useState<ReadonlySet<string>>(
@@ -602,9 +615,6 @@ export function TaskSidebar(props: {
                 : props.onCollapseProject(group.projectId, expanded)
             }
           >
-            <span className="w-3 shrink-0 text-center text-fg-subtle">
-              {expanded ? "▾" : "▸"}
-            </span>
             {group.projectId === null ? (
               <StandaloneIcon />
             ) : (
@@ -673,11 +683,13 @@ export function TaskSidebar(props: {
             )}
           </span>
         </div>
-        {/* 无竖线缩进导轨（ml-5 收敛自原 ml-7，组缩进 ≥20px 口径保留）：
-            行首置顶图标列落位在项目文件夹图标正下方，任务标题起点保持
-            与项目名文字对齐（sidebar-archive e2e assertProjectHierarchy） */}
+        {/* 无竖线缩进导轨：行首置顶图标列落在项目文件夹图标正下方，
+            任务标题起点与项目名文字对齐（sidebar-archive e2e
+            assertProjectHierarchy）。行首下拉箭头退役后组缩进由 20px 收到
+            4px：项目名 = px-2(8) + 文件夹图标 16 + gap 4 = 28px，任务标题 =
+            ml-1(4) + 置顶列 22 + pl-0.5(2) = 28px，图标列中心也对齐。 */}
         {expanded && (
-          <div data-testid="group-tasks" className="ml-5">
+          <div data-testid="group-tasks" className="ml-1">
             <ul>{visibleActive.map((task) => renderTaskItem(task))}</ul>
             {group.active.length > ACTIVE_PREVIEW_LIMIT && (
               <button
@@ -726,7 +738,7 @@ export function TaskSidebar(props: {
       ref={layoutRef}
       aria-label="任务列表"
       style={{ width: sidebarWidth }}
-      className="relative flex shrink-0 flex-col bg-canvas"
+      className={`relative flex shrink-0 flex-col bg-canvas${props.frameClassName ? ` ${props.frameClassName}` : ""}`}
     >
       {menu && menuTask && (
         <TaskContextMenu
@@ -774,7 +786,20 @@ export function TaskSidebar(props: {
         />
       )}
       <div className="relative flex items-center justify-between pl-3 pr-2 py-2.5">
-        <h2 className="text-sm font-medium text-fg">任务列表</h2>
+        {/* A 修订版：程序图标 + 品牌名取代「任务列表」标题（品牌迁入左栏，
+            窗口标题栏在 A 里不再渲染） */}
+        <div className="flex min-w-0 items-center gap-2">
+          <img
+            src={appIconUrl}
+            alt=""
+            aria-hidden="true"
+            data-testid="app-mark"
+            className="h-5 w-5 shrink-0 rounded-[5px]"
+          />
+          <span className="truncate text-sm font-semibold tracking-wide text-fg">
+            CodexLike
+          </span>
+        </div>
         <div className="flex items-center gap-1">
           {/* 任务搜索（ADR 0018 迁入，原标题栏入口）：添加项目之前；
               弹层 fixed 贴视口，从侧栏头部下方展开 */}

@@ -36,6 +36,11 @@ export function InteractionPanel(props: {
    * 下发）；外壳收拢在 ComposerRegion，宽度与消息输入框完全一致。
    */
   contentWidthClass?: string;
+  /**
+   * 【原型设施，prototype/card-shell】外壳附加类（透传 ComposerRegion）：
+   * 与输入框共用同一整页卡片变体处理（发丝线 / 悬浮托盘）。
+   */
+  regionClassName?: string;
 }) {
   const { request } = props.record;
   const disabled = props.busy || props.record.status !== "pending";
@@ -71,6 +76,7 @@ export function InteractionPanel(props: {
     <ComposerRegion
       testId="interaction-region"
       contentWidthClass={props.contentWidthClass}
+      className={props.regionClassName}
     >
       <section
         data-testid="interaction-panel"

@@ -112,9 +112,12 @@ async function assertProjectHierarchy(window) {
       height: node.getBoundingClientRect().height,
     };
   });
-  // 97851e7（票 04）起无竖线缩进导轨：任务标题起点对齐原竖线位置、为标题让出宽度。
+  // 97851e7（票 04）起无竖线缩进导轨：任务标题起点对齐项目名文字。
+  // 2026-11-26 项目行行首下拉箭头退役、改由开合文件夹图标表达展开态后，
+  // 组缩进从 20px 收到 4px（= 标题与项目名对齐后的剩余量）——真正的契约是
+  // 上面「标题与项目名对齐」与本条「无导轨、仍有缩进」，缩进量随行首图标宽度。
   assert(
-    guide.border === 0 && guide.indent >= 20 && guide.height > 0,
+    guide.border === 0 && guide.indent >= 4 && guide.height > 0,
     `展开任务不使用竖线导轨、保留组缩进：${JSON.stringify(guide)}`
   );
   const projectBox = await project.boundingBox();

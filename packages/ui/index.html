@@ -9,7 +9,29 @@
       // JSON 偏好的镜像（ThemeProvider 写入时双写）；未设置时默认浅色。
       // 始终设置 data-theme：主题 CSS 变量以 [data-theme] 属性选择器为键。
       document.documentElement.dataset.theme =
-        localStorage.getItem('codexlike.theme') === 'dark' ? 'dark' : 'light';
+        localStorage.getItem("codexlike.theme") === "dark" ? "dark" : "light";
+      // 【dev 诊断 2026-11-26】模块图链接失败（如 Vite 开发服务缓存损坏，
+      // 某模块被当成空模块返回）不会触发 main.tsx 里的捕获器——入口模块
+      // 本身没执行。这里在模块脚本之前装捕获阶段监听，把失败资源写进标签
+      // 标题，避免只剩空白页无从下手。仅本机 dev 地址生效。
+      if (
+        location.hostname === "localhost" ||
+        location.hostname === "127.0.0.1"
+      ) {
+        window.addEventListener(
+          "error",
+          function (event) {
+            var target = event.target;
+            var where =
+              target && target.src ? target.src : event.message || "unknown";
+            document.title = "ERR " + where;
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (event) {
+          document.title = "REJ " + String(event.reason);
+        });
+      }
     </script>
   </head>
   <body>

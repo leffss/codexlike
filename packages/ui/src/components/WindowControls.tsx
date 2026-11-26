@@ -3,10 +3,17 @@ import type { CodexLikeApi, WindowState } from "@codexlike/desktop/ipc";
 export function WindowControls(props: {
   api: CodexLikeApi["windowControls"] | undefined;
   state: WindowState;
+  /**
+   * 【原型设施，prototype/card-shell A 修订版】紧凑档：窗口按钮落进
+   * 消息卡首行 / 右栏首行（行高更矮），与 26px 图标按钮对齐。
+   */
+  compact?: boolean;
 }) {
   const api = props.api;
   if (!api) return null;
-
+  const buttonClass = `window-no-drag flex ${
+    props.compact ? "h-7 w-8" : "h-8 w-9"
+  } shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent`;
   // 窗口可能已销毁；失败不猜测本地状态，关闭流程仍由主进程负责。
   async function request(action: () => Promise<void>) {
     try {
@@ -24,7 +31,7 @@ export function WindowControls(props: {
         aria-label="最小化"
         title="最小化"
         onClick={() => request(() => api.minimize())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        className={buttonClass}
       >
         <svg
           width="12"
@@ -44,7 +51,7 @@ export function WindowControls(props: {
         aria-label={props.state.maximized ? "还原" : "最大化"}
         title={props.state.maximized ? "还原" : "最大化"}
         onClick={() => request(() => api.toggleMaximize())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        className={buttonClass}
       >
         <svg
           width="12"
@@ -68,7 +75,7 @@ export function WindowControls(props: {
         aria-label="关闭"
         title="关闭"
         onClick={() => request(() => api.close())}
-        className="window-no-drag flex h-8 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        className={buttonClass}
       >
         <svg
           width="12"

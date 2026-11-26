@@ -320,11 +320,21 @@ function openerIcon(id: string) {
  * 图标跟随当前默认（挂载即预取一次候选；失败静默回退资源管理器图标）；
  * 下拉列出本机探测到的候选（展开时重拉，✓ 标当前默认）；点选即以该程序
  * 打开并记为默认（行为即设置）。无路径时整组禁用；失败经 notifyError 提示。
+ *
+ * 导出给原型 A 修订版复用：按钮从标题栏迁到消息卡首行右侧（打开目录）。
+ *
+ * compact（原型 A 首行专用，2026-11-26 用户反馈）：收起主图标与下拉箭头
+ * 之间的间隔（16px → 8px）——那里只有一组紧凑图标，留白不必像标题栏
+ * 那样宽。默认路径不传，保持原样。
  */
-function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
+export function WorkspaceOpenerButton(props: {
+  opener: TitlebarOpener;
+  compact?: boolean;
+}) {
   const { workspacePath, listOpeners, openWorkspace, notifyError } =
     props.opener;
   const disabled = workspacePath === null;
+  const compact = props.compact === true;
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<OpenerListResult["openers"] | null>(null);
   const [defaultId, setDefaultId] = useState<
@@ -390,9 +400,13 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
   }
 
   return (
-    /* 免拖作用域（同徽章）：交互控件整体挂 window-no-drag */
+    /* 免拖作用域（同徽章）：交互控件整体挂 window-no-drag。
+       compact（原型 A 首行）：整组外加一圈发丝线，读作「一个」分裂按钮，
+       而不是两个散落的图标——默认路径不加框，保持原样。 */
     <div
-      className="window-no-drag relative flex shrink-0 items-stretch"
+      className={`window-no-drag relative flex shrink-0 items-stretch${
+        compact ? " rounded-md border border-line" : ""
+      }`}
       ref={rootRef}
     >
       <button
@@ -402,7 +416,11 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
         title={disabled ? "未选择工作区" : "用默认程序打开工作区"}
         aria-label="打开工作区"
         onClick={() => void openMain()}
-        className="rounded-l-md border border-r-0 border-transparent px-2 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+        className={`rounded-l-md ${
+          compact
+            ? "py-1.5 pl-2 pr-0.5"
+            : "border border-r-0 border-transparent px-2 py-0.5"
+        } text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50`}
       >
         {/* 主按钮图标跟随当前默认（用户定稿）；未拉到列表前回退资源管理器 */}
         {openerIcon(defaultId ?? "explorer")}
@@ -415,7 +433,11 @@ function WorkspaceOpenerButton(props: { opener: TitlebarOpener }) {
         aria-haspopup="menu"
         title={disabled ? "未选择工作区" : "选择打开工作区的程序"}
         onClick={() => void toggleMenu()}
-        className="rounded-r-md border border-transparent px-1 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+        className={`rounded-r-md ${
+          compact
+            ? "py-1.5 pl-0.5 pr-1"
+            : "border border-transparent px-1 py-0.5"
+        } text-xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50`}
       >
         <svg
           width="10"
