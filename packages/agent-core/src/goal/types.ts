@@ -116,6 +116,14 @@ export const GOAL_VERIFICATION_OUTCOMES: readonly GoalVerificationOutcome[] = [
 ];
 
 /**
+ * 判定自身故障（outcome = unavailable）的 reason 固定前缀（ADR 0035
+ * fail-open）：verifier 拼故障说明用它开头，持久化读侧回推旧库行结论也用它
+ * 匹配——两处知识耦合在同一个短语上，改文案须同步这里（旧库 reason 是历史
+ * 文本，值变化会匹配不上，把 unavailable 误判为 unpassed）。
+ */
+export const GOAL_UNAVAILABLE_REASON_PREFIX = "完成判定不可用";
+
+/**
  * 连续多少轮完成判定不可用后暂停目标（ADR 0035 fail-open「不把目标永久
  * 卡死」：单次故障照常续跑，判定持续不可用才停下等人处理）。
  */

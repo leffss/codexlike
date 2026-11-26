@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ToolCallRecord } from "../tools/types";
 import {
   GOAL_STATUSES,
+  GOAL_UNAVAILABLE_REASON_PREFIX,
   GOAL_VERIFICATION_OUTCOMES,
   type GoalRecord,
   type GoalVerificationOutcome,
@@ -509,8 +510,11 @@ interface GoalVerificationRow {
 
 /**
  * 验证记录的结论种类（读侧）：票 02 时代的旧行没有 outcome 列（取列默认值
- * 空串）——按 passed 与理由回推：通过即 passed；理由注明「完成判定不可用」
+ * 空串）——按 passed 与理由回推：通过即 passed；理由以「完成判定不可用」开头
  * 为 unavailable；其余为 unpassed。非法值同样回推，不把未知种类漏到界面。
+ * 这是回推启发式：匹配锚与 verifier 拼的文案同源，都依赖
+ * GOAL_UNAVAILABLE_REASON_PREFIX——旧库 reason 是历史文本，改该常量值会匹配
+ * 不上、把 unavailable 误判为 unpassed。
  */
 function verificationOutcomeOf(
   row: GoalVerificationRow
@@ -518,7 +522,9 @@ function verificationOutcomeOf(
   if ((GOAL_VERIFICATION_OUTCOMES as readonly string[]).includes(row.outcome))
     return row.outcome as GoalVerificationOutcome;
   if (row.passed === 1) return "passed";
-  return row.reason.includes("完成判定不可用") ? "unavailable" : "unpassed";
+  return row.reason.includes(GOAL_UNAVAILABLE_REASON_PREFIX)
+    ? "unavailable"
+    : "unpassed";
 }
 
 /**

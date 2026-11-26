@@ -9,7 +9,12 @@ import { composeStoredMessageContent } from "../context/stored-message";
 import type { ToolCallRecord } from "../tools/types";
 import { describeModelError, isAbortLike } from "../task/errors";
 import type { StoredMessage } from "../task/types";
-import type { GoalRecord, GoalVerdict, GoalVerificationRecord } from "./types";
+import {
+  GOAL_UNAVAILABLE_REASON_PREFIX,
+  type GoalRecord,
+  type GoalVerdict,
+  type GoalVerificationRecord,
+} from "./types";
 
 /**
  * 完成判定（GLOSSARY「完成判定」，ADR 0035 完成判定契约）：
@@ -170,7 +175,7 @@ export function unavailableGoalVerdict(cause: string): GoalVerdict & {
 } {
   return {
     passed: false,
-    reason: `完成判定不可用（${cause}），本轮没有判定结论`,
+    reason: `${GOAL_UNAVAILABLE_REASON_PREFIX}（${cause}），本轮没有判定结论`,
     nextAction: "",
   };
 }
