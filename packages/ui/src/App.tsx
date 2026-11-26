@@ -204,7 +204,9 @@ function AppShell(props: {
   const settingsPage = <SettingsPage />;
 
   return (
-    <div className="flex h-full flex-col bg-fg/5 p-1">
+    // 页根即窗口桌面：p-2（8px）为卡片壳与窗口边缘的留白（2026-11-26
+    // 用户反馈「卡片边框离程序最外层边框太窄」由 p-1 放宽一档）
+    <div className="flex h-full flex-col bg-fg/5 p-2">
       <ApplicationExit state={workspaceState}>
         {view === "workspace" ? (
           <main className="min-h-0 flex-1">{workspacePage}</main>

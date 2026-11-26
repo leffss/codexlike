@@ -436,7 +436,11 @@ export function WorkspacePage(props: {
   // 新建、加载与已有任务始终使用同一档位；滚动条宽度由消息流实际测量。
   const contentWidthClass = TASK_CONTENT_WIDTH_CLASS;
   const [scrollbarGutter, setScrollbarGutter] = useState(0);
+  // 正文列左右同宽（2026-11-26 用户反馈「正文与输入框左右离卡片边框不一样」）：
+  // 消息流滚动槽恒占右侧 8px，若只补右缘，正文会被挤成左窄右宽——左右都按
+  // 「基准 1rem + 滚动槽」留白，滚动条算进可视留白，正文块在卡片内居中。
   const contentPadding = {
+    paddingLeft: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
     paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
   };
 

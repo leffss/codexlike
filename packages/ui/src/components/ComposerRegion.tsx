@@ -25,12 +25,14 @@ export function ComposerRegion(props: {
 }) {
   const contentWidthClass = props.contentWidthClass ?? TASK_CONTENT_WIDTH_CLASS;
   return (
-    // 补偿消息流原生滚动条占宽，基准列对齐（2026-11-19 起输入卡本体在
-    // 列内再左右各外扩 12px，比正文列宽一点；见 MessageComposer 输入卡）。
+    // 补偿消息流原生滚动条占宽，基准列对齐。正文列左右同宽（2026-11-26
+    // 用户反馈「正文与输入框左右离卡片边框不一样」）：消息流左缘已补槽宽，
+    // 本壳左右都按「基准 1rem + 槽」留白，输入卡本体再在列内左右各外扩 12px。
     <div
       data-testid={props.testId}
       className="bg-canvas px-4 pt-2.5 pb-4"
       style={{
+        paddingLeft: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
         paddingRight: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
       }}
     >

@@ -330,10 +330,17 @@ export function MessageStream(props: {
         // overflow-x-hidden：宽内容（表格 / 代码块）由各自容器内聚横向滚动，
         // 滚动容器自身不出现横向溢出（spec 用户故事 34）。
         // 稳定预留纵向滚动槽；同列头部和输入区消费实测槽宽保持左右缘一致。
+        // 左缘同步补一份槽宽（2026-11-26 用户反馈「正文左右离卡片边框不一样」）：
+        // 滚动槽恒占右缘 8px，右侧留白 = px-4 + 槽、左侧只有 px-4，正文块会
+        // 左偏——左缘按「1rem + 槽」留白，两侧可视留白相等、正文在卡内居中。
         className="h-full overflow-x-hidden overflow-y-auto bg-canvas px-4 py-5"
         // 禁用原生 scroll anchoring：跟随/恢复由状态机自管，
         // 原生锚点会覆盖恢复值（票 03）
-        style={{ overflowAnchor: "none", scrollbarGutter: "stable" }}
+        style={{
+          overflowAnchor: "none",
+          scrollbarGutter: "stable",
+          paddingLeft: "calc(1rem + var(--task-scrollbar-gutter, 0px))",
+        }}
         data-testid="message-stream"
       >
         {/* min-h-full 弹性列：空流态（新任务发送瞬间尚无用户段）也能把

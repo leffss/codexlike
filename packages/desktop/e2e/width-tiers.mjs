@@ -9,7 +9,7 @@
 // 2) 窗口内容区 1280px（任务容器 960px ≥864）→ 5xl 档：
 //    assistant 内容宽突破旧 768px 锁死值（2026-11-22 上限自 max-w-4xl 上移
 //    一档至 max-w-5xl；此宽度下留白生效、上限不 bind，档位由计算样式断言钉住）。
-// 3) 窗口内容区 1616px（容器 1296px ≥1280，留 16px 断点余量）→ 7xl 档：内容列留白 192px，上限 1280px
+// 3) 窗口内容区 1632px（任务容器 1288px ≥1280，留 8px 断点余量）→ 7xl 档：内容列留白 192px，上限 1280px
 //    （2026-11-22 自 max-w-6xl/1152px 上移一档；此宽度下上限不 bind，计算样式断言钉住）；
 //    头部 / 消息流左右缘对齐，输入卡片左右各外扩 12px；用户气泡右对齐内容列右缘。
 // 4) 宽表格与长代码行在自身容器内横向滚动，消息流滚动容器无横向溢出。
@@ -36,12 +36,13 @@ import {
   startMockProvider,
 } from "./helpers.mjs";
 
-/** 档位换算依据：侧栏固定 w-80（320px），窗口内容区宽 - 320 = 任务容器宽 */
+/** 档位换算依据：侧栏固定 w-80（320px）；窗口内容区宽 − 320 − 页根留白 16 −
+ *  左栏 gap 8 = 任务容器宽（下列公式按 SHELL_INSET 统一扣外壳） */
 const SIDEBAR_WIDTH = 320;
-const STREAM_PADDING = 32; // 消息流滚动容器 px-4 × 2
-/** 桌面双卡（A）外壳附加的横向留白：页根 p-1(8px) + 左栏 gap-2(8px) +
- *  中列卡描边(2px)——内容列比无壳布局窄 18px。 */
-const SHELL_INSET = 18;
+const STREAM_PADDING = 32; // 消息流水平内边距基准（左缘 + 槽、右缘 1rem，公式里另计 2×槽）
+/** 桌面双卡（A）外壳附加的横向留白：页根 p-2(16px) + 左栏 gap-2(8px) +
+ *  中列卡描边(2px)——内容列比无壳布局窄 26px。 */
+const SHELL_INSET = 26;
 /** 输入卡左右各比正文列外扩的宽度（-mx-3，2026-11-19 呈现对齐轮定案） */
 const COMPOSER_BREAKOUT = 12;
 
@@ -174,6 +175,25 @@ async function assertAligned(window, contentTestId, label) {
       ) <= 1,
     `${label}：输入卡片应比消息列左右各宽 ${COMPOSER_BREAKOUT}px，实际 ${JSON.stringify({ composer, content })}`
   );
+  // 正文列与输入卡在卡片内左右留白相等（2026-11-26 用户反馈「左右离卡片
+  // 边框不一样」）：消息流滚动槽恒占右缘 8px，左缘若不补槽宽就会左窄右宽。
+  // 正文按「1rem + 槽」两侧留白，输入卡再外扩 12px，两侧余量同样相等。
+  const stream = await window.getByTestId("message-stream").boundingBox();
+  assert(stream !== null, `${label}：消息流容器必须可见`);
+  const insets = (box) => ({
+    left: box.x - stream.x,
+    right: stream.x + stream.width - (box.x + box.width),
+  });
+  const contentInsets = insets(content);
+  const composerInsets = insets(composer);
+  const symmetric = (box) => Math.abs(box.left - box.right) <= 1;
+  assert(
+    symmetric(contentInsets) && symmetric(composerInsets),
+    `${label}：正文与输入卡在卡片内应左右等距，实际 ${JSON.stringify({
+      contentInsets,
+      composerInsets,
+    })}`
+  );
   return content;
 }
 
@@ -298,16 +318,22 @@ async function main() {
       `5xl 档 assistant 内容宽 ${tier5xl.width} 必须突破旧 768px 锁死值`
     );
 
-    // 场景 3：7xl 档（窗口内容区 1616 → 容器 1296px ≥1280）：留白 192px，上限 1280px。
-    // 窗口不取 1600：容器恰压 1280 断点线零余量，DPI 夹紧/取整掉档会让
-    // expectedWide±2 假红（2026-11-22 注释换算修正轮顺手抬 16px 余量）。
-    // 此宽度下上限同样不 bind，档位切换由计算样式断言钉住（上移前为 1152px）。
-    await resizeWindow(app, 1616, 900);
+    // 场景 3：7xl 档（窗口内容区 1632 → 任务容器 1288px ≥1280）：留白 192px，上限 1280px。
+    // 窗口不取 1624：容器恰压 1280 断点线零余量，DPI 夹紧/取整掉档会让
+    // expectedWide±2 假红（2026-11-22 注释换算修正轮顺手抬余量；2026-11-26
+    // 外壳 p-2 后按新几何重算）。此宽度下上限同样不 bind，档位切换由计算
+    // 样式断言钉住（上移前为 1152px）。
+    await resizeWindow(app, 1632, 900);
     const wideGutter = await window
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
     const expectedWide = Math.min(
-      1616 - SHELL_INSET - SIDEBAR_WIDTH - STREAM_PADDING - wideGutter - 192,
+      1632 -
+        SHELL_INSET -
+        SIDEBAR_WIDTH -
+        STREAM_PADDING -
+        wideGutter * 2 -
+        192,
       1280
     );
     const tier7xl = await assertContentWidth(window, {
@@ -380,7 +406,7 @@ async function main() {
       .getByTestId("message-stream")
       .evaluate((el) => el.offsetWidth - el.clientWidth);
     const expectedFull =
-      1060 - SHELL_INSET - SIDEBAR_WIDTH - STREAM_PADDING - gutter;
+      1060 - SHELL_INSET - SIDEBAR_WIDTH - STREAM_PADDING - gutter * 2;
     const tierBase = await assertContentWidth(window, {
       min: expectedFull - 2,
       max: 1023,
@@ -393,9 +419,9 @@ async function main() {
 
     await assertAligned(window, "message-list", "基础档已有任务");
 
-    // 场景 5b：5xl 上限几何生效（窗口内容区 1520 → 容器 1200px，5xl 档）：
-    // 留白后可用宽 1200−32−96−滚动槽 ≈ 1057px > 1024px，内容列钉在上限
-    // 1024px（2026-11-22 上移前钉在 896px，此腿是上限上移的直接几何证据）。
+    // 场景 5b：5xl 上限几何生效（窗口内容区 1520 → 任务容器 1176px，5xl 档）：
+    // 留白后可用宽 1176−2(描边)−32−2×8(滚动槽)−96 ≈ 1030px > 1024px，内容列
+    // 钉在上限 1024px（2026-11-22 上移前钉在 896px，此腿是上限上移的直接几何证据）。
     await resizeWindow(app, 1520, 900);
     const tier5xlBound = await assertContentWidth(window, {
       min: 1022,
