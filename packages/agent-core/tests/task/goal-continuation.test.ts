@@ -406,8 +406,10 @@ describe("空转计数与连续故障计数逐轮落库", () => {
       persistence: store,
       now: fakeClock(50),
     });
+    // 重启后「进行中」的目标恢复为「已暂停」（票 06）；连续计数随目标落库，
+    // 不因恢复为已暂停而清零（恢复才清零）
     expect(restarted.goal(task.id)).toMatchObject({
-      status: "active",
+      status: "paused",
       idleStreak: 1,
       failureStreak: 1,
     });

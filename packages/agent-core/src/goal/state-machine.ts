@@ -130,3 +130,31 @@ export function advanceGoal(
     updatedAt: at,
   };
 }
+
+/**
+ * 重启恢复为暂停态（ADR 0035「重启与恢复」）时当前进行中区段的闭合终点，
+ * 供 advanceGoal(goal, "pause", 终点) 记账。
+ * 进程被杀的时刻无从得知，停机时长又不得计入累计时长——所以终点不取重启
+ * 时刻，而取该任务落库里最晚的时间戳（停机前最后一次有记录的活动），并夹在
+ * 进行中起点与重启时刻之间：
+ * - 不早于起点：落库里没有晚于起点的记录（目标刚设定 / 刚恢复就退出）时
+ *   这一段按 0 计；
+ * - 不晚于重启时刻：落库时间戳晚于重启时刻（系统时钟回拨后启动）时不产生
+ *   「未来」的时长。
+ * lastPersistedAt：该任务落库里最晚的时间戳；没有任何记录为 null。
+ */
+export function goalRestartPauseAt(
+  goal: GoalRecord,
+  lastPersistedAt: string | null,
+  now: string
+): string {
+  const since = Date.parse(goal.activeSince ?? "");
+  // 起点缺失或非法：没有可闭合的进行中区段（advanceGoal 对此按 0 计）
+  if (Number.isNaN(since)) return now;
+  const latest = lastPersistedAt === null ? since : Date.parse(lastPersistedAt);
+  const end = Math.max(since, latest);
+  const current = Date.parse(now);
+  return new Date(
+    Number.isNaN(current) ? end : Math.min(end, current)
+  ).toISOString();
+}

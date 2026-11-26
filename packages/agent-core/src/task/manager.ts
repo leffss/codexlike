@@ -19,6 +19,7 @@ import {
 } from "../goal/types";
 import {
   advanceGoal,
+  goalRestartPauseAt,
   isGoalEditable,
   isGoalOpen,
   type GoalTransition,
@@ -289,6 +290,11 @@ export function createTaskManager(
   const cache = new Map<string, AgentTask>();
   // 启动即终结所有残留请求：transcript 可在 get 前读取，绝不重放待执行工具。
   for (const task of persistence.listTasks()) {
+    // 目标模式的重启恢复（ADR 0035「重启与恢复」）：残留的「进行中」目标转
+    // 「已暂停」，由用户手动恢复。必须先于下面的收尾写入——补记的中断提示、
+    // 交互结算与子代理收尾的时间戳都是重启时刻，算进闭合终点就把停机时长
+    // 记成了进行中时长（见 pauseGoalsAfterRestart）。
+    pauseGoalsAfterRestart(task.id);
     const interactions = persistence.listInteractions(task.id);
     const unfinished =
       task.status !== "idle" ||
@@ -424,6 +430,71 @@ export function createTaskManager(
     };
     persistence.insertGoalVerification(verification);
     return verification;
+  }
+
+  /** 状态机推进结果落库（transitionGoal 与启动收尾的重启恢复共用同一组列） */
+  function persistGoalTransition(goal: GoalRecord): void {
+    persistence.updateGoal(goal.id, {
+      status: goal.status,
+      activeMs: goal.activeMs,
+      activeSince: goal.activeSince,
+      idleStreak: goal.idleStreak,
+      failureStreak: goal.failureStreak,
+      updatedAt: goal.updatedAt,
+    });
+  }
+
+  /** 重启恢复（ADR 0035「重启与恢复」）：残留的「进行中」目标转「已暂停」 */
+  function pauseGoalsAfterRestart(taskId: string): void {
+    const restartedAt = now();
+    for (const goal of persistence.listGoals(taskId)) {
+      if (goal.status !== "active") continue;
+      const next = advanceGoal(
+        goal,
+        "pause",
+        goalRestartPauseAt(goal, lastPersistedAt(taskId), restartedAt)
+      );
+      // 累计时长闭合在停机前最后一次有记录的活动上，但这条记录确实是在这次
+      // 启动时被改写的：更新时间如实取重启时刻
+      persistGoalTransition({ ...next, updatedAt: restartedAt });
+    }
+  }
+
+  /**
+   * 该任务落库里最晚的时间戳（重启恢复闭合进行中区段的终点候选，见
+   * goalRestartPauseAt）：停机前最后一次有记录的活动，取自消息、工具调用、
+   * 交互（请求发出 / 回应）、逐轮验证记录，以及子代理的委派与逐轮记录——
+   * 子代理运行中被杀时主任务自己没有更晚的记录。没有任何记录为 null。
+   * 只读启动收尾不改写的列（子代理的 completedAt 会被收尾补记，不取）。
+   */
+  function lastPersistedAt(taskId: string): string | null {
+    let latestMs = Number.NaN;
+    let latest: string | null = null;
+    const see = (at: string | null | undefined): void => {
+      if (at === null || at === undefined) return;
+      const ms = Date.parse(at);
+      if (Number.isNaN(ms) || ms <= latestMs) return;
+      latestMs = ms;
+      latest = at;
+    };
+    for (const message of persistence.listMessages(taskId))
+      see(message.createdAt);
+    for (const call of persistence.listToolCalls(taskId)) see(call.createdAt);
+    for (const interaction of persistence.listInteractions(taskId)) {
+      see(interaction.request.createdAt);
+      see(interaction.resolvedAt);
+    }
+    for (const verification of persistence.listGoalVerifications(taskId))
+      see(verification.createdAt);
+    for (const subagent of persistence.listSubagents(taskId)) {
+      see(subagent.queuedAt);
+      see(subagent.startedAt);
+    }
+    for (const message of persistence.listSubagentMessages(taskId))
+      see(message.createdAt);
+    for (const call of persistence.listSubagentToolCalls(taskId))
+      see(call.createdAt);
+    return latest;
   }
 
   return {
@@ -754,14 +825,7 @@ export function createTaskManager(
       const goal = persistence.listGoals(taskId).at(-1);
       if (goal === undefined) throw new Error("任务尚未设定目标");
       const next = advanceGoal(goal, transition, now());
-      persistence.updateGoal(goal.id, {
-        status: next.status,
-        activeMs: next.activeMs,
-        activeSince: next.activeSince,
-        idleStreak: next.idleStreak,
-        failureStreak: next.failureStreak,
-        updatedAt: next.updatedAt,
-      });
+      persistGoalTransition(next);
       return next;
     },
 

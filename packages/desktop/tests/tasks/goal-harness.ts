@@ -173,6 +173,14 @@ export interface GoalApp {
   armProfileGate(): { reached: Promise<void>; release(): void };
   /** 删除测试用的 Provider Profile（任务所用模型不可用的场合） */
   removeProfile(): Promise<boolean>;
+  /**
+   * 强杀并重启（票 06，ADR 0035「重启与恢复」）：在途回合与挂起的判定原样留着
+   * ——不走退出屏障、不中断、不落库——只把库交给新一代，等价 taskkill /F 之后
+   * 同库再启动。返回新一代（同一 mock、同一 Provider Profile、同一库文件）。
+   * 旧代自此不再被触达（其 IPC 处理器已被新代覆盖），挂着的在途执行由用例
+   * 收尾统一排空。
+   */
+  killAndRestart(): GoalApp;
 }
 
 /** 目标状态事件（宿主 goal 编排器下发）：不含续跑轮自己的 goal-continuation 开始事件 */
@@ -182,7 +190,10 @@ const GOAL_STATE_EVENTS = [
   "goal-verification",
 ];
 
+/** 存活的应用代（用例收尾：中断在途回合并等宿主执行态回到空闲） */
 const apps: GoalApp[] = [];
+/** 被 killAndRestart 强杀的代：在途执行还挂在模型请求上，收尾时统一排空 */
+const killed: GoalApp[] = [];
 const cleanups: (() => void | Promise<void>)[] = [];
 
 afterEach(async () => {
@@ -198,6 +209,12 @@ afterEach(async () => {
         { timeout: 8000 }
       )
       .catch(() => {});
+  }
+  // 被强杀的代：挂着的在途执行按退出排空落定（中断在途回合并等它们收尾），
+  // 之后才轮到各代关库——否则它们醒来会写已关闭的连接
+  for (const app of killed.splice(0).reverse()) {
+    app.runtime.freeze();
+    await app.runtime.stopAndDrain();
   }
   for (const fn of cleanups.splice(0).reverse()) await fn();
   handlers.clear();
@@ -215,8 +232,6 @@ export async function setupGoalApp(
   const workspace = join(root, "project");
   mkdirSync(workspace);
   const dbPath = join(root, "nested", "task-workbench.db");
-  const persistence = createSqliteTaskStore(dbPath);
-  cleanups.push(() => persistence.close());
   const resourcesFor = ({ workspacePath }: { workspacePath: string }) =>
     createAgentResourceSnapshot({
       workspacePath,
@@ -224,11 +239,6 @@ export async function setupGoalApp(
       compatibleGlobalDir: join(root, "compatible"),
       findGitRoot: () => null,
     });
-  const manager = createTaskManager({
-    persistence,
-    resourcesFor,
-    tools: options.tools ?? [],
-  });
   const profiles = createProfileStore({
     dir: root,
     safeStorage: {
@@ -384,114 +394,138 @@ export async function setupGoalApp(
     apiKey: "test",
     baseURL: `http://127.0.0.1:${mockPort}/v1`,
   });
-  const delivered: TaskEventEnvelope[] = [];
-  const window = {
-    isDestroyed: () => false,
-    webContents: {
-      send: (_channel: string, envelope: TaskEventEnvelope) =>
-        delivered.push(structuredClone(envelope)),
-    },
-  } as unknown as BrowserWindow;
-  const runtime = registerTaskHandlers({
-    manager,
-    profiles: gatedProfiles,
-    getWindow: () => window,
-    dataDir: root,
-    worktreeService: createWorktreeService({
-      worktreesDir: join(root, "worktrees"),
-    }),
-    resourcesFor,
-    concurrencyLimit: options.concurrencyLimit ?? ((): number => 3),
-  });
-
   const waitFor = (check: () => unknown) =>
     vi.waitFor(check, { timeout: 8000 });
 
-  const app: GoalApp = {
-    manager,
-    profile,
-    runtime,
-    delivered,
-    goalEvents: (taskId) =>
-      delivered.filter(
-        (envelope) =>
-          envelope.taskId === taskId &&
-          typeof envelope.event.type === "string" &&
-          GOAL_STATE_EVENTS.includes(envelope.event.type)
-      ),
-    userTexts: (taskId) =>
-      ipcInvoke("messages", taskId)
-        .filter((item: any) => item.message?.role === "user")
-        .map((item: any) => item.message.content as string),
-    messageRoles: (taskId) =>
-      ipcInvoke("messages", taskId)
-        .filter((item: any) => item.kind === "message")
-        .map((item: any) => item.message.role as string),
-    goalOf: (taskId) => ipcInvoke("view", taskId).goal,
-    verificationsOf: (taskId) =>
-      ipcInvoke("messages", taskId)
-        .filter((item: any) => item.kind === "goal-verification")
-        .map((item: any) => item.verification as GoalVerificationRecord),
-    activityOf: (taskId) =>
-      ipcInvoke("list").find((task: any) => task.id === taskId)
-        .activity as TaskActivity,
-    hold: (text) => app.holdWhere((last) => last === text),
-    holdWhere: async (match) => {
-      await waitFor(() =>
-        expect(
-          roundQueue.some((entry) => match(entry.text, entry.round.body))
-        ).toBe(true)
-      );
-      const index = roundQueue.findIndex((entry) =>
-        match(entry.text, entry.round.body)
-      );
-      return roundQueue.splice(index, 1)[0]!.round;
-    },
-    hasRequestWhere: (match) => roundQueue.some((entry) => match(entry.text)),
-    hasRequest: (text) => roundQueue.some((entry) => entry.text === text),
-    reply: async (text, content = `${text}的回答`) => {
-      const round = await app.hold(text);
-      round.write(content);
-      round.finish();
-    },
-    idle: async (taskId) => {
-      await waitFor(() =>
-        expect(ipcInvoke("execution", taskId).running).toBe(false)
-      );
-    },
-    nextVerdict: async () => {
-      await waitFor(() => expect(verdicts.length).toBeGreaterThan(0));
-      return verdicts.shift()!;
-    },
-    pendingVerdicts: () => verdicts.length,
-    requestCount: () => requestCount,
-    newTask: async (requestId, text = `建立任务-${requestId}`) => {
-      const task = await ipcInvoke("start", {
-        requestId,
-        projectId: null,
-        text,
-      });
-      await app.reply(text);
-      await app.idle(task.id);
-      return task;
-    },
-    queueTexts: (taskId) =>
-      ipcInvoke("view", taskId).queueState.queue.map((item: any) => item.text),
-    armProfileGate: () => {
-      let release!: () => void;
-      let markReached!: () => void;
-      const wait = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const reached = new Promise<void>((resolve) => {
-        markReached = resolve;
-      });
-      gate = { reached: markReached, wait };
-      armed = true;
-      return { reached, release };
-    },
-    removeProfile: () => profiles.remove(profile.id),
-  };
-  apps.push(app);
-  return app;
+  /**
+   * 启动一代（初次启动与 killAndRestart 之后的重启共用）：同一库文件上新建
+   * 持久层连接、任务管理器与 IPC 处理器——等价一次应用启动（任务管理器的
+   * 启动收尾随之执行）。
+   */
+  function launch(): GoalApp {
+    const persistence = createSqliteTaskStore(dbPath);
+    cleanups.push(() => persistence.close());
+    const manager = createTaskManager({
+      persistence,
+      resourcesFor,
+      tools: options.tools ?? [],
+    });
+    const delivered: TaskEventEnvelope[] = [];
+    const window = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (_channel: string, envelope: TaskEventEnvelope) =>
+          delivered.push(structuredClone(envelope)),
+      },
+    } as unknown as BrowserWindow;
+    const runtime = registerTaskHandlers({
+      manager,
+      profiles: gatedProfiles,
+      getWindow: () => window,
+      dataDir: root,
+      worktreeService: createWorktreeService({
+        worktreesDir: join(root, "worktrees"),
+      }),
+      resourcesFor,
+      concurrencyLimit: options.concurrencyLimit ?? ((): number => 3),
+    });
+
+    const app: GoalApp = {
+      manager,
+      profile,
+      runtime,
+      delivered,
+      goalEvents: (taskId) =>
+        delivered.filter(
+          (envelope) =>
+            envelope.taskId === taskId &&
+            typeof envelope.event.type === "string" &&
+            GOAL_STATE_EVENTS.includes(envelope.event.type)
+        ),
+      userTexts: (taskId) =>
+        ipcInvoke("messages", taskId)
+          .filter((item: any) => item.message?.role === "user")
+          .map((item: any) => item.message.content as string),
+      messageRoles: (taskId) =>
+        ipcInvoke("messages", taskId)
+          .filter((item: any) => item.kind === "message")
+          .map((item: any) => item.message.role as string),
+      goalOf: (taskId) => ipcInvoke("view", taskId).goal,
+      verificationsOf: (taskId) =>
+        ipcInvoke("messages", taskId)
+          .filter((item: any) => item.kind === "goal-verification")
+          .map((item: any) => item.verification as GoalVerificationRecord),
+      activityOf: (taskId) =>
+        ipcInvoke("list").find((task: any) => task.id === taskId)
+          .activity as TaskActivity,
+      hold: (text) => app.holdWhere((last) => last === text),
+      holdWhere: async (match) => {
+        await waitFor(() =>
+          expect(
+            roundQueue.some((entry) => match(entry.text, entry.round.body))
+          ).toBe(true)
+        );
+        const index = roundQueue.findIndex((entry) =>
+          match(entry.text, entry.round.body)
+        );
+        return roundQueue.splice(index, 1)[0]!.round;
+      },
+      hasRequestWhere: (match) => roundQueue.some((entry) => match(entry.text)),
+      hasRequest: (text) => roundQueue.some((entry) => entry.text === text),
+      reply: async (text, content = `${text}的回答`) => {
+        const round = await app.hold(text);
+        round.write(content);
+        round.finish();
+      },
+      idle: async (taskId) => {
+        await waitFor(() =>
+          expect(ipcInvoke("execution", taskId).running).toBe(false)
+        );
+      },
+      nextVerdict: async () => {
+        await waitFor(() => expect(verdicts.length).toBeGreaterThan(0));
+        return verdicts.shift()!;
+      },
+      pendingVerdicts: () => verdicts.length,
+      requestCount: () => requestCount,
+      newTask: async (requestId, text = `建立任务-${requestId}`) => {
+        const task = await ipcInvoke("start", {
+          requestId,
+          projectId: null,
+          text,
+        });
+        await app.reply(text);
+        await app.idle(task.id);
+        return task;
+      },
+      queueTexts: (taskId) =>
+        ipcInvoke("view", taskId).queueState.queue.map(
+          (item: any) => item.text
+        ),
+      armProfileGate: () => {
+        let release!: () => void;
+        let markReached!: () => void;
+        const wait = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const reached = new Promise<void>((resolve) => {
+          markReached = resolve;
+        });
+        gate = { reached: markReached, wait };
+        armed = true;
+        return { reached, release };
+      },
+      removeProfile: () => profiles.remove(profile.id),
+      killAndRestart: () => {
+        const alive = apps.indexOf(app);
+        if (alive >= 0) apps.splice(alive, 1);
+        killed.push(app);
+        return launch();
+      },
+    };
+    apps.push(app);
+    return app;
+  }
+
+  return launch();
 }
