@@ -116,6 +116,7 @@
   - **两次时序抖动（如实记录，非本票回归）**：`sidebar-archive` 首跑红在「取消置顶恢复最近发送顺序」（hover 点击后同步读值，票 03 轮已知 flaky，本票不碰置顶/排序），重跑绿；`message-order` 首跑红在「两段思考应交错独立存在」（受控 `<details>` 异步渲染竞态，票 03 轮已知红之一），重跑绿。两者各 2 跑 1 绿 1 红、失败断言与本票改动面无关。
   - **未跑全量链** `test:e2e:all`（全量回归归票 07）。合计 37 个场景文件、39 次执行。
 - code-review 双轴走查（Standards 对照 CODING_STANDARDS.md 六条 + 坏味道基线；Spec 对照票面六条验收 + 编排者裁决）：无需要修改的发现；`persistGoalTransition` 的提取消灭两处列集合重复、`goalRestartPauseAt` 与 `advanceGoal` 同处状态机模块职责一致。
+- **pre-commit 钩子的一次抖动（如实记录）**：第一次 `git commit` 时 pre-commit 的 desktop 全量里 `goal-continuation-ipc.test.ts`「判定在途被中断」一条用例红（harness `holdWhere` 的 8 秒超时在高负载下没等到匹配请求），而验证链里 desktop 全量 688 刚全绿；随后单独重跑该文件 16 条全绿、desktop 全量再跑一次 688 全绿，重试提交钩子全过。判定为负载相关的时序抖动、不是回归，未改任何代码。
 
 ### 写给票 07（收口）的要点
 
